@@ -6,7 +6,9 @@ import { readFile, rawFileUrl } from './reader'
  * with no origin, so it cannot reach LoomWatch's page or the daemon, under a policy that lets it
  * fetch nothing and reach nothing on this computer (`https:` only). A small script LoomWatch adds
  * tells the reader what is marked, so a part of the page can be asked about as any file's can, and
- * shows the parts already asked about.
+ * shows the parts already asked about. The files beside the page — its data, clips, pictures and
+ * fonts — are read for it by the reader, inside the page's own folder and the folders in it only
+ * (ADR 0091): a dashboard's `fetch('sales.csv')` works, and nothing above its folder is reached.
  */
 
 /** What the page may load: from the web over https, or from itself. Nothing on this computer, no requests of its own, no forms. */
@@ -47,6 +49,91 @@ export const PAGE_SANDBOX = 'allow-scripts allow-popups allow-popups-to-escape-s
  */
 export const PAGE_BRIDGE = `(function () {
   var send = function (message) { message.lw = 'reader'; parent.postMessage(message, '*'); };
+  // The page's own files (ADR 0091). The frame can reach nothing itself, so what the page asks for
+  // beside it — by fetch, by XMLHttpRequest, or as a clip to play — is asked of the reader, which
+  // reads it inside the page's folder and hands the bytes back. Anything else is left to the page's
+  // own fetch, which the policy stops, as before.
+  var loads = {}, loadCount = 0;
+  function beside(url) {
+    var value = String(url == null ? '' : url).trim();
+    return value !== '' && value.charAt(0) !== '#' && !/^[a-z][a-z0-9+.-]*:/i.test(value) && value.slice(0, 2) !== '//';
+  }
+  function load(url) {
+    return new Promise(function (resolve) { var id = ++loadCount; loads[id] = resolve; send({ type: 'load', id: id, url: String(url) }); });
+  }
+  var pageFetch = window.fetch;
+  window.fetch = function (input) {
+    var url = typeof input === 'string' ? input : null;
+    if (url === null || !beside(url)) return pageFetch.apply(this, arguments);
+    return load(url).then(function (answer) {
+      if (!answer.status) throw new TypeError('Failed to fetch');
+      return new Response(answer.status === 200 ? answer.body : null, { status: answer.status, headers: { 'Content-Type': answer.type || 'application/octet-stream' } });
+    });
+  };
+  // An XMLHttpRequest for a file beside the page, as far as the libraries that still use one read
+  // it (PapaParse, jQuery): its events and handlers, its status and headers, and its response as
+  // text, JSON, bytes or a blob. Any other address fails as the policy would make it.
+  function PageRequest() {
+    this.readyState = 0; this.status = 0; this.statusText = ''; this.response = null; this.responseText = ''; this.responseType = '';
+    this.responseURL = ''; this.responseXML = null; this.timeout = 0; this.withCredentials = false;
+    this.upload = { addEventListener: function () {}, removeEventListener: function () {} };
+    this.onreadystatechange = this.onloadstart = this.onprogress = this.onload = this.onloadend = this.onerror = this.onabort = this.ontimeout = null;
+    this.lwOn = {}; this.lwUrl = ''; this.lwType = ''; this.lwDone = false;
+  }
+  ['UNSENT', 'OPENED', 'HEADERS_RECEIVED', 'LOADING', 'DONE'].forEach(function (name, value) { PageRequest[name] = value; PageRequest.prototype[name] = value; });
+  PageRequest.prototype.addEventListener = function (type, listener) { (this.lwOn[type] = this.lwOn[type] || []).push(listener); };
+  PageRequest.prototype.removeEventListener = function (type, listener) { var list = this.lwOn[type] || [], at = list.indexOf(listener); if (at >= 0) list.splice(at, 1); };
+  PageRequest.prototype.lwFire = function (type) {
+    var request = this, event = { type: type, target: request, currentTarget: request, lengthComputable: false, loaded: 0, total: 0 };
+    if (typeof request['on' + type] === 'function') request['on' + type].call(request, event);
+    (request.lwOn[type] || []).slice().forEach(function (listener) {
+      if (typeof listener === 'function') listener.call(request, event);
+      else if (listener && typeof listener.handleEvent === 'function') listener.handleEvent(event);
+    });
+  };
+  PageRequest.prototype.open = function (method, url) { this.lwUrl = String(url); this.lwDone = false; this.readyState = 1; this.lwFire('readystatechange'); };
+  PageRequest.prototype.setRequestHeader = function () {};
+  PageRequest.prototype.overrideMimeType = function () {};
+  PageRequest.prototype.getResponseHeader = function (name) { return this.readyState >= 2 && this.lwType && String(name).toLowerCase() === 'content-type' ? this.lwType : null; };
+  PageRequest.prototype.getAllResponseHeaders = function () { return this.readyState >= 2 && this.lwType ? 'content-type: ' + this.lwType + '\\r\\n' : ''; };
+  PageRequest.prototype.abort = function () { if (this.lwDone) return; this.lwDone = true; this.readyState = 0; this.lwFire('abort'); this.lwFire('loadend'); };
+  PageRequest.prototype.send = function () {
+    var request = this;
+    request.lwFire('loadstart');
+    function finish(answer) {
+      if (request.lwDone) return;
+      request.lwDone = true;
+      if (!answer.status) { request.readyState = 4; request.lwFire('readystatechange'); request.lwFire('error'); request.lwFire('loadend'); return; }
+      request.status = answer.status; request.statusText = answer.status === 200 ? 'OK' : 'Not Found';
+      request.responseURL = request.lwUrl; request.lwType = answer.type || '';
+      request.readyState = 2; request.lwFire('readystatechange');
+      var bytes = answer.status === 200 && answer.body ? answer.body : new ArrayBuffer(0), kind = request.responseType;
+      var text = function () { return new TextDecoder().decode(bytes); };
+      if (kind === 'arraybuffer') request.response = bytes;
+      else if (kind === 'blob') request.response = new Blob([bytes], { type: request.lwType });
+      else if (kind === 'json') { try { request.response = JSON.parse(text()); } catch (error) { request.response = null; } }
+      else if (kind === 'document') request.response = null;
+      else { request.responseText = text(); request.response = request.responseText; }
+      request.readyState = 3; request.lwFire('readystatechange'); request.lwFire('progress');
+      request.readyState = 4; request.lwFire('readystatechange'); request.lwFire('load'); request.lwFire('loadend');
+    }
+    if (!beside(request.lwUrl)) { setTimeout(function () { finish({ status: 0 }); }, 0); return; }
+    load(request.lwUrl).then(finish);
+  };
+  window.XMLHttpRequest = PageRequest;
+  // A clip beside the page plays from a blob: made here, rather than written into the page.
+  function clips() {
+    Array.prototype.forEach.call(document.querySelectorAll('[data-lw-src]'), function (element) {
+      var url = element.getAttribute('data-lw-src');
+      element.removeAttribute('data-lw-src');
+      load(url).then(function (answer) {
+        if (answer.status !== 200 || !answer.body) return;
+        element.src = URL.createObjectURL(new Blob([answer.body], { type: answer.type }));
+        if (element.tagName === 'SOURCE' && element.parentElement && typeof element.parentElement.load === 'function') element.parentElement.load();
+      });
+    });
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', clips); else clips();
   var down = false, shown = false, timer = 0, queued = false;
   function report() {
     var selection = document.getSelection();
@@ -293,6 +380,12 @@ export const PAGE_BRIDGE = `(function () {
   addEventListener('message', function (event) {
     var data = event.data;
     if (event.source !== parent || !data || data.lw !== 'reader') return;
+    if (data.type === 'loaded' && loads[data.id]) {
+      var answered = loads[data.id];
+      delete loads[data.id];
+      answered({ status: typeof data.status === 'number' ? data.status : 0, type: String(data.mediaType || ''), body: Object.prototype.toString.call(data.body) === '[object ArrayBuffer]' ? data.body : null });
+      return;
+    }
     if (data.type === 'clear') { var selection = document.getSelection(); if (selection) selection.removeAllRanges(); shown = false; }
     if (data.type === 'marks') {
       wanted = (Array.isArray(data.parts) ? data.parts : []).filter(function (ask) { return ask && typeof ask.text === 'string' && typeof ask.key === 'string'; });
@@ -421,6 +514,8 @@ export type PageMessage =
   | { type: 'hover'; key: string | null; now: boolean; rect?: PageRect }
   | { type: 'escape' }
   | { type: 'ready' }
+  /** The page asked for a file beside it, by the address it wrote (`fetch`, `XMLHttpRequest`, a clip): the reader answers `loaded` with the same id. */
+  | { type: 'load'; id: number; url: string }
 
 const isRect = (value: unknown): value is PageRect => {
   const rect = value as Record<string, unknown> | null
@@ -432,6 +527,10 @@ export function pageMessage(data: unknown): PageMessage | null {
   const message = data as { type?: unknown; text?: unknown; rect?: unknown }
   if (message.type === 'ready') return { type: 'ready' }
   if (message.type === 'escape') return { type: 'escape' }
+  if (message.type === 'load') {
+    const { id, url } = data as { id?: unknown; url?: unknown }
+    return Number.isSafeInteger(id) && typeof url === 'string' && url.length <= 4096 ? { type: 'load', id: id as number, url } : null
+  }
   if (message.type === 'parts') {
     const parts = (data as { parts?: unknown }).parts
     if (!Array.isArray(parts)) return null
@@ -460,8 +559,11 @@ export function pageMessage(data: unknown): PageMessage | null {
   return { type: 'selection', text, rect: isRect(message.rect) ? message.rect : undefined }
 }
 
-/** The most of a page's own files (pictures beside it, its stylesheet, its script) taken in. */
-const MAX_OWN_FILES = 40
+/** The most of a page's own files (pictures beside it, its stylesheets, scripts and fonts) taken in. */
+const MAX_OWN_FILES = 80
+
+/** The largest file beside a page handed to it as it runs (a clip is handed whole, as a `blob:`). */
+const PAGE_FILE_MAX_BYTES = 512 * 1024 * 1024
 
 /** A link to a file beside the page: not the web, not data, not a part of the page itself. */
 function isBeside(url: string): boolean {
@@ -469,23 +571,67 @@ function isBeside(url: string): boolean {
   return value !== '' && !value.startsWith('#') && !/^[a-z][a-z0-9+.-]*:/i.test(value) && !value.startsWith('//')
 }
 
-/** `chart.png` beside `/a/b/page.html` → `/a/b/chart.png`; `..` steps up; a query or fragment is dropped. */
-export function besidePath(page: string, url: string): string | null {
+/**
+ * `chart.png` beside `/a/b/page.html` → `/a/b/chart.png`; a query or fragment is dropped. `from` is
+ * the file the link is written in, when not the page itself (its stylesheet). A page reaches only its
+ * own folder and the folders in it (ADR 0091): a link that steps above its folder is `null`, so a
+ * page can't read another team's files, or any file it could then send to the web.
+ */
+export function besidePath(page: string, url: string, from = page): string | null {
   const clean = decodeURIComponentSafe(url.trim().replace(/[?#].*$/, ''))
   if (!clean) return null
   const windows = /^[A-Za-z]:[\\/]/.test(page)
   const separator = windows ? '\\' : '/'
-  const parts = page.split(/[\\/]/)
-  parts.pop()
+  const folder = page.split(/[\\/]/).slice(0, -1)
+  const parts = from.split(/[\\/]/).slice(0, -1)
+  if (folder.some((name, at) => parts[at] !== name)) return null
   for (const part of clean.split(/[\\/]/)) {
     if (part === '' || part === '.') continue
     if (part === '..') {
-      if (parts.length > 1) parts.pop()
+      if (parts.length <= folder.length) return null
+      parts.pop()
       continue
     }
     parts.push(part)
   }
-  return parts.join(separator)
+  return parts.length > folder.length ? parts.join(separator) : null
+}
+
+/** A file the page asked for as it runs, as it is handed over: what the page's `fetch` makes of it. */
+export interface PageFile {
+  /** 200 with the bytes; 404 for a file not there, outside the page's folder, or not one a page loads; 0 when the daemon couldn't be reached. */
+  status: number
+  mediaType: string
+  body: ArrayBuffer | null
+}
+
+/** What a page asked for beside it (`url` as it wrote it), read inside its folder, or why not. */
+export async function pageFile(page: string, url: string, signal?: AbortSignal): Promise<PageFile> {
+  const missing: PageFile = { status: 404, mediaType: '', body: null }
+  const file = isBeside(url) ? besidePath(page, url) : null
+  if (!file) return missing
+  const response = await fetch(rawFileUrl(file), { signal, cache: 'no-store' }).catch(() => null)
+  if (!response) return { status: 0, mediaType: '', body: null }
+  if (!response.ok || Number(response.headers.get('content-length')) > PAGE_FILE_MAX_BYTES) return missing
+  return { status: 200, mediaType: response.headers.get('content-type') ?? '', body: await response.arrayBuffer() }
+}
+
+/** A `url(…)` in CSS. */
+const CSS_URL = /url\(\s*(['"]?)([^'")]+?)\1\s*\)/g
+
+/** CSS with the pictures and fonts it names taken in as data: named from `from` (its own file), inside the page's folder. */
+async function cssTakenIn(css: string, page: string, from: string, take: () => boolean, signal?: AbortSignal): Promise<string> {
+  const found = new Map<string, string>()
+  for (const match of css.matchAll(CSS_URL)) {
+    const url = match[2]
+    if (found.has(url) || !isBeside(url) || !besidePath(page, url, from) || !take()) continue
+    found.set(url, '')
+  }
+  await Promise.all([...found.keys()].map(async (url) => {
+    const response = await fetch(rawFileUrl(besidePath(page, url, from)!), { signal }).catch(() => null)
+    if (response?.ok) found.set(url, await dataUrl(response).catch(() => ''))
+  }))
+  return css.replace(CSS_URL, (whole: string, _quote: string, url: string) => (found.get(url) ? `url("${found.get(url)}")` : whole))
 }
 
 function decodeURIComponentSafe(value: string): string {
@@ -506,8 +652,11 @@ async function dataUrl(response: Response): Promise<string> {
 
 /**
  * The page as the frame is given it: the policy first, LoomWatch's script next, and the files it
- * names beside it taken in — pictures as data, its own stylesheet and script as text — since the
- * sandboxed frame cannot ask the daemon for them. A file that is not there is left as written.
+ * names beside it taken in — pictures as data, its own stylesheets and scripts as text, and the
+ * pictures and fonts its CSS names as data — since the sandboxed frame cannot ask the daemon for
+ * them. A clip is handed over as the page runs, by LoomWatch's script (`data-lw-src`), rather than
+ * written into the page. A file that is not there, or is outside the page's folder, is left as
+ * written.
  */
 export async function pageDocument(html: string, path: string, signal?: AbortSignal): Promise<string> {
   const doc = new DOMParser().parseFromString(html, 'text/html')
@@ -515,21 +664,36 @@ export async function pageDocument(html: string, path: string, signal?: AbortSig
   let taken = 0
   const take = () => taken++ < MAX_OWN_FILES
   const jobs: Promise<void>[] = []
-  for (const image of Array.from(doc.querySelectorAll<HTMLImageElement | HTMLSourceElement>('img[src], source[src]'))) {
-    const src = image.getAttribute('src') ?? ''
-    const file = isBeside(src) ? besidePath(path, src) : null
-    if (!file || !take()) continue
-    jobs.push(fetch(rawFileUrl(file), { signal }).then(async (response) => { if (response.ok) image.setAttribute('src', await dataUrl(response)) }).catch(() => undefined))
+  const asData = (element: Element, attribute: string) => {
+    const value = element.getAttribute(attribute) ?? ''
+    const file = isBeside(value) ? besidePath(path, value) : null
+    if (!file || !take()) return
+    jobs.push(fetch(rawFileUrl(file), { signal }).then(async (response) => { if (response.ok) element.setAttribute(attribute, await dataUrl(response)) }).catch(() => undefined))
   }
+  for (const clip of Array.from(doc.querySelectorAll('video[src], audio[src], video > source[src], audio > source[src]'))) {
+    const src = clip.getAttribute('src') ?? ''
+    if (!isBeside(src) || !besidePath(path, src)) continue
+    clip.setAttribute('data-lw-src', src)
+    clip.removeAttribute('src')
+  }
+  for (const image of Array.from(doc.querySelectorAll('img[src], picture > source[src]'))) asData(image, 'src')
+  for (const video of Array.from(doc.querySelectorAll('video[poster]'))) asData(video, 'poster')
   for (const link of Array.from(doc.querySelectorAll<HTMLLinkElement>('link[rel~="stylesheet"][href]'))) {
     const href = link.getAttribute('href') ?? ''
     const file = isBeside(href) ? besidePath(path, href) : null
     if (!file || !take()) continue
-    jobs.push(readFile(file, signal).then((read) => {
+    jobs.push(readFile(file, signal).then(async (read) => {
       const style = doc.createElement('style')
-      style.textContent = read.text
+      // Its pictures and fonts are named from where the stylesheet is, not the page.
+      style.textContent = await cssTakenIn(read.text, path, file, take, signal)
       link.replaceWith(style)
     }).catch(() => undefined))
+  }
+  for (const style of Array.from(doc.querySelectorAll('style'))) {
+    jobs.push(cssTakenIn(style.textContent ?? '', path, path, take, signal).then((css) => { style.textContent = css }).catch(() => undefined))
+  }
+  for (const element of Array.from(doc.querySelectorAll('[style*="url("]'))) {
+    jobs.push(cssTakenIn(element.getAttribute('style') ?? '', path, path, take, signal).then((css) => { element.setAttribute('style', css) }).catch(() => undefined))
   }
   for (const script of Array.from(doc.querySelectorAll<HTMLScriptElement>('script[src]'))) {
     const src = script.getAttribute('src') ?? ''

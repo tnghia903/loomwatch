@@ -20,11 +20,11 @@ describe('a web page in the reader', () => {
       const url = String(input)
       if (url.startsWith('/api/files/raw') && url.includes('chart.png')) return new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), { status: 200, headers: { 'content-type': 'image/png' } })
       if (url.includes(encodeURIComponent('/w/site/style.css'))) return new Response(JSON.stringify({ text: 'body{color:red}' }), { status: 200 })
-      if (url.includes(encodeURIComponent('/w/app.js'))) return new Response(JSON.stringify({ text: 'run("</script>")' }), { status: 200 })
+      if (url.includes(encodeURIComponent('/w/site/js/app.js'))) return new Response(JSON.stringify({ text: 'run("</script>")' }), { status: 200 })
       return new Response(JSON.stringify({ error: 'gone' }), { status: 404 })
     }))
     const html = '<html><head><base href="http://evil/"><meta http-equiv="content-security-policy" content="default-src *"><link rel="stylesheet" href="style.css"></head>'
-      + '<body><img src="chart.png"><img src="https://cdn.example/x.png"><img src="missing.png"><script src="../app.js"></script></body></html>'
+      + '<body><img src="chart.png"><img src="https://cdn.example/x.png"><img src="missing.png"><script src="../app.js"></script><script src="js/app.js"></script></body></html>'
     const ready = await pageDocument(html, '/w/site/page.html')
     const doc = new DOMParser().parseFromString(ready, 'text/html')
     const head = doc.head.children
@@ -37,15 +37,125 @@ describe('a web page in the reader', () => {
     const images = [...doc.querySelectorAll('img')].map((image) => image.getAttribute('src'))
     expect(images[0]).toBe('data:image/png;base64,iVBORw==')
     expect(images.slice(1)).toEqual(['https://cdn.example/x.png', 'missing.png'])
-    const script = [...doc.querySelectorAll('script')].at(-1)!
+    const [outside, script] = [...doc.querySelectorAll('script')].slice(-2)
+    // A script above the page's folder is left as written: the page reaches only its own folder.
+    expect(outside.getAttribute('src')).toBe('../app.js')
+    expect(vi.mocked(fetch).mock.calls.map(([input]) => decodeURIComponent(String(input)))).not.toContainEqual(expect.stringContaining('/w/app.js'))
     expect(script.hasAttribute('src')).toBe(false)
     expect(ready).toContain('run("<\\/script>")')
   })
 
-  it('names a file beside the page by its full path', () => {
+  it('names a file beside the page by its full path, inside the page’s folder only', () => {
     expect(besidePath('/w/site/page.html', 'img/chart%20one.png?v=2#x')).toBe('/w/site/img/chart one.png')
-    expect(besidePath('/w/site/page.html', '../../../../etc/x.css')).toBe('/etc/x.css')
+    expect(besidePath('/w/site/page.html', 'img/../data/sales.csv')).toBe('/w/site/data/sales.csv')
+    expect(besidePath('/w/site/page.html', '/data.csv')).toBe('/w/site/data.csv')
     expect(besidePath('C:\\w\\page.html', './a.png')).toBe('C:\\w\\a.png')
+    for (const above of ['../other-team/secret.csv', 'img/../../x.css', '../../../../etc/x.css', '.', 'img/..']) expect(besidePath('/w/site/page.html', above)).toBeNull()
+    // Named from its stylesheet, still inside the page's folder.
+    expect(besidePath('/w/site/page.html', '../fonts/a.woff2', '/w/site/css/style.css')).toBe('/w/site/fonts/a.woff2')
+    expect(besidePath('/w/site/page.html', '../../a.woff2', '/w/site/css/style.css')).toBeNull()
+  })
+
+  it('hands a clip over as the page runs, and takes in its poster and the pictures and fonts its CSS names', async () => {
+    const bytes = (type: string) => new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { 'content-type': type } })
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = decodeURIComponent(String(input))
+      if (url.startsWith('/api/files/read') && url.includes('/w/site/css/style.css')) {
+        return new Response(JSON.stringify({ text: '@font-face{src:url(../fonts/brand.woff2)}body{background:url("../img/bg.png")}a{fill:url(#shine)}b{background:url(https://cdn.example/x.png)}i{background:url(../../up.png)}' }), { status: 200 })
+      }
+      if (url.startsWith('/api/files/raw') && url.endsWith('/w/site/fonts/brand.woff2')) return bytes('font/woff2')
+      if (url.startsWith('/api/files/raw') && /\/w\/site\/(img\/bg|img\/dot|poster)\.png$/.test(url)) return bytes('image/png')
+      return new Response(JSON.stringify({ error: 'gone' }), { status: 404 })
+    }))
+    const html = '<html><head><link rel="stylesheet" href="css/style.css"><style>.x{background:url(img/dot.png)}</style></head><body>'
+      + '<video src="clip.mp4" poster="poster.png"></video><video><source src="clips/b.webm"></video><audio src="../outside.mp3"></audio>'
+      + '<div style="background: url(\'img/dot.png\')"></div></body></html>'
+    const doc = new DOMParser().parseFromString(await pageDocument(html, '/w/site/page.html'), 'text/html')
+    const [video, holder] = [...doc.querySelectorAll('video')]
+    expect(video.hasAttribute('src')).toBe(false)
+    expect(video.getAttribute('data-lw-src')).toBe('clip.mp4')
+    expect(video.getAttribute('poster')).toBe('data:image/png;base64,AQID')
+    expect(holder.querySelector('source')!.getAttribute('data-lw-src')).toBe('clips/b.webm')
+    expect(holder.querySelector('source')!.hasAttribute('src')).toBe(false)
+    expect(doc.querySelector('audio')!.getAttribute('src')).toBe('../outside.mp3')
+    expect(doc.querySelector('audio')!.hasAttribute('data-lw-src')).toBe(false)
+    // The stylesheet's own files are named from where it is; the web, the page's own ids and
+    // anything above its folder are left as written.
+    const [linked, inline] = [...doc.querySelectorAll('style')].map((style) => style.textContent)
+    expect(inline).toBe('.x{background:url("data:image/png;base64,AQID")}')
+    expect(linked).toBe('@font-face{src:url("data:font/woff2;base64,AQID")}body{background:url("data:image/png;base64,AQID")}a{fill:url(#shine)}b{background:url(https://cdn.example/x.png)}i{background:url(../../up.png)}')
+    expect(doc.querySelector('div')!.getAttribute('style')).toBe('background: url("data:image/png;base64,AQID")')
+    expect(vi.mocked(fetch).mock.calls.map(([input]) => decodeURIComponent(String(input))).join(' ')).not.toMatch(/outside|up\.png|clip\.mp4|b\.webm/)
+  })
+
+  it('answers the page’s fetch and XMLHttpRequest for files beside it through the reader, and hands its clips over as blobs', async () => {
+    const holder = document.createElement('iframe')
+    document.body.append(holder)
+    const inner = holder.contentWindow! as Window & typeof globalThis
+    // jsdom's frames have none of fetch's own classes, which a browser's frame has. Its fetch
+    // stands for the page's own, which the policy stops.
+    const stopped = vi.fn(() => Promise.reject(new TypeError('stopped by the policy')))
+    Object.assign(inner, { fetch: stopped, Response, Blob, TextDecoder })
+    inner.URL.createObjectURL = () => 'blob:clip'
+    const sent: Record<string, unknown>[] = []
+    vi.spyOn(inner.parent, 'postMessage').mockImplementation((message: unknown) => { sent.push(message as Record<string, unknown>) })
+    const loadsOf = () => sent.filter((message) => message.type === 'load')
+    const answer = (id: unknown, file: Record<string, unknown>) => inner.dispatchEvent(new inner.MessageEvent('message', { data: { lw: 'reader', type: 'loaded', id, ...file }, source: inner.parent }))
+    const text = (words: string) => new TextEncoder().encode(words).buffer
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 0))
+    try {
+      holder.contentDocument!.body.innerHTML = '<video data-lw-src="clip.mp4"></video>'
+      new inner.Function(PAGE_BRIDGE)()
+      // The clip is asked for at once, and plays from a blob made in the page.
+      expect(loadsOf()).toEqual([{ lw: 'reader', type: 'load', id: 1, url: 'clip.mp4' }])
+      answer(1, { status: 200, mediaType: 'video/mp4', body: text('clip') })
+      await settle()
+      expect(holder.contentDocument!.querySelector('video')!.getAttribute('src')).toBe('blob:clip')
+
+      const fetched = inner.fetch('data/sales.csv')
+      expect(loadsOf().at(-1)).toEqual({ lw: 'reader', type: 'load', id: 2, url: 'data/sales.csv' })
+      answer(2, { status: 200, mediaType: 'text/csv; charset=utf-8', body: text('region,q3\nNorth,190\n') })
+      const response = await fetched
+      expect(response.ok).toBe(true)
+      expect(response.headers.get('content-type')).toBe('text/csv; charset=utf-8')
+      expect(await response.text()).toBe('region,q3\nNorth,190\n')
+      const gone = inner.fetch('../secret.csv')
+      answer(3, { status: 404, mediaType: '', body: null })
+      expect((await gone).status).toBe(404)
+      // The web is left to the page's own fetch.
+      await expect(inner.fetch('https://example.com/x.json')).rejects.toThrow('stopped by the policy')
+      expect(stopped).toHaveBeenCalledTimes(1)
+
+      const request = new inner.XMLHttpRequest()
+      const states: number[] = []
+      let loaded = ''
+      request.onreadystatechange = () => states.push(request.readyState)
+      request.addEventListener('load', function (this: XMLHttpRequest) { loaded = this.responseText })
+      request.open('GET', 'data/sales.csv')
+      request.send()
+      expect(loadsOf().at(-1)).toMatchObject({ id: 4, url: 'data/sales.csv' })
+      answer(4, { status: 200, mediaType: 'text/csv', body: text('a,b') })
+      await settle()
+      expect([request.status, loaded, request.getResponseHeader('Content-Type')]).toEqual([200, 'a,b', 'text/csv'])
+      expect(states).toEqual([1, 2, 3, 4])
+      const json = new inner.XMLHttpRequest()
+      json.responseType = 'json'
+      json.open('GET', 'data.json')
+      json.send()
+      answer(5, { status: 200, mediaType: 'application/json', body: text('{"q3":190}') })
+      await settle()
+      expect(JSON.stringify(json.response)).toBe('{"q3":190}')
+      const web = new inner.XMLHttpRequest()
+      let failed = false
+      web.onerror = () => { failed = true }
+      web.open('GET', 'https://example.com/x.json')
+      web.send()
+      await settle()
+      expect([failed, web.status, loadsOf().length]).toEqual([true, 0, 5])
+    } finally {
+      vi.restoreAllMocks()
+      holder.remove()
+    }
   })
 
   it('lets go of the marked words on Escape, which reaches the page and not the reader', async () => {
@@ -264,6 +374,10 @@ describe('a web page in the reader', () => {
     expect(pageMessage({ lw: 'reader', type: 'selection', text: 'Sales', rect: { top: 'x' } })).toEqual({ type: 'selection', text: 'Sales', rect: undefined })
     expect(pageMessage({ type: 'selection', text: 'Sales' })).toBeNull()
     expect(pageMessage({ lw: 'reader', type: 'navigate', url: 'x' })).toBeNull()
+    expect(pageMessage({ lw: 'reader', type: 'load', id: 3, url: 'data/sales.csv' })).toEqual({ type: 'load', id: 3, url: 'data/sales.csv' })
+    expect(pageMessage({ lw: 'reader', type: 'load', id: 1.5, url: 'x.csv' })).toBeNull()
+    expect(pageMessage({ lw: 'reader', type: 'load', id: 2, url: 'x'.repeat(5000) })).toBeNull()
+    expect(pageMessage({ lw: 'reader', type: 'load', url: 'x.csv' })).toBeNull()
     expect(pageMessage('hello')).toBeNull()
   })
 })
