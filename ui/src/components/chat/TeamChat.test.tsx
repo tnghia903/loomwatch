@@ -2019,3 +2019,24 @@ describe('what the move onto My agents changed (ADR 0094)', () => {
     expect(screen.queryByText(line)).toBeNull()
   })
 })
+
+// The owner (2026-10-26): a link to a run of the team (the bell, the notch, the menu bar) opens
+// the team's chat at that run's message, not at the newest one, reading back to it when it is older.
+describe('a link to one of the team’s runs', () => {
+  it('opens the chat at its message, reading back to it, and lights it', async () => {
+    const older: ChatItem[] = [{ kind: 'work', run: run({ runId: 'run-0', sessionId: 'run-0', prompt: 'yesterday’s digest' }), request: message({ id: 'm-0', runId: 'run-0', text: '@team yesterday’s digest' }), notes: [] }]
+    page = [{ kind: 'work', run: run({}), request: message({}), notes: [] }]
+    const asked: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (!url.startsWith('/api/chat?')) return new Response('{}', { status: 404 })
+      asked.push(url)
+      const items = url.includes('before=') ? older : page
+      return new Response(JSON.stringify({ teamKey: 'news', teamPath: 'news.yaml', items: [...items].reverse(), more: !url.includes('before=') }), { status: 200 })
+    }))
+    renderChat({ landAt: 'run-0' })
+    await waitFor(() => expect(document.querySelector('[data-said="request:run-0"]')).toHaveClass('flash'))
+    expect(asked.some((url) => url.includes('before='))).toBe(true)
+    expect(document.querySelector('[data-said="request:run-1"]')).not.toHaveClass('flash')
+  })
+})

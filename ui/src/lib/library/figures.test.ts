@@ -56,6 +56,17 @@ describe('a team’s agent wears', () => {
   it('the one its id picks when it is the team’s own', () => {
     expect(agentFigure({ id: 'writer' }, saved)).toEqual(figureFor('writer'))
   })
+
+  // The owner (2026-10-26): Cole wore a lilac spool in My agents and another figure on the screen a
+  // run of its chat opened on. Its chat file names no link, so the chat it is says whose it is.
+  it('in an agent’s own chat, the figure of the agent the chat is for', () => {
+    expect(figureFor('editor')).not.toEqual({ kind: 'thimble', color: 'lilac' })
+    expect(agentFigure({ id: 'editor' }, saved, 'editor')).toEqual({ kind: 'thimble', color: 'lilac' })
+    // A chat for an agent not in My agents wears the one the chat's name picks, as before.
+    expect(agentFigure({ id: 'new-editor' }, saved, 'new-editor')).toEqual(figureFor('new-editor'))
+    // A link still wins.
+    expect(agentFigure({ id: 'editor-2', from: { agent: 'reader', version: 1 } }, saved, 'editor')).toEqual(figureFor('reader'))
+  })
 })
 
 describe('an agent’s chat colour', () => {

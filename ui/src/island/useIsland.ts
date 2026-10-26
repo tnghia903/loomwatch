@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'r
 
 import { fetchChatPage, fetchNotesAnswering } from '../lib/chat/client'
 import { agentFigure, figureFor, type FigureChoice } from '../lib/library/figures'
-import { fetchJobs, type SavedJob } from '../lib/library/jobs'
+import { benchChatOwner, fetchJobs, type SavedJob } from '../lib/library/jobs'
 import { fetchPinnedAgent, pinAgent } from '../lib/library/pinned'
 import { crewOf, type CrewAgent } from '../lib/rail/teamCrews'
 import { answerPermission, fetchRecentRuns, fetchRun, type RunRecord } from '../lib/runs/client'
@@ -563,7 +563,7 @@ function useFigures(teams: readonly TeamNow[], saved: readonly SavedJob[], pinne
     if (pinned && teamPath === pinned.chatPath) return figureFor(pinned.id, pinned.job.figure)
     if (!agent) return figureFor(teamPath)
     const placed = crews.get(teamPath)?.find((each) => each.id === agent)
-    return agentFigure(placed ?? { id: agent }, saved)
+    return agentFigure(placed ?? { id: agent }, saved, benchChatOwner(teamPath))
   }, [crews, saved, pinned])
   const crewFigures = useCallback((teamPath: string) => (crews.get(teamPath) ?? []).map((agent) => agentFigure(agent, saved)), [crews, saved])
   return { figure, crewFigures }

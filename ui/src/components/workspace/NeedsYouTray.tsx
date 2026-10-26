@@ -6,7 +6,7 @@ import type { PermissionDecision, SpendDecision } from '../../lib/runs/client'
 import { PERMISSION_SAID } from '../../lib/runs/permissionRequests'
 import { historyRunUrl } from '../../lib/runs/history'
 import { ago, APPROVAL_TEXT, type Ticket } from '../../lib/story/needsYou'
-import { goToTeam } from '../../lib/team-file/teamPage'
+import { goToRun } from '../agents/route'
 import { InlineMarkdown } from '../ui/Markdown'
 
 interface NeedsYouTrayProps {
@@ -154,7 +154,7 @@ export function NeedsYouTray({ tickets, working, onAnswer, onPermission, onSpend
       setBusy(null)
     }
   }
-  const openRun = (ticket: Ticket) => goToTeam(historyRunUrl({ id: ticket.runId, teamPath: ticket.teamPath }))
+  const openRun = (ticket: Ticket) => goToRun(historyRunUrl({ id: ticket.runId, teamPath: ticket.teamPath }))
   const startReply = (ticket: Ticket) => { setReplying(ticket.id); setDraft('') }
 
   // The run on screen already asks with its own answer box and permission card, so its ticket

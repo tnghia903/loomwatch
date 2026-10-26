@@ -224,12 +224,7 @@ impl Control {
     }
 
     fn run_url(&self, team_path: &str, run_id: &str) -> String {
-        format!(
-            "{}/?path={}&run={}",
-            self.inner.origin,
-            encode_query(team_path),
-            encode_query(run_id)
-        )
+        run_address(&self.inner.origin, team_path, run_id)
     }
 
     async fn conversation(&self, id: &str) -> Option<Arc<Conversation>> {
@@ -294,6 +289,24 @@ pub(crate) fn tier_model(tier: &str) -> String {
         Source::OpenRouter => true,
     };
     crate::ai::MODEL_TIERS.model_on(tier, &ai.connected_sources(), &offers)
+}
+
+/// Where a run opens in the app: its team's page on that run, or, for a run of an agent's own chat
+/// (`.jobs/.bench/<id>.yaml`), that agent's chat in My agents with the run's Details beside it, as
+/// the app's own links (`historyRunUrl` in ui/src/lib/runs/history.ts) open it.
+fn run_address(origin: &str, team_path: &str, run_id: &str) -> String {
+    match crate::jobs::chat_of(team_path) {
+        Some(agent) => format!(
+            "{origin}/agents/{}?view=chat&run={}",
+            encode_query(agent),
+            encode_query(run_id)
+        ),
+        None => format!(
+            "{origin}/?path={}&run={}",
+            encode_query(team_path),
+            encode_query(run_id)
+        ),
+    }
 }
 
 fn encode_query(value: &str) -> String {
