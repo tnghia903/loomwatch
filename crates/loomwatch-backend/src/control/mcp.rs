@@ -158,12 +158,13 @@ agents:
 edges: []                             # no fixed order: the lead hands out the parts
 
 To run a team on a schedule, add a top-level block:
-schedule: {cron: "0 8 * * 1-5", timezone: "Asia/Singapore", prompt: "Prepare today's brief."}
+schedule: {cron: "0 8 * * 1-5", prompt: "Prepare today's brief."}
+Leave out `timezone`: without it the team runs on this computer's own clock, which is the person's. Add one (an IANA name such as Europe/London) only when they name another place's time.
 and, to send each scheduled answer to Notion, `deliver: {notion: {title: "Brief {{date}}"}}` inside `schedule`.
 To send every answer to Notion, whoever starts the run, add a top-level `deliver: {notion: {}}` (title placeholders: {{team}}, {{date}}, {{time}}, {{weekday}}). Pages go under the destination the person chose in Connections.
 For a team that should build on what its earlier runs found, add `memory: {notebook: {enabled: true, keep: review}}`: its agents keep notes, and the person chooses which to keep. To let it read what another of their teams knows, add `memory: {inherits: [{team: <that team's id>}]}`.
 
-When you change an existing team, call `read_team` first and propose the whole edited file, keeping everything you were not asked to change. A review step can't be the first stage. If `propose_team` reports a problem, fix the file and propose it again before you answer."#;
+When you change an existing team, call `read_team` first and propose the whole edited file, keeping everything you were not asked to change. A review step can't be the first stage. If `propose_team` reports a problem, fix the file and propose it again before you answer, and say nothing about it: everything you write shows in the person's panel."#;
 
 fn string(description: &str) -> Value {
     json!({"type": "string", "description": description})
@@ -1542,6 +1543,10 @@ mod tests {
                 && !reply.contains("Writer job"),
             "{reply}"
         );
+        // Found in a live run: a copied time zone, and a note about a refused draft in the reply.
+        assert!(!INSTRUCTIONS.contains("Asia/Singapore"));
+        assert!(rule("Leave out `timezone`").contains("this computer's own clock"));
+        assert!(rule("If `propose_team` reports a problem").contains("say nothing about it"));
         let plain = rule("Reply in plain words");
         assert!(
             plain.contains("say what the person gets when the team runs")
