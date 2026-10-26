@@ -10,7 +10,9 @@
 //! so the panel renders it from the same stream as the assistant's own words and tool calls, and a
 //! reload shows exactly what was proposed.
 
+mod find;
 mod instructions;
+mod jobs;
 mod mcp;
 #[cfg(test)]
 mod tests;
@@ -65,6 +67,8 @@ pub struct ControlOptions {
     /// A model that replaces the person's choice for every conversation, from
     /// `LOOMWATCH_ASK_MODEL`: `fake/offline` for an offline demo.
     pub ask_model: Option<String>,
+    /// The person's home folder, where `find_files` looks for the folders and files they name.
+    pub home: Option<PathBuf>,
 }
 
 #[derive(Clone)]
@@ -80,6 +84,7 @@ struct Inner {
     /// `http://127.0.0.1:<port>`: what links in tool results start with.
     origin: String,
     ask_model: Option<String>,
+    home: Option<PathBuf>,
     conversations: RwLock<BTreeMap<String, Arc<Conversation>>>,
     proposals: RwLock<BTreeMap<String, Proposal>>,
 }
@@ -172,6 +177,9 @@ struct Proposal {
     base_revision: Option<String>,
     summary: String,
     created_at: String,
+    /// Each agent's name as the team is read, by id: an agent that points at one of My agents has
+    /// none in the file, and the card names it as My agents does (ADR 0096).
+    agent_names: BTreeMap<String, String>,
 }
 
 impl Control {
@@ -193,6 +201,7 @@ impl Control {
                     .ask_model
                     .map(|model| model.trim().to_owned())
                     .filter(|model| !model.is_empty()),
+                home: options.home.filter(|home| home.is_absolute()),
                 conversations: RwLock::default(),
                 proposals: RwLock::default(),
             }),
@@ -507,7 +516,12 @@ async fn converse(
         let Ok(Some(turn)) = tokio::time::timeout(IDLE_LIMIT, turns.recv()).await else {
             break;
         };
-        let prompt = compose_prompt(&control, &turn, first);
+        let has = if first {
+            Some(what_they_have(&control).await)
+        } else {
+            None
+        };
+        let prompt = compose_prompt(&control, &turn, has.as_deref());
         first = false;
         control
             .record(
@@ -580,12 +594,14 @@ async fn fail(control: &Control, conversation: &Conversation, message: &str) {
     *conversation.turns.lock().await = None;
 }
 
-/// What the app is told. The first turn carries the instructions; every turn says where the person
-/// is, so the app never has to ask a tool for it.
-fn compose_prompt(control: &Control, turn: &Turn, first: bool) -> String {
+/// What the app is told. The first turn carries the instructions and what the person has (`has`);
+/// every turn says where the person is, so the app never has to ask a tool for it.
+fn compose_prompt(control: &Control, turn: &Turn, has: Option<&str>) -> String {
     let mut prompt = String::new();
-    if first {
+    if let Some(has) = has {
         prompt.push_str(mcp::INSTRUCTIONS);
+        prompt.push_str("\n\n");
+        prompt.push_str(has);
         prompt.push_str("\n\n");
     }
     prompt.push_str("## Where the person is\n");
@@ -593,6 +609,89 @@ fn compose_prompt(control: &Control, turn: &Turn, first: bool) -> String {
     prompt.push_str("\n\n## The person's message\n");
     prompt.push_str(turn.text.trim());
     prompt
+}
+
+/// The most names of one kind [`what_they_have`] lists.
+const NAMES_LISTED: usize = 25;
+
+/// What the person has to build with, by name, said once at the top of a conversation so Ask builds
+/// from it rather than from nothing (ADR 0096): their teams, My agents with the ids a team points
+/// at, their skills and connected tools, and the ways of paying they connected. The tools give
+/// the rest.
+async fn what_they_have(control: &Control) -> String {
+    let root = control.inner.teams_root.clone();
+    let skills_folder = control.inner.skills_folder.clone();
+    let on_disk = tokio::task::spawn_blocking(move || {
+        let teams = crate::api::discover_team_files(&root)
+            .unwrap_or_default()
+            .iter()
+            .map(|file| {
+                crate::api::summarize_team_file(&root, file)
+                    .name
+                    .unwrap_or_else(|| file.clone())
+            })
+            .collect::<Vec<_>>();
+        let agents = crate::jobs::list_jobs(&root)
+            .map(|list| {
+                list.jobs
+                    .iter()
+                    .map(|agent| format!("{} (`{}`)", agent.spec.name, agent.id))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let skills = crate::capabilities::detect_capabilities(skills_folder.as_deref(), &root)
+            .skills
+            .into_iter()
+            .map(|skill| skill.name)
+            .collect::<Vec<_>>();
+        (teams, agents, skills)
+    })
+    .await;
+    let (teams, agents, skills) = on_disk.unwrap_or_default();
+    let tools = mcp::connected_tool_names().await;
+    let paying = crate::ai::installed()
+        .map(crate::ai::Ai::connected_sources)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|source| {
+            serde_json::to_value(source)
+                .ok()?
+                .as_str()
+                .map(str::to_owned)
+        })
+        .collect::<Vec<_>>();
+    let line = |label: &str, names: &[String]| {
+        let shown = names.iter().take(NAMES_LISTED).cloned().collect::<Vec<_>>();
+        let listed = match names.len() {
+            0 => "none yet".to_owned(),
+            count if count > NAMES_LISTED => {
+                format!("{}, and {} more", shown.join(", "), count - NAMES_LISTED)
+            }
+            _ => shown.join(", "),
+        };
+        format!("- {label}: {listed}.\n")
+    };
+    let mut has = String::from("## What the person has\n");
+    has.push_str(&line("Teams", &teams));
+    has.push_str(&line("My agents", &agents));
+    has.push_str(&line("Skills", &skills));
+    has.push_str(&line("Connected tools", &tools));
+    has.push_str(&line("Ways of paying connected", &paying));
+    has.push_str(this_computer(cfg!(target_os = "macos")));
+    has.trim_end().to_owned()
+}
+
+/// What an agent's commands can reach on this computer, said to Ask so it knows whether a maker may
+/// run its programs without asking (the owner's ruling, ADR 0096): on a Mac, commands run in a
+/// sandbox that keeps the files they change to the agent's own folder and temporary folders
+/// (`agent/sandbox.rs`); elsewhere nothing does, so each command asks.
+fn this_computer(mac: bool) -> &'static str {
+    if mac {
+        "- This computer: a Mac, where an agent's commands run in a sandbox that keeps the files \
+         they change to its own folder.\n"
+    } else {
+        "- This computer: not a Mac, so an agent's commands could change any file the person can.\n"
+    }
 }
 
 fn describe_context(control: &Control, context: &AskContext) -> String {

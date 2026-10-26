@@ -86,6 +86,7 @@ fn calling(step: usize, text: &str, tool: &str, arguments: &Value) -> Completion
 /// Stands in for the model behind Ask: reads the person's message and the tools' answers, and
 /// calls the Control tools the way a model would.
 ///
+/// - "folder": builds from what the person has ([`build_from_what_they_have`]).
 /// - "team" or "brief": proposes a broken team file first (to exercise the validation loop), then
 ///   the valid four-step team with a review stop.
 /// - "run": asks to start a run of it.
@@ -109,7 +110,9 @@ fn assistant() -> Demo {
             .to_lowercase();
         let answers = answers(&request.messages);
         let step = answers.len();
-        let reply = if message.contains("note") {
+        let reply = if message.contains("folder") {
+            build_from_what_they_have(step, &answers)
+        } else if message.contains("note") {
             match step {
                 0 => calling(step, "", "get_run", &json!({})),
                 1 => calling(
@@ -197,6 +200,58 @@ fn assistant() -> Demo {
     })
 }
 
+/// "…from my Client notes folder, with my researcher": the stand-in looks at what the person has
+/// first, as Ask is told to, then proposes a pipeline that points at their Researcher, starts the
+/// Writer from `LoomWatch`'s job, and gives the Writer alone the folder `find_files` found.
+fn build_from_what_they_have(step: usize, answers: &[&str]) -> Completion {
+    let answer = |at: usize| serde_json::from_str::<Value>(answers[at]).unwrap_or_default();
+    match step {
+        0 => calling(step, "", "list_my_agents", &json!({})),
+        1 => calling(step, "", "read_job", &json!({"job": "writer"})),
+        2 => calling(step, "", "find_files", &json!({"name": "Client notes"})),
+        3 => {
+            let agent = answer(0)["agents"][0]["id"]
+                .as_str()
+                .unwrap_or("nobody")
+                .to_owned();
+            let writer = answer(1);
+            let folder = answer(2)["found"][0]["path"]
+                .as_str()
+                .unwrap_or("nowhere")
+                .to_owned();
+            let role = writer["role"].as_str().unwrap_or_default().replacen(
+                '\n',
+                "\nThe review is for the client's managers: one page, what changed this quarter.\n",
+                1,
+            );
+            let indented = role.lines().fold(String::new(), |indented, line| {
+                indented + "      " + line + "\n"
+            });
+            let yaml = format!(
+                "schemaVersion: 1\nid: client-review\nname: Client review\nentrypoint: researcher\n\
+                 agents:\n  - id: researcher\n    from: {{agent: {agent}}}\n  - id: writer\n    \
+                 name: Writer\n    role: |\n{indented}    model: {}\n    thinkingEffort: {}\n    \
+                 doneWhen: {}\n    capabilities:\n      - {{kind: knowledge, name: Client notes, \
+                 path: '{folder}'}}\nedges:\n  - {{from: researcher, to: writer, layer: configured, \
+                 kind: sequence, ts: \"2026-10-26T00:00:00Z\"}}\n",
+                writer["model"].as_str().unwrap_or_default(),
+                writer["thinkingEffort"].as_str().unwrap_or_default(),
+                writer["doneWhen"],
+            );
+            calling(
+                step,
+                "",
+                "propose_team",
+                &json!({"file": "client-review.yaml", "yaml": yaml, "summary": "Your Researcher finds, the Writer writes from your Client notes."}),
+            )
+        }
+        _ => Completion::text(
+            "I used your Researcher as it is, started the Writer from LoomWatch's Writer, and gave \
+             the Writer your Client notes folder. Apply it on the canvas, or tell me what to change.",
+        ),
+    }
+}
+
 fn rewrite(prompt: &str) -> String {
     let removed = prompt
         .split("removed the ")
@@ -232,10 +287,11 @@ fn rewrite(prompt: &str) -> String {
     format!("Here they are:\n```json\n{}\n```", json!({"edits": edits}))
 }
 
-/// A served [`Control`] over a scratch teams folder and skills folder.
+/// A served [`Control`] over a scratch teams folder, skills folder and home folder.
 struct Fixture {
     root: TempDirectory,
     skills: TempDirectory,
+    home: TempDirectory,
     base: String,
     control: Control,
     registry: RunRegistry,
@@ -248,6 +304,7 @@ impl Fixture {
     async fn start(archive: Option<EventArchive>, ask_model: Option<String>) -> Self {
         let root = TempDirectory::new("teams");
         let skills = TempDirectory::new("skills");
+        let home = TempDirectory::new("home");
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
             .await
             .expect("bind");
@@ -260,12 +317,14 @@ impl Fixture {
             registry: registry.clone(),
             listen: address,
             ask_model,
+            home: Some(home.0.clone()),
         });
         let router = control.router();
         tokio::spawn(async move { axum::serve(listener, router).await });
         Self {
             root,
             skills,
+            home,
             base: format!("http://{address}"),
             control,
             registry,
@@ -464,6 +523,11 @@ async fn a_conversation_proposes_asks_before_running_and_drafts_a_review_note() 
             "read_team",
             "list_models",
             "list_skills",
+            "list_jobs",
+            "read_job",
+            "list_my_agents",
+            "list_tools",
+            "find_files",
             "propose_team",
             "start_run",
             "get_run",
@@ -978,8 +1042,7 @@ async fn ask_wires_a_skill_by_a_name_a_run_can_deliver() {
         .await;
     assert!(failed, "{message}");
     assert!(
-        message.starts_with("No skill called eli5 is installed")
-            && message.contains("`list_skills`"),
+        message == "eli5 isn't one of your skills. Add it on the Skills page.",
         "{message}"
     );
 
@@ -1002,6 +1065,323 @@ fn ask_is_told_to_give_a_skill_as_a_skill() {
     assert!(instructions.contains("`capabilities: [{kind: skill, name: "));
     assert!(instructions.contains("by name from `list_skills`"));
     assert!(instructions.contains("don't copy what the skill says into the `role`"));
+}
+
+/// One of My agents, written as the app saves it.
+fn save_agent(root: &std::path::Path, id: &str, yaml: &str) {
+    std::fs::create_dir_all(root.join(".jobs")).expect("My agents");
+    std::fs::write(root.join(format!(".jobs/{id}.yaml")), yaml).expect("an agent");
+}
+
+/// ADR 0096: Ask builds from what the person has. Told to use their own agent and a folder they
+/// name, it looks at My agents, `LoomWatch`'s Writer and the folder first, then proposes a team that
+/// points at their agent as it is saved, starts the Writer from the job, and gives the folder to
+/// the Writer alone; and it is told what the person has before its first answer.
+#[tokio::test]
+async fn ask_builds_a_team_from_the_persons_own_agent_a_job_and_a_folder() {
+    let pool = crate::db::Db::temp().await;
+    let demo = assistant();
+    let fixture = Fixture::start(
+        Some(EventArchive::new(pool)),
+        Some(crate::engine::demo_model(demo.clone())),
+    )
+    .await;
+    save_agent(
+        &fixture.root.0,
+        "researcher",
+        "name: Researcher\ndoes: Finds and checks sources\ninstructions: Find the facts, with a source for each.\nmodel: fake/offline\n",
+    );
+    let notes = fixture.home.0.join("Documents").join("Client notes");
+    std::fs::create_dir_all(&notes).expect("the folder");
+    std::fs::write(notes.join("acme.md"), "Acme renewed.").expect("a note");
+
+    let (status, started) = fixture.post("/api/ask/conversations", &json!({})).await;
+    assert_eq!(status, 201, "{started}");
+    let id = started["id"].as_str().expect("id").to_owned();
+    fixture
+        .say(
+            &id,
+            "Build a team that writes a client review from my Client notes folder, with my researcher.",
+        )
+        .await;
+    let events = fixture.events(&id).await;
+
+    let first = demo
+        .requests()
+        .first()
+        .map(|request| request.prompt().to_owned())
+        .expect("the assistant was asked");
+    assert!(
+        first.contains("## What the person has\n")
+            && first.contains("- My agents: Researcher (`researcher`).\n")
+            && first.contains("- Connected tools: none yet.")
+            && first.contains("- This computer: "),
+        "{first}"
+    );
+    let proposals = phases(&events, "ask_proposal");
+    assert_eq!(proposals.len(), 1, "{}", dump(&events));
+    let yaml = proposals[0]["yaml"].as_str().expect("the proposed file");
+    let team =
+        crate::config::TeamConfig::parse_in(yaml, &fixture.root.0).expect("a team a run reads");
+    let researcher = &team.agents[0];
+    assert_eq!(
+        researcher.role, "Find the facts, with a source for each.",
+        "as it is saved"
+    );
+    assert!(researcher.capabilities.is_empty());
+    let writer = &team.agents[1];
+    let job = super::jobs::named("writer").expect("the writer job");
+    assert!(writer.role.starts_with(&job.role[0]), "{}", writer.role);
+    assert!(
+        writer
+            .role
+            .contains(job.role.last().expect("its reply line")),
+        "{}",
+        writer.role
+    );
+    assert_eq!(writer.done_when, job.done_when);
+    assert_eq!(writer.capabilities.len(), 1);
+    assert_eq!(
+        writer.capabilities[0].path.as_deref(),
+        Some(notes.as_path())
+    );
+    assert_eq!(team.spend.per_run, Some(crate::spend::DEFAULT_PER_RUN_USD));
+    assert_eq!(
+        proposals[0]["agentNames"],
+        json!({"researcher": "Researcher", "writer": "Writer"}),
+        "the card names the agent from My agents, which has no name in the file"
+    );
+    assert!(
+        said(&events).contains("Researcher as it is"),
+        "{}",
+        dump(&events)
+    );
+}
+
+/// What Ask sees of `LoomWatch`'s jobs, My agents and the person's files (ADR 0096): the jobs with
+/// the models the app places them on, each agent with what it brings and the teams it is in, and
+/// a folder by its name with what is inside, one a team already reads first.
+#[tokio::test]
+async fn ask_sees_the_jobs_the_persons_agents_and_their_folders() {
+    let fixture = Fixture::start(None, None).await;
+    let tools = ControlTools::new(
+        fixture.control.clone(),
+        Caller::Conversation("ask-test".to_owned()),
+    );
+    let call = |name: &'static str, arguments: Value| {
+        let tools = &tools;
+        async move {
+            let (answer, failed) = tools.call(name, arguments).await;
+            (
+                serde_json::from_str::<Value>(&answer).unwrap_or(Value::String(answer)),
+                failed,
+            )
+        }
+    };
+
+    let (jobs, failed) = call("list_jobs", json!({})).await;
+    assert!(!failed, "{jobs}");
+    let listed = jobs["jobs"].as_array().expect("jobs");
+    assert_eq!(listed.len(), super::jobs::BUILT_IN_JOBS.len());
+    let deck = listed
+        .iter()
+        .find(|job| job["job"] == "deck")
+        .expect("the deck maker");
+    assert_eq!(deck["name"], "Presentation maker");
+    assert!(deck.get("role").is_none(), "listed short");
+    let (job, failed) = call("read_job", json!({"job": "Checker"})).await;
+    assert!(!failed, "{job}");
+    assert!(
+        job["role"]
+            .as_str()
+            .is_some_and(|role| role.contains("## Check")),
+        "{job}"
+    );
+    assert_eq!(job["model"], super::tier_model("check"));
+    let (missing, failed) = call("read_job", json!({"job": "astronaut"})).await;
+    assert!(
+        failed && missing == json!("LoomWatch has no job called astronaut."),
+        "{missing}"
+    );
+
+    save_agent(
+        &fixture.root.0,
+        "researcher",
+        "name: Researcher\ndoes: Finds and checks sources\ninstructions: Find the facts.\nskills: [cite]\nreads:\n  - {name: Notes, path: ~/notes}\n",
+    );
+    std::fs::write(
+        fixture.root.0.join("brief.yaml"),
+        "schemaVersion: 1\nid: brief\nname: Market brief\nentrypoint: researcher\nagents:\n  - id: researcher\n    from: {agent: researcher}\nedges: []\n",
+    )
+    .expect("a team");
+    let (agents, failed) = call("list_my_agents", json!({})).await;
+    assert!(!failed, "{agents}");
+    assert_eq!(
+        agents["agents"],
+        json!([{
+            "id": "researcher", "name": "Researcher", "does": "Finds and checks sources",
+            "instructions": "Find the facts.", "model": null, "thinkingEffort": null,
+            "skills": ["cite"], "tools": [], "reads": [{"name": "Notes", "path": "~/notes"}],
+            "doneWhen": [], "allow": {}, "inTeams": ["Market brief"],
+        }])
+    );
+
+    let mine = fixture.home.0.join("Documents").join("Market research");
+    std::fs::create_dir_all(&mine).expect("a folder");
+    std::fs::write(mine.join("prices.csv"), "a,b").expect("a file");
+    let shared = fixture.root.0.join("shared").join("market research");
+    std::fs::create_dir_all(&shared).expect("a folder a team reads");
+    std::fs::write(
+        fixture.root.0.join("scan.yaml"),
+        "schemaVersion: 1\nid: scan\nname: Scan\nentrypoint: a\nagents:\n  - id: a\n    name: Scout\n    role: Scan.\n    model: fake/offline\n    capabilities:\n      - {kind: knowledge, name: Research, path: shared/market research}\nedges: []\n",
+    )
+    .expect("a team");
+    let (found, failed) = call("find_files", json!({"name": "market research"})).await;
+    assert!(!failed, "{found}");
+    let found = found["found"].as_array().expect("found");
+    assert_eq!(found.len(), 2, "{found:?}");
+    assert_eq!(found[0]["path"], shared.to_string_lossy().as_ref());
+    assert_eq!(found[0]["usedBy"], json!(["Scan · Scout"]));
+    assert_eq!(found[1]["path"], mine.to_string_lossy().as_ref());
+    assert_eq!(found[1]["holds"], json!(["prices.csv"]));
+    let (none, failed) = call("find_files", json!({"name": "tax returns"})).await;
+    assert!(!failed);
+    assert!(
+        none["message"].as_str().is_some_and(
+            |m| m.contains("ask which folder it is in") && m.contains("never ask for a path")
+        ),
+        "a newcomer is never asked for a path: {none}"
+    );
+
+    let (tools_listed, failed) = call("list_tools", json!({})).await;
+    assert!(!failed);
+    assert_eq!(
+        tools_listed,
+        json!({"tools": []}),
+        "none connected in a test"
+    );
+}
+
+/// A proposal names only what is there (ADR 0096): one of My agents by an id it has, a folder or
+/// file on this computer, a folder to work in, and a connected tool; what the saved team already
+/// names is kept. A new team starts with the new-team spending limit; a change to a team doesn't
+/// add one.
+#[tokio::test]
+async fn a_proposal_names_only_agents_places_and_tools_that_are_there() {
+    let fixture = Fixture::start(None, None).await;
+    let tools = ControlTools::new(
+        fixture.control.clone(),
+        Caller::Conversation("ask-test".to_owned()),
+    );
+    save_agent(
+        &fixture.root.0,
+        "researcher",
+        "name: Researcher\ninstructions: Find the facts.\nmodel: anthropic/claude-sonnet-5.5\n",
+    );
+    // One that names no model runs on the one the team gives it, and can't run without.
+    save_agent(
+        &fixture.root.0,
+        "editor",
+        "name: Editor\ninstructions: Tidy it.\n",
+    );
+    let pointer = |model: &str| {
+        format!(
+            "schemaVersion: 1\nid: tidy\nname: Tidy\nentrypoint: e\nagents:\n  - id: e\n    \
+             from: {{agent: editor}}\n{model}edges: []\n"
+        )
+    };
+    let tidy = |yaml: String| json!({"file": "tidy.yaml", "yaml": yaml, "summary": "Tidy."});
+    let (message, failed) = tools.call("propose_team", tidy(pointer(""))).await;
+    assert!(failed && message.contains("missing `model`"), "{message}");
+    let (answer, failed) = tools
+        .call(
+            "propose_team",
+            tidy(pointer("    model: anthropic/claude-sonnet-5.5\n")),
+        )
+        .await;
+    assert!(!failed, "{answer}");
+    let notes = fixture.home.0.join("notes");
+    std::fs::create_dir_all(&notes).expect("a folder");
+    let team = |extra: &str| {
+        format!(
+            "schemaVersion: 1\nid: brief\nname: Brief\nentrypoint: a\nagents:\n  - id: a\n    \
+             name: Collector\n    role: Collect\n    model: anthropic/claude-sonnet-5.5\n{extra}  \
+             - id: r\n    from: {{agent: researcher}}\nedges: []\n"
+        )
+    };
+    let propose = |yaml: String| json!({"file": "brief.yaml", "yaml": yaml, "summary": "A brief."});
+    let refused = |extra: &'static str, says: &'static str| {
+        let tools = &tools;
+        let yaml = team(extra);
+        async move {
+            let (message, failed) = tools.call("propose_team", propose(yaml)).await;
+            assert!(failed && message.contains(says), "{extra}: {message}");
+        }
+    };
+    let (message, failed) = tools
+        .call(
+            "propose_team",
+            propose(team("").replace("agent: researcher", "agent: nobody")),
+        )
+        .await;
+    assert!(failed && message.contains("`list_my_agents`"), "{message}");
+    refused(
+        "    capabilities:\n      - {kind: knowledge, name: Gone, path: /no/such/folder}\n",
+        "There is no folder or file at /no/such/folder on this computer.",
+    )
+    .await;
+    refused(
+        "    spawn: {cwd: no-such-folder}\n",
+        "There is no folder or file at no-such-folder",
+    )
+    .await;
+    refused(
+        "    capabilities:\n      - {kind: tool, name: Linear}\n",
+        "Linear isn't connected yet. Connect it in Connections, under Tools.",
+    )
+    .await;
+
+    let found = format!(
+        "    capabilities:\n      - {{kind: knowledge, name: Notes, path: '{}'}}\n",
+        notes.display()
+    );
+    let (answer, failed) = tools.call("propose_team", propose(team(&found))).await;
+    assert!(!failed, "{answer}");
+    let answer: Value = serde_json::from_str(&answer).expect("json");
+    let proposals = fixture.control.inner.proposals.read().await;
+    let proposed = &proposals[answer["proposalId"].as_str().expect("an id")].yaml;
+    assert!(
+        proposed.contains("name: Brief\nspend:\n  perRun: 1.00\n"),
+        "{proposed}"
+    );
+    drop(proposals);
+
+    // Once the team is saved with Linear and a folder since moved, a change keeps both, and adds
+    // no limit the person didn't set.
+    let saved = team(
+        "    capabilities:\n      - {kind: tool, name: Linear}\n      - {kind: knowledge, name: Old, path: /moved/away}\n",
+    );
+    std::fs::write(fixture.root.0.join("brief.yaml"), &saved).expect("the saved team");
+    let changed = saved.replace("role: Collect", "role: Collect more");
+    let (answer, failed) = tools.call("propose_team", propose(changed)).await;
+    assert!(!failed, "{answer}");
+    let answer: Value = serde_json::from_str(&answer).expect("json");
+    let proposals = fixture.control.inner.proposals.read().await;
+    let proposed = &proposals[answer["proposalId"].as_str().expect("an id")].yaml;
+    assert!(!proposed.contains("spend:"), "{proposed}");
+}
+
+/// Ask is told whether this computer sandboxes an agent's commands, which decides whether a maker
+/// may run its programs without asking (the owner's ruling, ADR 0096).
+#[test]
+fn ask_is_told_whether_commands_here_are_sandboxed() {
+    let mac = super::this_computer(true);
+    assert!(mac.contains("a Mac") && mac.contains("sandbox"), "{mac}");
+    let other = super::this_computer(false);
+    assert!(
+        other.contains("not a Mac") && !other.contains("sandbox"),
+        "{other}"
+    );
 }
 
 /// The owner (2026-10-26): a run of Cole's own chat opened the team screen on its chat file. A link

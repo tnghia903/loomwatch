@@ -33,7 +33,7 @@ function DashedEdge() {
 }
 
 function ProposalView({ card, actions }: { card: ProposalCard; actions: CardActions }) {
-  const changes = useMemo(() => proposalChanges(card.isNew ? null : actions.savedYamlFor(card.file), card.yaml), [card, actions])
+  const changes = useMemo(() => proposalChanges(card.isNew ? null : actions.savedYamlFor(card.file), card.yaml, card.agentNames), [card, actions])
   const showing = actions.previewingId === card.id
   if (card.superseded && !card.outcome) {
     return <div className="ask-card ask-card-quiet t-meta">An earlier draft of “{card.name}”, replaced by the one below.</div>

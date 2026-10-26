@@ -36,6 +36,8 @@ export interface Proposal {
   baseRevision: string | null
   summary: string
   createdAt: string
+  /** Each agent's name as the team is read, by id: one from My agents has none in the file. */
+  agentNames?: Record<string, string>
 }
 
 export type ProposalOutcome = 'applied' | 'discarded' | 'undone'

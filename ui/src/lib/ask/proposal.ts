@@ -8,7 +8,7 @@ import type { AgentConfig, TeamDocument } from '../team-file/types'
 export interface ProposalChanges {
   /** Agent ids the proposal adds, in the order the team runs them. */
   added: string[]
-  /** Agent ids whose job, app, model, kind or skills the proposal changes. */
+  /** Agent ids whose job, app, model, kind, skills, tools or reads the proposal changes. */
   changed: string[]
   /** Names of the agents the proposal takes away (they are no longer on the canvas to name). */
   removed: string[]
@@ -31,8 +31,11 @@ function agentsOf(team: TeamDocument | null): AgentConfig[] {
   return Array.isArray(team?.agents) ? team.agents : []
 }
 
-function nameOf(agent: AgentConfig): string {
-  return agent.kind === 'operator' ? `${agent.name || 'You'} (review)` : agent.name || agent.id
+/** Each agent's name as the team is read, by id: one from My agents has none in the file. */
+type Names = Readonly<Record<string, string>>
+
+function nameOfAgent(agent: AgentConfig, names: Names = {}): string {
+  return agent.kind === 'operator' ? `${agent.name || 'You'} (review)` : agent.name || names[agent.id] || agent.id
 }
 
 function same(a: unknown, b: unknown): boolean {
@@ -44,8 +47,11 @@ function list(names: string[]): string {
   return `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`
 }
 
-function skillsOf(agent: AgentConfig): string[] {
-  return (Array.isArray(agent.capabilities) ? agent.capabilities : []).filter((capability) => capability.kind === 'skill').map((capability) => capability.name)
+type Given = 'skill' | 'tool' | 'knowledge'
+
+/** What the file gives an agent of one kind, by name: its skills, its tools, what it reads. */
+function givenOf(agent: AgentConfig, kind: Given): string[] {
+  return (Array.isArray(agent.capabilities) ? agent.capabilities : []).filter((capability) => capability.kind === kind).map((capability) => capability.name)
 }
 
 /** `names` that `others` doesn't have, whatever their case, as a run finds a skill. */
@@ -54,9 +60,14 @@ function without(names: string[], others: string[]): string[] {
   return names.filter((name) => !lower.has(name.toLowerCase()))
 }
 
-function skills(names: string[]): string {
-  return `the skill${names.length === 1 ? '' : 's'} ${list(names)}`
+/** What an agent is given, as the card says it: "the skill pdf", "the tools Linear and Gmail",
+    "Client notes to read". */
+function given(kind: Given, names: string[]): string {
+  if (kind === 'knowledge') return `${list(names)} to read`
+  return `the ${kind}${names.length === 1 ? '' : 's'} ${list(names)}`
 }
+
+const GIVEN: readonly Given[] = ['skill', 'tool', 'knowledge']
 
 function runOrder(team: TeamDocument | null): AgentConfig[] {
   const agents = agentsOf(team)
@@ -72,13 +83,15 @@ function runOrder(team: TeamDocument | null): AgentConfig[] {
 
 /**
  * The difference between the team as it is (`currentYaml`, null for a new team) and the proposal.
- * Only what a person would notice is reported: who joins, who leaves, whose job changes, the skills
- * an agent is given or loses, the order, and the schedule.
+ * Only what a person would notice is reported: who joins, who leaves, whose job changes, the
+ * skills, tools and folders or files an agent is given or loses, the order, and the schedule.
+ * `names` names the agents the file points at in My agents (ADR 0096).
  */
-export function proposalChanges(currentYaml: string | null, proposedYaml: string): ProposalChanges {
+export function proposalChanges(currentYaml: string | null, proposedYaml: string, names: Names = {}): ProposalChanges {
   const before = parse(currentYaml)
   const after = parse(proposedYaml)
   const ordered = runOrder(after)
+  const nameOf = (agent: AgentConfig) => nameOfAgent(agent, names)
   const order = ordered.map(nameOf)
   const was = new Map(agentsOf(before).map((agent) => [agent.id, agent]))
   const now = new Map(agentsOf(after).map((agent) => [agent.id, agent]))
@@ -88,10 +101,15 @@ export function proposalChanges(currentYaml: string | null, proposedYaml: string
   const lines: string[] = []
 
   if (!before) {
-    if (order.length > 0) lines.push(`${order.length} step${order.length === 1 ? '' : 's'}: ${order.join(' → ')}`)
+    // With no connections the first agent leads and hands out the parts: there are no steps.
+    const leads = ordered.length > 1 && (!Array.isArray(after?.edges) || after.edges.filter((edge) => edge.layer !== 'observed').length === 0)
+    if (leads) lines.push(`Led by ${order[0]}, with ${list(order.slice(1))}`)
+    else if (order.length > 0) lines.push(`${order.length} step${order.length === 1 ? '' : 's'}: ${order.join(' → ')}`)
     for (const agent of ordered) {
-      const given = skillsOf(agent)
-      if (given.length > 0) lines.push(`Gives ${nameOf(agent)} ${skills(given)}`)
+      for (const kind of GIVEN) {
+        const items = givenOf(agent, kind)
+        if (items.length > 0) lines.push(`Gives ${nameOf(agent)} ${given(kind, items)}`)
+      }
     }
   } else {
     if (added.length > 0) lines.push(`Adds ${list(added.map((id) => nameOf(now.get(id) as AgentConfig)))}`)
@@ -105,11 +123,15 @@ export function proposalChanges(currentYaml: string | null, proposedYaml: string
       if ((previous.model || '') !== (agent.model || '')) what.push('model')
       if ((previous.kind || 'harness') !== (agent.kind || 'harness')) what.push('kind')
       if (what.length > 0) lines.push(`Changes ${nameOf(agent)}’s ${list(what)}`)
-      const given = without(skillsOf(agent), skillsOf(previous))
-      const taken = without(skillsOf(previous), skillsOf(agent))
-      if (given.length > 0) lines.push(`Gives ${nameOf(agent)} ${skills(given)}`)
-      if (taken.length > 0) lines.push(`Disconnects ${skills(taken)} from ${nameOf(agent)}`)
-      if (what.length > 0 || given.length > 0 || taken.length > 0) changed.push(agent.id)
+      let connections = false
+      for (const kind of GIVEN) {
+        const more = without(givenOf(agent, kind), givenOf(previous, kind))
+        const taken = without(givenOf(previous, kind), givenOf(agent, kind))
+        if (more.length > 0) lines.push(`Gives ${nameOf(agent)} ${given(kind, more)}`)
+        if (taken.length > 0) lines.push(`Disconnects ${kind === 'knowledge' ? list(taken) : given(kind, taken)} from ${nameOf(agent)}`)
+        connections ||= more.length > 0 || taken.length > 0
+      }
+      if (what.length > 0 || connections) changed.push(agent.id)
     }
     if (removed.length > 0) lines.push(`Removes ${list(removed)}`)
     const orderBefore = runOrder(before).map((agent) => agent.id)

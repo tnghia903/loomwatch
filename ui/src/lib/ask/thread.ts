@@ -7,6 +7,7 @@
 // LoomWatch records too. They are placed with the turn they were made in rather than at their
 // sequence number: the tool server records a proposal the moment it is made, while the app's own
 // report of the call can still be on its way, so the two orders are not the same.
+import builtInJobs from '../../../../schemas/built-in-jobs.json'
 import { ACTIVITY_KINDS, ReplyText } from '../watch/replyText'
 import { eventText, type RunEvent } from '../watch/events'
 import type { AskState, ProposalOutcome } from './client'
@@ -33,6 +34,8 @@ export interface ProposalCard {
   isNew: boolean
   summary: string
   yaml: string
+  /** Each agent's name as the team is read, by id: one from My agents has none in the file. */
+  agentNames: Record<string, string>
   outcome: ProposalOutcome | null
   /** A later proposal for the same file replaced this one. */
   superseded: boolean
@@ -107,6 +110,12 @@ const STEP_WORDS: Record<string, { running: string; done: string; failed: string
   list_teams: { running: 'Looking at your teams', done: 'Looked at your teams', failed: 'Couldn’t list your teams' },
   read_team: { running: 'Reading the team', done: 'Read the team', failed: 'Couldn’t read the team' },
   list_models: { running: 'Checking the models', done: 'Checked the models', failed: 'Couldn’t list the models' },
+  list_skills: { running: 'Looking at your skills', done: 'Looked at your skills', failed: 'Couldn’t list your skills' },
+  list_jobs: { running: 'Looking at LoomWatch’s jobs', done: 'Looked at LoomWatch’s jobs', failed: 'Couldn’t look at LoomWatch’s jobs' },
+  read_job: { running: 'Reading a job', done: 'Read a job', failed: 'Couldn’t read the job' },
+  list_my_agents: { running: 'Looking at My agents', done: 'Looked at My agents', failed: 'Couldn’t list My agents' },
+  list_tools: { running: 'Looking at your tools', done: 'Looked at your tools', failed: 'Couldn’t list your tools' },
+  find_files: { running: 'Looking for a folder or file', done: 'Looked for a folder or file', failed: 'Couldn’t look for it' },
   propose_team: { running: 'Drafting the team', done: 'Drafted the team', failed: 'Found a problem in the draft', fixed: 'Fixed a problem in its draft' },
   start_run: { running: 'Getting the run ready', done: 'Got the run ready', failed: 'Couldn’t start the run' },
   get_run: { running: 'Checking the run', done: 'Checked the run', failed: 'Couldn’t read the run' },
@@ -132,7 +141,17 @@ function stepLabel(tool: string | null, title: string, status: StepStatus, input
   if (!words) return status === 'running' ? `Using ${shorten(title, 48)}` : `Used ${shorten(title, 48)}`
   const file = object(input) && typeof input.file === 'string' ? input.file : null
   if (tool === 'read_team' && file && status !== 'failed') return `${status === 'running' ? 'Reading' : 'Read'} ${file}`
+  // A job by the name the app shows it under, and a search by the words it looked for.
+  const job = tool === 'read_job' && object(input) && typeof input.job === 'string' ? jobLabel(input.job) : null
+  if (job && status !== 'failed') return `${status === 'running' ? 'Reading' : 'Read'} the ${job} job`
+  const sought = tool === 'find_files' && object(input) && typeof input.name === 'string' ? input.name.trim() : ''
+  if (sought) return `${{ running: 'Looking for', done: 'Looked for', failed: 'Couldn’t look for' }[status]} “${shorten(sought, 40)}”`
   return words[status]
+}
+
+/** A built-in job's name as the app shows it, from its id (`schemas/built-in-jobs.json`). */
+function jobLabel(id: string): string | null {
+  return builtInJobs.jobs.find((job) => job.id === id.trim().toLowerCase())?.label ?? null
 }
 
 function shorten(text: string, limit: number): string {
@@ -142,6 +161,12 @@ function shorten(text: string, limit: number): string {
 
 function object(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** A record of names by id, keeping only the ones that are words. */
+function names(value: unknown): Record<string, string> {
+  if (!object(value)) return {}
+  return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1].trim() !== ''))
 }
 
 function text(value: unknown): string {
@@ -209,7 +234,8 @@ export function projectAskThread(events: readonly RunEvent[]): AskThread {
         } else if (phase === 'ask_proposal') {
           const card: ProposalCard = {
             kind: 'proposal', id: text(payload.proposalId), at: event.ts, file: text(payload.file), name: text(payload.name) || text(payload.file),
-            isNew: payload.isNew === true, summary: text(payload.summary), yaml: text(payload.yaml), outcome: null, superseded: false,
+            isNew: payload.isNew === true, summary: text(payload.summary), yaml: text(payload.yaml), agentNames: names(payload.agentNames),
+            outcome: null, superseded: false,
           }
           for (const earlier of proposals.values()) if (earlier.file === card.file) earlier.superseded = true
           proposals.set(card.id, card)
@@ -264,6 +290,7 @@ export function projectAskThread(events: readonly RunEvent[]): AskThread {
         const tool = toolOf(title, typeof payload.name === 'string' ? payload.name : null)
         const status: StepStatus = payload.status === 'completed' ? 'done' : payload.status === 'failed' ? 'failed' : 'running'
         const step: AskStep = { id: `${building.turn.id}:${callId}`, label: stepLabel(tool, title, status, payload.rawInput), status, detail: status === 'failed' ? failureDetail(payload.rawOutput) : null, tool }
+        doneLabels.set(step, stepLabel(tool, title, 'done', payload.rawInput))
         building.calls.set(callId, { step, tool, title, input: payload.rawInput })
         building.turn.steps.push(step)
         building.turn.thinking = false
@@ -297,6 +324,9 @@ export function projectAskThread(events: readonly RunEvent[]): AskThread {
   return { items, state, error, appName, appId, model }
 }
 
+/** What each step reads once done, from what it was called with: "Looked for “Client notes”". */
+const doneLabels = new WeakMap<AskStep, string>()
+
 /**
  * A call the app got wrong and then made again successfully was a problem it fixed on its own, such
  * as a draft the tool server refused: it reads as fixed, without the tool's words for what was
@@ -308,7 +338,7 @@ function settleFixed(steps: AskStep[]) {
     if (!steps.slice(index + 1).some((later) => later.tool === step.tool && later.status === 'done')) return
     const words = STEP_WORDS[step.tool]
     step.status = 'done'
-    step.label = words?.fixed ?? words?.done ?? step.label
+    step.label = words?.fixed ?? doneLabels.get(step) ?? words?.done ?? step.label
     step.detail = null
   })
 }

@@ -27,7 +27,7 @@ const HOME: DocState = { path: null, saveState: 'no-file', loadedYaml: null, yam
 
 /** The editor as far as these actions use it: edits change its YAML, undo puts the last one back. */
 function setup(initial: DocState = OPEN_TEAM, extra: Partial<{ activeRunId: string | null; waiting: boolean; saves: boolean }> = {}) {
-  const spies = { applyYaml: vi.fn(), save: vi.fn(async () => extra.saves ?? true), undo: vi.fn(), closeDocument: vi.fn() }
+  const spies = { applyYaml: vi.fn(), save: vi.fn(async () => extra.saves ?? true), undo: vi.fn(), closeDocument: vi.fn(), loadMyAgents: vi.fn(async () => {}) }
   const options = {
     conversationId: 'ask-1', activeRunId: extra.activeRunId ?? null, waiting: extra.waiting ?? false,
     toBuild: vi.fn(), showRun: vi.fn(), applyRecord: vi.fn(), onDocumentOpen: vi.fn(), frame: vi.fn(),
@@ -38,6 +38,7 @@ function setup(initial: DocState = OPEN_TEAM, extra: Partial<{ activeRunId: stri
     const [history, setHistory] = useState<string[]>([])
     const doc = {
       ...state,
+      loadMyAgents: () => spies.loadMyAgents(),
       applyYaml: (yaml: string, file?: string) => {
         spies.applyYaml(...(file ? [yaml, file] : [yaml]))
         if (!file) setHistory((past) => [...past, state.yamlPreview])
@@ -205,7 +206,7 @@ describe('useAskActions', () => {
 
   it('falls back to the file the conversation recorded when the daemon no longer has the proposal', async () => {
     client.fetchProposal.mockRejectedValue(new Error('This proposal is no longer available.'))
-    const recorded: ProposalCard = { kind: 'proposal', id: 'p1', at: '2026-10-02T09:00:00Z', file: 'brief.yaml', name: 'Brief', isNew: false, summary: '', yaml: CHANGED, outcome: null, superseded: false }
+    const recorded: ProposalCard = { kind: 'proposal', id: 'p1', at: '2026-10-02T09:00:00Z', file: 'brief.yaml', name: 'Brief', isNew: false, summary: '', yaml: CHANGED, agentNames: {}, outcome: null, superseded: false }
     const { result, spies } = setup()
     await act(async () => { await result.current.actions.showProposal('p1', recorded) })
     expect(spies.applyYaml).toHaveBeenCalledWith(CHANGED)
@@ -257,6 +258,19 @@ describe('team file names', () => {
     expect(sameTeamFile(null, 'brief.yaml')).toBe(false)
     expect(teamFileForAsk('/Users/me/teams/nested/brief.yaml', '/Users/me/teams')).toBe('nested/brief.yaml')
     expect(teamFileForAsk('brief.yaml', null)).toBe('brief.yaml')
+  })
+
+  it('reads My agents before it puts a proposal on the canvas, so an agent from there shows as itself', async () => {
+    let read: () => void = () => {}
+    const { result, spies } = setup(HOME)
+    spies.loadMyAgents.mockImplementation(() => new Promise<void>((resolve) => { read = resolve }))
+    client.fetchProposal.mockResolvedValue(proposal({ isNew: true, file: 'client-review.yaml', yaml: SAVED }))
+    await act(async () => { await result.current.actions.showProposal('p1') })
+    expect(spies.loadMyAgents).toHaveBeenCalledTimes(1)
+    expect(spies.applyYaml).not.toHaveBeenCalled()
+    await act(async () => { read() })
+    await waitFor(() => expect(spies.applyYaml).toHaveBeenCalledWith(SAVED, 'client-review.yaml'))
+    expect(result.current.actions.preview?.proposal.file).toBe('client-review.yaml')
   })
 
   it('credits Ask LoomWatch with a proposal, and names what an AI app connected earlier proposed', () => {

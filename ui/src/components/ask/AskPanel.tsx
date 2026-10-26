@@ -161,7 +161,7 @@ export function AskPanel({ ask, view, cards, hidden = false, onHome = false }: A
         {ask.needsKey ? null : empty ? (
           <div className="ask-empty">
             <p className="ask-empty-title">What should your team do?</p>
-            <p className="ask-empty-text">I can set up a team, change one, start a run, or help you review one. Nothing is saved or run until you say so.</p>
+            <p className="ask-empty-text">I can set up or change a team from your own agents, folders and tools, start a run, or help you review one. Nothing is saved or run until you say so.</p>
             <ul className="ask-suggestions" aria-label="Try asking">
               {SUGGESTIONS[view].map((suggestion, index) => (
                 <li key={suggestion} style={{ ['--i' as string]: index }}>

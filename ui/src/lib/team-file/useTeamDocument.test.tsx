@@ -1352,6 +1352,23 @@ describe('useTeamDocument.applyYaml', () => {
     expect(result.current.nodes).toHaveLength(3)
   })
 
+  it('fills in a proposed team’s agent from My agents once it has read them, on a page with no team open', async () => {
+    window.history.pushState({}, '', '/')
+    const mine = new Map([['researcher', { id: 'researcher', file: '.jobs/researcher.yaml', name: 'Researcher', instructions: 'Find the facts, with a source for each.', model: 'anthropic/claude-sonnet-5.5' }]])
+    vi.stubGlobal('fetch', withMyAgents(async (input) =>
+      String(input) === '/api/config/schema' ? jsonResponse(200, SCHEMA_GATE) : jsonResponse(404, { error: 'not found' }), mine))
+    const { result } = renderHook(() => useTeamDocument())
+    await waitFor(() => expect(result.current.checking).toBe(false))
+    const proposed = 'schemaVersion: 1\nid: review\nname: Review\nentrypoint: researcher\nagents:\n  - id: researcher\n    from: { agent: researcher }\nedges: []\n'
+
+    await act(async () => { await result.current.loadMyAgents() })
+    act(() => { result.current.applyYaml(proposed, 'review.yaml') })
+    const agent = result.current.nodes.find((node) => node.id === 'researcher')?.data.agent
+    expect(agent?.name).toBe('Researcher')
+    expect(agent?.role).toBe('Find the facts, with a source for each.')
+    expect(agent?.model).toBe('anthropic/claude-sonnet-5.5')
+  })
+
   it('opens a proposed new team unsaved, with nothing to undo back to, and closes it to no team', async () => {
     window.history.pushState({}, '', '/')
     const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL) =>
