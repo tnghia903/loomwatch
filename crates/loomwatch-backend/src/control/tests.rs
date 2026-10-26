@@ -1206,7 +1206,7 @@ async fn ask_sees_the_jobs_the_persons_agents_and_their_folders() {
     save_agent(
         &fixture.root.0,
         "researcher",
-        "name: Researcher\ndoes: Finds and checks sources\ninstructions: Find the facts.\nskills: [cite]\nreads:\n  - {name: Notes, path: /tmp/notes}\n",
+        "name: Researcher\ndoes: Finds and checks sources\ninstructions: Find the facts.\nskills: [cite]\nreads:\n  - {name: Notes, path: ~/notes}\n",
     );
     std::fs::write(
         fixture.root.0.join("brief.yaml"),
@@ -1220,7 +1220,7 @@ async fn ask_sees_the_jobs_the_persons_agents_and_their_folders() {
         json!([{
             "id": "researcher", "name": "Researcher", "does": "Finds and checks sources",
             "instructions": "Find the facts.", "model": null, "thinkingEffort": null,
-            "skills": ["cite"], "tools": [], "reads": [{"name": "Notes", "path": "/tmp/notes"}],
+            "skills": ["cite"], "tools": [], "reads": [{"name": "Notes", "path": "~/notes"}],
             "doneWhen": [], "allow": {}, "inTeams": ["Market brief"],
         }])
     );
