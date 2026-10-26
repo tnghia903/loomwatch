@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { PASS_BEAT_MS } from '../../lib/chat/baton'
 import type { ChatItem, ChatMessage } from '../../lib/chat/client'
+import { ChatMentionsContext } from '../../lib/chat/faces'
 import { clockTime } from '../../lib/chat/format'
 import type { Lesson } from '../../lib/lessons/client'
 import { figureFor, figureStill } from '../../lib/library/figures'
@@ -139,15 +140,126 @@ describe('the message box says where a message goes before it is sent', () => {
     expect(onSend).toHaveBeenCalledWith('@team digest', { kind: 'team' }, false)
   })
 
-  it('a review is decided with its buttons: ↵ never approves, and Esc writes to the team instead', () => {
-    const { onSend, onAnswer, type } = composer([], { runId: 'r', node: 'review', kind: 'review_stop', from: 'researcher', fromName: 'Researcher' })
-    type('looks good but add a source')
-    expect(screen.getByText(/A note to go with your review of Researcher's work/)).toBeInTheDocument()
-    fireEvent.keyDown(box(), { key: 'Enter' })
-    expect(onSend).not.toHaveBeenCalled()
+  it('in a review, ↵ sends the work back with your note and never approves; Esc writes to the team instead', async () => {
+    const review = { runId: 'r', node: 'review', kind: 'review_stop' as const, from: 'researcher', fromName: 'Researcher', backTo: 'researcher' }
+    const { onSend, onAnswer, type } = composer([], review)
+    type('add a source')
+    expect(screen.getByText('Your review note · Enter sends the work back to Researcher')).toBeInTheDocument()
+    expect(box()).toHaveAttribute('placeholder', 'What to change, or a note to pass on')
+    fireEvent.keyDown(box(), { key: 'Enter', shiftKey: true })
     expect(onAnswer).not.toHaveBeenCalled()
+    fireEvent.keyDown(box(), { key: 'Enter' })
+    expect(onAnswer).toHaveBeenCalledWith(review, 'add a source')
+    expect(onSend).not.toHaveBeenCalled()
+    await act(async () => {})
+    // The @ of who is reviewed changes nothing; a note @ anyone else is Approve's to pass on, so
+    // ↵ leaves it to the buttons.
+    type('@Researcher add a source')
+    fireEvent.keyDown(box(), { key: 'Enter' })
+    expect(onAnswer).toHaveBeenCalledTimes(2)
+    await act(async () => {})
+    for (const elsewhere of ['@Writer keep it short', '@team add a source']) {
+      type(elsewhere)
+      expect(screen.getByText('Your review note · press Approve or Send back above')).toBeInTheDocument()
+      fireEvent.keyDown(box(), { key: 'Enter' })
+      expect(onAnswer).toHaveBeenCalledTimes(2)
+      expect(box()).toHaveValue(elsewhere)
+    }
+    // Nor does the @ picker say an @ starts work: from here it starts nothing.
+    type('@wr')
+    expect(within(screen.getByRole('listbox')).getAllByRole('option').map((option) => option.textContent)).toEqual(['@Writer'])
+    cleanup()
+
+    // With nowhere to send the work back, ↵ does nothing: Approve is its button.
+    const approveOnly = composer([], { ...review, backTo: null })
+    approveOnly.type('looks good')
+    expect(screen.getByText('Your review note · press Approve above')).toBeInTheDocument()
+    expect(box()).toHaveAttribute('placeholder', 'A note to pass on')
+    fireEvent.keyDown(box(), { key: 'Enter' })
+    expect(approveOnly.onAnswer).not.toHaveBeenCalled()
+    expect(approveOnly.onSend).not.toHaveBeenCalled()
+    expect(box()).toHaveValue('looks good')
     fireEvent.click(screen.getByRole('button', { name: /Write to the team instead/ }))
     expect(screen.getByText('Team note · starts nothing')).toBeInTheDocument()
+  })
+
+  it('draws each agent @mentioned as its chip as you type, letter for letter under the box’s own words', () => {
+    const mentions = { agents: [{ id: 'researcher', name: 'Researcher' }, { id: 'writer', name: 'Writer' }], hue: (id: string) => (id === 'writer' ? 2 : 1) }
+    const onSend = vi.fn(async () => true)
+    function Harness() {
+      const [value, setValue] = useState('')
+      return (
+        <ChatMentionsContext.Provider value={mentions}>
+          <ChatComposer agents={agents} names={team.names} steps={3} live={[]} decision={null} value={value} onChange={setValue} onSend={onSend} onAnswer={vi.fn(async () => true)} />
+        </ChatMentionsContext.Provider>
+      )
+    }
+    render(<Harness />)
+    const type = (text: string) => fireEvent.change(box(), { target: { value: text, selectionStart: text.length } })
+    const layer = () => document.querySelector('.tc-input-words')
+    // A name typed in other letters takes the agent's own once you are past it, as its chip shows it.
+    type('ask @researcher, then\n@Writer and @team')
+    expect(box()).toHaveValue('ask @Researcher, then\n@Writer and @team')
+    expect(layer()).not.toBeNull()
+    const chips = [...layer()!.querySelectorAll('.tc-typed-mention')]
+    expect(chips.map((chip) => [chip.getAttribute('data-agent'), chip.className, chip.textContent])).toEqual([
+      ['researcher', 'tc-typed-mention hue-1', '@Researcher'],
+      ['writer', 'tc-typed-mention hue-2', '@Writer'],
+    ])
+    // Each chip has its agent's face where its @ is, and every letter of the box is on the layer.
+    for (const chip of chips) expect(chip.querySelector('.tc-typed-at .tc-typed-face svg, .tc-typed-at .tc-typed-face img')).not.toBeNull()
+    expect(layer()!.textContent).toBe('ask @Researcher, then\n@Writer and @team\u200b')
+    // Still at the end, or under the caret, the name is yours to type on ("@researchers"); past it,
+    // it is the agent's, and the caret stays where it was.
+    type('ask @researcher')
+    expect(box()).toHaveValue('ask @researcher')
+    fireEvent.change(box(), { target: { value: 'ask @researcher again', selectionStart: 15 } })
+    expect(box()).toHaveValue('ask @researcher again')
+    fireEvent.change(box(), { target: { value: 'ask @researcher again!', selectionStart: 22 } })
+    expect(box()).toHaveValue('ask @Researcher again!')
+    expect((box() as HTMLTextAreaElement).selectionStart).toBe(22)
+    expect(layer()).toHaveAttribute('aria-hidden', 'true')
+    expect(box()).toHaveClass('chipped')
+    // Words with no agent in them are the box's own again.
+    type('ask @team')
+    expect(layer()).toBeNull()
+    expect(box()).not.toHaveClass('chipped')
+  })
+
+  it('lays the chips’ words out as the box lays out its own, so the caret stays on its letters', () => {
+    const wrap = document.createElement('div')
+    wrap.className = 'tc-input-wrap'
+    wrap.innerHTML = '<div class="tc-input-words"><span class="tc-typed-mention hue-1"><span class="tc-typed-at">@<span class="tc-typed-face"></span></span>Writer</span></div><textarea class="tc-input chipped"></textarea>'
+    document.body.append(wrap)
+    const layer = wrap.querySelector('.tc-input-words')!
+    const input = wrap.querySelector('.tc-input')!
+    // The layer reaches past the box each side by as much as its own padding, so a chip at a line's
+    // end keeps its round end and the words start where the box's do.
+    const lengths = (value: string | null) => (value ?? '').split(' ').map((one) => Number.parseFloat(one))
+    const [layerY, layerX] = lengths(cascaded(layer, ['padding', 'padding-top', 'padding-left']))
+    const [inputY, inputX] = lengths(cascaded(input, ['padding', 'padding-top', 'padding-left']))
+    const [insetY, insetX] = lengths(cascaded(layer, 'inset'))
+    expect([layerY, insetY, layerX + insetX]).toEqual([inputY, 0, inputX])
+    expect(layerX).toBeGreaterThan(0)
+    for (const property of [['font', 'line-height', 'font-size', 'font-family', 'font-weight'], 'letter-spacing', 'word-spacing', 'text-indent', 'text-transform', 'tab-size', 'scrollbar-gutter']) {
+      expect(cascaded(layer, property), String(property)).toBe(cascaded(input, property))
+      expect(cascaded(layer, property), String(property)).not.toBeNull()
+    }
+    expect(cascaded(layer, 'white-space')).toBe('pre-wrap')
+    expect(cascaded(layer, 'overflow-wrap')).toBe('break-word')
+    expect(cascaded(layer, 'pointer-events')).toBe('none')
+    expect(cascaded(input, 'color')).toBe('transparent')
+    expect(cascaded(input, 'caret-color')).toBe('var(--color-ink)')
+    // Nothing on a chip takes room: no padding, margin, border or weight of its own, and the face
+    // stands out of the line.
+    for (const part of ['.tc-typed-mention', '.tc-typed-at']) {
+      const element = wrap.querySelector(part)!
+      for (const property of [['padding', 'padding-left', 'padding-right'], ['margin', 'margin-left', 'margin-right'], ['border', 'border-width', 'border-left', 'border-right'], ['font', 'font-weight', 'font-size', 'letter-spacing'], 'display']) {
+        expect(cascaded(element, property), `${part} ${String(property)}`).toBeNull()
+      }
+    }
+    expect(cascaded(wrap.querySelector('.tc-typed-face')!, 'position')).toBe('absolute')
+    wrap.remove()
   })
 })
 
@@ -1155,6 +1267,74 @@ describe('a piece of work', () => {
     await waitFor(() => expect(posted[0]).toMatchObject({ url: '/api/runs/run-1/answers', body: { node: 'review', text: 'Approved. Continue as planned.' } }))
   })
 
+  // 2026-10-26: Reply on the handover under review did nothing you could see, and ↵ in the box
+  // sent nothing, so the note never went back.
+  it('Reply on the handover under review quotes it over the box, still your note, and ↵ sends the work back with it', async () => {
+    said.messages = [{
+      id: 'h-1', kind: 'handover', from: null, handedBy: { from: ['researcher'], via: [] }, to: 'review', text: 'Three stories, sourced.', context: null,
+      eventId: 'e0', evidenceId: null, seq: 0, ts: '2026-10-06T02:01:00.000Z', offsetMs: 60_000, state: 'pending', error: null, reply: null, carried: false,
+    }]
+    page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null, waitingOn: { node: 'review', name: 'Your review', kind: 'review_stop', since: '2026-10-06T02:01:00.000Z', question: 'Check it', context: 'Three stories, sourced.', handoverFrom: 'researcher', park: 'reloadable', parkNote: '', sendBackAvailable: true } }), request: message({}), notes: [] }]
+    answer = () => new Response(JSON.stringify(run({ status: 'running', reply: null, finishedAt: null })), { status: 200 })
+    renderChat()
+    const talk = await screen.findByRole('region', { name: 'What the agents said' })
+    fireEvent.click(within(talk).getByRole('button', { name: 'Reply to Researcher: handover' }))
+    expect(screen.getByRole('group', { name: "Replying to Researcher's handover" })).toBeInTheDocument()
+    await waitFor(() => expect(box()).toHaveFocus())
+    // Still your note on the review: no @ goes in, as the note goes where its button sends it.
+    expect(box()).toHaveValue('')
+    expect(box()).toHaveAttribute('placeholder', 'What to change, or a note to pass on')
+    // Its ✕ only hides the quote: the box still writes the note.
+    expect(screen.getByRole('button', { name: 'Hide the quote' })).toBeInTheDocument()
+    fireEvent.change(box(), { target: { value: 'Leave the repo out.' } })
+    expect(screen.getByText('Your review note · Enter sends the work back to Researcher')).toBeInTheDocument()
+    expect(within(talk).getByRole('button', { name: 'Approve with your note' })).toBeEnabled()
+    fireEvent.keyDown(box(), { key: 'Enter' })
+    await waitFor(() => expect(posted[0]).toMatchObject({ url: '/api/runs/run-1/answers', body: { node: 'review', text: 'Leave the repo out.', sendBack: 'researcher' } }))
+    expect(posted).toHaveLength(1)
+    // Answered, the quote goes with it.
+    await waitFor(() => expect(screen.queryByRole('group', { name: /^Replying to/ })).toBeNull())
+    expect(box()).toHaveValue('')
+  })
+
+  it('keeps the newest in view when the box below grows into the chat’s room, so a review’s buttons stay over the note', async () => {
+    const watching: { sizes: ResizeObserverCallback; targets: Element[] }[] = []
+    vi.stubGlobal('ResizeObserver', class {
+      targets: Element[] = []
+      sizes: ResizeObserverCallback
+      constructor(sizes: ResizeObserverCallback) { this.sizes = sizes; watching.push(this) }
+      observe(target: Element) { this.targets.push(target) }
+      unobserve() {}
+      disconnect() { this.targets = [] }
+    })
+    page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null, waitingOn: { node: 'review', name: 'Your review', kind: 'review_stop', since: '2026-10-06T02:01:00.000Z', question: 'Check it', context: 'Three stories', handoverFrom: 'researcher', park: 'reloadable', parkNote: '', sendBackAvailable: true } }), request: message({}), notes: [] }]
+    renderChat()
+    await screen.findByRole('button', { name: 'Approve' })
+    const scroller = document.querySelector('.tc-scroll') as HTMLElement
+    let room = 400
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, get: () => 900 })
+    Object.defineProperty(scroller, 'clientHeight', { configurable: true, get: () => room })
+    const observer = watching.find((one) => one.targets.includes(scroller))!
+    expect(observer, 'the chat itself is watched for its size').toBeDefined()
+    const resized = () => act(() => observer.sizes([], observer as unknown as ResizeObserver))
+    resized()
+    // Read to the foot of the chat, the buttons in view…
+    scroller.scrollTop = 500
+    fireEvent.scroll(scroller)
+    // …and the box takes 60 px of its room for a reply's quote: the foot stays in view.
+    room = 340
+    resized()
+    expect(scroller.scrollTop).toBe(900)
+    // Read further up, the chat stays where you are.
+    room = 400
+    resized()
+    scroller.scrollTop = 100
+    fireEvent.scroll(scroller)
+    room = 340
+    resized()
+    expect(scroller.scrollTop).toBe(100)
+  })
+
   it('offers Continue with the team under one agent’s new version, counting as the review it passes', async () => {
     page = [{ kind: 'work', run: run({ runId: 'turn', onlyAgent: 'researcher', responder: 'researcher', reply: 'Three stories, one more source.' }), request: message({ route: 'agent', agentId: 'researcher', text: '@Researcher add a source', runId: 'turn' }), notes: [] }]
     answer = () => new Response(JSON.stringify({ route: 'team', run: run({ runId: 'next', status: 'queued', startAt: 'writer', followsRunId: 'turn', reply: null }) }), { status: 202 })
@@ -1588,6 +1768,7 @@ describe('replying to something said', () => {
     expect(box()).toHaveValue('@Writer ')
     expect(screen.getByText('Note for Writer · after its current step')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'To Researcher instead' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: "Don't reply to it" })).toBeInTheDocument()
 
     // Esc lets go of the reply and keeps the words.
     fireEvent.keyDown(box(), { key: 'Escape' })
@@ -1595,7 +1776,7 @@ describe('replying to something said', () => {
     expect(box()).toHaveValue('@Writer ')
   })
 
-  it('Reply on the question the team waits on you for goes back to answering it', async () => {
+  it('Reply on the question the team waits on you for goes back to answering it, quoted over the box', async () => {
     said.messages = [
       talk({ id: 'h1', kind: 'handover', to: 'review', handedBy: { from: ['researcher'], via: [] }, text: 'Three stories, sourced.', seq: 0 }),
       talk({ id: 'question:e1', kind: 'question', from: 'researcher', to: 'operator', text: 'Which market?', state: 'pending', seq: 2 }),
@@ -1608,7 +1789,8 @@ describe('replying to something said', () => {
     const said_ = await screen.findByRole('region', { name: 'What the agents said' })
     fireEvent.click(within(said_).getByRole('button', { name: 'Reply to Researcher: question' }))
     expect(screen.getByPlaceholderText('Answer Researcher…')).toBeInTheDocument()
-    expect(screen.queryByRole('group', { name: /^Replying to/ })).toBeNull()
+    expect(screen.getByRole('group', { name: "Replying to Researcher's question" })).toBeInTheDocument()
+    expect(box()).toHaveValue('')
     // A reply to anything else is a message of its own, not your answer to the question.
     fireEvent.click(within(said_).getByRole('button', { name: 'Reply to Researcher: handover' }))
     expect(screen.getByRole('group', { name: "Replying to Researcher's handover" })).toBeInTheDocument()

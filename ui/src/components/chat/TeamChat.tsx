@@ -8,7 +8,7 @@ import { isDocument } from '../../lib/chat/document'
 import { nameWithHelpers } from '../../lib/chat/helpers'
 import { clockTime, dayKey, dayLabel, listNames } from '../../lib/chat/format'
 import { destination, withMention, type ChatAgent } from '../../lib/chat/route'
-import { replyOf } from '../../lib/chat/reply'
+import { answersDecision, replyOf } from '../../lib/chat/reply'
 import { answerReply, askedPassages, partId, type AskedPassage } from '../../lib/files/passage'
 import { FileReaderContext } from '../../lib/files/reader'
 import { markSeen } from '../../lib/chat/seen'
@@ -211,10 +211,17 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
       const waiting = run.waitingOn
       if (!waiting) continue
       const from = waiting.kind === 'review_stop' ? waiting.handoverFrom ?? waiting.node : waiting.node
-      return { runId: run.runId, node: waiting.node, kind: waiting.kind, from, fromName: team.names.get(from) ?? from }
+      const backTo = waiting.kind === 'review_stop' && waiting.sendBackAvailable ? waiting.handoverFrom ?? null : null
+      return { runId: run.runId, node: waiting.node, kind: waiting.kind, from, fromName: team.names.get(from) ?? from, backTo }
     }
     return null
   }, [chat.live, team.names])
+  // A quote of what waited on you goes once it is answered, however it was.
+  const [seenDecision, setSeenDecision] = useState(decision)
+  if (decision?.runId !== seenDecision?.runId || decision?.node !== seenDecision?.node) {
+    setSeenDecision(decision)
+    if (answersDecision(seenDecision, replyTo) && !answersDecision(decision, replyTo)) setReplyTo(null)
+  }
   // While nothing waits on you, the newest stop's way out is the screen's one gold fill.
   const fixFill = useMemo(() => filledFix(shownItems, decision), [shownItems, decision])
 
@@ -233,19 +240,26 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
     else setShowJump(true)
   }, [lastKey])
   // And keeps to it while what is there grows — the agents' talk read in, an answer streaming —
-  // unless you are reading further up, or the growth is something you just opened yourself.
+  // unless you are reading further up, or the growth is something you just opened yourself. So it
+  // does when the box below grows into the chat's room (a reply's quote, a longer note), however
+  // it was opened, so a review's buttons stay over the note they send.
   const touched = useRef(0)
   useEffect(() => {
     const element = scroller.current
     if (!element || typeof ResizeObserver === 'undefined') return
     let height = element.scrollHeight
+    let room = element.clientHeight
     const sizes = new ResizeObserver(() => {
       const grew = element.scrollHeight > height
+      const shorter = element.clientHeight < room
       height = element.scrollHeight
-      if (grew && atBottom.current && restore.current === null && performance.now() - touched.current > 600) element.scrollTop = element.scrollHeight
+      room = element.clientHeight
+      if (!atBottom.current || restore.current !== null) return
+      if (shorter || (grew && performance.now() - touched.current > 600)) element.scrollTop = element.scrollHeight
     })
     const watch = () => {
       sizes.disconnect()
+      sizes.observe(element)
       for (const child of element.children) sizes.observe(child)
     }
     watch()
@@ -415,15 +429,19 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
     }
   }, [addFiles, connectFolder])
 
+  // Your answer to a question, or a review's note sent back with the work, as its Send back does.
   const answer = useCallback(async (open: OpenDecision, text: string) => {
+    const sendBack = open.kind === 'review_stop' ? open.backTo : undefined
+    if (sendBack === null) return false
+    follow.pin()
     try {
-      chat.applyRun(await answerRun(open.runId, open.node, text))
+      chat.applyRun(await answerRun(open.runId, open.node, text, sendBack))
       return true
     } catch (caught) {
       announce(caught instanceof Error ? caught.message : String(caught))
       return false
     }
-  }, [chat, announce])
+  }, [chat, announce, follow])
 
   const tryAgain = useCallback((item: Extract<ChatItem, { kind: 'work' }>) => {
     const text = item.request?.text ?? item.run.prompt
@@ -541,12 +559,12 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
   // the @ of whoever said it (or `to`, a teammate asked about a part of a file instead), so it goes
   // to that agent as any @ does (ADR 0051).
   const startReply = (reply: ReplyTo, to?: string) => {
-    const answers = decision !== null && reply.runId === decision.runId && reply.from === decision.from
-      && (decision.kind === 'question' ? reply.kind === 'question' && reply.to === null : reply.kind === 'handover')
-    if (answers) {
-      // What the team waits on you for is answered in the box already: Reply goes back to it.
-      setReplyTo(null)
+    if (answersDecision(decision, reply)) {
+      // What the team waits on you for is answered in the box: Reply goes back to answering it,
+      // with what it answers quoted above the box. Its @ would send nothing, so none is added.
+      setReplyTo(replyOf(reply))
       setAnswerAsked((count) => count + 1)
+      setMentioned((count) => count + 1)
       return
     }
     setReplyTo(replyOf(reply))

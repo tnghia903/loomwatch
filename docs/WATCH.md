@@ -47,9 +47,11 @@ session or from a fresh start), `dispatch` and `handoff` tasks, `ask_user` quest
 answers, and your answers at a review step. It reads as a group chat inside the team's chat: each
 agent has its own colour and initials, numbered as its card is, and your messages sit on the
 right. A review's **Approve** and **Send back** stand where your reply goes, under the handover
-they decide. A question names who it is for with an @mention, and its answer quotes it. A handover
-shows as a document shared with the stage it was for. An answer still owed shows as someone
-writing while the run is live, and as **No answer** after it ends. A plain approval is a short
+they decide. **Reply** on that handover quotes it above the message box; what you type there is
+still your review note. <kbd>Enter</kbd> sends the work back with it and never approves; a note
+that @mentions another agent or the team waits for the buttons. A question names who it is for
+with an @mention, and its answer quotes it. A handover shows as a document shared with the stage
+it was for. An answer still owed shows as someone writing while the run is live, and as **No answer** after it ends. A plain approval is a short
 note in the chat; a review you approved with a note is one message from you to the stage it went
 on to, and the direction and handover that stage was then given fold into it, as they only
 repeat it. A long message shows its first lines and **Read more** shows it verbatim; **Info**
