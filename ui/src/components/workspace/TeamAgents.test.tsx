@@ -4,7 +4,7 @@ import { parse } from 'yaml'
 
 import type { SavedJob } from '../../lib/library/jobs'
 import type { AgentConfig } from '../../lib/team-file/types'
-import { goldFilled, heightOf, isGoldFill, PHONE } from '../../test/cascade'
+import { cascaded, goldFilled, heightOf, isGoldFill, PHONE } from '../../test/cascade'
 import type { AgentFigureProps } from '../agents/AgentFigure'
 import { TeamAgents, type TeamAgentsProps } from './TeamAgents'
 
@@ -304,6 +304,32 @@ describe('a team’s agents, the first of its views', () => {
     const offers = screen.getAllByRole('button', { name: 'Hand it over' })
     expect(offers.length).toBeGreaterThan(1)
     for (const offer of offers) expect(isGoldFill(offer)).toBe(false)
+  })
+
+  // Opened from Workflow or the Agents tab, the bench of one of My agents is as wide as the page, as
+  // it is in My agents: a width held on it, or on anything between it and the page, left the right
+  // half of a wide window empty.
+  it('gives the bench of an agent placed from My agents the page’s whole width, in Build and in Chat', async () => {
+    vi.stubGlobal('fetch', vi.fn((url: string) => (String(url).endsWith('/api/jobs')
+      ? Promise.resolve(new Response(JSON.stringify({ jobs: [reader], problems: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      : Promise.reject(new Error('no daemon')))))
+    renderTeamAgents({ agents: [{ ...scoper, from: { agent: 'reader' } }], selected: 'scope', savedJobs: [reader] })
+    await screen.findByRole('textbox', { name: /Instructions/ })
+    const page = document.querySelector('.team-agents')!
+    /** Each width the stylesheets hold `from`, or anything above it below the page, to. */
+    const held = (from: Element) => {
+      const found: string[] = []
+      for (let at: Element | null = from; at && at !== page; at = at.parentElement) {
+        for (const property of ['width', 'max-width']) {
+          const value = cascaded(at, property)
+          if (value && /\d(px|ch|em|rem)\b/.test(value)) found.push(`.${[...at.classList].join('.')} { ${property}: ${value} }`)
+        }
+      }
+      return found
+    }
+    expect(held(document.querySelector('.byhand-main')!)).toEqual([])
+    fireEvent.click(within(screen.getByRole('navigation', { name: 'Agent view' })).getByRole('button', { name: 'Chat' }))
+    expect(held(await waitFor(() => document.querySelector('.byhand-chat')!))).toEqual([])
   })
 
   it('lists what an agent from My agents reads in every team apart from what this team gives it', async () => {
