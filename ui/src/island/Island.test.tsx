@@ -502,6 +502,43 @@ describe('beside the notch at rest, on every screen', () => {
     }
   })
 
+  it('the agent that peeked out last is not drawn as the island shrinks back from the list: only while out, and as it tucks in', async () => {
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(noteReads).toBeGreaterThan(0))
+    await act(async () => {})
+    // A team starts: its researcher peeks out below the notch.
+    runs = [run('r1', { working: ['researcher'] })]
+    await waitFor(() => expect(view(container)).toBe('work'), { timeout: 5_000 })
+    const balcony = container.querySelector<HTMLElement>('.island-balcony')!
+    // Drawn unless a rule hides it, at once unless a rule says to wait.
+    const drawn = () => cascaded(balcony, 'visibility', DESKTOP, islandRules) || 'visible'
+    const waits = () => cascaded(balcony, 'transition', DESKTOP, islandRules) || 'none'
+    // Out, it is drawn from when it starts up: not before, parked below, which an island coming
+    // straight from the list (a team starting while it was open) is still deep enough to show. Its
+    // island doesn't shrink on a spring with reduced motion: there it fades in from the start.
+    const rise = cascaded(balcony.querySelector<HTMLElement>('.island-slot.is-on')!, 'transition', DESKTOP, islandRules)!
+    expect([drawn(), waits()]).toEqual(['visible', `visibility 0s ${rise.split(' ').at(-1)}`])
+    expect(cascaded(balcony, 'transition', { ...DESKTOP, reducedMotion: true }, islandRules)).toBe('none')
+    // Pointed at, the list opens over it, and it is gone from the first frame.
+    const shape = container.querySelector('.island-shape')!
+    fireEvent.pointerEnter(shape, { pointerType: 'mouse' })
+    await waitFor(() => expect(view(container)).toBe('list'))
+    expect([drawn(), waits()]).toEqual(['hidden', 'none'])
+    // Left, the list closes and the island shrinks back beside the notch on its spring. The
+    // researcher, parked below where it peeked out, is inside the island while it is still nearly as
+    // deep as the list: it stays out of sight, rather than showing there alone.
+    fireEvent.pointerLeave(shape, { pointerType: 'mouse' })
+    await waitFor(() => expect(view(container)).toBe('tucked'), { timeout: ISLAND_WAITS.closeList + 2_000 })
+    expect(balcony.querySelector('.island-slot')?.getAttribute('data-agent')).toBe('researcher')
+    expect(drawn()).toBe('hidden')
+    // Tucking in from below the notch instead, it is drawn until it is down: as long as it slides.
+    const slide = cascaded(balcony.querySelector<HTMLElement>('.island-slot')!, 'transition', DESKTOP, islandRules)!
+    expect(waits()).toBe(`visibility 0s ${slide.split(' ')[1]}`)
+  }, 15_000)
+
   it('without a notch, nothing is drawn at rest, nor for the teams: nothing to point at, the face has their news', async () => {
     runs = [run('r1', { permissionRequests: [permission('p1')] })]
     const { container } = render(<Island />)

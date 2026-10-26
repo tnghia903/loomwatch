@@ -133,9 +133,13 @@ body {
 .island[data-view="slot"] .island-shape { --w: calc(var(--notch-w) + 160px); --h: calc(var(--bar) + 64px); --r: 24px; }
 
 /* ---- Popping out: the agent at work peeks up below the notch ---- */
-.island-balcony { position: absolute; top: calc(var(--bar) - var(--peek-up)); left: 50%; width: var(--fig); height: var(--fig); translate: -50% 0; }
-/* The list fills the island: whoever peeked last is not drawn over it. */
-.island:is([data-view="list"], [data-view="box"], [data-view="bench"]) .island-balcony { visibility: hidden; }
+/* Drawn only while someone is out: from when they start up (`--t-quick`, as `.island-slot.is-on`),
+   and as they tuck back in (`--t-move`, as `.island-slot`). Parked below, whoever peeked last would
+   show alone in the island as it shrinks from the list. */
+.island-balcony { position: absolute; top: calc(var(--bar) - var(--peek-up)); left: 50%; width: var(--fig); height: var(--fig); translate: -50% 0; visibility: hidden; transition: visibility 0s var(--t-move); }
+.island:is([data-view="work"], [data-view="done"], [data-view="fail"]) .island-balcony { visibility: visible; transition: visibility 0s var(--t-quick); }
+/* The list fills the island: whoever peeked last is not drawn over it, from the moment it opens. */
+.island:is([data-view="list"], [data-view="box"], [data-view="bench"]) .island-balcony { transition: none; }
 .island-slot { position: absolute; inset: 0; translate: 0 calc(var(--fig) * 1.15); transition: translate var(--t-move) var(--ease-in); }
 .island-slot > * { transform-origin: 50% 90%; }
 .island:is([data-view="work"], [data-view="done"], [data-view="fail"]) .island-slot.is-on {
@@ -529,6 +533,8 @@ body {
   .island-hang { opacity: 0; }
   .island[data-view="ask"] .island-hang { opacity: 1; }
   .island-slot, .island-head { opacity: 0; }
+  /* The island doesn't shrink around it on a spring here: whoever is out fades in from the start. */
+  .island:is([data-view="work"], [data-view="done"], [data-view="fail"]) .island-balcony { transition: none; }
   .island:is([data-view="work"], [data-view="done"], [data-view="fail"]) .island-slot.is-on, .island:is([data-view="rest"], [data-view="tucked"]) .island-head { opacity: 1; }
   /* Without its breath and its dip, a figure at work holds itself up a little, apart from one that
      is ready and from done's sitting down: told by its pose, not by its colour alone. */
