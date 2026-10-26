@@ -327,7 +327,6 @@
 .team-agents-linked { display: flex; flex-direction: column; gap: var(--sp-4); }
 /* Spaced as one of My agents' page (.agent-builder), whose head it shares. */
 .team-agents-own { display: flex; flex-direction: column; gap: var(--sp-5); }
-.team-agents-linked > :first-child { max-width: 760px; }
 /* Choosing agents for the team: the first step of a team, and the strip's last chip. */
 .team-agents-chip.add { border-style: dashed; color: var(--color-ink-2); }
 .team-agents-chip.add > svg { color: var(--color-accent); }
