@@ -98,6 +98,18 @@ describe('run history as a thread (Canvas B)', () => {
     const [row] = mergeHistory([record({ runId: 'run 16', teamPath: 'daily-news.yaml' })], [])
     expect(historyRunUrl(row)).toBe('/?path=daily-news.yaml&run=run+16')
   })
+
+  // The owner (2026-10-26): a run of Cole's own chat opened the team screen on its chat file. It
+  // opens where you work with Cole. Twin cases: `run_link` (crates/loomwatch-app/src/progress.rs)
+  // and `Control::run_url` (crates/loomwatch-backend/src/control/mod.rs).
+  it('opens a run of an agent’s own chat in that agent’s chat, however its file is written', () => {
+    expect(historyRunUrl({ id: 'r1', teamPath: '.jobs/.bench/cole.yaml' })).toBe('/agents/cole?view=chat&run=r1')
+    expect(historyRunUrl({ id: 'r1', teamPath: '/Users/ana/LoomWatch/teams/.jobs/.bench/cole.yaml' })).toBe('/agents/cole?view=chat&run=r1')
+    expect(historyRunUrl({ id: 'r1', teamPath: 'C:\\Users\\ana\\LoomWatch\\teams\\.jobs\\.bench\\cole.yaml' })).toBe('/agents/cole?view=chat&run=r1')
+    // A removed agent's file, and any other team, open on the team's page as before.
+    expect(historyRunUrl({ id: 'r1', teamPath: '.jobs/.removed/cole.yaml' })).toBe('/?path=.jobs%2F.removed%2Fcole.yaml&run=r1')
+    expect(historyRunUrl({ id: 'r1', teamPath: 'trip.yaml' })).toBe('/?path=trip.yaml&run=r1')
+  })
 })
 
 describe('teamRunIds', () => {

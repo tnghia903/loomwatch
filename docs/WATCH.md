@@ -178,7 +178,10 @@ answer in the chat. Your sent message shows the pictures small, opening full siz
 beside the chat, and other files as cards. An answer to an agent's question takes words only, and
 the box says so while files are in it. A dropped folder isn't sent: the folder picker opens, its
 button waits until that folder is open, and it is added for every agent of the team as a linked
-source, with a line over the box saying so. Deep links use `?run=<id>`, which opens the chat with that run's Details; the legacy
+source, with a line over the box saying so. Deep links use `?run=<id>`, which opens the chat at that run's message, read back to
+when it is older, with the run's Details. A run of one of My agents' own chats (`.jobs/.bench/<id>.yaml`) opens in that agent's
+chat instead, `/agents/<id>?view=chat&run=<run>`, with the run's Details over its bench: the bell, the notch, the menu bar and the
+daemon's links all go there (a chat that is none of My agents' opens on the team page as before). The legacy
 `/watch?session=<id>` route redirects there, and a bare `/watch` opens the team list. A run the
 daemon no longer remembers (restart) is read from the archive alone.
 

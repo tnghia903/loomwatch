@@ -11,9 +11,12 @@ import type { AgentConfig } from '../../lib/team-file/types'
  */
 export const SavedAgentsContext = createContext<readonly SavedJob[]>([])
 
+/** Whose own chat the open team is (`benchChatOwner`), or `null` for any other team. */
+export const ChatOfContext = createContext<string | null>(null)
+
 /** The figure a team's agent wears (lib/library/figures.ts `agentFigure`). */
 export function useAgentFigure(agent: Pick<AgentConfig, 'id' | 'from'>): FigureChoice {
-  return agentFigure(agent, useContext(SavedAgentsContext))
+  return agentFigure(agent, useContext(SavedAgentsContext), useContext(ChatOfContext))
 }
 
 /**

@@ -78,6 +78,8 @@ interface TeamChatProps {
   onStarted?: (runId: string) => void
   /** A message Details asked to show — its timeline's "Read the message" — in the piece it belongs to. */
   reveal?: { runId: string; id: string; at: number } | null
+  /** The run a link opened the chat on (`?run=`): the chat reads back to its piece and shows it. */
+  landAt?: string | null
   /** A finding of an answer's review, opened in Details: its record, or the agent's work. */
   onOpenFinding: (runId: string, line: ReceiptLine) => void
   /** The newest piece's run as it changes, or null for none: an agent's chat shows its figure at work by it. */
@@ -125,7 +127,7 @@ const ROSTER_KEY = 'loomwatch.chatRoster'
  * With `team.solo` it is one agent's own chat (its Chat tab): everything you write goes to that
  * agent, starting its work when it is free and joining its turn while it works, so there is no @.
  */
-export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, routine, detailsRunId, answerRunId = null, onOpenAnswer, blocked, prepare, onDetails, onTeamReview, onStale, onAlwaysAllow, announce, onNewest, onStarted, reveal = null, onOpenFinding, onNewestRun, startTeam = false, onStartTeamTaken, ask = null, onPassages, onConnectFolder }: TeamChatProps) {
+export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, routine, detailsRunId, answerRunId = null, onOpenAnswer, blocked, prepare, onDetails, onTeamReview, onStale, onAlwaysAllow, announce, onNewest, onStarted, reveal = null, landAt = null, onOpenFinding, onNewestRun, startTeam = false, onStartTeamTaken, ask = null, onPassages, onConnectFolder }: TeamChatProps) {
   const chat = useTeamChat(teamPath)
   // Pictures and files pasted or dropped in, kept as they are added (ADR 0082).
   const attachments = useChatAttachments(teamPath)
@@ -625,6 +627,28 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
   // A note shown from outside the chat (`note:<id>`: the answers under it, from the reader), or by a search, whichever was last.
   const revealedNote = shown?.id.startsWith('note:') ? { id: shown.id.slice('note:'.length), at: shown.at } : null
   const noteFlash = revealedNote && (!noteShown || revealedNote.at > noteShown.at) ? revealedNote : noteShown
+  // A link to a run opens the chat at its piece, as a found message is opened: older pages are read
+  // until it is there, then its request comes into view, lit for a moment. A run that is no longer
+  // in the chat leaves the chat where it was; its Details still opens.
+  const [linked, setLinked] = useState(landAt)
+  const [seenLandAt, setSeenLandAt] = useState(landAt)
+  if (landAt !== seenLandAt) {
+    setSeenLandAt(landAt)
+    setLinked(landAt)
+  }
+  useEffect(() => {
+    if (!linked || !chat.loaded) return
+    if (!chat.items.some((item) => item.kind === 'work' && item.run.runId === linked)) {
+      if (chat.loadingOlder) return
+      if (chat.more) { loadOlder(); return }
+      setLinked(null)
+      return
+    }
+    setLinked(null)
+    setShown({ runId: linked, id: revealId(linked, 'request'), at: Date.now() })
+    // `loadOlder` is read as it is now; what moves the landing on is the chat.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linked, chat.loaded, chat.items, chat.more, chat.loadingOlder])
   const [opening, setOpening] = useState<{ piece: FoundPiece; passage: FoundPassage | null } | null>(null)
   const [landingMissed, setLandingMissed] = useState(false)
   const openFound = (piece: FoundPiece, passage: FoundPassage | null) => {

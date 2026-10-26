@@ -16,10 +16,6 @@ export interface CanvasActions {
   mode: ExecutionMode
   stepById: ReadonlyMap<string, PipelineStep>
   nodeNames: ReadonlyMap<string, string>
-  /** Details' "What was recorded": every record behind the run, in the provenance panel. */
-  toggleProvenance?: () => void
-  /** Opens what an agent was given: the handover it received and the memory packet it was supplied. */
-  inspectHandover?: (agentId: string | null) => void
   /**
    * §15.2.2: the permanent Prompt node is the composer seen in a second place, so clicking it
    * focuses the one editor rather than opening another.

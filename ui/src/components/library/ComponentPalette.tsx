@@ -2,9 +2,9 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { BookmarkCheck, Box, ChartColumn, ChartSpline, Clapperboard, Code2, ExternalLink, FileText, Folder, GripVertical, Info, LayoutDashboard, LocateFixed, NotebookText, PanelLeftClose, PanelLeftOpen, PenLine, Plug, Plus, Presentation, Puzzle, RefreshCw, ScanEye, Scissors, ScrollText, Search, Shapes, Sheet, Telescope, Trash2, UserCheck, UserRound, type LucideIcon } from 'lucide-react'
 import { DEFAULT_MODEL, modelNameFromId } from '../../lib/ai/modelIds'
 import { OPERATOR_SOURCE } from '../../lib/library/fixtures'
-import { removeJob, savedJobPreset, useSavedJobs } from '../../lib/library/jobs'
+import { benchChatOwner, removeJob, savedJobPreset, useSavedJobs } from '../../lib/library/jobs'
 import { isOpenTeam, teamAgentSource, useAgentUses, type TeamOwnAgent } from '../../lib/library/uses'
-import { figureFor, type FigureChoice } from '../../lib/library/figures'
+import { agentFigure, figureFor, type FigureChoice } from '../../lib/library/figures'
 import { FigureStill } from '../agents/FigureStill'
 import { modelForPreset, roleSource, type RoleIcon, type RolePreset } from '../../lib/library/roles'
 import type { CapabilityInventory, DetectedCapability } from '../../lib/library/client'
@@ -122,9 +122,9 @@ function jobItem(preset: RolePreset, jobId?: string): PaletteItem {
   return { name: preset.label, detail: preset.does, engine: `on ${modelNameFromId(modelForPreset(preset).model)}`, Icon: preset.icon ? ROLE_ICONS[preset.icon] : BookmarkCheck, mime: LIBRARY_DRAG_MIME, event: 'loomwatch:add-agent', disabled: false, payload: roleSource(preset) as object, ...(jobId ? { jobId } : {}) }
 }
 
-/** One of this team's own agents: it is already on the canvas, so a click finds its card. */
-function hereItem(agent: { id: string; name: string }, reveal?: (id: string) => void): PaletteItem {
-  return { name: agent.name, detail: 'On this canvas', hint: `Show ${agent.name} on the canvas`, Icon: UserRound, mime: LIBRARY_DRAG_MIME, event: 'loomwatch:add-agent', disabled: !reveal, payload: {}, draggable: false, figure: figureFor(agent.id), ...(reveal ? { onActivate: () => reveal(agent.id), Trailing: LocateFixed } : {}) }
+/** One of this team's own agents, in the figure its card wears: it is already on the canvas, so a click finds its card. */
+function hereItem(agent: { id: string; name: string }, figure: FigureChoice, reveal?: (id: string) => void): PaletteItem {
+  return { name: agent.name, detail: 'On this canvas', hint: `Show ${agent.name} on the canvas`, Icon: UserRound, mime: LIBRARY_DRAG_MIME, event: 'loomwatch:add-agent', disabled: !reveal, payload: {}, draggable: false, figure, ...(reveal ? { onActivate: () => reveal(agent.id), Trailing: LocateFixed } : {}) }
 }
 
 /** Another team's agent not yet in My agents: once both teams are saved, an identical one is one agent (ADR 0094). */
@@ -258,7 +258,7 @@ export function ComponentPalette({ capabilityInventory, capabilitiesLoading = fa
   // this team's own (found on the canvas) and other teams' (added as a copy).
   const yours = { name: YOURS, items: [
     ...saved.jobs.map(job => { const item = jobItem(savedJobPreset(job), job.id); return { ...item, figure: figureFor(job.id, job.figure) } }),
-    ...teamAgents.map(agent => hereItem(agent, onRevealAgent)),
+    ...teamAgents.map(agent => hereItem(agent, agentFigure(agent, saved.jobs, benchChatOwner(teamPath)), onRevealAgent)),
     ...(teamOwn ?? []).filter(agent => !isOpenTeam(agent.teamPath, teamPath, teamsRoot)).map(elsewhereItem),
   ] }
   const groups: { name: string; items: PaletteItem[] }[] = [

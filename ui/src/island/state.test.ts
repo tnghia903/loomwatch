@@ -364,8 +364,9 @@ describe('writing to the box’s agent', () => {
     const s = play([[at(0), placed], [at(0), pinned], [at(0), working]])
     const shown = (state: IslandState) => state.teams?.map((team) => [team.teamName, team.link, Boolean(team.pinned)])
     expect(shown(s)).toEqual([['Maya', '/agents/maya?view=chat', true], ['Trip planner', '/?path=trip.yaml&run=r1', false]])
-    // Unpinned, its chat is a team like any other again.
-    expect(shown(islandReducer(s, { type: 'pinned', pinned: null, now: at(1) }))?.[0]).toEqual(['Maya · chat', '/?path=.jobs%2F.bench%2Fmaya.yaml&run=c1', false])
+    // Unpinned, its chat is listed like any team again, and its work still opens in Maya's chat, at
+    // that piece (the owner, 2026-10-26: a one-to-one chat opens in My agents).
+    expect(shown(islandReducer(s, { type: 'pinned', pinned: null, now: at(1) }))?.[0]).toEqual(['Maya · chat', '/agents/maya?view=chat&run=c1', false])
   })
 })
 

@@ -11,7 +11,8 @@ import { alwaysAllowGuest } from '../../lib/library/bringIn'
 import { benchFolder, useSavedJobs } from '../../lib/library/jobs'
 import { guestsOf } from '../../lib/chat/guests'
 import { knowledgeForChat, type TeamKnowledge } from '../../lib/library/teamDraft'
-import { isTerminalRun, type RunRecord } from '../../lib/runs/client'
+import { approveTeam, isTerminalRun, type RunRecord, type TeamReview } from '../../lib/runs/client'
+import type { DetailsAsked } from '../../lib/runs/useBenchDetails'
 import { useRunSession } from '../../lib/runs/useRunSession'
 import { ALLOW_SWITCHES } from '../../lib/team-file/allow'
 import { fetchTeamFile, saveTeamFile } from '../../lib/team-file/client'
@@ -20,6 +21,7 @@ import { AnswerDocument } from '../chat/AnswerDocument'
 import { TeamChat, type Prepared } from '../chat/TeamChat'
 import type { TeamView } from '../chat/WorkPiece'
 import { FileReader } from '../reader/FileReader'
+import { TeamReviewDialog } from '../run/TeamReviewDialog'
 import { GuestNamesContext, TeamFiguresContext } from './figureContext'
 
 export interface AgentChatProps {
@@ -47,6 +49,14 @@ export interface AgentChatProps {
   knowledge?: TeamKnowledge
   /** A file its answers name, read over the bench, and what passes between it and the chat (ADR 0077). */
   file?: BenchFile['chat']
+  /** The piece whose Details is open over the bench, and opening one: from its Details, or from a
+      finding of its answer's review, at the record or agent the finding points at. */
+  detailsRunId: string | null
+  onDetails: (asked: DetailsAsked) => void
+  /** A message Details asked the chat to show, in the piece it belongs to. */
+  reveal?: { runId: string; id: string; at: number } | null
+  /** The piece a link to its run opened this agent's page on: the chat shows it. */
+  landAt?: string | null
 }
 
 const message = (failed: unknown) => (failed instanceof Error ? failed.message : String(failed))
@@ -60,14 +70,18 @@ const message = (failed: unknown) => (failed instanceof Error ? failed.message :
  * folder so no team list or schedule sees it. Each message that starts work first writes the agent
  * as it is on screen, saved or not, so a change made in Build is in its next answer. Every message
  * goes to the agent: it starts work when the agent is free and joins its turn while it works.
+ * A piece's Details, and the record a finding of its review points at, open over the bench
+ * (`AgentDetails`), so working with one agent never takes you to a team's screen.
  */
-export function AgentChat({ draft, model, chatId, figure, onAllow, onRecord, answerRunId, onOpenAnswer, knowledge, file }: AgentChatProps) {
+export function AgentChat({ draft, model, chatId, figure, onAllow, onRecord, answerRunId, onOpenAnswer, knowledge, file, detailsRunId, onDetails, reveal = null, landAt = null }: AgentChatProps) {
   const agentId = chatAgentId(chatId)
   const name = draft.name.trim() || 'New agent'
   // A new agent's chat is kept under its name, so one with no name yet has nowhere to keep it.
   const blocked = !draft.name.trim() ? 'Give it a name in Build first: its chat is kept under it.'
     : !model ? 'Choose a model for it in Build first.' : !draft.instructions.trim() ? 'Write its instructions in Build first.' : null
   const [said, setSaid] = useState('')
+  // Its chat file changed outside LoomWatch: what it will do, to trust before it runs (ADR 0048).
+  const [review, setReview] = useState<{ review: TeamReview; retry: () => void } | null>(null)
   const announce = useCallback((text: string) => setSaid(text), [])
 
   // The chat's team file, written as the agent is now, for what is about to start.
@@ -141,11 +155,9 @@ export function AgentChat({ draft, model, chatId, figure, onAllow, onRecord, ans
   }, [onRecord])
   useEffect(() => () => onRecord(null), [onRecord])
 
-  // Its full record opens where every run's does: the team screen, on this chat, with Details. In a
-  // tab of its own, so the agent on this page, and any change not saved yet, stay where they are.
-  const details = useCallback((runId: string) => {
-    if (path) window.open(`/?path=${encodeURIComponent(path)}&view=chat&run=${encodeURIComponent(runId)}`, '_blank', 'noopener')
-  }, [path])
+  // The newer of what the file reader and Details ask the chat to show.
+  const fromFile = file?.reveal ?? null
+  const shownMessage = fromFile && (!reveal || fromFile.at > reveal.at) ? fromFile : reveal
 
   if (!shown) return <section className="agent-chat-wait" aria-busy="true"><p className="t-meta">Opening {name}’s chat…</p></section>
   if (!path) {
@@ -168,13 +180,13 @@ export function AgentChat({ draft, model, chatId, figure, onAllow, onRecord, ans
         team={team}
         steps={1}
         suggestion={null}
-        detailsRunId={null}
+        detailsRunId={detailsRunId}
         answerRunId={answerRunId}
         onOpenAnswer={(runId) => onOpenAnswer(runId === answerRunId ? null : runId)}
         blocked={blocked}
         prepare={prepare}
-        onDetails={details}
-        onTeamReview={() => announce(`LoomWatch wants you to look over ${name}’s chat file before it runs. Open Details on any piece to see it.`)}
+        onDetails={(runId) => onDetails({ runId })}
+        onTeamReview={(asked, retry) => setReview({ review: asked, retry })}
         onStale={() => announce(`${name}’s chat file changed while you were sending. Send your message again.`)}
         onAlwaysAllow={(asked, what) => {
           // One of your other agents it added to this chat (ADR 0092): changed in My agents itself.
@@ -194,13 +206,15 @@ export function AgentChat({ draft, model, chatId, figure, onAllow, onRecord, ans
             : `${name} may do “${what.label}” without asking from now on. Save it to keep that.`)
         }}
         announce={announce}
-        onOpenFinding={(runId) => details(runId)}
+        onOpenFinding={(runId, line) => onDetails({ runId, evidenceId: line.evidenceId, agentId: line.agentId })}
         onNewestRun={follow}
-        reveal={file?.reveal ?? null}
+        reveal={shownMessage}
+        landAt={landAt}
         ask={file?.ask ?? null}
         onPassages={file?.onPassages}
       />
       <p className="visually-hidden" role="status">{said}</p>
+      {review && <TeamReviewDialog review={review.review} onTrust={async () => { await approveTeam(review.review.teamPath, review.review.teamRevision); const { retry } = review; setReview(null); retry() }} onClose={() => setReview(null)} />}
     </FileReaderContext.Provider>
     </GuestNamesContext.Provider>
     </TeamFiguresContext.Provider>

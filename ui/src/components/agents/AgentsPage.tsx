@@ -56,7 +56,7 @@ export function AgentsPage(props: AgentsPageProps) {
         <main className="home-main agents-main">
           {starting
             ? <AgentTemplates team={route.team} />
-            : <AgentBuilder key={route.kind === 'agent' ? route.id : `new-${route.from ?? ''}`} id={route.kind === 'agent' ? route.id : null} startFrom={route.kind === 'new' ? route.from : null} cameFrom={route.team} view={route.view} leaveRef={leave} bar={slots} {...builder} />}
+            : <AgentBuilder key={route.kind === 'agent' ? route.id : `new-${route.from ?? ''}`} id={route.kind === 'agent' ? route.id : null} startFrom={route.kind === 'new' ? route.from : null} cameFrom={route.team} view={route.view} run={route.kind === 'agent' ? route.run : null} leaveRef={leave} bar={slots} {...builder} />}
         </main>
       </AgentFrame>
     )

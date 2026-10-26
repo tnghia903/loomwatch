@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { NoteAnswering } from '../lib/chat/client'
+import { figureFor, figureStill } from '../lib/library/figures'
 import type { SavedJob } from '../lib/library/jobs'
 import type { TeamRequest } from '../lib/runs/teamRequests'
 import type { RunRecord } from '../lib/runs/client'
@@ -266,6 +267,18 @@ describe('the island page', () => {
     // log, Quit.
     fireEvent.click(container.querySelector('.island-list')!.querySelector<HTMLElement>('[aria-label="More"]')!)
     expect(toApp.at(-1)).toMatchObject({ kind: 'menu' })
+  })
+
+  // The owner (2026-10-26): Cole wore another figure than in My agents wherever its chat's runs
+  // showed. An agent's own chat (`.jobs/.bench/<id>.yaml`) is that agent, pinned to the notch or not.
+  it('shows a run of an agent’s own chat in the figure the agent wears in My agents', async () => {
+    // Maya is first in My agents, so the box opens with her; Writer is the one at work.
+    jobs = [maya, { ...writer, figure: { kind: 'cone', color: 'sky' } }]
+    expect(figureStill(figureFor('writer'))).not.toContain('cone-sky')
+    runs = [run('r1', { teamPath: '.jobs/.bench/writer.yaml', teamName: 'Writer · chat', entrypoint: 'writer', responder: 'writer', agentIds: ['writer'], agentNames: { writer: 'Writer' }, working: ['writer'] })]
+    const { container } = render(<Island />)
+    tellPage({ kind: 'place', notch: { width: 188, height: 32 }, menuBar: 32 })
+    await waitFor(() => expect(container.querySelector('.island-head img')?.getAttribute('src')).toContain('cone-sky'))
   })
 
   it('lists an agent answering in the chat, where no run is', async () => {
