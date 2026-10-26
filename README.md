@@ -728,9 +728,11 @@ learn the interface without calling a model provider.
 2. When the team pauses for you, the chat shows what Researcher handed over, with **Approve** and
    **Send back to Researcher** under it.
 3. To ask for changes, type `Use the short guide and remove the detailed walkthrough.` in the box
-   and click **Send back to Researcher**. The researcher revises its work and asks again.
-4. Click **Approve** to let the team continue. To pass on a note, type it first; the button then
-   says **Approve with your note**, and your note goes on as your direction.
+   and click **Send back to Researcher** (or press <kbd>Enter</kbd>). The researcher revises its
+   work and asks again.
+4. Click **Approve** to let the team continue. To pass on a note, type it first, then click the
+   button, which now says **Approve with your note**; <kbd>Enter</kbd> would send the work back
+   instead. Your note goes on as your direction.
 5. Read the team's answer in the chat. The demo writer echoes the direction it received.
 
 </details>
@@ -856,9 +858,10 @@ its place at the start of every run. In a run's **Details**, an agent's **What i
 shows what it was supplied when its session started.
 
 For a review checkpoint in a pipeline, add a **You** step between two agents and say what to look
-at in its **What to check** box. **Approve** passes the work on (it says **Continue** once you
-type a note, and your note goes with it). **Send back to** the agent asks for a revision while its
-session is still open. An agent can also ask you a question mid-run: type your answer in the
+at in its **What to check** box. **Approve** passes the work on (it says **Approve with your
+note** once you type a note, and your note goes with it). **Send back to** the agent asks for a
+revision while it can still revise its work; <kbd>Enter</kbd> in the box does the same once you
+have typed what to change. An agent can also ask you a question mid-run: type your answer in the
 request box and click **Reply**.
 
 </details>

@@ -22,6 +22,15 @@ export function replyOf(reply: ReplyTo): ReplyTo {
   return { ...reply, text: `${chars.slice(0, half).join('')}\n\n[… cut …]\n\n${chars.slice(-half).join('')}` }
 }
 
+/**
+ * Whether `reply` is to what the team waits on you for — the question it asks you, or the handover
+ * under your review — so the box answers it, rather than sending a message of its own.
+ */
+export function answersDecision(decision: { runId: string; from: string; kind: 'review_stop' | 'question' } | null, reply: Pick<ReplyTo, 'runId' | 'from' | 'to' | 'kind'> | null): boolean {
+  if (!decision || !reply || reply.runId !== decision.runId || reply.from !== decision.from) return false
+  return decision.kind === 'question' ? reply.kind === 'question' && reply.to === null : reply.kind === 'handover'
+}
+
 /** What a kind of message is called in a reply's quote: "Writer's question back". */
 export const SAID: Record<ReplyKind, string> = {
   handover: 'handover',

@@ -509,20 +509,49 @@
 .tc-composer.answering .tc-box { border-color: color-mix(in srgb, var(--color-accent) 60%, transparent); }
 .tc-input {
   flex: 1;
-  /* One line is exactly the height of the send button beside it, so the two sit centred. */
+  /* One line is exactly the height of the send button beside it, so the two sit centred. Lines
+     keep 24 px, as a sent message with a chip does, so chips on lines above each other keep apart. */
   min-height: 34px;
   max-height: 40vh;
-  padding: 6px 0;
-  line-height: 22px;
+  padding: 5px 0;
   border: 0;
   outline: none;
   resize: none;
   field-sizing: content;
   background: transparent;
-  font: 400 14.5px/1.5 var(--font-sans);
+  font: 400 14.5px/24px var(--font-sans);
   color: var(--color-ink);
 }
 .tc-input::placeholder { color: var(--color-ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Each agent @mentioned in the box is its chip as you type (ChatComposer TypedWords), drawn on a
+   layer of the same words under the box's own, which go clear while there is one. Anything that
+   moves a letter on that layer — a bolder weight, padding, a wider face — would set the caret off
+   its letters, so the tint and ring are shadows round the name that take no room, and the figure's
+   head stands in the room of the @. The layer reaches 4 px past the box each side, with as much
+   padding, so a chip at a line's end keeps its round end; a scroll bar that takes room (Windows,
+   or a Mac set to show them) takes the same room from both, so their lines wrap alike. */
+.tc-input-wrap { position: relative; display: flex; flex: 1; min-width: 0; }
+.tc-input-wrap > .tc-input { position: relative; z-index: 1; min-width: 0; scrollbar-gutter: stable; }
+.tc-input, .tc-input-words { letter-spacing: normal; word-spacing: normal; text-transform: none; text-indent: 0; tab-size: 8; }
+.tc-input-words {
+  position: absolute; inset: 0 -4px; overflow: hidden; scrollbar-gutter: stable; pointer-events: none; user-select: none;
+  padding: 5px 4px; white-space: pre-wrap; overflow-wrap: break-word;
+  font: 400 14.5px/24px var(--font-sans); color: var(--color-ink);
+}
+.tc-input.chipped { color: transparent; caret-color: var(--color-ink); }
+/* Selected words are the box's own, chip or none, in ink on the gold tint, solid so the layer's
+   letters stay under it. Not the system's Highlight: Chromium keeps it light in the dark theme. */
+.tc-input::selection { color: var(--color-ink); background: color-mix(in srgb, var(--color-accent) 30%, var(--color-panel-solid)); }
+.tc-typed-mention {
+  border-radius: 99px; color: color-mix(in srgb, var(--hue) 94%, var(--color-ink)); background: var(--color-accent-tint);
+  box-shadow: 0 0 0 1px var(--color-accent-tint), 0 0 0 2px color-mix(in srgb, var(--color-accent) 35%, transparent);
+  -webkit-box-decoration-break: clone; box-decoration-break: clone;
+}
+.tc-typed-at { position: relative; color: transparent; }
+.tc-typed-face { position: absolute; left: 50%; top: 50%; width: 18px; height: 18px; translate: -50% -50%; }
+.tc-typed-face > * { display: block; width: 100%; height: 100%; object-fit: contain; }
+/* Forced colours draw the box's own words whatever they are set to: the chips step aside. */
+@media (forced-colors: active) { .tc-input-words { display: none; } }
 .tc-send { display: flex; align-items: center; gap: 6px; flex: none; }
 .tc-send .btn { display: inline-flex; align-items: center; gap: 5px; height: 34px; padding: 0 12px; font-size: 13px; border-radius: 11px; }
 .tc-now { color: var(--color-live); }

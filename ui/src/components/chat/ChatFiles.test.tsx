@@ -201,7 +201,7 @@ describe('pictures and files go with a message (ADR 0082)', () => {
     const onAnswer = vi.fn(async () => true)
     function Harness() {
       const [value, setValue] = useState('the second one')
-      return <ChatComposer agents={agents} names={team.names} steps={2} live={[]} decision={{ runId: 'run-1', node: 'writer', kind: 'question', from: 'writer', fromName: 'Writer' }}
+      return <ChatComposer agents={agents} names={team.names} steps={2} live={[]} decision={{ runId: 'run-1', node: 'writer', kind: 'question', from: 'writer', fromName: 'Writer', backTo: null }}
         value={value} onChange={setValue} onSend={vi.fn(async () => true)} onAnswer={onAnswer} attachments={files} />
     }
     render(<Harness />)

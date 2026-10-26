@@ -1,13 +1,17 @@
 import { ArrowUp, AtSign, CornerDownLeft, MessageSquareText, Paperclip, Reply, TextQuote, Users, X, Zap } from 'lucide-react'
-import { createElement, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { createElement, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from 'react'
 
 import { pastedName, type Attachment, type ChatAttachments } from '../../lib/chat/attachments'
 import type { ChatTarget, ReplyTo } from '../../lib/chat/client'
+import { useChatMentions } from '../../lib/chat/faces'
 import { extensionOf } from '../../lib/files/fileRefs'
 import { fileIcon } from '../../lib/files/icons'
 import { rawFileUrl } from '../../lib/files/reader'
-import { replyWhat, replyWords } from '../../lib/chat/reply'
-import { destination, findMention, mentionChoices, mentionQuery, type ChatAgent, type Destination } from '../../lib/chat/route'
+import { answersDecision, replyWhat, replyWords } from '../../lib/chat/reply'
+import { destination, findMention, mentionChoices, mentionQuery, mentionsIn, type ChatAgent, type Destination, type Mention } from '../../lib/chat/route'
+import { FigureStill } from '../agents/FigureStill'
+import { useTeamFigure } from '../agents/figureContext'
+import { AgentMark } from '../ui/AgentMark'
 import { InlineMarkdown } from '../ui/Markdown'
 import { Swap } from './Appearing'
 import type { RunRecord } from '../../lib/runs/client'
@@ -20,6 +24,8 @@ export interface OpenDecision {
   /** Who asked: the agent with the question, or whose handover is under review. */
   from: string
   fromName: string
+  /** The agent a review's note can send the work back to, as its Send back does; `null` when none can. */
+  backTo: string | null
 }
 
 interface ChatComposerProps {
@@ -34,7 +40,10 @@ interface ChatComposerProps {
   value: string
   onChange: (text: string) => void
   onSend: (text: string, to: ChatTarget, now: boolean) => Promise<boolean>
-  /** Your answer to an agent's question; a review is answered by the buttons on its message. */
+  /**
+   * Your answer to an agent's question, or a review's note sent back with the work (↵, as its Send
+   * back does). Approve is only ever its button on the message.
+   */
   onAnswer: (decision: OpenDecision, text: string) => Promise<boolean>
   /** Counts the faces clicked to @mention them: each time, the box takes the caret and glows once. */
   mentioned?: number
@@ -123,10 +132,24 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
   }, [answerAsked])
   const attached = attachments?.items ?? []
   // A reply to something else is a message of its own, not your answer to what the team waits on.
-  const answering = decision && !teamInstead && !replyTo ? decision : null
+  const answering = decision && !teamInstead && (!replyTo || answersDecision(decision, replyTo)) ? decision : null
+  // A review's note goes with the work sent back. With nowhere to send it, or words @ someone else
+  // (a note for Writer, or the team, is what Approve passes on), ↵ does nothing: the buttons decide.
+  const sendsBack = answering?.kind === 'review_stop' && answering.backTo
+    && mentionsIn(text, agents).every((found) => found.target.kind === 'agent' && found.target.agent === answering.backTo)
+    ? answering.backTo : null
   // Files go with words, and only once each is kept; one that can't be kept is taken out first.
   // An answer takes words only, so files wait for a message of their own.
   const filesHold = attached.some((item) => item.state !== 'ready') || Boolean(answering && attached.length > 0)
+
+  // Each agent @mentioned is drawn as its chip as you type, as it will show once sent (SaidText).
+  const said = useChatMentions()
+  const chips = useMemo(() => (said ? mentionsIn(text, said.agents).filter((found) => found.target.kind === 'agent') : []), [said, text])
+  const chipped = said !== null && chips.length > 0
+  const drawn = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    if (drawn.current && box.current) drawn.current.scrollTop = box.current.scrollTop
+  })
 
   const mention = useMemo(() => (solo ? null : findMention(text, agents)), [solo, text, agents])
   const target: ChatTarget = solo ? { kind: 'agent', agent: solo.id } : mention?.target ?? null
@@ -149,6 +172,24 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
     box.current.focus()
     box.current.setSelectionRange(at, at)
   }, [text])
+  // A name typed in other letters ("@researcher") takes the agent's own once you are past it, as
+  // its chip and the sent message show it. The one at the caret, or still at the end, is left to be
+  // typed on.
+  const named = (value: string, at: number) => {
+    let out = ''
+    let from = 0
+    let caretAt = at
+    for (const found of said ? mentionsIn(value, said.agents) : []) {
+      if (found.target.kind !== 'agent' || found.end >= value.length || (at > found.start && at <= found.end)) continue
+      const id = found.target.agent
+      const agent = said?.agents.find((one) => one.id === id)
+      const word = `@${agent?.name.trim() || id}`
+      out += `${value.slice(from, found.start)}${word}`
+      if (at > found.end) caretAt += word.length - (found.end - found.start)
+      from = found.end
+    }
+    return { value: `${out}${value.slice(from)}`, at: caretAt }
+  }
   const insert = (choice: { insert: string }) => {
     if (!query) return
     const next = `${text.slice(0, query.start)}${choice.insert}${text.slice(caret).replace(/^\S*\s?/, '')}`
@@ -161,15 +202,14 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
 
   const send = async (now: boolean) => {
     if (!trimmed || sending || disabled || filesHold) return
+    if (answering?.kind === 'review_stop' && !sendsBack) return
     // Out of the box at once, as in any chat: the message shows in the log while it goes. It comes
     // back only if it was held — a team that needs checking first — so nothing typed is lost.
     const kept = text
     setText('')
     setSent((count) => count + 1)
     setSending(true)
-    const ok = answering && answering.kind === 'question'
-      ? await onAnswer(answering, trimmed)
-      : await onSend(trimmed, target, now)
+    const ok = answering ? await onAnswer(answering, trimmed) : await onSend(trimmed, target, now)
     setSending(false)
     if (!ok) setText(kept)
   }
@@ -209,8 +249,8 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
     }
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault()
-      // A review is decided with its buttons; Enter never approves by accident.
-      if (answering?.kind === 'review_stop') return
+      // In a review, ↵ sends the work back with your note, as you would answer a question; it
+      // never approves by accident.
       void send(false)
     }
   }
@@ -221,7 +261,8 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
   const answeringLabel = answering
     ? answering.kind === 'question'
       ? `Your answer to ${answering.fromName}'s question`
-      : `A note to go with your review of ${answering.fromName}'s work · press Approve or Send back above`
+      : sendsBack ? `Your review note · Enter sends the work back to ${answering.fromName}`
+        : `Your review note · press Approve${answering.backTo ? ' or Send back' : ''} above`
     : null
   const route = answering ? null : where.route
   const icon = answering ? <MessageSquareText size={14} aria-hidden="true" />
@@ -239,7 +280,7 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
   const placeholder = replyTo?.kind === 'passage' && !answering ? `Ask ${name(addressed ?? replyTo.from)} about ${thisPart}…`
     : attached.length > 0 && !answering ? (solo || target ? `Say what to do with ${them}` : `@team, then what to do with ${them}`)
     : answering?.kind === 'question' ? `Answer ${answering.fromName}…`
-    : answering ? 'A note for Approve, or what to change'
+    : answering ? (answering.backTo ? 'What to change, or a note to pass on' : 'A note to pass on')
       : replyTo?.kind === 'passage' ? `Ask ${name(addressed ?? replyTo.from)} about ${thisPart}…`
         : replyTo ? `Reply to ${name(replyTo.from)}…`
         : solo ? `Message ${solo.name || solo.id}` : 'Message the team'
@@ -277,7 +318,8 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
             <span className="tc-replying-quote"><InlineMarkdown clickable={false}>{replyWords(replyTo)}</InlineMarkdown></span>
           </span>
           {other && onAddress && <button type="button" className="tc-link" onClick={() => onAddress(other)}>To {name(other)} instead</button>}
-          {onCancelReply && <button type="button" className="tc-link tc-replying-close" onClick={onCancelReply} aria-label="Don't reply to it" title="Don't reply to it (Esc)"><X size={13} aria-hidden="true" /></button>}
+          {/* A quote of what the box answers anyway only goes from view. */}
+          {onCancelReply && <button type="button" className="tc-link tc-replying-close" onClick={onCancelReply} aria-label={answering ? 'Hide the quote' : "Don't reply to it"} title={answering ? 'Hide the quote (Esc)' : "Don't reply to it (Esc)"}><X size={13} aria-hidden="true" /></button>}
         </div>
       )}
       {attachments && attached.length > 0 && <Attached items={attached} onRemove={attachments.remove} />}
@@ -295,35 +337,45 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
                   onMouseEnter={() => setPicked(index)}>
                   {choice.id === 'team' ? <Users size={14} aria-hidden="true" /> : <AtSign size={14} aria-hidden="true" />}
                   <b>{choice.id === 'team' ? '@team' : `@${choice.label}`}</b>
-                  <span>{choice.id === 'team' ? `everyone, from step one` : working ? 'working now · a note joins its turn' : 'works alone on it'}</span>
+                  {/* An answer goes to who asked, whoever it names: an @ there starts nothing. */}
+                  {!answering && <span>{choice.id === 'team' ? `everyone, from step one` : working ? 'working now · a note joins its turn' : 'works alone on it'}</span>}
                 </li>
               )
             })}
           </ul>
         )}
-        <textarea
-          ref={box}
-          className="tc-input"
-          rows={1}
-          value={text}
-          placeholder={placeholder}
-          aria-label={solo ? `Message ${solo.name || solo.id}` : 'Message the team'}
-          aria-describedby={quiet ? undefined : whereId}
-          aria-controls={pickerOpen ? pickerId : undefined}
-          aria-expanded={pickerOpen}
-          aria-activedescendant={pickerOpen ? `${pickerId}-${choices[Math.min(picked, choices.length - 1)].id}` : undefined}
-          disabled={Boolean(disabled)}
-          onChange={(event) => { setText(event.target.value); setCaret(event.target.selectionStart); setPickerClosed(false); setPicked(0) }}
-          onSelect={(event) => setCaret(event.currentTarget.selectionStart)}
-          onKeyDown={keyDown}
-          onPaste={(event) => {
-            // A screenshot or a file copied in Finder goes with the words; text pastes as text.
-            const files = Array.from(event.clipboardData?.files ?? [])
-            if (!attachments || files.length === 0) return
-            event.preventDefault()
-            attachments.add(files, (file) => pastedName(file))
-          }}
-        />
+        <div className="tc-input-wrap">
+          {chipped && <TypedWords ref={drawn} text={text} chips={chips} hue={said.hue} />}
+          <textarea
+            ref={box}
+            className={`tc-input${chipped ? ' chipped' : ''}`}
+            rows={1}
+            value={text}
+            placeholder={placeholder}
+            aria-label={solo ? `Message ${solo.name || solo.id}` : 'Message the team'}
+            aria-describedby={quiet ? undefined : whereId}
+            aria-controls={pickerOpen ? pickerId : undefined}
+            aria-expanded={pickerOpen}
+            aria-activedescendant={pickerOpen ? `${pickerId}-${choices[Math.min(picked, choices.length - 1)].id}` : undefined}
+            disabled={Boolean(disabled)}
+            onChange={(event) => {
+              // Letters still being put together by an input method are left as they are.
+              const typed = (event.nativeEvent as InputEvent).isComposing ? { value: event.target.value, at: event.target.selectionStart } : named(event.target.value, event.target.selectionStart)
+              if (typed.value !== event.target.value) pendingCaret.current = typed.at
+              setText(typed.value); setCaret(typed.at); setPickerClosed(false); setPicked(0)
+            }}
+            onSelect={(event) => setCaret(event.currentTarget.selectionStart)}
+            onScroll={(event) => { if (drawn.current) drawn.current.scrollTop = event.currentTarget.scrollTop }}
+            onKeyDown={keyDown}
+            onPaste={(event) => {
+              // A screenshot or a file copied in Finder goes with the words; text pastes as text.
+              const files = Array.from(event.clipboardData?.files ?? [])
+              if (!attachments || files.length === 0) return
+              event.preventDefault()
+              attachments.add(files, (file) => pastedName(file))
+            }}
+          />
+        </div>
         <div className="tc-send">
           {attachments && (
             <>
@@ -342,7 +394,8 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
               <Zap size={13} aria-hidden="true" />Send now
             </button>
           )}
-          {/* A review is decided with the buttons on its message; this box only holds the note. */}
+          {/* A review is decided with the buttons on its message; this box holds the note, which ↵
+              sends back as Send back does. */}
           {answering?.kind !== 'review_stop' && (
             <button type="submit" className="btn btn-primary tc-go" disabled={!trimmed || sending || Boolean(disabled) || filesHold} aria-label={sendLabel} title={filesHold && !answering ? 'Waits for your files' : undefined}>
               {starts ? <ArrowUp size={15} aria-hidden="true" /> : <CornerDownLeft size={14} aria-hidden="true" />}
@@ -353,6 +406,34 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
       </div>
       {disabled && <p className="tc-disabled" role="status">{disabled}</p>}
     </form>
+  )
+}
+
+/**
+ * The words in the box with each agent @mentioned drawn as its chip: its figure's head and its name
+ * in its colour on the gold tint. They lie under the box's own words, which go clear while there is
+ * a chip, each letter where the box has it, so typing, the caret and selecting stay the box's own:
+ * the head stands in the @'s own room and the name keeps its letters.
+ */
+function TypedWords({ text, chips, hue, ref }: { text: string; chips: readonly Mention[]; hue: (id: string) => number; ref: Ref<HTMLDivElement> }) {
+  const parts: ReactNode[] = []
+  let at = 0
+  for (const chip of chips) {
+    if (chip.target.kind !== 'agent') continue
+    parts.push(text.slice(at, chip.start), <TypedChip key={chip.start} id={chip.target.agent} hue={hue(chip.target.agent)} name={text.slice(chip.start + 1, chip.end)} />)
+    at = chip.end
+  }
+  // A last line that is empty still takes its room, as in the box.
+  parts.push(text.slice(at), '​')
+  return <div ref={ref} className="tc-input-words" aria-hidden="true">{parts}</div>
+}
+
+function TypedChip({ id, hue, name }: { id: string; hue: number; name: string }) {
+  const figure = useTeamFigure(id)
+  return (
+    <span className={`tc-typed-mention hue-${hue}`} data-agent={id}>
+      <span className="tc-typed-at">@<span className="tc-typed-face">{figure ? <FigureStill figure={figure} headOnly alt="" draggable={false} /> : <AgentMark id={id} size={14} />}</span></span>{name}
+    </span>
   )
 }
 
