@@ -17,11 +17,11 @@ import type { TeamView } from './WorkPiece'
 
 // The pieces read their own record and events only while live or shown; a still session here,
 // saying what the agents said when a test gives it messages.
-const said = vi.hoisted(() => ({ messages: [] as TeamMessage[], read: false, agents: [] as unknown[], events: [] as unknown[], record: null as RunRecord | null }))
+const said = vi.hoisted(() => ({ messages: [] as TeamMessage[], read: false, agents: [] as unknown[], events: [] as unknown[], evidence: [] as unknown[], record: null as RunRecord | null }))
 vi.mock('../../lib/runs/useRunSession', () => ({
   useRunSession: (runId: string | null) => ({
     record: said.record && said.record.runId === runId ? said.record : null, applyRecord: vi.fn(), missing: false, events: runId && said.events.length > 0 ? said.events : runId && (said.read || said.messages.length > 0) ? [{ id: 'e0' }] : [], error: null, connected: false,
-    projection: { agents: runId ? said.agents : [], evidence: [], messages: runId ? said.messages : [], delegations: [], attention: [], coverage: {}, prompt: null, promptAgentId: null, phase: said.read ? 'succeeded' : 'queued' },
+    projection: { agents: runId ? said.agents : [], evidence: runId ? said.evidence : [], messages: runId ? said.messages : [], delegations: [], attention: [], coverage: {}, prompt: null, promptAgentId: null, phase: said.read ? 'succeeded' : 'queued' },
     latest: null, cursor: null, setCursor: vi.fn(), lastSeq: -1, mode: 'replay', terminal: true, evidenceComplete: true,
   }),
 }))
@@ -63,6 +63,7 @@ beforeEach(() => {
   said.messages = []
   said.agents = []
   said.events = []
+  said.evidence = []
   said.read = false
   said.record = null
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -1084,6 +1085,27 @@ describe('a piece of work', () => {
     expect(chip.getAttribute('title')?.split('\n')[0]).toBe(`${folder}/digest.html`)
     const files = screen.getByRole('group', { name: 'Files in this answer' })
     expect(await within(files).findByRole('button', { name: 'Open digest.html' })).toBeEnabled()
+  })
+
+  // A newcomer's run (a75f05b4): the Designer named what it wrote in plain words, no code, no links.
+  it('offers a file the run wrote where its answer names it in plain words', async () => {
+    const design = '/Users/me/sutd-final-project/design'
+    said.evidence = [{ toolKind: 'edit', status: 'succeeded', locations: [{ path: `${design}/architecture.html` }] }]
+    page = [{ kind: 'work', run: run({ reply: `Done.\n\nFiles are in ${design}:\n- architecture.html` }), request: message({}), notes: [] }]
+    const chatFetch = globalThis.fetch
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (!url.startsWith('/api/files/stat')) return chatFetch(input, init)
+      return Promise.resolve(new Response(JSON.stringify({
+        path: new URL(url, 'http://x').searchParams.get('path'), name: 'architecture.html', exists: true, isDir: false, sizeBytes: 2_048,
+        modifiedAt: null, kind: 'web', folder: 'design', openable: true,
+      }), { status: 200 }))
+    }))
+    renderChat()
+    const chip = await screen.findByRole('button', { name: 'Open architecture.html (Web page)' })
+    expect(chip.getAttribute('title')?.split('\n')[0]).toBe(`${design}/architecture.html`)
+    const files = screen.getByRole('group', { name: 'Files in this answer' })
+    expect(await within(files).findByRole('button', { name: 'Open architecture.html' })).toBeEnabled()
   })
 
   it('shows a check step’s stop with what is still not met, and approves the work as it is', async () => {

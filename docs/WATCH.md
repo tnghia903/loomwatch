@@ -93,7 +93,9 @@ The request and the answer themselves are read in the chat, not again here. What
 is a tab of the pane beside the chat, after **Details**: first a long answer (or a titled one past
 a few lines), as the chat shows a message, by the figure and name of the agent who gave it, in a
 bubble, with its title on hover; then, past a thin line, each file its answer names that
-LoomWatch can show and that is on this computer, by its name and the mark of its kind. In the chat
+LoomWatch can show and that is on this computer, by its name and the mark of its kind. A file the
+work wrote counts even when the answer names it in plain words, by its name or path, with no code
+or link around it. In the chat
 such an answer stays short, a card with its title, opening words and length, whose **Open** shows
 its tab. Once the work has finished well, the pane following
 the newest work switches to what it came to: the first page, document, sheet or picture it wrote,

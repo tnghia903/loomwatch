@@ -74,6 +74,13 @@ describe('a document answer, read beside the chat', () => {
     expect(screen.getByText('LLM Prefill Guide.html', { selector: 'code' })).toBeInTheDocument()
   })
 
+  it('opens a file the run wrote where the answer names it in plain words', async () => {
+    const page = '/Users/me/sutd-final-project/design/architecture.html'
+    render(<AnswerDocument by="Designer" streaming={false} touched={[page]} written={[page]} text={'Files are in /Users/me/sutd-final-project/design:\n\n- architecture.html'} />)
+    const chip = await screen.findByRole('button', { name: /architecture\.html/ })
+    expect(chip.getAttribute('title')?.split('\n')[0]).toBe(page)
+  })
+
   it('says it is still being written', () => {
     render(<AnswerDocument by="Writer" streaming text="# Draft" />)
     expect(screen.getByText('Writer is writing this')).toBeInTheDocument()

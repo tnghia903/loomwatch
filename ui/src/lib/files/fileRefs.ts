@@ -1,4 +1,4 @@
-import { baseName, isAbsolutePath, pathFromFileUrl, splitPath } from './paths'
+import { baseName, isAbsolutePath, isWindowsPath, pathFromFileUrl, splitPath } from './paths'
 
 export { baseName }
 
@@ -7,9 +7,10 @@ export { baseName }
  * instead of a raw path (ADR 0026).
  *
  * Deliberately narrow: an absolute path whose last segment has an extension, written as inline
- * code, as a Markdown link, or as a `file://` URL — or a file name listed under such a folder
- * ([`withFolderPaths`]). Bare words and API routes ("/api/runs") are not files, and a false
- * positive would put an Open button on something that is not openable.
+ * code, as a Markdown link, or as a `file://` URL — or a file name listed under such a folder, or a
+ * file the run wrote named in plain words ([`withFolderPaths`]). Other bare words and API routes
+ * ("/api/runs") are not files, and a false positive would put an Open button on something that is
+ * not openable.
  */
 const EXTENSION = /\.([A-Za-z0-9]{1,8})$/
 
@@ -148,10 +149,11 @@ export function folderWords(folder: string | null | undefined, path: string): st
 /**
  * Every distinct file a Markdown reply names, in the order it first names them. `touched` is what
  * the run's agents read or wrote ([`filesTouched`]) and `agentFolder` the one the answering agent
- * works in, for the names they give from their own folder.
+ * works in, for the names they give from their own folder; `written` is what they wrote
+ * ([`filesWritten`]), for the names they give in plain words.
  */
-export function fileRefsIn(markdown: string, touched: readonly string[] = [], agentFolder: string | null = null): string[] {
-  const text = withFolderPaths(markdown, touched, agentFolder)
+export function fileRefsIn(markdown: string, touched: readonly string[] = [], agentFolder: string | null = null, written: readonly string[] = []): string[] {
+  const text = withFolderPaths(markdown, touched, agentFolder, written)
   const found: string[] = []
   const add = (path: string | null) => {
     if (path && !found.includes(path)) found.push(path)
@@ -180,11 +182,20 @@ export function fileRefsIn(markdown: string, touched: readonly string[] = [], ag
  * — what the run's agents read or wrote — whose path ends with it. A file it made with a command
  * was never touched by name, so a link to one resolves under `agentFolder`, where the answering
  * agent works. A name in code is not taken from there: code names files the agent ran or quoted too.
+ *
+ * Agents also name what they made in plain words, with no code or link at all:
+ *
+ *     Files are in /Users/me/project/design:
+ *     - architecture.html
+ *
+ * Such a name, or its path, becomes a file only when it fits just one file in `written`, what the
+ * run's agents wrote: those are real files, so a word is never taken for one it isn't.
  */
-export function withFolderPaths(markdown: string, touched: readonly string[] = [], agentFolder: string | null = null): string {
+export function withFolderPaths(markdown: string, touched: readonly string[] = [], agentFolder: string | null = null, written: readonly string[] = []): string {
   const home = agentFolder && isAbsolutePath(agentFolder) ? agentFolder : null
   const lines = markdown.split('\n')
-  for (const passage of passagesOf(lines)) {
+  const passages = passagesOf(lines)
+  for (const passage of passages) {
     const folders: Array<{ at: number; path: string }> = []
     passage.forEach((index, order) => {
       for (const match of lines[index].matchAll(MENTION)) {
@@ -207,7 +218,54 @@ export function withFolderPaths(markdown: string, touched: readonly string[] = [
       })
     })
   }
+  const named = plainNames(written)
+  if (named) for (const index of passages.flat()) lines[index] = named(lines[index])
   return lines.join('\n')
+}
+
+// What plain words may not be read inside: code, a link with its words, an HTML tag or a web address.
+const KEPT = /`[^`\n]*`|!?\[[^\]\n]*\]\([^)\n]*\)|<[^>\n]*>|[A-Za-z][A-Za-z0-9+.-]*:\/\/\S+/g
+
+/**
+ * A line's plain words with each name of a file in `written` (`architecture.html`,
+ * `design/architecture.html`, or its full path) as a code span of that file's full path, or `null`
+ * when the run wrote nothing. A name stands alone: not inside another word, an address, code or a
+ * link. A name two written files share stays words, unless given by its full path.
+ */
+function plainNames(written: readonly string[]): ((line: string) => string) | null {
+  const files = written.filter((path) => !path.includes('`'))
+  if (!files.length) return null
+  const longestFirst = (a: string, b: string) => b.length - a.length
+  const paths = [...files].sort(longestFirst).map(escapePattern).join('|')
+  const names = [...new Set(files.map((path) => baseName(path)))].sort(longestFirst).map(escapePattern).join('|')
+  // Before a name: the line's start, a space, or an opening bracket, quote or `*`. After it: the
+  // line's end, a space, closing punctuation, or a full stop that ends the sentence. Its full path
+  // first, which can hold spaces; else the name, with the folders before it.
+  const name = new RegExp(`(^|[\\s(\\["'“‘*])(${paths}|(?:[^\\s\`'"()<>\\[\\]*]*[\\\\/])?(?:${names}))(?=$|[\\s)\\]"'”’*,;:!?]|\\.(?:\\s|$))`, 'g')
+  const resolve = (words: string) => words.replace(name, (whole, before: string, said: string) => {
+    const path = isAbsolutePath(said) ? files.find((file) => samePath(file, said)) : touchedFile(said, files)
+    return path ? `${before}\`${path}\`` : whole
+  })
+  return (line) => {
+    let out = ''
+    let at = 0
+    for (const match of line.matchAll(KEPT)) {
+      out += resolve(line.slice(at, match.index)) + match[0]
+      at = match.index + match[0].length
+    }
+    return out + resolve(line.slice(at))
+  }
+}
+
+/** Whether two full paths name the same file, either separator, and on Windows in any case. */
+function samePath(a: string, b: string): boolean {
+  const fold = (part: string) => (isWindowsPath(a) ? part.toLowerCase() : part)
+  const [left, right] = [splitPath(a), splitPath(b)]
+  return left.length === right.length && left.every((part, index) => fold(part) === fold(right[index]))
+}
+
+function escapePattern(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 // A code span, a link target, or a bare `file://` URL — in one pass, so offsets on a line agree.

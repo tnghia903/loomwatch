@@ -10,11 +10,12 @@ import { Markdown } from '../ui/Markdown'
  * the card, so each lives in one place.
  *
  * `touched` is every file the run's agents read or wrote (`filesTouched`) and `folder` the one the
- * answering agent works in, so a file the answer names from the agent's own folder opens too.
+ * answering agent works in, so a file the answer names from the agent's own folder opens too;
+ * `written` is what they wrote (`filesWritten`), so one it names in plain words opens as well.
  */
-export function AnswerDocument({ text, by, streaming, touched = NONE, folder = null }: { text: string; by: string; streaming: boolean; touched?: readonly string[]; folder?: string | null }) {
-  // Names listed under a folder, or given from the agent's own folder, read as files too.
-  const shown = useMemo(() => withFolderPaths(text, touched, folder), [text, touched, folder])
+export function AnswerDocument({ text, by, streaming, touched = NONE, folder = null, written = NONE }: { text: string; by: string; streaming: boolean; touched?: readonly string[]; folder?: string | null; written?: readonly string[] }) {
+  // Names listed under a folder, given from the agent's own folder, or of a file it wrote, read as files too.
+  const shown = useMemo(() => withFolderPaths(text, touched, folder, written), [text, touched, folder, written])
   return (
     <article className="tc-document" aria-label="The team’s answer">
       <p className="tc-document-by">{streaming ? `${by} is writing this` : `Written by ${by}`}</p>

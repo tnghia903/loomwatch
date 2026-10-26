@@ -96,6 +96,43 @@ describe('fileRefsIn', () => {
     expect(fileRefsIn('[guide](./guide.html)', [], 'writer')).toEqual([])
   })
 
+  it('finds a file the run wrote where the reply names it in plain words, by name or by path', () => {
+    const design = '/Users/me/sutd-final-project/design'
+    const written = [`${design}/solution-design.md`, `${design}/architecture.html`, '/Users/me/My Files/LLM Prefill Guide.html']
+    // The shape of a real Designer reply (run a75f05b4): no code, no links, only words.
+    const reply = `Files are in ${design}:\n- solution-design.md\n- architecture.html`
+    expect(fileRefsIn(reply, written, null, written)).toEqual([`${design}/solution-design.md`, `${design}/architecture.html`])
+    expect(withFolderPaths(reply, written, null, written)).toBe(`Files are in ${design}:\n- \`${design}/solution-design.md\`\n- \`${design}/architecture.html\``)
+    // From its folder, by its full path at the end of a sentence, in bold, in brackets, with spaces.
+    expect(fileRefsIn('See design/architecture.html.', written, null, written)).toEqual([`${design}/architecture.html`])
+    expect(fileRefsIn(`Saved to ${design}/solution-design.md, as asked.`, written, null, written)).toEqual([`${design}/solution-design.md`])
+    expect(fileRefsIn('**architecture.html** (the diagram)', written, null, written)).toEqual([`${design}/architecture.html`])
+    expect(fileRefsIn('The guide (LLM Prefill Guide.html) is done.', written, null, written)).toEqual(['/Users/me/My Files/LLM Prefill Guide.html'])
+    expect(withFolderPaths('Open /Users/me/My Files/LLM Prefill Guide.html to read it.', written, null, written)).toBe('Open `/Users/me/My Files/LLM Prefill Guide.html` to read it.')
+    // On Windows, either way round its separators go, in any case.
+    const plan = 'C:\\Users\\ana\\work\\plan.md'
+    expect(withFolderPaths('Wrote plan.md and c:/users/ana/work/plan.md.', [plan], null, [plan])).toBe(`Wrote \`${plan}\` and \`${plan}\`.`)
+    // A path a code span cannot hold stays words.
+    expect(withFolderPaths('See /a/x`y.md.', [], null, ['/a/x`y.md'])).toBe('See /a/x`y.md.')
+  })
+
+  it('leaves plain words alone unless they name just one file the run wrote', () => {
+    const written = ['/a/design/architecture.html', '/a/one/README.md', '/a/two/README.md']
+    const read = ['/a/brief/budget.md', ...written]
+    // Read, not written; two written files of that name; a name inside another word or address.
+    expect(fileRefsIn('From budget.md. See README.md.', read, null, written)).toEqual([])
+    expect(fileRefsIn('old-architecture.html, my_architecture.html, architecture.html.bak, architecture.htmlx', read, null, written)).toEqual([])
+    expect(fileRefsIn('https://example.com/architecture.html and www.example.com/architecture.html', read, null, written)).toEqual([])
+    expect(fileRefsIn('/b/design/architecture.html, ../design/architecture.html, ~/architecture.html', read, null, written)).toEqual([])
+    // A link's words, and fenced code, stay as written.
+    const kept = '[architecture.html](https://example.com/page)\n\n```\narchitecture.html\n```'
+    expect(withFolderPaths(kept, read, null, written)).toBe(kept)
+    // Without the run's files, words are words.
+    expect(fileRefsIn('See architecture.html.', read)).toEqual([])
+    // Its full path picks one of two files of the same name.
+    expect(fileRefsIn('See /a/two/README.md.', read, null, written)).toEqual(['/a/two/README.md'])
+  })
+
   it('reads a link’s %20s as the spaces in a file’s name', () => {
     expect(filePathFromLink('/Users/me/My%20Report.pdf')).toBe('/Users/me/My Report.pdf')
     expect(filePathFromLink('file:///Users/me/My%20Report.pdf')).toBe('/Users/me/My Report.pdf')
