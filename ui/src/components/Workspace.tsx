@@ -443,8 +443,10 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   const waiting = record?.status === 'running' ? record.waitingOn ?? null : null
   const projection = session.projection
   const runView = activeRunId !== null
-  // What the run's agents read or wrote: the answer names files from an agent's own folder.
+  // What the run's agents read or wrote: the answer names files from an agent's own folder, and
+  // what they wrote in plain words.
   const touchedFiles = useMemo(() => filesTouched(projection.evidence), [projection.evidence])
+  const writtenFiles = useMemo(() => filesWritten(projection.evidence), [projection.evidence])
   const routine = useMemo(() => scheduleForPath(schedules.entries, doc.path), [schedules.entries, doc.path])
   // A routine's run starting and ending is when it has news, such as when it tries again: read the
   // routines then, not at the next minute.
@@ -1642,9 +1644,9 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   // The files its finished answer names that the reader reads and that are on this computer: the
   // files its answer's cards in the chat offer to Read.
   const responderFolder = responderAgent?.folder ?? null
-  const namedFiles = useMemo(() => (detailsOpen && session.terminal ? fileRefsIn(responseText, touchedFiles, responderFolder).filter((path) => readerFormat(path) !== null) : []), [detailsOpen, session.terminal, responseText, touchedFiles, responderFolder])
+  const namedFiles = useMemo(() => (detailsOpen && session.terminal ? fileRefsIn(responseText, touchedFiles, responderFolder, writtenFiles).filter((path) => readerFormat(path) !== null) : []), [detailsOpen, session.terminal, responseText, touchedFiles, responderFolder, writtenFiles])
   const foundFiles = useFilesFound(namedFiles)
-  const writtenFiles = useMemo(() => new Set(filesWritten(projection.evidence)), [projection.evidence])
+  const wrote = useMemo(() => new Set(writtenFiles), [writtenFiles])
   const paneTabs = useMemo(() => madeTabs({
     runId: activeRunId,
     files: (foundFiles ?? []).map(({ path, facts }) => {
@@ -1655,13 +1657,13 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
         label: baseName(path),
         kind: facts.kind,
         // Made by the work (written, or in an agent's own folder), and not code.
-        lead: (writtenFiles.has(path) || maker !== undefined) && readerFormat(path) !== 'code',
+        lead: (wrote.has(path) || maker !== undefined) && readerFormat(path) !== 'code',
       }
     }),
     answer: paneAnswer,
     kept: kept.map(({ file, kind }) => ({ file, label: baseName(file.path), kind })),
     closed: closedTabs,
-  }), [activeRunId, foundFiles, writtenFiles, askable, answerResponder, paneAnswer, kept, closedTabs])
+  }), [activeRunId, foundFiles, wrote, askable, answerResponder, paneAnswer, kept, closedTabs])
   // Its record stays on screen until what it made is known, so the pane moves once; work that
   // stopped or failed keeps its record on screen, where that is said.
   const shownTab = shownPaneTab(paneTab, paneTabs, detailsFollow, session.terminal && record?.status === 'succeeded' && foundFiles !== null)
@@ -2581,7 +2583,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
                     onAsk={composerState.kind === 'blocked' ? undefined : askInChat} asked={passages.asked} asking={passages.asking} faces={passages.faces} onShowAsked={showAsked} />
                 ) : shownTab === 'answer' ? (
                   <FileOriginContext.Provider value={answerOrigin}>
-                    <AnswerDocument text={responseText} by={nodeNames.get(record?.responder ?? '') ?? record?.responder ?? 'the team'} streaming={!session.terminal} touched={touchedFiles} folder={responderAgent?.folder} />
+                    <AnswerDocument text={responseText} by={nodeNames.get(record?.responder ?? '') ?? record?.responder ?? 'the team'} streaming={!session.terminal} touched={touchedFiles} folder={responderAgent?.folder} written={writtenFiles} />
                   </FileOriginContext.Provider>
                 ) : session.loading ? (
                   // The record is shown once it is read whole, so it opens as it ended rather than replaying.

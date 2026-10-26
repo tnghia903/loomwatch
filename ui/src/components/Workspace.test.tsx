@@ -344,6 +344,26 @@ describe('Workspace', () => {
       expect(within(pane).getAllByRole('tab').map((each) => each.textContent)).toEqual(['Details', 'q3.md', 'make_chart.py', 'market.md'])
     })
 
+    // A newcomer's run (a75f05b4): the answer named what it wrote, in the person's own folder, in
+    // plain words. It is what the work came to, so the pane opens on it.
+    it('opens on a file the work wrote where the answer names it in plain words', async () => {
+      sessionState.events = [
+        event(0, 'process', { phase: 'spawned', pid: 1 }),
+        event(1, 'tool_call', { callId: 'w1', title: 'Write sales/q3.md', toolKind: 'edit', status: 'in_progress', rawInput: { path: 'sales/q3.md' }, locations: [{ path: OWN }] }),
+        event(2, 'tool_update', { callId: 'w1', status: 'completed' }),
+      ]
+      const run = finished('run-2', `# Sales plan\n\n${'Sales rose in the west. '.repeat(40)}\n\nFiles are in /teams/sales:\n- q3.md`)
+      serve([work(run)], [run])
+      renderWorkspace()
+      const pane = await openPane()
+      await waitFor(() => expect(within(pane).getByRole('tab', { name: 'q3.md' })).toHaveAttribute('aria-selected', 'true'))
+      expect(within(pane).getAllByRole('tab')).toHaveLength(3)
+      // The answer read in full there names it as a file too.
+      fireEvent.click(within(pane).getByRole('tab', { name: 'Reviewer’s answer' }))
+      const chip = await within(within(pane).getByRole('tabpanel')).findByRole('button', { name: /q3\.md/ })
+      expect(chip.getAttribute('title')?.split('\n')[0]).toBe(OWN)
+    })
+
     it('keeps the record on screen when the work stopped, with what it named a tab away', async () => {
       const run = { ...finished('run-2', `Partly done: \`${MADE}\`.`), status: 'failed', error: 'The model stopped answering.' }
       serve([work(run)], [run])
