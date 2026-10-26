@@ -1763,7 +1763,7 @@ async fn run_review_stop(
         let feedback = send_back_note(&answer.text);
         let stage_id = stage.agent_id.clone();
         let reply = stage
-            .send_back(&feedback, bus, archive, shared_log, exit_timeout)
+            .send_back(&feedback, lineage, bus, archive, shared_log, exit_timeout)
             .await?;
         // The redone work is handed on by the rule the first pass was: as written when it fits.
         handover = if reply_is_its_own_handover(team, &stage_id, &reply) {
@@ -2184,7 +2184,8 @@ impl ParkedStage {
     ///
     /// The session is reopened here and now, on a fresh process: the note lands in the
     /// conversation that produced the work, not in a new one that would have to be told what the
-    /// work was.
+    /// work was. While it redoes the work it is at work as on its first pass (ADR 0051): the chat
+    /// shows it working, and a note sent to it then goes in before its reply is final.
     ///
     /// # Errors
     ///
@@ -2192,6 +2193,7 @@ impl ParkedStage {
     async fn send_back(
         &mut self,
         note: &str,
+        lineage: &RunLineage,
         bus: &TeamBus,
         archive: &EventArchive,
         shared_log: Option<&EventLog>,
@@ -2202,11 +2204,13 @@ impl ParkedStage {
         let session = self
             .session_mut()
             .context("a reopened stage always has a session")?;
-        session
+        let work = Work::begin(lineage, shared_log, &agent_id, &mut session.recorder);
+        let reply = session
             .process
             .prompt_turn(&mut session.recorder, note)
             .await
-            .with_context(|| format!("{agent_id} failed to answer your note"))
+            .with_context(|| format!("{agent_id} failed to answer your note"))?;
+        work.deliver_notes(session, shared_log, reply).await
     }
 
     /// Bring the parked session back on a fresh process. A no-op for one that is already open.
@@ -10496,6 +10500,122 @@ mod tests {
                 .any(|event| event.payload["phase"] == "turn_purpose"
                     && event.payload["purpose"] == "handover"),
             "a reply that fits took a handover turn"
+        );
+        Ok(())
+    }
+
+    /// **Work sent back from a review stop is at work while it is redone (ADR 0051).**
+    ///
+    /// The redo is held part way through its turn. While it is, the run record lists its agent as
+    /// working, which is what the chat's figures and its "is working" line read, and a note sent to
+    /// it then joins the work instead of finding nobody at work. Back at the stop, nobody is.
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn work_sent_back_is_shown_working_and_takes_a_note_while_it_is_redone() -> Result<()> {
+        const NOTE: &str = "add the dates";
+        const LATER: &str = "and the venue";
+        let pool = crate::db::Db::temp().await;
+        let (drafter, hold) = crate::agent::Demo::responder_holding(
+            |request| {
+                let prompt = request.prompt();
+                Some(crate::agent::Completion::text(if prompt.contains(LATER) {
+                    "third draft, with dates and venue"
+                } else if prompt.contains(NOTE) {
+                    "second draft, with dates"
+                } else {
+                    "first draft"
+                }))
+            },
+            |request| request.prompt().contains(NOTE),
+            "",
+        );
+        let model = crate::engine::demo_model(drafter);
+        let team = Arc::new(TeamConfig {
+            agents: vec![
+                pipeline_agent("a", &model),
+                operator_node("review", "Approve the draft, or say what to change."),
+            ],
+            ..shape(&[], &["a>review"])
+        });
+        let archive = EventArchive::new(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let (registry, desk, run_id) = operator_desk(&team, &archive);
+        let answering = tokio::spawn({
+            let desk = desk.clone();
+            let run_id = run_id.clone();
+            async move {
+                let first = wait_for_stop(&desk, &run_id, |waiting| {
+                    waiting.context.as_deref() == Some("first draft")
+                })
+                .await;
+                desk.deliver(&run_id, &first.node, answer(NOTE, Some("a")))
+                    .await
+                    .expect("the stop takes a send-back");
+                tokio::time::timeout(Duration::from_secs(10), async {
+                    while hold.waiting() == 0 {
+                        tokio::time::sleep(Duration::from_millis(20)).await;
+                    }
+                })
+                .await
+                .expect("the redo reached its model");
+                let redoing = registry.get(&run_id).expect("the run is known").working;
+                let noted = registry
+                    .queue_note(
+                        &run_id,
+                        crate::runs::QueuedNote {
+                            id: "note-1".to_owned(),
+                            agent: "a".to_owned(),
+                            text: LATER.to_owned(),
+                            sent_at: "2026-10-26T00:00:00Z".to_owned(),
+                            now: false,
+                            reply: None,
+                            files: Vec::new(),
+                        },
+                    )
+                    .map(|_| ())
+                    .map_err(|error| error.to_string());
+                hold.release(1);
+                // Whatever the redo came to, the stop is answered, so the run ends either way.
+                let second = wait_for_stop(&desk, &run_id, |waiting| {
+                    waiting.context.as_deref() != Some("first draft")
+                })
+                .await;
+                let back = registry.get(&run_id).expect("the run is known").working;
+                desk.deliver(&run_id, &second.node, answer("Approved", None))
+                    .await
+                    .expect("the stop takes the answer");
+                (redoing, noted, back)
+            }
+        });
+        let outcome = run_pipeline_mode(
+            &team,
+            &team_path,
+            archive.clone(),
+            "go",
+            Duration::from_secs(5),
+            Some(EventLog::new(archive.clone(), run_id.clone())),
+            &Arc::new(memory::TeamMemory::default()),
+            &RunLineage {
+                operator: Some(desk.clone()),
+                ..RunLineage::default()
+            },
+        )
+        .await?;
+        let (redoing, noted, back) = answering.await?;
+        assert_eq!(
+            redoing,
+            ["a"],
+            "the agent redoing the work is shown working"
+        );
+        assert_eq!(
+            noted,
+            Ok(()),
+            "a note sent while the work is redone joins it"
+        );
+        assert_eq!(outcome.reply, "third draft, with dates and venue");
+        assert!(
+            back.is_empty(),
+            "back at the stop, nobody is working: {back:?}"
         );
         Ok(())
     }
