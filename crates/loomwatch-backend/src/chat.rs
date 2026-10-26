@@ -393,10 +393,10 @@ pub enum PartAt {
         bottom: u32,
         right: u32,
     },
-    /// A chart, a picture or a video in a web page (`what`), found again by `path`: a CSS selector
-    /// from the page's body or from an element with an id, each step an element's name and, where
-    /// it has siblings of its kind, its place among them (`body > main > section:nth-of-type(2) >
-    /// canvas`).
+    /// A part of a web page (`what`: a chart, a picture, a video, or any other part picked in it, such
+    /// as a box in a drawing or a card), found again by `path`: a CSS selector from the page's body
+    /// or from an element with an id, each step an element's name and, where it has siblings of its
+    /// kind, its place among them (`body > main > section:nth-of-type(2) > canvas`).
     Element { what: String, path: String },
     /// A kind a newer version wrote: the part reads as its words.
     #[serde(other)]
@@ -405,8 +405,8 @@ pub enum PartAt {
 
 impl PartAt {
     /// Whether the place is one the reader could have marked: a box inside its picture or frame,
-    /// cells inside a sheet, a moment or a span that goes forward, a chart, picture or video in a
-    /// page by a path on one line.
+    /// cells inside a sheet, a moment or a span that goes forward, a part of a page by a path on one
+    /// line.
     fn usable(&self) -> bool {
         match *self {
             Self::Box {
@@ -448,7 +448,7 @@ impl PartAt {
                     })
             }
             Self::Element { ref what, ref path } => {
-                matches!(what.as_str(), "chart" | "picture" | "video")
+                matches!(what.as_str(), "chart" | "picture" | "video" | "part")
                     && !path.trim().is_empty()
                     && path.chars().count() <= ELEMENT_PATH_CHARS
                     && !path.contains(['\n', '\r', '`'])
@@ -5361,10 +5361,10 @@ mod tests {
         assert!(answers_in_chat(false, &[], Some(&words)));
     }
 
-    /// **A chart, picture or video in a web page is a part of its own (ADR 0091).** It keeps the
-    /// path that finds it again in the page, and the agent is told what it is and that path; one
-    /// that isn't a chart, picture or video, or whose path is empty, runs over lines or would close
-    /// the quote it is told in, is refused.
+    /// **A part of a web page is a part of its own (ADR 0091).** A chart, a picture, a video, or any
+    /// other part picked in the page keeps the path that finds it again there, and the agent is told
+    /// what it is and that path; a kind the reader doesn't mark, or a path that is empty, runs over
+    /// lines or would close the quote it is told in, is refused.
     #[test]
     fn a_thing_in_a_page_keeps_its_path_and_the_agent_is_told_it() {
         let team = team();
@@ -5386,6 +5386,15 @@ mod tests {
             chart.for_agents(&team).named,
             "A part of index.html from Researcher, in the file /w/dash/index.html, the chart in the \
              page at `body > main > section:nth-of-type(2) > canvas`"
+        );
+        // A box picked in a drawing, by its group in the drawing.
+        let mut picked =
+            part(json!({"kind": "element", "what": "part", "path": "svg#arch > g:nth-of-type(4)"}));
+        check_reply(&mut picked, &team).expect("usable");
+        assert_eq!(
+            picked.for_agents(&team).named,
+            "A part of index.html from Researcher, in the file /w/dash/index.html, the part in the \
+             page at `svg#arch > g:nth-of-type(4)`"
         );
         for bad in [
             json!({"kind": "element", "what": "table", "path": "table"}),

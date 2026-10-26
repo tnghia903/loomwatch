@@ -27,9 +27,24 @@
 .rd-title { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 17px/1.25 var(--font-serif); letter-spacing: -.01em; color: var(--color-ink); }
 .rd-meta { display: flex; align-items: center; gap: 10px; min-width: 0; margin: 3px 0 0; font-size: 12px; line-height: 16px; color: var(--color-ink-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .rd-meta > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.rd-from { display: inline-flex; flex: none; align-items: center; gap: 5px; color: var(--color-ink-2); }
+/* The maker's name gives way when the bar is narrow, rather than running under what comes after it. */
+.rd-from { display: inline-flex; flex: 0 1 auto; align-items: center; gap: 5px; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--color-ink-2); }
 .rd-updated { font-weight: 600; color: var(--color-accent); }
 .rd-views { flex: none; }
+/* A web page's Pick switch (pageFrame.ts): a dashed chip with a page in it, one part of the page
+   picked (FileReader PickMark). On, the chip's edge and the picked part are drawn whole and the
+   chip tinted: picking. */
+.rd-pick { display: grid; flex: none; place-items: center; box-sizing: border-box; width: 30px; height: 30px; padding: 0; border: 1.5px dashed var(--color-accent); border-radius: 8px; background: transparent; color: inherit; line-height: 0; cursor: pointer; transition: background-color var(--t-instant) var(--ease-out), border-color var(--t-instant) var(--ease-out); }
+@media (hover: hover) { .rd-pick:hover { background: var(--color-accent-tint); } }
+.rd-pick[aria-pressed='true'] { border-style: solid; background: var(--color-accent-tint); }
+.rd-pick:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.rd-pick-block { fill: var(--color-ink-3); }
+/* The picked block's edge on whole pixels, so its dashes draw as dashes at 1x. On, it is drawn whole
+   and tinted too: a second sign besides the edge, and the gold edge on a gold tint the page draws. */
+.rd-pick-part { fill: none; stroke: var(--color-accent); stroke-width: 2; stroke-dasharray: 2 2; }
+.rd-pick[aria-pressed='true'] .rd-pick-part { stroke-dasharray: none; fill: color-mix(in srgb, var(--color-accent) 30%, transparent); }
+/* As big as the bar's other buttons on a touch screen or a narrow window (app.css lifts them to 44 px). */
+@media (pointer: coarse), (max-width: 767px) { .rd-pick { width: 44px; height: 44px; } }
 .rd-acts { display: inline-flex; flex: none; gap: 2px; }
 .rd-note { flex: none; margin: 0; padding: 8px 18px; border-bottom: 1px solid var(--color-hairline); background: var(--color-accent-tint); font-size: 12.5px; line-height: 1.45; color: var(--color-ink-2); }
 
@@ -236,9 +251,8 @@
 
 /* The tip's mark on a picture is the box the drag draws, still. */
 .rd-hint mark.box { padding: 0 3px; border: 1px dashed var(--color-accent); background: color-mix(in srgb, var(--color-marker) 14%, transparent); }
-/* The mark at a thing's corner in a web page (pageFrame.ts .lw-thing-mark), drawn small in its tip:
-   the asked agent's face in a dashed chip. */
-.rd-hint-thing { display: inline-grid; place-items: center; box-sizing: border-box; width: 20px; height: 20px; margin: 0 2px; border: 1.5px dashed var(--color-accent); border-radius: 6px; vertical-align: -5px; line-height: 0; }
+/* A web page's Pick switch (.rd-pick), drawn small in its tip: its page with one part picked, in a dashed chip. */
+.rd-hint-pick { display: inline-grid; place-items: center; box-sizing: border-box; width: 24px; height: 24px; margin: 0 2px; border: 1.5px dashed var(--color-accent); border-radius: 7px; vertical-align: -7px; line-height: 0; }
 
 /* ---------- The parts asked about: a marker stroke on the words, the agent's bubble after them ----------
    lib/files/partMarks.ts wraps each part's words in .rd-mark and leaves a .rd-slot after the last
@@ -471,6 +485,14 @@
 
 @container details (max-width: 560px) {
   .rd-bar { padding-left: 14px; }
+  /* A web page's bar holds the Pick switch as well: in a narrow pane its buttons go to a row of
+     their own, at its right, rather than squeeze the title to a few letters. */
+  .rd-bar:has(.rd-pick) { flex-wrap: wrap; row-gap: 8px; }
+  .rd-bar:has(.rd-pick) .rd-bar-words { flex: 1 1 calc(100% - 44px); }
+  .rd-bar:has(.rd-pick) .rd-pick { margin-left: auto; }
+  /* The tip wraps rather than lose its end (where to click, and who is asked), over the pane's
+     width: centred from its middle, it would otherwise wrap in half of it. */
+  .rd-hint { width: max-content; white-space: normal; border-radius: 16px; }
   .rd-title { font-size: 15.5px; }
   .rd-sheet { display: none; }
 }

@@ -1,8 +1,8 @@
 import { ExternalLink, FolderOpen, X } from 'lucide-react'
-import { createElement, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createElement, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 
-import type { BoxAt, ElementAt, ReplyTo, TimeAt } from '../../lib/chat/client'
+import type { BoxAt, ReplyTo, TimeAt } from '../../lib/chat/client'
 import type { AgentFacts } from '../../lib/chat/faces'
 import { quoteLine } from '../../lib/chat/reply'
 import { baseName, extensionOf, fileKindIn, fileLabel, fileTitle, formatBytes, withFolderPaths } from '../../lib/files/fileRefs'
@@ -70,8 +70,8 @@ const PICTURE_HINT_KEY = 'loomwatch.readerHint.picture'
 const CELLS_HINT_KEY = 'loomwatch.readerHint.cells'
 /** And for a recording, whose line is pressed or dragged along. */
 const MEDIA_HINT_KEY = 'loomwatch.readerHint.media'
-/** And for the things in a web page (a chart, a picture, a video), asked about from the mark at their corner. */
-const THING_HINT_KEY = 'loomwatch.readerHint.thing'
+/** And for a web page, any part of which is asked about by the Pick switch. */
+const PICK_HINT_KEY = 'loomwatch.readerHint.pick'
 /** And for a PDF's pages, where a drag over a picture or a chart marks a box. */
 const PDF_HINT_KEY = 'loomwatch.readerHint.pdf'
 /**
@@ -151,6 +151,22 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
   // (a box) and a sheet (cells). A web page reports its own marked words.
   const cellsView = shown === 'table' || shown === 'sheet'
   const selfMarking = !words || cellsView
+  // A web page's Pick switch (ADR 0091): while it is on, a click on the page marks the part under
+  // it. It is for the page open now, and goes off with the file.
+  const [pickingIn, setPickingIn] = useState<string | null>(null)
+  const pickable = askable && shown === 'page'
+  const picking = pickable && pickingIn === path
+  // Turned on from the keyboard, the page takes the keys, for its arrows to walk its parts.
+  const [pickKeys, setPickKeys] = useState(0)
+  // What the arrow keys reached while picking, said to a screen reader; turned on from the
+  // keyboard, how to pick with it.
+  const [pointedAt, setPointedAt] = useState('')
+  const togglePick = (event: ReactMouseEvent) => {
+    const keys = !picking && event.detail === 0
+    setPickingIn(picking ? null : path)
+    setPointedAt(keys ? 'Picking. Use the arrow keys, then Enter.' : '')
+    if (keys) setPickKeys((count) => count + 1)
+  }
 
   const stage = useRef<HTMLDivElement>(null)
   const scroller = useRef<HTMLDivElement>(null)
@@ -307,10 +323,12 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
     document.getSelection()?.removeAllRanges()
     setCleared((count) => count + 1)
     setMarked(null)
-    // Asking about a thing in a page, or a box on a PDF's page, is what their tips teach; words asked
-    // about there teach words.
-    const teaches = hintKey === THING_HINT_KEY || hintKey === PDF_HINT_KEY
-    hideHint(marked.at?.kind === 'element' ? THING_HINT_KEY : marked.at?.kind === 'box' && hintKey === PDF_HINT_KEY ? PDF_HINT_KEY : teaches ? HINT_KEY : hintKey)
+    // Asked: picking stops, so the page's own buttons and links work again while the person writes.
+    setPickingIn(null)
+    // Asking about a part picked in a page, or a box on a PDF's page, is what their tips teach; words
+    // asked about there teach words.
+    const teaches = hintKey === PICK_HINT_KEY || hintKey === PDF_HINT_KEY
+    hideHint(marked.at?.kind === 'element' ? PICK_HINT_KEY : marked.at?.kind === 'box' && hintKey === PDF_HINT_KEY ? PDF_HINT_KEY : teaches ? HINT_KEY : hintKey)
   }
 
   // The parts asked about: marked in the text, with a bubble after them for each agent asked, each
@@ -557,6 +575,11 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
   const cardFacts = cardAsk ? factsOf(bubbleAgent(cardAsk)) : null
   const cardLine = cardAsk ? bubbleCardParts(cardAsk, lookOfAsk(cardAsk), name) : null
   const closeAnswer = () => setAnswerFor(null)
+  // Escape in a page with nothing marked in it closes the answer open over it, or else stops picking.
+  const escapePage = () => {
+    if (answerFor) closeAnswer()
+    else setPickingIn(null)
+  }
   // The open answer's talk before it: what the same agent was asked about the same words, oldest first.
   const earlierTalk = answerShown ? asked.filter((passage) => passage !== answerShown && passage.file === path && askKey(passage) === shownKey) : NO_PASSAGES
   // Reply under an answer is one more ask about the same part, to the agent that answered, written
@@ -568,20 +591,16 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
     askAbout(passageReply({ path, runId: file.runId, from }, passage.text, passage.at), undefined, bubbleAgent(passage))
   }
 
-  // The tip under a file, until a part of one has been asked about. A web page with a chart, a
-  // picture or a video in it has its own: someone who has marked words has not found the mark at a
-  // chart's corner, which shows only while the chart is pointed at.
-  const [thingsOf, setThingsOf] = useState<{ path: string; what: readonly ElementAt['what'][] } | null>(null)
-  const pageThings = shown === 'page' && thingsOf?.path === path ? thingsOf.what : []
-  const thingWord = pageThings.includes('chart') ? 'chart' : pageThings[0] ?? null
-  const hintKey = format === 'media' ? MEDIA_HINT_KEY : !words ? PICTURE_HINT_KEY : cellsView ? CELLS_HINT_KEY : thingWord ? THING_HINT_KEY : pdfPages && pdfPictured === path ? PDF_HINT_KEY : HINT_KEY
+  // The tip under a file, until a part of one has been asked about. A web page has its own:
+  // someone who has marked words has not found the Pick switch.
+  const hintKey = format === 'media' ? MEDIA_HINT_KEY : !words ? PICTURE_HINT_KEY : cellsView ? CELLS_HINT_KEY : shown === 'page' ? PICK_HINT_KEY : pdfPages && pdfPictured === path ? PDF_HINT_KEY : HINT_KEY
   const [hidden, setHidden] = useState<readonly string[]>([])
   const unseen = !useTipSeen(hintKey)
   // Whether marking words has been learnt: before the reader opened, or since, here.
   const wordsLearnt = useTipSeen(HINT_KEY) || hidden.includes(HINT_KEY)
   const hint = unseen && !hidden.includes(hintKey)
-  // The mark at a thing's corner in a page, drawn small in its tip: the asked agent's face in a dashed chip.
-  const thingMark = from ? <i className="rd-hint-thing" role="img" aria-label="the mark at its corner"><AvatarFace id={from} hue={hue(from)} size={14} fontSize={6} text={initials(name(from))} /></i> : null
+  // The Pick switch, drawn small in the page's tip as in the reader's bar.
+  const pickMark = <i className="rd-hint-pick" role="img" aria-label="the Pick a part button"><PickMark size={18} /></i>
   const hideHint = (key = hintKey) => {
     setHidden((keys) => [...keys, key])
     try { window.localStorage.setItem(key, 'seen') } catch { /* The tip shows again next time. */ }
@@ -613,9 +632,7 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
   // agent's figure as a picture it can show.
   const figures = useContext(TeamFiguresContext)
   const figureOf = (id: string) => figures.get(id) ?? figures.get(wearerOf(id)) ?? null
-  // The agent a page's marks ask is in them too, by its face (pageFrame.ts dressMark).
-  const askerFigure = from ? figureOf(from) : null
-  const pictures = useFigurePictures(shown === 'page' ? [...(askerFigure ? [figureStill(askerFigure)] : []), ...mine.flatMap((passage) => { const figure = figureOf(bubbleAgent(passage)); return figure ? [figureStill(figure)] : [] })] : [])
+  const pictures = useFigurePictures(shown === 'page' ? mine.flatMap((passage) => { const figure = figureOf(bubbleAgent(passage)); return figure ? [figureStill(figure)] : [] }) : [])
   const pageMarksSaid = JSON.stringify({
     // Words, and the things in the page asked about (ADR 0091), each known by its part's id.
     parts: mine.filter((passage) => !passage.at || passage.at.kind === 'element').map((passage): PageMark => {
@@ -633,9 +650,8 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
       }
     }),
     asking,
-    face: askerFigure ? { figure: pictures.get(figureStill(askerFigure)) ?? null } : null,
   })
-  const pageMarks = useMemo(() => JSON.parse(pageMarksSaid) as { parts: PageMark[]; asking: string | null; face: { figure: string | null } | null }, [pageMarksSaid])
+  const pageMarks = useMemo(() => JSON.parse(pageMarksSaid) as { parts: PageMark[]; asking: string | null }, [pageMarksSaid])
   // The marks move with the text: measured again on the next frame after a scroll.
   const scrolled = useRef(0)
   const onScroll = () => {
@@ -689,8 +705,8 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
     </div>
   )
   else if (text === null) body = <p className="rd-loading" role="status">Reading {fileName}…</p>
-  else if (shown === 'page') body = <PageFrame path={path} name={fileName} html={text} marks={pageMarks} onMarked={setMarked} onParts={takeParts} onOpen={setAnswerFor} onEscape={closeAnswer} cleared={cleared}
-    onThings={(what) => setThingsOf({ path, what })}
+  else if (shown === 'page') body = <PageFrame path={path} name={fileName} html={text} marks={pageMarks} picking={picking} pickKeys={pickKeys} onMarked={setMarked} onParts={takeParts} onOpen={setAnswerFor} onEscape={escapePage} cleared={cleared}
+    onPointing={setPointedAt}
     onHover={(key, at, now) => { const passage = key ? mine.find((item) => askKey(item) === key) : undefined; if (key && passage && hasCard(passage)) cardAt(key, at, now); else cardAt('', null, now) }} />
   else if (cellsView && sheets) body = (
     // Drawn afresh when the file changes. Words asked about in a table before it could be marked by
@@ -725,6 +741,12 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
             {from && <span className="rd-from"><AvatarFace id={from} hue={hue(from)} size={16} fontSize={7} text={initials(name(from))} />{name(from)}</span>}
           </p>
         </div>
+        {pickable && from && (
+          <button type="button" className="rd-pick" aria-pressed={picking} onClick={togglePick}
+            aria-label="Pick a part of the page to ask about" title={picking ? 'Click any part of the page. Click here or press Esc to stop.' : 'Pick a part to ask about'}>
+            <PickMark size={18} />
+          </button>
+        )}
         {format === 'page' && (
           <div className="tc-pane-tabs rd-views" role="tablist" aria-label="Show the page as">
             <button type="button" role="tab" aria-selected={view === 'page'} onClick={() => setView('page')}>Page</button>
@@ -736,6 +758,7 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
           <button type="button" className="btn btn-icon" onClick={() => void actions.open(true)} disabled={actions.busy} aria-label={`Show ${fileName} in its folder`} title="Show in folder"><FolderOpen size={14} aria-hidden="true" /></button>
         </span>
         <span className="visually-hidden" role="status">{actions.said}</span>
+        {pickable && <span className="visually-hidden" role="status">{picking ? pointedAt : ''}</span>}
       </header>
       {((content.file?.extracted && shown !== 'sheet' && !pdfPages) || (content.file?.truncated && !pdfPages)) && (
         <p className="rd-note">
@@ -824,9 +847,11 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
                 : hintKey === PDF_HINT_KEY ? (wordsLearnt
                   ? <span><mark className="box">Drag over a chart or picture</mark> to ask <b>{name(from)}</b> about it</span>
                   : <span><mark>Mark any words</mark> or <mark className="box">drag over a chart or picture</mark> to ask <b>{name(from)}</b></span>)
-                : hintKey === THING_HINT_KEY && thingWord ? (wordsLearnt
-                  ? <span>Click {thingMark} on a {thingWord} to ask <b>{name(from)}</b> about it</span>
-                  : <span><mark>Mark any words</mark> or click {thingMark} on a {thingWord} to ask <b>{name(from)}</b></span>)
+                : hintKey === PICK_HINT_KEY ? (picking
+                  ? <span>Click any part to ask <b>{name(from)}</b> about it</span>
+                  : wordsLearnt
+                    ? <span>Click {pickMark} at the top, then any part, to ask <b>{name(from)}</b> about it</span>
+                    : <span><mark>Mark any words</mark>, or click {pickMark} at the top, then any part, to ask <b>{name(from)}</b></span>)
                   : <span><mark>Mark any words</mark> to ask <b>{name(from)}</b> about them</span>}
             <button type="button" className="rd-hint-close" onClick={() => hideHint()} aria-label="Hide this tip"><X size={12} aria-hidden="true" /></button>
           </p>
@@ -834,6 +859,21 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
       </div>
     </article>
     </FileOriginContext.Provider>
+  )
+}
+
+/**
+ * The Pick switch's mark (ADR 0091): a page of a few blocks, one of them picked, outlined dashed as
+ * the page outlines a part a click marks, and drawn whole while picking. It says what the switch
+ * does, not who answers: the pill says that.
+ */
+function PickMark({ size }: { size: number }) {
+  return (
+    <svg className="rd-pick-mark" width={size} height={size} viewBox="0 0 18 18" aria-hidden="true" focusable="false">
+      <rect className="rd-pick-block" x="2" y="2" width="14" height="4" rx="1" />
+      <rect className="rd-pick-block" x="2" y="8" width="6" height="8" rx="1" />
+      <rect className="rd-pick-part" x="11" y="9" width="4" height="6" />
+    </svg>
   )
 }
 
