@@ -342,7 +342,7 @@ function Hang({ island, onPointerEnter, onPointerLeave }: { island: IslandState;
         {shown && ticket && (
           <>
             <span className="island-hang-figure glow" data-moment="ask">
-              <FigureStill figure={island.figure(shown.team.teamPath, ticket.node ?? shown.team.agent)} alt="" />
+              <FigureStill figure={island.figure(shown.team.teamPath, shown.team.askers?.[ticket.id] ?? shown.team.agent)} alt="" />
             </span>
             <div className="island-card" role="group" aria-label={`${shown.team.teamName}: ${ticket.text}`}>
               <AskBody island={island} team={shown.team} ticket={ticket} first />

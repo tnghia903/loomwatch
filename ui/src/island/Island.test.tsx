@@ -254,6 +254,17 @@ describe('the island page', () => {
     expect(posted).toEqual([])
   })
 
+  // The owner (2026-10-26): Researcher's work waited for a review, and the figure holding it at the
+  // notch was the review step's own, not Researcher's, as the chat draws it.
+  it('hangs a review from the figure of the agent whose work it is, not the review step’s', async () => {
+    expect(figureStill(figureFor('review'))).not.toBe(figureStill(figureFor('researcher')))
+    runs = [run('r1', { waitingOn: { node: 'review', name: 'You', kind: 'review_stop', handoverFrom: 'researcher', since: '2026-10-22T10:02:00Z', question: 'Researcher is done. Approve the findings, or say what to change.', park: 'reloadable', parkNote: '', sendBackAvailable: true } })]
+    const { container } = render(<Island />)
+    tellPage({ kind: 'place', notch: { width: 188, height: 32 }, menuBar: 32 })
+    await waitFor(() => expect(container.querySelector('.island-card')).toBeTruthy())
+    expect(container.querySelector('.island-hang-figure img')?.getAttribute('src')).toBe(figureStill(figureFor('researcher')))
+  })
+
   it('opens the list when the pointer reaches the island, one row per team', async () => {
     runs = [run('r1', { working: ['writer'] }), run('r2', { teamPath: 'digest.yaml', teamName: 'Weekly digest', agentIds: ['checker'], agentNames: { checker: 'Checker' }, working: ['checker'] })]
     const { container } = render(<Island />)

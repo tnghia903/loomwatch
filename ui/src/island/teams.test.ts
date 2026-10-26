@@ -45,6 +45,12 @@ describe('what the island shows of each team', () => {
     expect([questioned.moment, questioned.agent, questioned.asks[0].kind]).toEqual(['ask', 'writer', 'question'])
   })
 
+  it('draws each ask with the agent it is about: a review with the one whose work it is, not the review step', () => {
+    const review = { node: 'review', name: 'You', kind: 'review_stop' as const, handoverFrom: 'researcher', since: iso(2), question: 'Researcher is done.', park: 'reloadable' as const, parkNote: '', sendBackAvailable: true }
+    const [team] = teamsNow([run('a', { permissionRequests: [permission('p1', 'writer')], waitingOn: review })], 0, none, nobody)
+    expect(team.asks.map((ask) => [ask.kind, team.askers?.[ask.id]])).toEqual([['permission', 'writer'], ['review', 'researcher']])
+  })
+
   it('lets a permission for the web be answered at a glance, but not a command, an Auto mode ask or an edit', () => {
     const [team] = teamsNow([run('a', { permissionRequests: [
       permission('web'),
