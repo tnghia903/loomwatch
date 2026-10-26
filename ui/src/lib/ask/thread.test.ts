@@ -58,6 +58,53 @@ describe('projectAskThread', () => {
     expect(turn.steps[1].detail).toBeNull()
   })
 
+  it('names the steps of building from what the person has, a job by its name and a search by its words', () => {
+    seq = 0
+    const turn = projectAskThread([
+      status('starting'), status('ready'), status('working'),
+      meta('ask_message', { text: 'A team for my client notes', context: { view: 'home', teamPath: null, runId: null } }),
+      call('c1', 'list_my_agents'), done('c1'),
+      call('c2', 'list_jobs'), done('c2'),
+      call('c3', 'read_job', { job: 'deck' }), done('c3'),
+      call('c4', 'read_job', { job: 'astronaut' }), done('c4'),
+      call('c5', 'list_skills'), done('c5'),
+      call('c6', 'list_tools'), done('c6'),
+      call('c7', 'find_files', { name: 'Client notes' }), done('c7'),
+      call('c8', 'find_files', { name: 'Client notes' }), failed('c8', 'Give a folder or file’s name.'),
+      call('c9', 'find_files', { name: 'Client notes' }),
+      call('c10', 'read_job', { job: 'deck' }), failed('c10', 'LoomWatch has no job called deck.'),
+      call('c11', 'find_files', { name: 'Tax returns' }), failed('c11', 'That is too long for a folder or file’s name.'),
+      event('turn_end', { stopReason: 'end_turn' }),
+    ]).items[1] as AssistantTurn
+    expect(turn.steps.map((step) => step.label)).toEqual([
+      'Looked at My agents',
+      'Looked at LoomWatch’s jobs',
+      'Read the Presentation maker job',
+      'Read a job',
+      'Looked at your skills',
+      'Looked at your tools',
+      'Looked for “Client notes”',
+      // Tried again, so it reads as done, still saying what it looked for: the person has nothing
+      // to do about it.
+      'Looked for “Client notes”',
+      expect.stringMatching(/^Look(ing|ed) for “Client notes”$/),
+      'Couldn’t read the job',
+      'Couldn’t look for “Tax returns”',
+    ])
+  })
+
+  it('keeps the names the daemon read for each agent, so a card names one from My agents', () => {
+    seq = 0
+    const thread = projectAskThread([
+      status('ready'), status('working'),
+      meta('ask_message', { text: 'A review team', context: { view: 'home', teamPath: null, runId: null } }),
+      meta('ask_proposal', { proposalId: 'p1', file: 'review.yaml', name: 'Review', isNew: true, summary: '', yaml: TEAM, agentNames: { researcher: 'Researcher', odd: 3, blank: ' ' } }),
+      meta('ask_proposal', { proposalId: 'p2', file: 'other.yaml', name: 'Other', isNew: true, summary: '', yaml: TEAM }),
+    ])
+    const cards = (thread.items[1] as AssistantTurn).cards
+    expect(cards.map((card) => card.kind === 'proposal' && card.agentNames)).toEqual([{ researcher: 'Researcher' }, {}])
+  })
+
   it('keeps a failure the app never fixed, in the words it was told', () => {
     const events = proposeTurn()
     const lastDraft = events.map((event) => event.payload?.title).lastIndexOf('mcp__loomwatch__propose_team')

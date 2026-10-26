@@ -409,12 +409,31 @@ other apps' settings, which hold those apps' credentials. The run records the to
 Ask (`control/`) is the same agent, on the operator's key and the model they chose, but outside
 any run. It is kept open across turns and archived as its own session. It gets the LoomWatch
 Control tools and nothing else: no files, no commands, no web. The tools are `list_teams`,
-`read_team`, `list_models`, `list_skills`, `propose_team`, `start_run`, `get_run` and
-`draft_review_note`, all direct calls in the daemon. They read and propose. None of them writes a
-team file or answers a review stop: a proposed team is shown on the canvas and saved only when the
-person presses Apply. A skill Ask gives an agent is wired by name (`kind: skill`), as the canvas
-wires one, from the skills `list_skills` reports, the same list a run delivers from. A proposal
-that wires a skill no run could find is refused, unless the saved team already wires it.
+`read_team`, `list_models`, `list_skills`, `list_jobs`, `read_job`, `list_my_agents`,
+`list_tools`, `find_files`, `propose_team`, `start_run`, `get_run` and `draft_review_note`, all
+direct calls in the daemon. They read and propose. None of them writes a team file or answers a
+review stop: a proposed team is shown on the canvas and saved only when the person presses Apply.
+
+Ask builds from what the person has (ADR 0096). Its first turn names their teams, My agents (with
+the ids a team points at), skills, connected tools and ways of paying. `list_jobs` and `read_job`
+give LoomWatch's built-in jobs from `schemas/built-in-jobs.json`, the list the app's palette and
+agent builder place from (`ui/src/lib/library/roles.ts`), on the models `schemas/model-tiers.json`
+gives each job. `list_my_agents` lists the person's agents, which a proposal points at with
+`from: {agent}`. `list_tools` lists the connected tools by what each reads and changes.
+`find_files` (`control/find.rs`) finds a folder or file by the person's words: first among what
+their teams and agents already read, then below their home folder and, on a Mac, iCloud Drive and
+each folder in `~/Library/CloudStorage`, at most five folders deep, skipping hidden folders, app
+data and bundles, within 40,000 folders and 3 seconds. It reads names only, and lists a found
+folder's first eight names. A folder near the top it wasn't allowed to open (macOS asks the person
+before an app reads Documents, Desktop or Downloads) is named in its answer, so Ask can say how to
+allow it rather than "not found". Ask is told never to ask the person for a path.
+
+`propose_team` checks a proposal as a run would read it, before it reaches the canvas: an agent
+that points at one of My agents is filled in from it, a skill must be installed, a tool connected,
+and a folder or file it connects, or a folder an agent works in, must be on this computer. What the
+saved team already names is let through. A check step that doesn't say how it sends work back gets
+`sendBack: {rounds: 2, whenStillNotMet: ask}`, and a new team that sets no `spend` gets the new-team
+limit, `perRun: 1.00`, as the editor writes them.
 
 ---
 

@@ -345,7 +345,8 @@ depend on the document as a whole:
   - **Verdict words.** A verdict word is read as a whole word, so "Metrics …" is not "Met".
   - Operator nodes may not set either field.
 - `spend.perRun` (team level) is what one run may spend on model calls, in US dollars. Absent
-  means no limit; new teams and the starter teams are written with `1.00`. Every agent of the run draws on it: stages, the lead, Team Bus helpers,
+  means no limit; new teams, the starter teams and a new team Ask LoomWatch proposes are written with
+`1.00`. Every agent of the run draws on it: stages, the lead, Team Bus helpers,
   summaries, checkpoints and handovers. The daemon adds up each call's dollars: the exact cost
   OpenRouter reports, or for a call on the Claude credit its cost at Claude's list prices. A call on
   the ChatGPT plan costs no dollars and counts against the plan's limits instead. Before each call, an agent whose run has used its figure waits, and the run shows a

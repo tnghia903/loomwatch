@@ -486,6 +486,21 @@ export function useTeamDocument() {
   }, [resetHistory])
 
   /**
+   * Read My agents again, so a team file that points at one of them can be filled in from it: a
+   * page with no team open hasn't read them, and one may have been saved since this page read
+   * them. An Ask LoomWatch proposal does this before it reaches the canvas (ADR 0096). When they
+   * can't be read, the list stays as it was.
+   */
+  const loadMyAgents = useCallback(async (): Promise<void> => {
+    try {
+      const list = await fetchJobs()
+      if (list) jobsRef.current = list.jobs
+    } catch {
+      // The agents show as the file writes them, as they would have before.
+    }
+  }, [])
+
+  /**
    * Replace the document with a whole team file as one undoable edit — how an Ask LoomWatch
    * proposal reaches the canvas (ADR 0033). Nothing is saved: the person applies it with Save, and
    * one undo puts back what was there. Agents keep their places unless the file adds one, which lays
@@ -1783,6 +1798,7 @@ export function useTeamDocument() {
     modeSwitchBanner,
     pendingEdgeRemoval,
     createNewDocument,
+    loadMyAgents,
     applyYaml,
     closeDocument,
     reloadFromDisk,

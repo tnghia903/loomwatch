@@ -327,8 +327,9 @@ Run a team every morning and send the answer to Notion. A review stop still wait
 
 ### 💬 Ask LoomWatch
 
-Describe the team you want in a sentence. Ask sets it up on the canvas, on the models you've
-connected, and nothing is saved until you click **Apply**.
+Describe the team you want in a sentence. Ask builds it on the canvas from your own agents,
+folders, skills and tools, on the models you've connected. Nothing is saved until you click
+**Apply**.
 
 </td>
 <td valign="top">
@@ -870,6 +871,16 @@ news"_. Ask sets the team up on the canvas. New and changed agents are marked,
 and nothing is saved until you click **Apply**; **Discard** drops the proposal, and **Undo** takes
 an applied one back.
 
+- **It builds from what you have.** It uses one of My agents when one already does the part, and
+  starts the others from LoomWatch's jobs, such as Researcher, Writer, Checker or Presentation
+  maker. Name a folder or file, such as _"from my Client notes folder"_, and Ask finds it by name
+  in your folders (on a Mac, iCloud Drive and cloud drives too) and gives it to the agent that
+  reads it. It gives a skill you added, or a tool you connected, to
+  the agent that uses it. It looks only at names to find a folder, never inside your files.
+- **It picks the team's shape.** One agent for most work; agents that hand work on in turn when it
+  needs different jobs, such as research then writing; a lead that hands parts to teammates
+  working at the same time; a review step where the work should wait for you; and a check step
+  when facts or figures must be right.
 - **It asks before it runs.** When it wants to start a run, it waits for you to click **Start run**,
   unless you turn off **Ask me before starting a run**.
 - **It never answers a review step.** It can put a drafted note in the review box; only you click

@@ -122,9 +122,12 @@ export function useAskActions({ doc, conversationId, activeRunId, waiting, toBui
     return () => window.clearTimeout(timer)
   }, [settled])
 
-  const begin = useCallback((proposal: Proposal, inPlace: boolean) => {
+  const begin = useCallback(async (proposal: Proposal, inPlace: boolean) => {
     const beforeYaml = inPlace ? doc.yamlPreview : null
-    const changes = proposalChanges(inPlace ? doc.loadedYaml ?? doc.yamlPreview : null, proposal.yaml)
+    const changes = proposalChanges(inPlace ? doc.loadedYaml ?? doc.yamlPreview : null, proposal.yaml, proposal.agentNames)
+    // A proposal may point at one of My agents (ADR 0096), which this page may not have read yet,
+    // as on Home: read them first, so the agent shows as itself rather than blank.
+    await doc.loadMyAgents()
     const applied = inPlace ? doc.applyYaml(proposal.yaml) : doc.applyYaml(proposal.yaml, proposal.file)
     if (!applied) {
       say({ text: 'That proposal isn’t a team LoomWatch can open. Ask for it again.' })
@@ -165,9 +168,9 @@ export function useAskActions({ doc, conversationId, activeRunId, waiting, toBui
         return
       }
       toBuild()
-      begin(proposal, true)
+      void begin(proposal, true)
     } else if (!doc.path && proposal.isNew) {
-      begin(proposal, false)
+      void begin(proposal, false)
     } else {
       try { window.sessionStorage.setItem(CARRIED_PROPOSAL_KEY, JSON.stringify(proposal)) } catch { /* the daemon's copy is enough */ }
       window.location.assign(proposal.isNew ? `/?${new URLSearchParams({ proposal: id })}` : teamUrl(proposal.file, { proposal: id }))
@@ -183,7 +186,7 @@ export function useAskActions({ doc, conversationId, activeRunId, waiting, toBui
       present(await fetchProposal(id))
     } catch (caught) {
       if (recorded?.yaml) {
-        present({ id, source: '', file: recorded.file, name: recorded.name, isNew: recorded.isNew, yaml: recorded.yaml, baseRevision: null, summary: recorded.summary, createdAt: recorded.at })
+        present({ id, source: '', file: recorded.file, name: recorded.name, isNew: recorded.isNew, yaml: recorded.yaml, baseRevision: null, summary: recorded.summary, createdAt: recorded.at, agentNames: recorded.agentNames })
         return
       }
       say({ text: caught instanceof Error ? caught.message : String(caught) })

@@ -451,6 +451,7 @@ async fn main() -> Result<()> {
                     registry: registry.clone(),
                     listen: address,
                     ask_model: std::env::var("LOOMWATCH_ASK_MODEL").ok(),
+                    home: loomwatch_backend::platform::home_dir(),
                 },
             );
             // ADR 0052: says when a newer LoomWatch is out and how to install it. The check runs
