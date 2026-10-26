@@ -1532,33 +1532,81 @@ describe('a web page in the reader', () => {
     }), '*'))
   })
 
-  it('tells someone in its tip that a chart in a page can be asked about, until they have', async () => {
+  it('has a Pick switch that has the page mark the part clicked, stops on Esc, on asking or with another file, and is taught in its tip until a part is asked about', async () => {
     const SITE = '/w/site/page.html'
-    answer = (url) => (url.startsWith('/api/files/read') ? respond(200, read({ path: SITE, name: 'page.html', kind: 'web', text: '<p>Sales grew.</p><canvas id="chart"></canvas>' })) : respond(404, {}))
-    const { onAsk } = renderReader({ file: { path: SITE, runId: 'run-1', from: 'writer' } })
-    const frame = await waitFor(() => {
+    const OTHER = '/w/site/other.html'
+    answer = (url) => (!url.startsWith('/api/files/read') ? respond(404, {})
+      : url.includes(encodeURIComponent(OTHER)) ? respond(200, read({ path: OTHER, name: 'other.html', kind: 'web', text: '<p>Other</p>' }))
+        : respond(200, read({ path: SITE, name: 'page.html', kind: 'web', text: '<p>Sales grew.</p><svg><rect></rect><text>API</text></svg>' })))
+    const { onAsk, rerender } = renderReader({ file: { path: SITE, runId: 'run-1', from: 'writer' } })
+    const frameOf = () => waitFor(() => {
       const element = document.querySelector('iframe')
       if (!element?.contentWindow) throw new Error('no frame yet')
       return element
     })
+    const frame = await frameOf()
+    const told = vi.spyOn(frame.contentWindow!, 'postMessage')
     const fromPage = (data: Record<string, unknown>) => act(() => { window.dispatchEvent(new MessageEvent('message', { data: { lw: 'reader', ...data }, source: frame.contentWindow })) })
-    // Before the page says what it has, the tip is about words.
-    expect(await screen.findByText('Mark any words')).toBeInTheDocument()
-    fromPage({ type: 'things', what: ['picture', 'chart'] })
+    fromPage({ type: 'ready' })
+    // It doesn't say who answers (the pill does, once a part is marked): it shows a page with one part picked, not a face.
+    const pick = screen.getByRole('button', { name: 'Pick a part of the page to ask about' })
+    expect(pick).toHaveAttribute('aria-pressed', 'false')
+    expect(pick.querySelector('svg .rd-pick-part')).not.toBeNull()
+    expect(pick.textContent).toBe('')
+    await waitFor(() => expect(told).toHaveBeenCalledWith({ lw: 'reader', type: 'pick', on: false }, '*'))
+    // The tip draws the switch, says where it is and what it does.
     const tip = () => document.querySelector('.rd-hint')
-    expect(tip()).toHaveTextContent(/^WRMark any words or click WR on a chart to ask Writer$/)
-    expect(screen.getByRole('img', { name: 'the mark at its corner' })).toBeInTheDocument()
-    // Words asked about teach words: the tip now speaks of the chart alone.
+    expect(tip()).toHaveTextContent(/^WRMark any words, or click at the top, then any part, to ask Writer$/)
+    expect(screen.getByRole('img', { name: 'the Pick a part button' }).querySelector('svg .rd-pick-part')).not.toBeNull()
+    // On: the page is told, and keeps the keys where it had them for a mouse's click; the tip says what to do now.
+    fireEvent.click(pick, { detail: 1 })
+    expect(pick).toHaveAttribute('aria-pressed', 'true')
+    expect(pick).toHaveAttribute('title', 'Click any part of the page. Click here or press Esc to stop.')
+    await waitFor(() => expect(told).toHaveBeenLastCalledWith({ lw: 'reader', type: 'pick', on: true }, '*'))
+    expect(document.activeElement).not.toBe(frame)
+    expect(tip()).toHaveTextContent(/^WRClick any part to ask Writer about it$/)
+    // The arrow keys' part is said to a screen reader.
+    fromPage({ type: 'pointing', text: 'The part “API”' })
+    expect(screen.getByText('The part “API”')).toHaveAttribute('role', 'status')
+    // Esc in the page, with no answer open over it, stops picking.
+    fromPage({ type: 'escape' })
+    expect(pick).toHaveAttribute('aria-pressed', 'false')
+    await waitFor(() => expect(told).toHaveBeenLastCalledWith({ lw: 'reader', type: 'pick', on: false }, '*'))
+    expect(screen.queryByText('The part “API”')).toBeNull()
+    // Turned on from the keyboard, the page takes the keys and outlines where they start, and a screen reader is told how.
+    fireEvent.click(pick, { detail: 0 })
+    expect(document.activeElement).toBe(frame)
+    await waitFor(() => expect(told).toHaveBeenLastCalledWith({ lw: 'reader', type: 'pick', on: true, keys: true }, '*'))
+    expect(screen.getByText('Picking. Use the arrow keys, then Enter.')).toHaveAttribute('role', 'status')
+    // Words asked about teach words, and asking stops picking: the page's own buttons work again.
     fromPage({ type: 'selection', text: 'Sales grew.', rect: { top: 10, bottom: 28, left: 20, right: 120 } })
     fireEvent.click(await screen.findByRole('button', { name: 'Ask' }))
     expect(window.localStorage.getItem('loomwatch.readerHint')).toBe('seen')
-    expect(tip()).toHaveTextContent(/^WRClick WR on a chart to ask Writer about it$/)
-    // Asking about the chart is what it teaches.
-    fromPage({ type: 'thing', what: 'chart', path: 'canvas#chart', text: 'The chart', rect: { top: 40, bottom: 190, left: 20, right: 320 } })
-    fireEvent.click(await screen.findByRole('button', { name: 'Ask' }))
-    expect(onAsk).toHaveBeenCalledTimes(2)
-    expect(window.localStorage.getItem('loomwatch.readerHint.thing')).toBe('seen')
+    expect(pick).toHaveAttribute('aria-pressed', 'false')
+    expect(tip()).toHaveTextContent(/^WRClick at the top, then any part, to ask Writer about it$/)
+    // A part the page says was picked: asked about by its path, with no picture when the page drew none.
+    fireEvent.click(pick, { detail: 1 })
+    const at = { kind: 'element', what: 'part', path: 'body > svg > rect' }
+    fromPage({ type: 'thing', what: 'part', path: 'body > svg > rect', text: 'The part “API”', rect: { top: 40, bottom: 90, left: 20, right: 220 } })
+    expect(await screen.findByRole('toolbar', { name: 'Ask Writer about the part you marked' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }))
+    expect(onAsk).toHaveBeenLastCalledWith(
+      { runId: 'run-1', messageId: passageId(SITE, 'The part “API”', at as never), from: 'writer', to: null, kind: 'passage', text: 'The part “API”', file: SITE, at },
+      undefined, 'writer',
+    )
+    expect(pick).toHaveAttribute('aria-pressed', 'false')
+    // Asking about a part is what the tip teaches.
+    expect(window.localStorage.getItem('loomwatch.readerHint.pick')).toBe('seen')
     expect(tip()).toBeNull()
+    // The switch is for the file open now: another page opens with it off.
+    fireEvent.click(pick, { detail: 1 })
+    expect(pick).toHaveAttribute('aria-pressed', 'true')
+    rerender({ file: { path: OTHER, runId: 'run-1', from: 'writer' } })
+    await screen.findByRole('article', { name: 'other.html, read here' })
+    expect(screen.getByRole('button', { name: 'Pick a part of the page to ask about' })).toHaveAttribute('aria-pressed', 'false')
+    // The page's code has no parts to pick.
+    fireEvent.click(screen.getByRole('tab', { name: 'Code' }))
+    expect(screen.queryByRole('button', { name: 'Pick a part of the page to ask about' })).toBeNull()
   })
 
   it('hands the page the files beside it that it asks for as it runs, inside its own folder only', async () => {

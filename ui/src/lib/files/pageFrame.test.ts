@@ -356,86 +356,320 @@ describe('a web page in the reader', () => {
     }
   })
 
-  it('marks a chart, picture or video in the page from the mark at its corner, sends what it is, where, and its picture, and outlines the things asked about', async () => {
+  // jsdom lays nothing out: each element of a test page is where its `data-box` says (left, top,
+  // width, height); any other is nowhere.
+  const laidOut = (inner: Window & typeof globalThis) => vi.spyOn(inner.Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+    const [left, top, width, height] = (this.getAttribute('data-box') ?? '0 0 0 0').split(' ').map(Number)
+    return { left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) } as DOMRect
+  })
+  // A press, as a mouse makes one, at x, y on an element.
+  const press = (inner: Window & typeof globalThis, element: Element, x: number, y: number) => {
+    for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+      const init = { bubbles: true, cancelable: true, clientX: x, clientY: y }
+      element.dispatchEvent(type.startsWith('pointer') ? new inner.PointerEvent(type, { ...init, pointerType: 'mouse' }) : new inner.MouseEvent(type, init))
+    }
+  }
+
+  it('picks any part of the page while the Pick switch is on, rather than doing what the page does, and widens on a second click', async () => {
     const holder = document.createElement('iframe')
     document.body.append(holder)
     const inner = holder.contentWindow! as Window & typeof globalThis
     const doc = holder.contentDocument!
     const sent: Record<string, unknown>[] = []
     vi.spyOn(inner.parent, 'postMessage').mockImplementation((message: unknown) => { sent.push(message as Record<string, unknown>) })
-    // jsdom lays nothing out: every thing is 300 by 150 at 10,20. It draws nothing either: the
-    // picture is whatever the canvas gives.
+    laidOut(inner)
+    vi.spyOn(inner, 'requestAnimationFrame').mockImplementation((callback) => { callback(0); return 1 })
+    const opened = vi.spyOn(inner, 'open').mockImplementation(() => null)
+    // The page's clock, moved on by hand: the outline fades in for its first 160 ms.
+    let clock = 1000
+    vi.spyOn(inner.Date, 'now').mockImplementation(() => clock)
+    // It draws nothing: what is drawn into a part's picture, and where, is all there is to see.
+    const drawn: unknown[][] = []
+    const sizes: number[][] = []
+    vi.spyOn(inner.HTMLCanvasElement.prototype, 'getContext').mockImplementation(function (this: HTMLCanvasElement) {
+      sizes.push([this.width, this.height])
+      return { scale: () => undefined, fillRect: () => undefined, drawImage: (...args: unknown[]) => drawn.push(args) } as unknown as CanvasRenderingContext2D
+    })
+    vi.spyOn(inner.HTMLCanvasElement.prototype, 'toBlob').mockImplementation((done: BlobCallback) => done(new Blob(['png']) as Blob))
+    // A drawing is drawn as a picture of it, which loads at once.
+    Object.assign(inner, { Image: class { onload: (() => void) | null = null; set src(_: string) { setTimeout(() => this.onload?.()) } } })
+    const settle = (ms = 10) => new Promise((resolve) => setTimeout(resolve, ms))
+    const tell = (data: Record<string, unknown>) => inner.dispatchEvent(new inner.MessageEvent('message', { data: { lw: 'reader', ...data }, source: inner.parent }))
+    const picked = () => sent.filter((message) => message.type === 'thing').map((message) => [message.what, message.path, message.text])
+    try {
+      doc.body.innerHTML = '<h2 data-box="10 10 400 30">Plan</h2>'
+        + '<section id="plan" data-box="10 50 600 400"><div data-box="20 60 300 100"><p data-box="30 70 280 20">Costs <b data-box="70 70 30 20">rise</b> in <a href="https://x.example/may" data-box="120 70 40 20">May</a></p> '
+        + '<button data-box="30 100 80 30">Export</button></div><canvas id="chart" data-box="20 200 300 150"></canvas></section>'
+        + '<svg id="arch" data-box="10 500 600 400"><rect data-box="10 500 600 400"></rect><rect data-box="40 530 240 140"></rect><text data-box="45 532 100 10">Serving path</text>'
+        + '<g data-box="50 550 200 100"><rect data-box="50 550 200 100"></rect><text data-box="60 560 120 20">API · Container App</text><text data-box="60 590 150 20">FTS/BM25</text></g>'
+        + '<rect data-box="300 550 200 100"></rect><text data-box="310 560 100 20">Reranker app</text><text data-box="282 600 14 12">top 20</text></svg>'
+      new inner.Function(PAGE_BRIDGE)()
+      // The page's own handlers, added after LoomWatch's script, as a page's are.
+      const page: string[] = []
+      doc.querySelector('button')!.addEventListener('click', () => page.push('click'))
+      inner.addEventListener('mousedown', () => page.push('mousedown'), true)
+      inner.addEventListener('keydown', (event) => page.push(event.key), true)
+      const words = doc.querySelector('b')!
+
+      // Off, a click is the page's, and nothing is outlined or marked.
+      words.dispatchEvent(new inner.PointerEvent('pointermove', { bubbles: true, pointerType: 'mouse', clientX: 80, clientY: 75 }))
+      press(inner, doc.querySelector('button')!, 40, 110)
+      await settle()
+      expect(page).toEqual(['mousedown', 'click'])
+      expect(doc.querySelector('.lw-thing-box')).toBeNull()
+      expect(picked()).toEqual([])
+
+      // On, pointing at words outlines the block they are in, not the words.
+      tell({ type: 'pick', on: true })
+      page.length = 0
+      words.dispatchEvent(new inner.PointerEvent('pointermove', { bubbles: true, pointerType: 'mouse', clientX: 80, clientY: 75 }))
+      const pointing = doc.querySelector<HTMLElement>('.lw-thing-box.lw-pointing')!
+      expect([pointing.style.left, pointing.style.top, pointing.style.width, pointing.style.height]).toEqual(['28px', '68px', '284px', '24px'])
+      // The outlines are over the page, never in it.
+      expect(doc.body.querySelector('.lw-thing-box')).toBeNull()
+      // Pointed at another part, the outline glides there, though not while it is still fading in;
+      // while the page scrolls under it, it keeps to its part at once, and stays so until it moves on.
+      const glides = () => !doc.querySelector('.lw-thing-box.lw-pointing')!.classList.contains('lw-still')
+      const over = (element: Element, x: number, y: number) => element.dispatchEvent(new inner.PointerEvent('pointermove', { bubbles: true, pointerType: 'mouse', clientX: x, clientY: y }))
+      expect(glides()).toBe(false)
+      over(doc.querySelector('button')!, 40, 110)
+      expect(glides()).toBe(false)
+      clock += 200
+      over(words, 80, 75)
+      expect(glides()).toBe(true)
+      inner.dispatchEvent(new inner.Event('scroll'))
+      expect(glides()).toBe(false)
+      over(words, 82, 75)
+      expect(glides()).toBe(false)
+      over(doc.querySelector('button')!, 40, 110)
+      expect(glides()).toBe(true)
+      over(words, 80, 75)
+      expect([pointing.style.left, pointing.style.top]).toEqual(['28px', '68px'])
+      expect(glides()).toBe(true)
+      // The page's own cursors (a link's hand) give way while picking.
+      expect(doc.documentElement.classList.contains('lw-picking')).toBe(true)
+      // The fade and the glide are only for those who haven't asked for less motion, and never while still.
+      const css = [...doc.querySelectorAll('style')].map((style) => style.textContent).join('')
+      expect(css).toContain('html.lw-picking body :not(.lw-slot,.lw-slot *){cursor:auto!important}')
+      expect(css).toMatch(/@media \(prefers-reduced-motion:no-preference\)\{\.lw-thing-box\.lw-pointing\{animation:lw-point-in [^}]*\}\.lw-thing-box\.lw-pointing:not\(\.lw-still\)\{transition:left [^}]*\}\}/)
+      // A drag across words still marks the words, and the outline steps aside while they are marked.
+      Object.defineProperty(inner.Range.prototype, 'getBoundingClientRect', { configurable: true, value: () => ({ top: 70, bottom: 90, left: 70, right: 100 }) })
+      const range = doc.createRange()
+      range.selectNodeContents(words)
+      doc.getSelection()!.addRange(range)
+      doc.dispatchEvent(new inner.Event('pointerup'))
+      await settle()
+      expect(sent.at(-1)).toMatchObject({ type: 'selection', text: 'rise' })
+      expect(doc.querySelector('.lw-thing-box.lw-pointing')).toBeNull()
+      doc.dispatchEvent(new inner.KeyboardEvent('keydown', { key: 'Escape' }))
+      expect(sent.at(-1)).toMatchObject({ type: 'selection', text: '' })
+      expect(doc.querySelector('.lw-thing-box.lw-pointing')).not.toBeNull()
+      // A press that moves is a drag across words, and marks nothing more; a double click picks a word.
+      sent.length = 0
+      const at = (type: string, x: number, init: Record<string, unknown> = {}) => words.dispatchEvent(type.startsWith('pointer')
+        ? new inner.PointerEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: 75, pointerType: 'mouse', ...init })
+        : new inner.MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: 75, ...init }))
+      at('pointerdown', 72)
+      at('click', 98)
+      at('pointerdown', 80)
+      at('click', 80, { detail: 2 })
+      await settle()
+      expect(sent.filter((message) => message.type === 'thing')).toEqual([])
+      // Words still marked when a part is clicked (Safari keeps them through a press on a button) are let go of.
+      doc.getSelection()!.addRange(range)
+      press(inner, doc.querySelector('button')!, 40, 110)
+      await settle()
+      expect(String(doc.getSelection())).toBe('')
+      expect(sent.filter((message) => message.type === 'thing').map((message) => message.path)).toEqual(['section#plan > div > button'])
+      tell({ type: 'clear' })
+      sent.length = 0
+
+      // A click marks that part, and the page never sees it; a second click there marks the part
+      // around it, and the next the one around that, up to the biggest.
+      press(inner, words, 80, 75)
+      await settle()
+      expect(picked()).toEqual([['part', 'section#plan > div > p', 'The part “Costs rise in May”']])
+      // Words and boxes have no picture: the agent reads them in the page's code.
+      expect(sent.find((message) => message.type === 'thing')).not.toHaveProperty('picture')
+      expect(doc.querySelector('.lw-thing-box.lw-marking')).not.toBeNull()
+      // The part marked is not outlined twice.
+      expect(doc.querySelector('.lw-thing-box.lw-pointing')).toBeNull()
+      sent.length = 0
+      for (let count = 0; count < 3; count += 1) {
+        press(inner, words, 80, 75)
+        await settle()
+      }
+      // Past the biggest part below the page itself, the part first clicked again.
+      expect(picked().map(([, path]) => path)).toEqual(['section#plan > div', 'section#plan', 'section#plan > div > p'])
+      expect(doc.querySelectorAll('.lw-thing-box.lw-marking')).toHaveLength(1)
+      // A link is a part of its own, and isn't followed; a button isn't pressed.
+      sent.length = 0
+      press(inner, doc.querySelector('a')!, 130, 75)
+      await settle()
+      press(inner, doc.querySelector('button')!, 40, 110)
+      await settle()
+      expect(picked()).toEqual([['part', 'section#plan > div > p > a', 'The part “May”'], ['part', 'section#plan > div > button', 'The part “Export”']])
+      expect(opened).not.toHaveBeenCalled()
+      expect(page).toEqual([])
+      // Nor does the browser follow the link, or put a press into a button or a field.
+      expect(doc.querySelector('a')!.dispatchEvent(new inner.MouseEvent('click', { bubbles: true, cancelable: true }))).toBe(false)
+      expect(doc.querySelector('button')!.dispatchEvent(new inner.MouseEvent('mousedown', { bubbles: true, cancelable: true }))).toBe(false)
+      await settle()
+
+      // A chart whole, with its picture.
+      sent.length = 0
+      drawn.length = 0
+      press(inner, doc.querySelector('canvas')!, 100, 250)
+      await settle()
+      expect(picked()).toEqual([['chart', 'canvas#chart', 'The chart under “Plan”']])
+      expect(Object.prototype.toString.call(sent.find((message) => message.type === 'thing')!.picture)).toBe('[object ArrayBuffer]')
+      expect(drawn.map((args) => args[0])).toEqual([doc.querySelector('canvas')])
+
+      // In a drawing: the box under the pointer with the words on it, by its group; its picture is
+      // the drawing cut to it, with a little around it.
+      sent.length = 0
+      drawn.length = 0
+      sizes.length = 0
+      const [, api, , reranker, label] = [...doc.querySelectorAll('text')]
+      press(inner, api, 100, 600)
+      await settle()
+      expect(picked()).toEqual([['part', 'svg#arch > g', 'The part “API · Container App”']])
+      expect(sizes.at(-1)).toEqual([232, 132])
+      expect(drawn.at(-1)!.slice(1)).toEqual([-24, -34, 600, 400])
+      // Clicked again, the region drawn around it, by its own words; then the drawing.
+      sent.length = 0
+      press(inner, api, 100, 600)
+      await settle()
+      press(inner, api, 100, 600)
+      await settle()
+      expect(picked()).toEqual([['part', 'svg#arch > rect:nth-of-type(2)', 'The part “Serving path”'], ['chart', 'svg#arch', 'The chart under “Plan”']])
+      // A box with its words beside it rather than in a group: the words drawn on it.
+      sent.length = 0
+      press(inner, reranker, 360, 570)
+      await settle()
+      // A label on no box is a part of its own; the drawing's background is the drawing.
+      press(inner, label, 289, 606)
+      await settle()
+      press(inner, doc.querySelector('svg')!, 580, 880)
+      await settle()
+      expect(picked()).toEqual([
+        ['part', 'svg#arch > rect:nth-of-type(3)', 'The part “Reranker app”'],
+        ['part', 'svg#arch > text:nth-of-type(3)', 'The part “top 20”'],
+        ['chart', 'svg#arch', 'The chart under “Plan”'],
+      ])
+
+      // The arrow keys walk the parts as a tree: down and up to the ones beside, right to the
+      // first inside, left to the one around; Enter marks it. The page never sees those keys.
+      sent.length = 0
+      page.length = 0
+      tell({ type: 'clear' })
+      const keys = (...names: string[]) => names.forEach((key) => doc.body.dispatchEvent(new inner.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })))
+      const outlined = () => { const box = doc.querySelector<HTMLElement>('.lw-thing-box.lw-pointing'); return box && [box.style.left, box.style.top] }
+      words.dispatchEvent(new inner.PointerEvent('pointermove', { bubbles: true, pointerType: 'mouse', clientX: 80, clientY: 75 }))
+      // From the part pointed at last, the words' block: down to the one beside it and up again, left
+      // to the one around them, down to the chart, left, down to the drawing and right into it, its region.
+      const walked: unknown[] = []
+      for (const key of ['ArrowDown', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowDown', 'ArrowLeft', 'ArrowDown', 'ArrowRight']) {
+        keys(key)
+        walked.push(outlined())
+      }
+      expect(walked).toEqual([['28px', '98px'], ['28px', '68px'], ['28px', '98px'], ['18px', '58px'], ['18px', '198px'], ['8px', '48px'], ['8px', '498px'], ['38px', '528px']])
+      // Each is said, for a screen reader.
+      expect(sent.filter((message) => message.type === 'pointing').map((message) => message.text)).toEqual([
+        'The part “Export”', 'The part “Costs rise in May”', 'The part “Export”', 'The part “Costs rise in May Export”', 'The chart under “Plan”',
+        'The part “Costs rise in May Export”', 'The chart under “Plan”', 'The part “Serving path”',
+      ])
+      keys('Enter', 'a')
+      await settle()
+      expect(picked()).toEqual([['part', 'svg#arch > rect:nth-of-type(2)', 'The part “Serving path”']])
+      expect(page).toEqual(['a'])
+
+      // Esc lets go of it, and with nothing marked is the reader's (it stops picking).
+      keys('Escape')
+      expect(sent.at(-1)).toMatchObject({ type: 'selection', text: '' })
+      expect(doc.querySelector('.lw-thing-box.lw-marking')).toBeNull()
+      keys('Escape')
+      expect(sent.at(-1)).toMatchObject({ type: 'escape' })
+
+      // Off again, the outline goes, the page's cursors come back and a click is the page's.
+      tell({ type: 'pick', on: false })
+      expect(doc.querySelector('.lw-thing-box.lw-pointing')).toBeNull()
+      expect(doc.documentElement.classList.contains('lw-picking')).toBe(false)
+      page.length = 0
+      sent.length = 0
+      press(inner, doc.querySelector('button')!, 40, 110)
+      await settle()
+      expect(page).toEqual(['mousedown', 'click'])
+      expect(picked()).toEqual([])
+    } finally {
+      vi.restoreAllMocks()
+      holder.remove()
+    }
+  })
+
+  it('takes a drag across words in a drawing as the box they are on, switch or no switch', async () => {
+    const holder = document.createElement('iframe')
+    document.body.append(holder)
+    const inner = holder.contentWindow! as Window & typeof globalThis
+    const doc = holder.contentDocument!
+    const sent: Record<string, unknown>[] = []
+    vi.spyOn(inner.parent, 'postMessage').mockImplementation((message: unknown) => { sent.push(message as Record<string, unknown>) })
+    laidOut(inner)
+    vi.spyOn(inner.HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => null)
+    // Words, were they sent as words, are somewhere.
+    Object.defineProperty(inner.Range.prototype, 'getBoundingClientRect', { configurable: true, value: () => ({ top: 560, bottom: 610, left: 60, right: 210 }) })
+    try {
+      doc.body.innerHTML = '<svg id="arch" data-box="10 500 600 400"><g data-box="50 550 200 100"><rect data-box="50 550 200 100"></rect><text data-box="60 560 120 20">API · Container App</text><text data-box="60 590 150 20">FTS/BM25</text></g>'
+        + '<rect data-box="300 550 200 100"></rect><text data-box="310 560 100 20">Reranker app</text></svg>'
+      new inner.Function(PAGE_BRIDGE)()
+      const drag = async (from: Node, to: Node) => {
+        const range = doc.createRange()
+        range.setStart(from, 0)
+        range.setEnd(to, 3)
+        doc.getSelection()!.addRange(range)
+        doc.dispatchEvent(new inner.Event('pointerup'))
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+      const [api, fts, reranker] = [...doc.querySelectorAll('text')].map((text) => text.firstChild!)
+      await drag(api, fts)
+      // Not marked as words (a drawing's words can't carry the marker): the box they are on.
+      expect(sent.filter((message) => message.type === 'selection' && message.text)).toEqual([])
+      expect(sent.find((message) => message.type === 'thing')).toMatchObject({ what: 'part', path: 'svg#arch > g', text: 'The part “API · Container App”' })
+      expect(String(doc.getSelection())).toBe('')
+      // Words across two boxes: the drawing.
+      sent.length = 0
+      await drag(fts, reranker)
+      expect(sent.find((message) => message.type === 'thing')).toMatchObject({ what: 'chart', path: 'svg#arch' })
+    } finally {
+      vi.restoreAllMocks()
+      holder.remove()
+    }
+  })
+
+  it('outlines the parts asked about by their path, follows them as the page changes size, and finds one the page draws later', async () => {
+    const holder = document.createElement('iframe')
+    document.body.append(holder)
+    const inner = holder.contentWindow! as Window & typeof globalThis
+    const doc = holder.contentDocument!
+    const sent: Record<string, unknown>[] = []
+    vi.spyOn(inner.parent, 'postMessage').mockImplementation((message: unknown) => { sent.push(message as Record<string, unknown>) })
     let width = 300
-    let top = 20
-    vi.spyOn(inner.Element.prototype, 'getBoundingClientRect').mockImplementation(() => ({ top, left: 10, width, height: 150, right: 10 + width, bottom: top + 150, x: 10, y: top, toJSON: () => ({}) }) as DOMRect)
+    vi.spyOn(inner.Element.prototype, 'getBoundingClientRect').mockImplementation(() => ({ top: 20, left: 10, width, height: 150, right: 10 + width, bottom: 170, x: 10, y: 20, toJSON: () => ({}) }) as DOMRect)
     // The page's own size changes, as a chart that fits itself to the page makes it.
     const resized: (() => void)[] = []
     Object.assign(inner, { ResizeObserver: class { constructor(callback: () => void) { resized.push(callback) } observe() {} unobserve() {} disconnect() {} } })
     vi.spyOn(inner.Element.prototype, 'getClientRects').mockImplementation(() => [{ top: 20, left: 10, right: 310, bottom: 170 }] as unknown as DOMRectList)
-    const drawn: unknown[] = []
-    vi.spyOn(inner.HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => ({ scale: () => undefined, fillRect: () => undefined, drawImage: (thing: unknown) => drawn.push(thing) }) as unknown as CanvasRenderingContext2D)
-    vi.spyOn(inner.HTMLCanvasElement.prototype, 'toBlob').mockImplementation((done: BlobCallback) => done(new Blob(['png']) as Blob))
     vi.spyOn(inner, 'requestAnimationFrame').mockImplementation((callback) => { callback(0); return 1 })
     const settle = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms))
     try {
-      const page = '<h2>Sales by region</h2><canvas id="chart"></canvas><figure><img alt="The team"></figure><section><h3>Launch</h3><video></video><video></video></section>'
+      const page = '<h2>Sales by region</h2><canvas id="chart"></canvas><section><div class="card">North</div></section>'
       doc.body.innerHTML = page
       new inner.Function(PAGE_BRIDGE)()
-      const marks = () => [...doc.querySelectorAll<HTMLButtonElement>('.lw-thing-mark')]
-      // Each mark says which thing it asks about (they come after the page), and its tooltip what it is.
-      expect(marks().map((mark) => mark.getAttribute('aria-label'))).toEqual(['Ask about the chart under “Sales by region”', 'Ask about the picture “The team”', 'Ask about the video under “Launch”', 'Ask about the video under “Launch”'])
-      expect(marks().map((mark) => mark.title)).toEqual(['Ask about this chart', 'Ask about this picture', 'Ask about this video', 'Ask about this video'])
-      // The reader is told which kinds the page has, for its tip.
-      expect(sent).toContainEqual({ lw: 'reader', type: 'things', what: ['chart', 'picture', 'video'] })
-      // The marks and outlines are over the page, never in it.
-      expect(doc.body.querySelector('.lw-things, .lw-thing-mark')).toBeNull()
-
-      // Pointing at the chart shows its mark, at its corner; pressing the mark marks the chart.
-      doc.querySelector('canvas')!.dispatchEvent(new inner.PointerEvent('pointermove', { bubbles: true, pointerType: 'mouse' }))
-      expect(marks()[0].classList.contains('lw-on')).toBe(true)
-      // Outside the chart, above its top left (its bubbles hang above its top right), so it covers
-      // none of the chart; across the corner when the page's top edge leaves no room.
-      expect([marks()[0].style.left, marks()[0].style.top]).toEqual(['4px', '6px'])
-      top = 100
-      doc.querySelector('canvas')!.dispatchEvent(new inner.PointerEvent('pointermove', { bubbles: true, pointerType: 'mouse' }))
-      marks()[1].focus()
-      marks()[0].focus()
-      expect([marks()[0].style.left, marks()[0].style.top]).toEqual(['10px', '68px'])
-      top = 20
-      marks()[0].click()
-      await settle()
-      const thing = sent.find((message) => message.type === 'thing')!
-      expect(thing).toMatchObject({ lw: 'reader', type: 'thing', what: 'chart', path: 'canvas#chart', text: 'The chart under “Sales by region”', rect: { top: 20, bottom: 170, left: 10, right: 310 } })
-      expect(Object.prototype.toString.call(thing.picture)).toBe('[object ArrayBuffer]')
-      expect(drawn).toEqual([doc.querySelector('canvas')])
-      expect(doc.querySelector('.lw-thing-box.lw-marking')).not.toBeNull()
-      // Escape lets go of it.
-      doc.dispatchEvent(new inner.KeyboardEvent('keydown', { key: 'Escape' }))
-      expect(sent.at(-1)).toMatchObject({ type: 'selection', text: '' })
-      expect(doc.querySelector('.lw-thing-box')).toBeNull()
-      // A picture by its own name; the second of two videos by its place among them.
-      sent.length = 0
-      marks()[1].click()
-      await settle()
-      marks()[3].click()
-      await settle()
-      const things = sent.filter((message) => message.type === 'thing')
-      expect(things.map((message) => [message.what, message.path, message.text])).toEqual([
-        ['picture', 'body > figure > img', 'The picture “The team”'],
-        ['video', 'body > section > video:nth-of-type(2)', 'The video under “Launch”'],
-      ])
-
-      // A thing asked about is outlined, with its bubble at its corner, and says where it is; one
-      // the page has not drawn yet is missing until it is.
-      sent.length = 0
       const tell = (data: Record<string, unknown>) => inner.dispatchEvent(new inner.MessageEvent('message', { data: { lw: 'reader', ...data }, source: inner.parent }))
-      const ask = (key: string, path: string) => ({ key, text: `The chart\u0001element:chart@${path}`, at: { kind: 'element', what: 'chart', path }, look: 'read', fresh: false, lit: false, open: false, label: 'Writer’s answer', title: '', figure: null, initials: 'WR' })
-      // Asked: the reader lets go of the marked thing.
-      tell({ type: 'clear' })
-      expect(doc.querySelector('.lw-thing-box.lw-marking')).toBeNull()
-      tell({ type: 'marks', asking: null, parts: [ask('a', 'canvas#chart'), ask('b', 'canvas#later')] })
-      expect(doc.querySelector('.lw-thing-box')!.className).toBe('lw-thing-box lw-read')
-      expect(doc.querySelectorAll('.lw-thing-holder .lw-bubble')).toHaveLength(1)
+      const ask = (key: string, what: string, path: string) => ({ key, text: `The ${what}\u0001element:${what}@${path}`, at: { kind: 'element', what, path }, look: 'read', fresh: false, lit: false, open: false, label: 'Writer’s answer', title: '', figure: null, initials: 'WR' })
+      tell({ type: 'marks', asking: null, parts: [ask('a', 'chart', 'canvas#chart'), ask('b', 'part', 'body > section > div'), ask('c', 'chart', 'canvas#later'), ask('d', 'part', 'aside#note')] })
+      expect([...doc.querySelectorAll('.lw-thing-box')].map((box) => box.className)).toEqual(['lw-thing-box lw-read', 'lw-thing-box lw-read'])
+      expect(doc.querySelectorAll('.lw-thing-holder .lw-bubble')).toHaveLength(2)
       // The chart fits itself to the page after it is drawn: its outline and bubble follow it.
       expect(doc.querySelector<HTMLElement>('.lw-thing-box')!.style.width).toBe('300px')
       width = 640
@@ -444,96 +678,81 @@ describe('a web page in the reader', () => {
       expect(doc.querySelector<HTMLElement>('.lw-thing-holder')!.style.left).toBe('650px')
       width = 300
       resized.forEach((callback) => callback())
-      // Each size change looks for things again a moment later: let that go by first.
+      // Each size change looks again a moment later: let that go by first.
       await settle(350)
       const reported = () => (sent.filter((message) => message.type === 'parts').at(-1)!.parts as { text: string; missing: boolean; rects: unknown[] }[]).map((part) => [part.text.split('@')[1], part.missing, part.rects.length])
-      expect(reported()).toEqual([['canvas#chart', false, 1], ['canvas#later', true, 0]])
+      expect(reported()).toEqual([['canvas#chart', false, 1], ['body > section > div', false, 1], ['canvas#later', true, 0], ['aside#note', true, 0]])
       expect(doc.body.innerHTML).toBe(page)
+      // A part the page adds later is found when it does: a chart, or any part.
       const later = doc.createElement('canvas')
       later.id = 'later'
       doc.body.append(later)
       await settle(350)
-      expect(reported()).toEqual([['canvas#chart', false, 1], ['canvas#later', false, 1]])
-      expect(doc.querySelectorAll('.lw-thing-holder .lw-bubble')).toHaveLength(2)
+      expect(reported()).toEqual([['canvas#chart', false, 1], ['body > section > div', false, 1], ['canvas#later', false, 1], ['aside#note', true, 0]])
+      const note = doc.createElement('aside')
+      note.id = 'note'
+      doc.body.append(note)
+      await settle(350)
+      expect(reported()).toEqual([['canvas#chart', false, 1], ['body > section > div', false, 1], ['canvas#later', false, 1], ['aside#note', false, 1]])
+      expect(doc.querySelectorAll('.lw-thing-holder .lw-bubble')).toHaveLength(4)
       // The bubble opens the answer.
       sent.length = 0
       doc.querySelector<HTMLButtonElement>('.lw-thing-holder .lw-bubble')!.click()
       expect(sent).toContainEqual({ lw: 'reader', type: 'open', key: 'a' })
-      // Nothing asked about any more: the outlines go. A thing whose part is in the message box is
-      // outlined dashed; the marks carry the asked agent's face.
-      tell({ type: 'marks', asking: 'The chart\u0001element:chart@canvas#chart', parts: [], face: { figure: 'data:image/webp;base64,AAAA' } })
-      expect(doc.querySelectorAll('.lw-thing-box')).toHaveLength(1)
-      expect(doc.querySelector('.lw-thing-box')!.className).toBe('lw-thing-box lw-asking')
+      // Nothing asked about any more: the outlines go. A part in the message box is outlined dashed.
+      tell({ type: 'marks', asking: 'The part\u0001element:part@body > section > div', parts: [] })
+      expect([...doc.querySelectorAll('.lw-thing-box')].map((box) => box.className)).toEqual(['lw-thing-box lw-asking'])
       expect(doc.querySelector('.lw-thing-holder')).toBeNull()
-      expect(marks()[0].querySelector('img')!.getAttribute('src')).toBe('data:image/webp;base64,AAAA')
-      expect(marks()[0].classList.contains('lw-has-face')).toBe(true)
-      tell({ type: 'marks', asking: null, parts: [], face: null })
+      tell({ type: 'marks', asking: null, parts: [] })
       expect(doc.querySelector('.lw-thing-box, .lw-thing-holder')).toBeNull()
-      expect(marks()[0].querySelector('img')).toBeNull()
     } finally {
       vi.restoreAllMocks()
       holder.remove()
     }
   })
 
-  it('finds the things in a page that first laid out at no size once it has one', async () => {
-    const holder = document.createElement('iframe')
-    document.body.append(holder)
-    // The frame's own load comes and goes first: only its size changing can find the chart.
-    await new Promise((resolve) => setTimeout(resolve, 50))
-    const inner = holder.contentWindow! as Window & typeof globalThis
-    const doc = holder.contentDocument!
-    const sent: Record<string, unknown>[] = []
-    vi.spyOn(inner.parent, 'postMessage').mockImplementation((message: unknown) => { sent.push(message as Record<string, unknown>) })
-    let width = 0
-    vi.spyOn(inner.Element.prototype, 'getBoundingClientRect').mockImplementation(() => ({ top: 0, left: 0, width, height: width / 2, right: width, bottom: width / 2, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect)
-    const resized: (() => void)[] = []
-    Object.assign(inner, { ResizeObserver: class { constructor(callback: () => void) { resized.push(callback) } observe() {} unobserve() {} disconnect() {} } })
-    vi.spyOn(inner, 'requestAnimationFrame').mockImplementation((callback) => { callback(0); return 1 })
-    try {
-      doc.body.innerHTML = '<h2>Sales</h2><canvas id="chart"></canvas>'
-      new inner.Function(PAGE_BRIDGE)()
-      expect(doc.querySelectorAll('.lw-thing-mark')).toHaveLength(0)
-      expect(sent.filter((message) => message.type === 'things')).toEqual([])
-      width = 400
-      resized.forEach((callback) => callback())
-      await new Promise((resolve) => setTimeout(resolve, 350))
-      expect(doc.querySelectorAll('.lw-thing-mark')).toHaveLength(1)
-      expect(sent).toContainEqual({ lw: 'reader', type: 'things', what: ['chart'] })
-    } finally {
-      vi.restoreAllMocks()
-      holder.remove()
-    }
-  })
-
-  it('calls a drawing with no words a picture, says a video’s moment, and takes a drag across a chart’s labels as the chart', async () => {
+  it('names a part as the person sees it: a drawing with no words is a picture, a video says its moment, a chart in layers is their holder', async () => {
     const holder = document.createElement('iframe')
     document.body.append(holder)
     const inner = holder.contentWindow! as Window & typeof globalThis
     const doc = holder.contentDocument!
     const sent: Record<string, unknown>[] = []
     vi.spyOn(inner.parent, 'postMessage').mockImplementation((message: unknown) => { sent.push(message as Record<string, unknown>) })
-    vi.spyOn(inner.Element.prototype, 'getBoundingClientRect').mockImplementation(() => ({ top: 0, left: 0, width: 200, height: 100, right: 200, bottom: 100, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect)
+    laidOut(inner)
     vi.spyOn(inner.HTMLMediaElement.prototype, 'currentTime', 'get').mockReturnValue(42.4)
     vi.spyOn(inner.HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => null)
     try {
-      doc.body.innerHTML = '<h2>Brand</h2><div><svg id="logo"><circle r="4"></circle></svg></div><h2>Trend</h2><div><svg id="trend"><text>2024</text><text>2025</text></svg></div><div><video id="clip"></video></div>'
-        + '<h2>Layers</h2><section><div><svg><text>x</text></svg><svg><text>legend</text></svg></div></section>'
+      doc.body.innerHTML = '<h2 data-box="0 0 200 20">Brand</h2><div data-box="0 20 200 100"><svg id="logo" data-box="0 20 200 100"><circle r="4"></circle></svg></div>'
+        + '<figure data-box="0 120 200 100"><img alt="The team" data-box="0 120 200 100"></figure>'
+        + '<h2 data-box="0 220 200 20">Launch</h2><section data-box="0 240 400 100"><video data-box="0 240 200 100"></video><video id="clip" data-box="200 240 200 100"></video></section>'
+        + '<h2 data-box="0 340 200 20">Layers</h2><section data-box="0 360 200 100"><div data-box="0 360 200 100"><svg data-box="0 360 200 100"><text>x</text></svg><svg data-box="0 360 200 100"><text>legend</text></svg></div></section>'
+        + '<svg id="note" data-box="0 470 300 100"><foreignObject data-box="10 480 200 60"><p>Kept in Azure</p></foreignObject></svg>'
       new inner.Function(PAGE_BRIDGE)()
-      const names = [...doc.querySelectorAll('.lw-thing-mark')].map((mark) => mark.getAttribute('aria-label'))
-      // A chart drawn in stacked layers is one thing: their holder.
-      expect(names).toEqual(['Ask about the picture under “Brand”', 'Ask about the chart under “Trend”', 'Ask about the video under “Trend”, at 0:42', 'Ask about the chart under “Layers”'])
-      // A drag across the chart's own labels marks the chart rather than its words.
+      // Turned on from the keyboard: the first part in view is outlined at once, for the keys to start from.
+      inner.dispatchEvent(new inner.MessageEvent('message', { data: { lw: 'reader', type: 'pick', on: true, keys: true }, source: inner.parent }))
+      const start = doc.querySelector<HTMLElement>('.lw-thing-box.lw-pointing')
+      expect(start).not.toBeNull()
+      expect([start!.style.left, start!.style.top, start!.style.width]).toEqual(['-2px', '-2px', '204px'])
+      for (const [thing, x, y] of [[doc.querySelector('#logo')!, 50, 50], [doc.querySelector('img')!, 50, 150], [doc.querySelector('section video')!, 50, 280], [doc.querySelectorAll('svg')[2], 50, 400]] as const) {
+        press(inner, thing, x, y)
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+      expect(sent.filter((message) => message.type === 'thing').map((message) => [message.what, message.path, message.text])).toEqual([
+        ['picture', 'svg#logo', 'The picture under “Brand”'],
+        ['picture', 'body > figure > img', 'The picture “The team”'],
+        ['video', 'body > section:nth-of-type(1) > video:nth-of-type(1)', 'The video under “Launch”, at 0:42'],
+        ['chart', 'body > section:nth-of-type(2) > div', 'The chart under “Layers”'],
+      ])
+      // A part of a drawing keeps its name's case in its path, so the page finds it again.
       sent.length = 0
-      const range = doc.createRange()
-      range.setStart(doc.querySelectorAll('#trend text')[0].firstChild!, 0)
-      range.setEnd(doc.querySelectorAll('#trend text')[1].firstChild!, 4)
-      doc.getSelection()!.addRange(range)
-      doc.dispatchEvent(new inner.Event('pointerup'))
+      const keys = (...names: string[]) => names.forEach((key) => doc.body.dispatchEvent(new inner.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })))
+      press(inner, doc.querySelector('#note')!, 250, 550)
       await new Promise((resolve) => setTimeout(resolve, 10))
-      expect(sent.filter((message) => message.type === 'selection' && message.text)).toEqual([])
-      expect(sent.find((message) => message.type === 'thing')).toMatchObject({ what: 'chart', path: 'svg#trend', text: 'The chart under “Trend”' })
-      expect(String(doc.getSelection())).toBe('')
+      keys('ArrowRight', 'Enter')
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      const path = sent.filter((message) => message.type === 'thing').at(-1)!.path as string
+      expect(path).toBe('svg#note > foreignObject')
+      expect(doc.querySelector(path)).toBe(doc.querySelector('foreignObject'))
     } finally {
       vi.restoreAllMocks()
       holder.remove()
@@ -566,8 +785,9 @@ describe('a web page in the reader', () => {
     const picture = new ArrayBuffer(4)
     expect(pageMessage({ lw: 'reader', type: 'thing', what: 'chart', path: 'canvas#chart', text: 'The chart', rect, picture })).toEqual({ type: 'thing', what: 'chart', path: 'canvas#chart', text: 'The chart', rect, picture })
     expect(pageMessage({ lw: 'reader', type: 'thing', what: 'video', path: 'body > video', text: 'The video', rect, picture: 'x' })).toEqual({ type: 'thing', what: 'video', path: 'body > video', text: 'The video', rect })
-    expect(pageMessage({ lw: 'reader', type: 'things', what: ['chart', 'table', 'video', 'chart'] })).toEqual({ type: 'things', what: ['chart', 'video'] })
-    expect(pageMessage({ lw: 'reader', type: 'things', what: 'chart' })).toBeNull()
+    expect(pageMessage({ lw: 'reader', type: 'thing', what: 'part', path: 'svg#arch > g', text: 'The part “API”', rect })).toEqual({ type: 'thing', what: 'part', path: 'svg#arch > g', text: 'The part “API”', rect })
+    expect(pageMessage({ lw: 'reader', type: 'pointing', text: 'The part “API”' })).toEqual({ type: 'pointing', text: 'The part “API”' })
+    for (const text of ['', ' ', 'x'.repeat(201), 3]) expect(pageMessage({ lw: 'reader', type: 'pointing', text })).toBeNull()
     for (const bad of [{ what: 'table' }, { path: '' }, { path: 'a\nb' }, { path: 'a`b' }, { text: '' }, { rect: { top: 'x' } }]) {
       expect(pageMessage({ lw: 'reader', type: 'thing', what: 'chart', path: 'canvas', text: 'The chart', rect, ...bad })).toBeNull()
     }

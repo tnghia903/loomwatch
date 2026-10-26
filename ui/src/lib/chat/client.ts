@@ -186,8 +186,11 @@ export type PartAt =
   | { kind: 'cells'; sheet?: string; top: number; left: number; bottom: number; right: number }
   /** A moment of a recording, in milliseconds from its start, or the span to `end`. */
   | { kind: 'time'; start: number; end?: number }
-  /** A chart, a picture or a video in a web page, found again by `path`, a CSS selector (`body > main > canvas:nth-of-type(2)`). */
-  | { kind: 'element'; what: 'chart' | 'picture' | 'video'; path: string }
+  /**
+   * A part of a web page, found again by `path`, a CSS selector (`body > main > canvas:nth-of-type(2)`):
+   * a chart, a picture, a video, or any other part picked in it (a box in a drawing, a card, a table).
+   */
+  | { kind: 'element'; what: 'chart' | 'picture' | 'video' | 'part'; path: string }
 
 /** A box on a picture, a page or a frame. */
 export type BoxAt = Extract<PartAt, { kind: 'box' }>
@@ -195,7 +198,7 @@ export type BoxAt = Extract<PartAt, { kind: 'box' }>
 export type CellsAt = Extract<PartAt, { kind: 'cells' }>
 /** A moment or a span of a recording. */
 export type TimeAt = Extract<PartAt, { kind: 'time' }>
-/** A chart, a picture or a video in a web page. */
+/** A part of a web page. */
 export type ElementAt = Extract<PartAt, { kind: 'element' }>
 
 /** One item of the chat, newest first from the daemon. */

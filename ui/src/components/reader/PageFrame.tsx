@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 
-import type { ElementAt, PartAt } from '../../lib/chat/client'
+import type { PartAt } from '../../lib/chat/client'
 import { PAGE_SANDBOX, pageDocument, pageFile, pageMessage, type PageMark, type PagePart } from '../../lib/files/pageFrame'
 
 export interface Marked {
@@ -10,7 +10,7 @@ export interface Marked {
   rect: { top: number; bottom: number; left: number; right: number }
   /** Where a part that isn't words is in its file (ADR 0091). */
   at?: PartAt
-  /** A thing in a web page as it was shown, drawn by the page, sent with the question. */
+  /** A part of a web page as it was shown, drawn by the page, sent with the question. */
   picture?: File
 }
 
@@ -19,7 +19,11 @@ interface PageFrameProps {
   name: string
   html: string
   /** The asks about parts of the page, marked in it with their bubbles, and the part in the message box. */
-  marks: { parts: readonly PageMark[]; asking: string | null; face?: { figure: string | null } | null }
+  marks: { parts: readonly PageMark[]; asking: string | null }
+  /** The Pick switch is on: a click on the page marks the part under it (ADR 0091). */
+  picking: boolean
+  /** Counts each time picking was turned on from the keyboard: the page takes the keys, for its arrows to walk its parts, and outlines where they start. */
+  pickKeys: number
   onMarked: (marked: Marked | null) => void
   /** Where the parts asked about are, line by line on screen, as the page scrolls. */
   onParts?: (parts: PagePart[], frame: Marked['rect']) => void
@@ -31,8 +35,8 @@ interface PageFrameProps {
   onHover?: (key: string | null, at: Marked['rect'] | null, now: boolean) => void
   /** Changes when the marked words have been asked about, so the page lets go of them. */
   cleared: number
-  /** The kinds of thing in the page that can be asked about (a chart, a picture, a video), as found. */
-  onThings?: (what: ElementAt['what'][]) => void
+  /** While picking, the arrow keys reached a part of the page: what it is called. */
+  onPointing?: (text: string) => void
 }
 
 /**
@@ -41,7 +45,7 @@ interface PageFrameProps {
  * coordinates; the parts asked about go back the same way, and so do the files beside it that the
  * page asks for as it runs, read inside its own folder.
  */
-export function PageFrame({ path, name, html, marks, onMarked, onParts, onOpen, onEscape, onHover, cleared, onThings }: PageFrameProps) {
+export function PageFrame({ path, name, html, marks, picking, pickKeys, onMarked, onParts, onOpen, onEscape, onHover, cleared, onPointing }: PageFrameProps) {
   const frame = useRef<HTMLIFrameElement>(null)
   const page = useRef(path)
   useEffect(() => { page.current = path }, [path])
@@ -60,15 +64,15 @@ export function PageFrame({ path, name, html, marks, onMarked, onParts, onOpen, 
   const opened = useRef(onOpen)
   const escaped = useRef(onEscape)
   const hovered = useRef(onHover)
-  const found = useRef(onThings)
+  const pointed = useRef(onPointing)
   useEffect(() => {
     marked.current = onMarked
     placed.current = onParts
     opened.current = onOpen
     escaped.current = onEscape
     hovered.current = onHover
-    found.current = onThings
-  }, [onMarked, onParts, onOpen, onEscape, onHover, onThings])
+    pointed.current = onPointing
+  }, [onMarked, onParts, onOpen, onEscape, onHover, onPointing])
   useEffect(() => {
     const listen = (event: MessageEvent) => {
       const element = frame.current
@@ -78,7 +82,7 @@ export function PageFrame({ path, name, html, marks, onMarked, onParts, onOpen, 
       if (message.type === 'ready') { setReady((count) => count + 1); return }
       if (message.type === 'open') { opened.current?.(message.key); return }
       if (message.type === 'escape') { escaped.current?.(); return }
-      if (message.type === 'things') { found.current?.(message.what); return }
+      if (message.type === 'pointing') { pointed.current?.(message.text); return }
       if (message.type === 'load') {
         const asking = element.contentWindow
         void pageFile(page.current, message.url).then((file) => {
@@ -115,6 +119,10 @@ export function PageFrame({ path, name, html, marks, onMarked, onParts, onOpen, 
     return () => window.removeEventListener('message', listen)
   }, [])
 
+  // Picking first, so a page that has just loaded is told its marks last.
+  useEffect(() => {
+    if (ready > 0) frame.current?.contentWindow?.postMessage({ lw: 'reader', type: 'pick', on: picking }, '*')
+  }, [ready, picking])
   useEffect(() => {
     if (ready === 0) return
     frame.current?.contentWindow?.postMessage({ lw: 'reader', type: 'marks', ...marks }, '*')
@@ -122,6 +130,11 @@ export function PageFrame({ path, name, html, marks, onMarked, onParts, onOpen, 
   useEffect(() => {
     if (cleared > 0) frame.current?.contentWindow?.postMessage({ lw: 'reader', type: 'clear' }, '*')
   }, [cleared])
+  useEffect(() => {
+    if (pickKeys === 0) return
+    frame.current?.focus()
+    frame.current?.contentWindow?.postMessage({ lw: 'reader', type: 'pick', on: true, keys: true }, '*')
+  }, [pickKeys])
 
   const shown = doc?.html === html ? doc.ready : null
   return shown === null

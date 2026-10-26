@@ -127,12 +127,23 @@ answer, and the marked words open the one still waiting for you, or else the new
 closes it. A web page the agent made is marked the same way. It runs in a sandbox of its own, and
 the data, clips, pictures and fonts beside it load as they would from the page's folder (a
 dashboard's `fetch('sales.csv')` works; LoomWatch reads them for it): its own folder and the folders
-in it only, never anything above it. Point at a chart, a picture or a video in the page and a small
-mark shows at its top left; press it (or reach it with Tab) to ask about that thing, and the page's
-tip says so while it has one. Dragging works as the page made it, so a chart that zooms on a drag
-still does; a drag across a chart's own labels marks the chart. The agent is sent a picture of the
-thing as it is shown, when the page can draw it, and told where it is in the page's code; once
-asked, it stays outlined with the agent's bubble at its corner. On a picture (ADR 0091), drag over
+in it only, never anything above it. To ask about any part of the page, not just its words, press
+the Pick switch at the top of the reader (a dashed box with a small page in it, beside Page and Code;
+the page's tip points to it). While it is on, the part under the pointer is outlined, the outline
+gliding from part to part as the pointer moves (it jumps where motion is reduced), and a click marks it: a box in a
+diagram, a card, a button, a table, a chart, a picture or a video. Click the same place again to
+mark the part around it (a box, then the area drawn around it, then the whole drawing), and once
+more past the biggest to go back to the first; drag across words to mark just the words, as always.
+The arrow keys walk the parts too (up and down to the ones beside, left to the one around, right to
+the first inside) and Enter marks one; turned on from the keyboard, the switch outlines the first
+part at once. While picking, a click is for picking, so the page's own buttons and links do
+nothing. Picking stops when you ask (Ask or Explain), when you press the switch again, or on Esc with
+nothing marked, and the page works as it made itself again (a chart that zooms on a drag still
+does). Words dragged across in a drawing mark the box they are on. The agent is told where the part
+is in the page's code, and sent a picture of it as it is shown when it is drawn (a chart, a picture,
+or a part of a drawing, cut out with a little around it); words and boxes go by their place in the
+code. Once asked, the part stays outlined with the agent's bubble at its corner. On a picture (ADR
+0091), drag over
 any part of it to mark a box, or click to mark all of it: the bubble leans in over the box, and the part
 goes with its picture, the box cut out of the picture, which the agent you ask sees when its model
 sees pictures. So **Explain** on a picture starts the agent's work rather than a quick answer in the

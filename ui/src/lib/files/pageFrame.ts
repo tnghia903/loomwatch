@@ -135,13 +135,21 @@ export const PAGE_BRIDGE = `(function () {
     });
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', clips); else clips();
-  // Things in the page a part can be (ADR 0091): a chart (a canvas, a drawing, or the holder of a
-  // chart's stacked layers), a picture or a video, 48 px or more each way. A drag on a chart is the
-  // chart's own (it may zoom), so each thing has a mark at its top left corner instead, shown while the thing
-  // is pointed at or the mark has the keyboard, which marks the thing to be asked about. The marks
-  // and outlines sit in a layer of their own over the page, outside its body.
-  var THING = 'canvas, svg, img, video', NS = 'http://www.w3.org/2000/svg';
-  var layer = null, thingMarks = [], pointed = null, hideTimer = 0, markedThing = null;
+  // The parts of the page (ADR 0091). While the reader's Pick switch is on, pointing at the page
+  // outlines the part under the pointer and a click marks it, rather than doing what the page does
+  // with a click there; a click on the part marked now widens the mark to the part around it. The
+  // arrow keys walk the parts as a tree is walked (up and down to the ones beside, left to the one
+  // around, right to the first inside) and Enter marks the one outlined. A drag across words still
+  // marks the words. A part is a block, a control or something drawn, never words inside a line
+  // (those are the words' to mark); in a drawing, it is the smallest shape there, with the words
+  // drawn on it. The outlines sit in a layer of their own over the page, outside its body.
+  var DRAWN = 'canvas, svg, img, video', LAYER = 'canvas, svg', NS = 'http://www.w3.org/2000/svg';
+  // The shapes a drawing's parts are (a path only when filled: an arrow is a line), and what else in one can be a part.
+  var SHAPES = 'rect, circle, ellipse, polygon, path', UNDRAWN = 'defs, clipPath, mask, marker, pattern, symbol';
+  var DRAWING_PARTS = /^(svg|g|a|rect|circle|ellipse|polygon|polyline|path|line|text|image|use|foreignObject)$/;
+  // Inside a line, only these are parts of their own; the page's head and scripts never are.
+  var CONTROLS = /^(a|button|img|input|select|textarea|video|audio|canvas|svg|iframe)$/, UNSHOWN = /^(script|style|noscript|template|head|title|meta|link)$/;
+  var layer = null, markedThing = null, picking = false, pointing = null, pointingBox = null;
   function layerOf() {
     if (layer && layer.isConnected) return layer;
     layer = document.createElement('div');
@@ -149,30 +157,136 @@ export const PAGE_BRIDGE = `(function () {
     document.documentElement.appendChild(layer);
     return layer;
   }
+  // What LoomWatch draws over and in the page: its outlines and bubbles keep their own clicks.
+  function ours(element) { return Boolean(element && element.closest && ((layer && layer.contains(element)) || element.closest('.lw-slot'))); }
   function near(a, b) { return Math.abs(a.top - b.top) < 2 && Math.abs(a.left - b.left) < 2 && Math.abs(a.width - b.width) < 2 && Math.abs(a.height - b.height) < 2; }
-  function thingOf(element) {
-    var found = element && element.closest ? element.closest(THING) : null;
-    if (!found || (layer && layer.contains(found))) return null;
-    for (var outer = found.parentElement && found.parentElement.closest('svg'); outer; outer = outer.parentElement && outer.parentElement.closest('svg')) found = outer;
-    var box = found.getBoundingClientRect();
-    if (box.width < 48 || box.height < 48) return null;
-    // A chart drawn in layers (Plotly's stacked drawings and canvases) is their holder.
-    var holder = found.parentElement, layers = 0, LAYER = 'canvas, svg';
-    if (holder && holder !== document.body && found.matches(LAYER)) Array.prototype.forEach.call(holder.children, function (child) { if (child.matches(LAYER) && near(child.getBoundingClientRect(), box)) layers++; });
-    return layers > 1 ? holder : found;
+  function outerSvg(element) {
+    var found = element.closest ? element.closest('svg') : null;
+    for (var outer = found && found.parentElement && found.parentElement.closest('svg'); outer; outer = outer.parentElement && outer.parentElement.closest('svg')) found = outer;
+    return found;
   }
+  // A chart drawn in layers (Plotly's stacked drawings and canvases) is their holder.
+  function isHolder(element) {
+    if (!element || element.namespaceURI === NS || element === document.body || element === document.documentElement) return false;
+    var layers = Array.prototype.filter.call(element.children, function (child) { return child.matches(LAYER); });
+    return layers.filter(function (each) { return near(each.getBoundingClientRect(), layers[0].getBoundingClientRect()); }).length > 1;
+  }
+  function wholeOf(drawn) { return drawn.matches(LAYER) && isHolder(drawn.parentElement) ? drawn.parentElement : drawn; }
   // A drawing with no words in it (a logo, an illustration) is a picture; a chart labels its axes.
+  // Anything else is a part of the page.
   function whatOf(thing) {
     var name = thing.localName;
     if (name === 'img' || (name === 'svg' && !thing.querySelector('text'))) return 'picture';
-    return name === 'video' ? 'video' : 'chart';
+    if (name === 'video') return 'video';
+    return name === 'canvas' || name === 'svg' || isHolder(thing) ? 'chart' : 'part';
+  }
+  // Whether an element is a part a click can pick: big enough to see, and a block, a control or
+  // something drawn rather than words inside a line.
+  function isPart(element) {
+    if (!element || element.nodeType !== 1 || element === document.body || element === document.documentElement || ours(element) || UNSHOWN.test(element.localName)) return false;
+    var box = element.getBoundingClientRect();
+    if (box.width < 4 || box.height < 4) return false;
+    if (element.namespaceURI === NS) return DRAWING_PARTS.test(element.localName) && !element.closest(UNDRAWN);
+    var look = getComputedStyle(element);
+    if (look.display === 'none' || look.display === 'contents' || look.visibility === 'hidden') return false;
+    return look.display !== 'inline' || CONTROLS.test(element.localName);
+  }
+  function filled(shape) {
+    var look = getComputedStyle(shape), fill = look.fill;
+    return Boolean(fill) && fill !== 'none' && !/^rgba\\([^)]*,\\s*0\\)$/.test(fill) && look.fillOpacity !== '0';
+  }
+  // The smallest shape in a drawing around a box on screen (a point, words marked in it, or a part
+  // of it: then a shape bigger than the part, not one of its own). One too small to point at, or
+  // the drawing's own background, is none: the drawing is the part.
+  function shapeAround(svg, at, part) {
+    var whole = svg.getBoundingClientRect(), best = null, least = Infinity;
+    Array.prototype.forEach.call(svg.querySelectorAll(SHAPES), function (shape) {
+      if (shape.closest(UNDRAWN) || (shape.localName === 'path' && !filled(shape))) return;
+      var box = shape.getBoundingClientRect(), area = box.width * box.height;
+      if (part && (part === shape || part.contains(shape) || near(box, at))) return;
+      if (box.width < 12 || box.height < 12 || area >= whole.width * whole.height * 0.9 || area >= least) return;
+      if (at.left < box.left - 4 || at.right > box.right + 4 || at.top < box.top - 4 || at.bottom > box.bottom + 4) return;
+      best = shape; least = area;
+    });
+    return best;
+  }
+  // A shape, or the group that is only it and what is drawn on it (its words, an icon).
+  function groupOf(shape, svg) {
+    var box = shape.getBoundingClientRect(), found = shape;
+    for (var at = shape.parentElement; at && at !== svg && at.namespaceURI === NS && /^(g|a)$/.test(at.localName); at = at.parentElement) {
+      var outer = at.getBoundingClientRect();
+      if (outer.left < box.left - 8 || outer.top < box.top - 8 || outer.right > box.right + 8 || outer.bottom > box.bottom + 8) break;
+      found = at;
+    }
+    return found;
+  }
+  // The part a click at x, y on an element picks: in a drawing, the smallest shape there (its
+  // group, with its words), else a label on its own, else the drawing; a canvas, a picture or a
+  // video whole; elsewhere the nearest part around the element.
+  function partAt(target, x, y) {
+    if (!target || target.nodeType !== 1 || ours(target)) return null;
+    var svg = outerSvg(target);
+    if (svg) {
+      var shape = shapeAround(svg, { left: x, right: x, top: y, bottom: y }), label = target.closest('text');
+      if (shape) return groupOf(shape, svg);
+      return label && svg.contains(label) && isPart(label) ? label : wholeOf(svg);
+    }
+    if (target.matches(DRAWN)) return wholeOf(target);
+    for (var at = target; at; at = at.parentElement) if (isPart(at)) return at;
+    return null;
+  }
+  // Words marked in a drawing can't be marked there as words: they mark the part they are drawn on.
+  function partOfWords(svg, range) {
+    var texts = Array.prototype.filter.call(svg.querySelectorAll('text'), function (text) { return range.intersectsNode(text); });
+    if (!texts.length) return wholeOf(svg);
+    var at = { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity };
+    texts.forEach(function (text) {
+      var box = text.getBoundingClientRect();
+      at.left = Math.min(at.left, box.left); at.top = Math.min(at.top, box.top); at.right = Math.max(at.right, box.right); at.bottom = Math.max(at.bottom, box.bottom);
+    });
+    var shape = shapeAround(svg, at);
+    return shape ? groupOf(shape, svg) : texts.length === 1 && isPart(texts[0]) ? texts[0] : wholeOf(svg);
+  }
+  // The part around one, a size bigger: what a second click on the same place marks. In a drawing,
+  // the shape drawn around it (a region it sits in), as the person sees it, before the drawing.
+  function wider(element) {
+    var box = element.getBoundingClientRect(), svg = element.namespaceURI === NS ? outerSvg(element) : null;
+    var around = svg && svg !== element ? shapeAround(svg, box, element) : null;
+    if (around) return groupOf(around, svg);
+    for (var at = element.parentElement; at && at !== document.body && at !== document.documentElement; at = at.parentElement) {
+      if (isPart(at) && !near(at.getBoundingClientRect(), box)) return wholeOf(at);
+    }
+    return null;
+  }
+  // The parts inside one, each the outermost of its size: what the arrow keys walk.
+  function partsIn(container) {
+    var found = [], box = container.getBoundingClientRect();
+    (function walk(parent) {
+      Array.prototype.forEach.call(parent.children, function (child) {
+        if (found.length >= 400 || ours(child)) return;
+        if (isPart(child) && !near(child.getBoundingClientRect(), box)) { var part = wholeOf(child); if (found.indexOf(part) < 0) found.push(part); }
+        else if (child.namespaceURI === NS || !child.matches('canvas, img, video')) walk(child);
+      });
+    })(container);
+    return found;
+  }
+  function inView(part) { var box = part.getBoundingClientRect(); return box.bottom > 0 && box.top < innerHeight && box.right > 0 && box.left < innerWidth; }
+  function walkFrom(from, key) {
+    if (!from) return partsIn(document.body).filter(inView)[0] || null;
+    if (key === 'ArrowLeft') return wider(from) || from;
+    if (key === 'ArrowRight') return partsIn(from)[0] || from;
+    var list = partsIn(wider(from) || document.body), at = -1;
+    list.forEach(function (part, i) { if (at < 0 && (part === from || part.contains(from) || from.contains(part))) at = i; });
+    if (at < 0) return list[0] || from;
+    return list[at + (key === 'ArrowDown' ? 1 : -1)] || from;
   }
   // Where the thing is in the page, as a CSS selector: from an element with an id of its own, or
   // from the body, each step its name and, among siblings of its kind, its place.
   function pathOf(thing) {
     var steps = [];
     for (var at = thing; at && at.nodeType === 1 && at !== document.body && at !== document.documentElement; at = at.parentElement) {
-      var name = at.localName.toLowerCase();
+      // A drawing's names keep their case (foreignObject); the page's own are lower case already.
+      var name = at.localName;
       if (at.id && /^[A-Za-z][\\w-]*$/.test(at.id) && document.querySelectorAll('#' + at.id).length === 1) { steps.unshift(name + '#' + at.id); return steps.join(' > '); }
       var place = 1, kin = 0;
       for (var other = at.parentElement ? at.parentElement.firstElementChild : null; other; other = other.nextElementSibling) {
@@ -185,12 +299,31 @@ export const PAGE_BRIDGE = `(function () {
     steps.unshift('body');
     return steps.join(' > ');
   }
-  function said(value) { var words = String(value || '').replace(/\\s+/g, ' ').trim(); return words.length > 60 ? words.slice(0, 59) + '\\u2026' : words; }
-  // What the person sees the thing called: its own name, or the heading it is under.
+  function clean(value) { return String(value || '').replace(/\\s+/g, ' ').trim(); }
+  function said(value) { var words = clean(value); return words.length > 60 ? words.slice(0, 59) + '\\u2026' : words; }
+  // The words of a part, line by line: its own, or for a shape in a drawing the words drawn on it.
+  function linesOf(part) {
+    if (part.namespaceURI !== NS) return String(typeof part.innerText === 'string' ? part.innerText : part.textContent || '').split(/\\n+/).map(clean).filter(Boolean);
+    var texts = part.localName === 'text' ? [part] : Array.prototype.slice.call(part.querySelectorAll('text')), svg = outerSvg(part);
+    if (!texts.length && svg && part !== svg) {
+      var box = part.getBoundingClientRect();
+      texts = Array.prototype.filter.call(svg.querySelectorAll('text'), function (text) {
+        var at = text.getBoundingClientRect(), x = (at.left + at.right) / 2, y = (at.top + at.bottom) / 2;
+        return x >= box.left && x <= box.right && y >= box.top && y <= box.bottom;
+      });
+    }
+    return texts.map(function (text) {
+      var spans = text.querySelectorAll('tspan');
+      return clean(spans.length ? Array.prototype.map.call(spans, function (span) { return span.textContent; }).join(' ') : text.textContent);
+    }).filter(Boolean);
+  }
+  // What the person sees the thing called: its own name, a part's first line of words, or the heading it is under.
   function labelOf(thing, what) {
     var title = thing.querySelector ? thing.querySelector(':scope > title') : null;
     var own = said(thing.getAttribute('aria-label') || thing.getAttribute('alt') || thing.getAttribute('title') || (title ? title.textContent : ''));
     if (own) return 'The ' + what + ' \\u201c' + own + '\\u201d';
+    var first = what === 'part' ? linesOf(thing)[0] : '';
+    if (first) return 'The part \\u201c' + said(first) + '\\u201d';
     var figure = thing.closest('figure'), caption = figure ? figure.querySelector('figcaption') : null, under = caption ? caption.textContent : '';
     if (!under) Array.prototype.forEach.call(document.querySelectorAll('h1, h2, h3, h4, h5, h6'), function (heading) { if (heading.compareDocumentPosition(thing) & 4) under = heading.textContent; });
     under = said(under);
@@ -202,104 +335,38 @@ export const PAGE_BRIDGE = `(function () {
     var whole = Math.round(seconds), hours = Math.floor(whole / 3600), minutes = Math.floor(whole % 3600 / 60), rest = ('0' + whole % 60).slice(-2);
     return hours ? hours + ':' + ('0' + minutes).slice(-2) + ':' + rest : minutes + ':' + rest;
   }
-  // What a thing's mark is called to a screen reader: which thing, since marks come after the page.
-  function markName(thing) { var label = labelOf(thing, whatOf(thing)); return 'Ask about ' + label.charAt(0).toLowerCase() + label.slice(1); }
   // An outline over a thing, grow pixels out from it each way.
   function placeOver(box, thing, grow) {
     var at = thing.getBoundingClientRect(), out = grow || 0;
     box.style.left = (at.left - out) + 'px'; box.style.top = (at.top - out) + 'px';
     box.style.width = (at.width + 2 * out) + 'px'; box.style.height = (at.height + 2 * out) + 'px';
   }
-  // The agent asked: its face in the mark, as the reader's tip and Ask show it; a box without one.
-  var face = null;
-  function dressMark(button) {
-    var src = face && /^data:image\\//.test(String(face.figure || '')) ? String(face.figure) : '';
-    if (button.getAttribute('data-shows') === src) return;
-    button.setAttribute('data-shows', src);
-    button.textContent = '';
-    button.classList.toggle('lw-has-face', Boolean(src));
-    if (!src) return;
-    var image = document.createElement('img');
-    image.alt = '';
-    image.src = src;
-    button.appendChild(image);
+  // The part the pointer is over while picking, or the arrow keys reached, outlined thin: none over
+  // the part marked now, nor where a click would only widen it, nor while words are marked. Moved
+  // to another part, the outline glides there; on the same part it stays as still as it was.
+  function point(part) {
+    pointing = part;
+    if (!part || shown || (markedThing && (markedThing.thing === part || markedThing.from === part))) {
+      if (pointingBox && pointingBox.parentNode) pointingBox.parentNode.removeChild(pointingBox);
+      pointingBox = null;
+      return;
+    }
+    if (!pointingBox || !pointingBox.isConnected) { pointingBox = document.createElement('div'); pointingBox.lwBorn = Date.now(); layerOf().appendChild(pointingBox); }
+    // While it fades in, it doesn't glide as well: a fast sweep would move it every way at once.
+    var still = pointingBox.lwPart === part ? pointingBox.classList.contains('lw-still') : Date.now() - pointingBox.lwBorn < 160;
+    pointingBox.lwPart = part;
+    pointingBox.className = 'lw-thing-box lw-pointing' + (dark(part.parentElement || part) ? ' lw-dark' : '') + (still ? ' lw-still' : '');
+    placeOver(pointingBox, part, 2);
   }
-  var kinds = '';
-  function scan() {
-    var seen = [];
-    Array.prototype.forEach.call(document.body ? document.body.querySelectorAll(THING) : [], function (element) {
-      var thing = thingOf(element);
-      if (thing && seen.indexOf(thing) < 0 && seen.length < 60) seen.push(thing);
-    });
-    // The reader says in its tip that these can be asked about: which kinds the page has.
-    var what = [];
-    seen.forEach(function (thing) { var kind = whatOf(thing); if (what.indexOf(kind) < 0) what.push(kind); });
-    if (what.join() !== kinds) { kinds = what.join(); send({ type: 'things', what: what }); }
-    thingMarks = thingMarks.filter(function (entry) {
-      var kept = seen.indexOf(entry.thing) >= 0;
-      if (!kept && entry.button.parentNode) entry.button.parentNode.removeChild(entry.button);
-      return kept;
-    });
-    seen.forEach(function (thing) {
-      if (thingMarks.some(function (entry) { return entry.thing === thing; })) return;
-      var button = document.createElement('button'), what = whatOf(thing);
-      button.type = 'button';
-      button.className = 'lw-thing-mark';
-      button.setAttribute('aria-label', markName(thing));
-      button.title = 'Ask about this ' + what;
-      button.addEventListener('pointerdown', function (event) { event.preventDefault(); event.stopPropagation(); });
-      button.addEventListener('click', function (event) { event.preventDefault(); event.stopPropagation(); markThing(thing); });
-      // Reached with Tab: the thing comes into view, so its mark and its Ask are where it is.
-      button.addEventListener('focus', function () { if (thing.scrollIntoView) thing.scrollIntoView({ block: 'nearest', inline: 'nearest' }); showMark(thing); });
-      dressMark(button);
-      button.addEventListener('blur', function () { hideMarkSoon(); });
-      button.addEventListener('pointerenter', function () { clearTimeout(hideTimer); });
-      button.addEventListener('pointerleave', function () { hideMarkSoon(); });
-      layerOf().appendChild(button);
-      thingMarks.push({ thing: thing, button: button });
-    });
-  }
-  function showMark(thing) {
-    clearTimeout(hideTimer);
-    pointed = thing;
-    thingMarks.forEach(function (entry) {
-      var on = entry.thing === thing;
-      entry.button.classList.toggle('lw-on', on);
-      if (!on) return;
-      entry.button.setAttribute('aria-label', markName(thing));
-      entry.button.classList.toggle('lw-dark', dark(thing.parentElement || thing));
-      // Just outside the thing, above its top left, so it covers none of the chart, nor a video's
-      // controls; across the corner when the page's top edge leaves no room. The bubbles of the
-      // asks about it hang above its top right.
-      var box = thing.getBoundingClientRect(), size = entry.button.offsetWidth || 28;
-      var above = box.top - size - 4 >= 4;
-      entry.button.style.left = Math.max(4, Math.min(innerWidth - size - 4, above ? box.left : box.left - size / 2)) + 'px';
-      entry.button.style.top = Math.max(4, Math.min(innerHeight - size - 4, above ? box.top - size - 4 : box.top - size / 2)) + 'px';
-    });
-  }
-  function hideMarkSoon() {
-    clearTimeout(hideTimer);
-    hideTimer = setTimeout(function () {
-      var active = document.activeElement;
-      if (active && active.classList && active.classList.contains('lw-thing-mark')) return;
-      pointed = null;
-      thingMarks.forEach(function (entry) { entry.button.classList.remove('lw-on'); });
-    }, 400);
-  }
-  document.addEventListener('pointermove', function (event) {
-    if (event.pointerType === 'touch' || (event.target && event.target.classList && event.target.classList.contains('lw-thing-mark'))) return;
-    var thing = thingOf(event.target);
-    if (thing && thing !== pointed) {
-      if (!thingMarks.some(function (entry) { return entry.thing === thing; })) scan();
-      showMark(thing);
-    } else if (!thing && pointed) hideMarkSoon();
+  var pointer = null, pointerQueued = false;
+  addEventListener('pointermove', function (event) {
+    if (!picking || event.pointerType === 'touch') return;
+    pointer = event;
+    if (pointerQueued) return;
+    pointerQueued = true;
+    requestAnimationFrame(function () { pointerQueued = false; if (picking && pointer) point(partAt(pointer.target, pointer.clientX, pointer.clientY)); });
   }, true);
-  // A finger has no pointing: a tap on a thing shows its mark, a tap elsewhere hides it.
-  document.addEventListener('pointerdown', function (event) {
-    if (event.pointerType !== 'touch' || (event.target && event.target.classList && event.target.classList.contains('lw-thing-mark'))) return;
-    var thing = thingOf(event.target);
-    if (thing) { scan(); showMark(thing); } else if (pointed) hideMarkSoon();
-  }, true);
+  addEventListener('mouseout', function (event) { if (picking && !event.relatedTarget) { pointer = null; point(null); } }, true);
   // The thing marked now, outlined dashed, with its picture as it is shown: drawn here, in the page,
   // where its drawings and frames can be read; one drawn from a picture another site would not
   // share has none, and goes by its place alone.
@@ -326,8 +393,17 @@ export const PAGE_BRIDGE = `(function () {
       } catch (error) { resolve(null); }
     });
   }
+  // A part's picture: what is drawn in it (its drawings, canvases, pictures and videos), where they
+  // are, on the page's own background; a part of a drawing cut out of the drawing with a little
+  // around it. A part with nothing drawn in it has none: its words and boxes are in the page's code.
   function pictureOf(thing) {
-    var box = thing.getBoundingClientRect();
+    var svg = thing.namespaceURI === NS ? outerSvg(thing) : null, box = thing.getBoundingClientRect();
+    if (svg && svg !== thing) {
+      var whole = svg.getBoundingClientRect(), left = Math.max(whole.left, box.left - 16), top = Math.max(whole.top, box.top - 16);
+      box = { left: left, top: top, width: Math.min(whole.right, box.right + 16) - left, height: Math.min(whole.bottom, box.bottom + 16) - top };
+    }
+    var layers = svg ? [svg] : thing.matches(DRAWN) ? [thing] : Array.prototype.filter.call(thing.querySelectorAll(DRAWN), function (each) { return !(each.parentElement && each.parentElement.closest('svg')); });
+    if (!layers.length) return Promise.resolve(null);
     var scale = Math.min(window.devicePixelRatio || 1, 2048 / Math.max(box.width, box.height, 1));
     var canvas = document.createElement('canvas');
     canvas.width = Math.max(1, Math.round(box.width * scale));
@@ -337,7 +413,6 @@ export const PAGE_BRIDGE = `(function () {
     context.scale(scale, scale);
     context.fillStyle = backdrop(thing);
     context.fillRect(0, 0, box.width, box.height);
-    var layers = thing.matches(THING) ? [thing] : Array.prototype.filter.call(thing.querySelectorAll(THING), function (each) { return !(each.parentElement && each.parentElement.closest('svg')); });
     var drawn = Promise.resolve();
     layers.forEach(function (each) {
       drawn = drawn.then(function () {
@@ -358,6 +433,7 @@ export const PAGE_BRIDGE = `(function () {
     if (markedThing && markedThing.box.parentNode) markedThing.box.parentNode.removeChild(markedThing.box);
     if (markedThing && sized && !Object.keys(marked.parts).some(function (text) { return marked.parts[text].thing === markedThing.thing; })) sized.unobserve(markedThing.thing);
     markedThing = null;
+    if (pointing) point(pointing);
   }
   function tellThing(withPicture) {
     var thing = markedThing && markedThing.thing;
@@ -371,38 +447,78 @@ export const PAGE_BRIDGE = `(function () {
       parent.postMessage(message, '*', bytes ? [bytes] : []);
     });
   }
-  function markThing(thing) {
+  // from: the part a click picked, when the mark was widened from it.
+  function markThing(thing, from) {
     unmarkThing();
     var box = document.createElement('div');
     // Dashed, a little out from the thing, so it shows beside the outline of an earlier ask about it.
     box.className = 'lw-thing-box lw-marking' + (dark(thing.parentElement || thing) ? ' lw-dark' : '');
     layerOf().appendChild(box);
     placeOver(box, thing, 4);
-    markedThing = { thing: thing, box: box };
+    markedThing = { thing: thing, box: box, from: from || null };
     if (sized) sized.observe(thing);
+    // The keys go on from the part marked, however it was marked.
+    point(thing);
     tellThing(true);
+  }
+  // A click while picking marks the part under it; on the part marked now, or the one it was
+  // widened from, the part around that, and past the biggest the one first clicked again. A press that moved was a drag across words, and a double
+  // click picks a word: the words are marked. Words marked before are let go of (Safari keeps them
+  // through a press on a button).
+  var pressedAt = null;
+  function pickAt(event) {
+    if (event.detail > 1 || (pressedAt && Math.abs(event.clientX - pressedAt.x) + Math.abs(event.clientY - pressedAt.y) > 4)) return;
+    var selection = document.getSelection();
+    if (selection && !selection.isCollapsed) selection.removeAllRanges();
+    var part = partAt(event.target, event.clientX, event.clientY);
+    shown = false;
+    if (part && markedThing && (markedThing.thing === part || markedThing.from === part)) {
+      var wide = wider(markedThing.thing);
+      if (wide) markThing(wide, part);
+      else if (markedThing.from) markThing(markedThing.from);
+      return;
+    }
+    if (part) markThing(part);
+    else { unmarkThing(); send({ type: 'selection', text: '' }); }
   }
   var down = false, shown = false, timer = 0, queued = false;
   function report() {
     var selection = document.getSelection();
     var text = selection && selection.rangeCount && !selection.isCollapsed ? String(selection) : '';
     if (!text.trim()) { if (shown) { shown = false; send({ type: 'selection', text: '' }); } return; }
-    // A drag across a chart's own labels means the chart, not the words on its axes.
-    var common = selection.getRangeAt(0).commonAncestorContainer, inside = thingOf(common.nodeType === 1 ? common : common.parentElement);
-    if (inside) { selection.removeAllRanges(); if (shown) { shown = false; send({ type: 'selection', text: '' }); } markThing(inside); return; }
-    var box = selection.getRangeAt(0).getBoundingClientRect();
+    var range = selection.getRangeAt(0), common = range.commonAncestorContainer, svg = outerSvg(common.nodeType === 1 ? common : common.parentElement);
+    if (svg) { selection.removeAllRanges(); if (shown) { shown = false; send({ type: 'selection', text: '' }); } markThing(partOfWords(svg, range)); return; }
+    if (markedThing) unmarkThing();
+    var box = range.getBoundingClientRect();
     shown = true;
+    point(pointing);
     send({ type: 'selection', text: text, rect: { top: box.top, bottom: box.bottom, left: box.left, right: box.right } });
   }
-  document.addEventListener('pointerdown', function () {
+  // A press lets go of what is marked; while picking, the click decides.
+  addEventListener('pointerdown', function (event) {
     down = true;
-    if (shown || markedThing) { shown = false; unmarkThing(); send({ type: 'selection', text: '' }); }
+    pressedAt = { x: event.clientX, y: event.clientY };
+    if (!picking && (shown || markedThing)) { shown = false; unmarkThing(); send({ type: 'selection', text: '' }); }
   }, true);
-  document.addEventListener('pointerup', function () { down = false; setTimeout(report, 0); }, true);
+  addEventListener('pointerup', function () { down = false; setTimeout(report, 0); }, true);
   document.addEventListener('selectionchange', function () { if (down) return; clearTimeout(timer); timer = setTimeout(report, 120); });
-  document.addEventListener('keydown', function (event) {
+  var WALK = { ArrowUp: 1, ArrowDown: 1, ArrowLeft: 1, ArrowRight: 1 };
+  addEventListener('keydown', function (event) {
+    if (picking && !ours(event.target) && !event.metaKey && !event.ctrlKey && !event.altKey) {
+      if (WALK[event.key]) {
+        event.preventDefault();
+        var next = walkFrom(pointing || (markedThing && markedThing.thing), event.key);
+        if (!next) return;
+        if (next.scrollIntoView) next.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        point(next);
+        // Said to a screen reader by the reader: which part the keys are on.
+        send({ type: 'pointing', text: labelOf(next, whatOf(next)) });
+        return;
+      }
+      if ((event.key === 'Enter' || event.key === ' ') && pointing) { event.preventDefault(); shown = false; markThing(pointing); return; }
+    }
     if (event.key !== 'Escape') return;
-    // With nothing marked, Escape is the reader's: it closes an answer open over the page.
+    // With nothing marked, Escape is the reader's: it closes an answer open over the page, or stops picking.
     if (!shown && !markedThing) { send({ type: 'escape' }); return; }
     var selection = document.getSelection();
     if (selection) selection.removeAllRanges();
@@ -594,6 +710,8 @@ export const PAGE_BRIDGE = `(function () {
     });
     if (markedThing) placeOver(markedThing.box, markedThing.thing, 4);
     if (askingThing) placeOver(askingThing.box, askingThing.thing, 4);
+    // The page scrolled or changed size: the outline keeps to its part at once, gliding only between parts.
+    if (pointingBox && pointing) { pointingBox.classList.add('lw-still'); placeOver(pointingBox, pointing, 2); }
   }
   // A thing whose part is in the message box now is outlined dashed, as words there stay lit.
   var askingThing = null;
@@ -624,7 +742,7 @@ export const PAGE_BRIDGE = `(function () {
     }) });
   }
   function later() {
-    if (queued || (!wanted.length && !markedThing && !askingThing)) return;
+    if (queued || (!wanted.length && !markedThing && !askingThing && !pointingBox)) return;
     queued = true;
     requestAnimationFrame(function () { queued = false; if (wanted.length) parts(); else placeThings(); });
   }
@@ -633,12 +751,12 @@ export const PAGE_BRIDGE = `(function () {
   function moved() {
     if (shown) report();
     if (markedThing) tellThing(false);
-    if (pointed) showMark(pointed);
     later();
   }
   addEventListener('scroll', function () { moved(); unhover(false); }, true);
   addEventListener('resize', moved);
-  document.addEventListener('click', function (event) {
+  addEventListener('click', function (event) {
+    if (picking && !ours(event.target)) { pickAt(event); return; }
     var link = event.target && event.target.closest ? event.target.closest('a[href]') : null;
     if (!link) {
       var selection = document.getSelection();
@@ -701,9 +819,15 @@ export const PAGE_BRIDGE = `(function () {
         return ask && typeof ask.text === 'string' && typeof ask.key === 'string' && (!ask.at || (ask.at.kind === 'element' && typeof ask.at.path === 'string'));
       });
       asking = data.asking || null;
-      face = data.face && typeof data.face === 'object' ? data.face : null;
-      thingMarks.forEach(function (entry) { dressMark(entry.button); });
       applyMarks();
+    }
+    if (data.type === 'pick') {
+      picking = data.on === true;
+      document.documentElement.classList.toggle('lw-picking', picking);
+      if (!picking) { pointer = null; point(null); }
+      // Turned on from the keyboard: the first part in view is outlined at once, so the keys have
+      // somewhere to start and the person sees where they are.
+      else if (data.keys === true && !pointing) point(walkFrom(null));
     }
   });
   function isThing(ask) { return Boolean(ask.at); }
@@ -738,29 +862,39 @@ export const PAGE_BRIDGE = `(function () {
     if (window.CSS && CSS.highlights && typeof Highlight === 'function') light('lw-read-asking', askingWords ? [find(index(), askingWords)] : []);
     parts();
   }
-  // Charts are often drawn after the page loads: the things are found again when one is added,
-  // and a thing asked about that the page did not have yet is looked for again.
+  // Charts are often drawn after the page loads: a part asked about that the page did not have
+  // yet is looked for again when the page adds to itself or changes size.
   var rescan = 0;
   function rescanSoon() {
     clearTimeout(rescan);
     rescan = setTimeout(function () {
-      scan();
       if (things.some(function (text) { return !marked.found[text]; })) { marked.key = null; applyMarks(); }
     }, 300);
   }
   function added(records) {
     return records.some(function (record) {
-      return Array.prototype.some.call(record.addedNodes, function (node) { return node.nodeType === 1 && !(layer && layer.contains(node)) && (node.matches(THING) || node.querySelector(THING)); });
+      return Array.prototype.some.call(record.addedNodes, function (node) { return node.nodeType === 1 && !ours(node); });
     });
   }
   function watch() {
     if (!document.body || typeof MutationObserver !== 'function') return;
     new MutationObserver(function (records) { if (added(records)) rescanSoon(); }).observe(document.body, { childList: true, subtree: true });
     if (sized) sized.observe(document.body);
-    scan();
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', watch); else watch();
-  addEventListener('load', function () { scan(); later(); });
+  addEventListener('load', later);
+  // While picking, a press, a click or a key of the walk is the reader's: the page's own handlers
+  // never see it (a button isn't pressed, a link isn't followed, a chart doesn't zoom), though a
+  // drag still marks words. A field, a button or a list isn't taken into either. The outlines and
+  // bubbles LoomWatch draws keep their own clicks.
+  ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click', 'dblclick', 'auxclick', 'touchstart', 'touchend', 'keydown', 'keyup'].forEach(function (type) {
+    addEventListener(type, function (event) {
+      if (!picking || ours(event.target)) return;
+      if (type.indexOf('key') === 0 && !WALK[event.key] && event.key !== 'Enter' && event.key !== ' ' && event.key !== 'Escape') return;
+      if (/click$/.test(type) || (type === 'mousedown' && event.target.closest && event.target.closest('input, textarea, select, button, [contenteditable]'))) event.preventDefault();
+      event.stopImmediatePropagation();
+    }, true);
+  });
   var style = document.createElement('style');
   // The reader's own look (reader.css .rd-mark, .rd-slot, .rd-bubble), in the page's own words:
   // the page has none of the reader's colours. Keep the two alike.
@@ -818,30 +952,29 @@ export const PAGE_BRIDGE = `(function () {
     + '@media (prefers-reduced-motion:reduce){.lw-mark.lw-busy,.lw-mark.lw-dark.lw-busy{' + plain + '}.lw-dots i{opacity:1}}'
     + '@keyframes lw-sweep{from{background-size:0% 74%}}@keyframes lw-shine{from{background-position:100% 62%,0 62%}to{background-position:-150% 62%,0 62%}}'
     + '@keyframes lw-pop{from{opacity:0;scale:.3}}@keyframes lw-typing{50%{opacity:.25}}'
-    // Things (ADR 0091): the layer over the page; the mark above a thing's top left (shown while it is
-    // pointed at or has the keyboard): a dashed chip, as the reader's tip draws a part to mark, with
-    // the asked agent's face in it, in the lightness of the page under it; and the outline of a thing
-    // marked now or in the message box (dashed, a little out from it) or asked about (the reader's
-    // box: a gold edge on a tint), its bubbles hung above its top right, clear of a chart's own tools.
-    // The page's own rules (a transition on everything, a margin on every div) must not reach them.
+    // Parts (ADR 0091): the layer over the page, and the outline of a part: pointed at while picking
+    // (a thin gold line); marked now or in the message box (dashed, a little out from it), each with
+    // a halo that shows where the page's lightness is guessed wrong (a white drawing on a dark page);
+    // or asked about (the reader's box: a gold edge on a tint), its
+    // bubbles hung above its top right, clear of a chart's own tools, all in the lightness of the
+    // page under them. The page's own rules (a transition on everything, a margin on every div)
+    // must not reach them.
     + '.lw-things{all:initial;position:fixed!important;inset:0!important;pointer-events:none!important;z-index:2147483646!important;display:block!important}'
-    + '.lw-thing-mark{all:unset;position:absolute!important;box-sizing:border-box!important;width:28px!important;height:28px!important;margin:0!important;padding:0!important;border-radius:8px!important;'
-    + 'border:1.5px dashed #8A6A16!important;background:#F5F0E4!important;box-shadow:0 2px 8px rgba(0,0,0,.28)!important;cursor:pointer!important;opacity:0;pointer-events:none!important;'
-    + 'display:grid!important;place-items:center!important;overflow:visible!important;transform:none!important;translate:none!important;scale:none!important;rotate:none!important;filter:none!important;transition:none!important;animation:none!important}'
-    + '.lw-thing-mark.lw-dark{background:#1A1508!important;border-color:#E9C46A!important;box-shadow:0 2px 8px rgba(0,0,0,.5)!important}'
-    + '.lw-thing-mark:not(.lw-has-face)::before{content:"";box-sizing:content-box;width:12px;height:9px;border:1.5px solid #8A6A16;border-radius:2px;background:rgba(233,196,106,.35)}'
-    + '.lw-thing-mark.lw-dark:not(.lw-has-face)::before{border-color:#E9C46A}'
-    + '.lw-thing-mark img{all:unset;display:block!important;width:22px!important;height:22px!important;object-fit:contain!important;pointer-events:none!important}'
-    + '.lw-thing-mark.lw-on,.lw-thing-mark:focus-visible{opacity:1;pointer-events:auto!important}'
-    + '.lw-thing-mark:focus-visible{outline:2px solid #8A6A16!important;outline-offset:2px;box-shadow:0 2px 8px rgba(0,0,0,.28),0 0 0 2px #F5F0E4!important}'
-    + '.lw-thing-mark.lw-dark:focus-visible{outline-color:#E9C46A!important;box-shadow:0 2px 8px rgba(0,0,0,.5),0 0 0 2px #1A1508!important}'
-    + '@media (pointer:coarse){.lw-thing-mark{width:44px!important;height:44px!important}.lw-thing-mark img{width:34px!important;height:34px!important}.lw-thing-mark:not(.lw-has-face)::before{width:18px;height:13px}}'
     + '.lw-thing-box,.lw-thing-holder{all:initial;display:block!important;position:absolute!important;margin:0!important;padding:0!important;transition:none!important;animation:none!important;transform:none!important}'
     + '.lw-thing-box{box-sizing:border-box!important;border:2px solid #D8A93C!important;border-radius:6px!important;background:rgba(233,196,106,.1)!important;'
     + 'box-shadow:0 0 0 1px rgba(0,0,0,.5),inset 0 0 0 1px rgba(255,255,255,.4)!important;pointer-events:none!important}'
     + '.lw-thing-box.lw-read,.lw-thing-box.lw-failed{background:rgba(233,196,106,.04)!important}'
-    + '.lw-thing-box:is(.lw-marking,.lw-asking){border-style:dashed!important;border-color:#8A6A16!important;background:rgba(233,196,106,.14)!important;box-shadow:none!important}'
-    + '.lw-thing-box:is(.lw-marking,.lw-asking).lw-dark{border-color:#E9C46A!important}'
+    + '.lw-thing-box:is(.lw-marking,.lw-asking){border-style:dashed!important;border-color:#8A6A16!important;background:rgba(233,196,106,.14)!important;box-shadow:0 0 0 1px rgba(255,255,255,.6)!important}'
+    + '.lw-thing-box:is(.lw-marking,.lw-asking).lw-dark{border-color:#E9C46A!important;box-shadow:0 0 0 1px rgba(0,0,0,.6)!important}'
+    + '.lw-thing-box.lw-pointing{border-width:1.5px!important;border-radius:4px!important;border-color:#8A6A16!important;background:rgba(233,196,106,.08)!important;box-shadow:0 0 0 1px rgba(255,255,255,.6)!important}'
+    + '.lw-thing-box.lw-pointing.lw-dark{border-color:#E9C46A!important;box-shadow:0 0 0 1px rgba(0,0,0,.6)!important}'
+    // The pointing outline fades in, and glides from one part to the next as the pointer or the keys
+    // move; held still while the page scrolls under it, and not at all where motion is reduced.
+    + '@media (prefers-reduced-motion:no-preference){.lw-thing-box.lw-pointing{animation:lw-point-in .16s cubic-bezier(.2,0,0,1)!important}'
+    + '.lw-thing-box.lw-pointing:not(.lw-still){transition:left .16s cubic-bezier(.2,0,0,1),top .16s cubic-bezier(.2,0,0,1),width .16s cubic-bezier(.2,0,0,1),height .16s cubic-bezier(.2,0,0,1)!important}}'
+    + '@keyframes lw-point-in{from{opacity:0}}'
+    // While picking, a click picks: no link or button shows the hand that says it will do its own thing.
+    + 'html.lw-picking body :not(.lw-slot,.lw-slot *){cursor:auto!important}'
     + '.lw-thing-box.lw-lit{outline:2px solid #8A6A16!important;outline-offset:1px;box-shadow:0 0 0 1px rgba(0,0,0,.5),inset 0 0 0 1px rgba(255,255,255,.4),0 0 0 4px rgba(0,0,0,.4)!important}'
     + '.lw-thing-box.lw-lit.lw-dark{outline-color:#E9C46A!important}'
     + '.lw-thing-holder{pointer-events:auto!important;line-height:0!important;translate:-100% calc(-100% - 4px)!important}'
@@ -898,10 +1031,10 @@ export type PageMessage =
   | { type: 'ready' }
   /** The page asked for a file beside it, by the address it wrote (`fetch`, `XMLHttpRequest`, a clip): the reader answers `loaded` with the same id. */
   | { type: 'load'; id: number; url: string }
-  /** A chart, picture or video in the page was marked (or moved while marked): what it is called, where, and its picture as shown when it could be drawn. */
+  /** A part of the page was marked (or moved while marked): what it is and is called, where, and its picture as shown when it could be drawn. */
   | { type: 'thing'; what: ElementAt['what']; path: string; text: string; rect: PageRect; picture?: ArrayBuffer }
-  /** The kinds of thing the page has that can be asked about, in the order found: the reader's tip names one. */
-  | { type: 'things'; what: ElementAt['what'][] }
+  /** While picking, the arrow keys reached a part: what it is called, for a screen reader to say. */
+  | { type: 'pointing'; text: string }
 
 /** The largest picture of a thing in the page taken from it. */
 const PICTURE_MAX_BYTES = 20 * 1024 * 1024
@@ -920,14 +1053,13 @@ export function pageMessage(data: unknown): PageMessage | null {
     const { id, url } = data as { id?: unknown; url?: unknown }
     return Number.isSafeInteger(id) && typeof url === 'string' && url.length <= 4096 ? { type: 'load', id: id as number, url } : null
   }
-  if (message.type === 'things') {
-    const what = (data as { what?: unknown }).what
-    if (!Array.isArray(what)) return null
-    return { type: 'things', what: [...new Set(what.filter((kind): kind is ElementAt['what'] => kind === 'chart' || kind === 'picture' || kind === 'video'))] }
+  if (message.type === 'pointing') {
+    const text = (data as { text?: unknown }).text
+    return typeof text === 'string' && text.trim() && text.length <= 200 ? { type: 'pointing', text } : null
   }
   if (message.type === 'thing') {
     const { what, path, text, rect, picture } = data as { what?: unknown; path?: unknown; text?: unknown; rect?: unknown; picture?: unknown }
-    if (what !== 'chart' && what !== 'picture' && what !== 'video') return null
+    if (what !== 'chart' && what !== 'picture' && what !== 'video' && what !== 'part') return null
     if (typeof path !== 'string' || !path.trim() || path.length > 1000 || /[\n\r`]/.test(path)) return null
     if (typeof text !== 'string' || !text.trim() || text.length > 200 || !isRect(rect)) return null
     const bytes = Object.prototype.toString.call(picture) === '[object ArrayBuffer]' && (picture as ArrayBuffer).byteLength <= PICTURE_MAX_BYTES ? picture as ArrayBuffer : undefined
