@@ -108,16 +108,35 @@ pub struct Row {
 }
 
 /// The app's address for a run, after its origin: the run's team, open on that run, which is
-/// where a question or a review waits for its answer. The same address the app's own "Open run"
-/// links use (`historyRunUrl` in ui/src/lib/runs/history.ts). Without `path` the app has no team
-/// to open and shows Home.
+/// where a question or a review waits for its answer. A run of an agent's own chat
+/// (`.jobs/.bench/<id>.yaml`) opens that agent's chat in My agents instead, its Details beside it,
+/// where you work with it. The same address the app's own "Open run" links use (`historyRunUrl` in
+/// ui/src/lib/runs/history.ts). Without `path` the app has no team to open and shows Home.
 pub fn run_link(team_path: &str, run_id: &str) -> String {
+    if let Some(agent) = chat_of(team_path) {
+        return format!(
+            "/agents/{}?view=chat&run={}",
+            query_value(agent),
+            query_value(run_id)
+        );
+    }
     let path = if team_path.is_empty() {
         String::new()
     } else {
         format!("path={}&", query_value(team_path))
     };
     format!("/?{path}run={}", query_value(run_id))
+}
+
+/// Whose own chat `team_path` is: `<id>` for `.jobs/.bench/<id>.yaml`, written either way round
+/// (`benchChatOwner` in ui/src/lib/library/jobs.ts reads the same).
+fn chat_of(team_path: &str) -> Option<&str> {
+    let mut names = team_path
+        .rsplit(['/', '\\'])
+        .filter(|name| !name.is_empty());
+    let file = names.next()?;
+    let in_bench = names.next() == Some(".bench") && names.next() == Some(".jobs");
+    in_bench.then(|| file.strip_suffix(".yaml")).flatten()
 }
 
 /// `value` with every byte but the unreserved ones percent-encoded, so a team in a folder
@@ -648,6 +667,29 @@ mod tests {
             run_link("caf\u{e9}.yaml", "r1"),
             "/?path=caf%C3%A9.yaml&run=r1"
         );
+    }
+
+    /// The owner (2026-10-26): a run of Cole's own chat opened the team screen on its chat file. It
+    /// opens where you work with Cole. Twin cases: `historyRunUrl` (ui/src/lib/runs/history.ts).
+    #[test]
+    fn a_line_of_an_agents_own_chat_opens_that_agents_chat() {
+        for path in [
+            ".jobs/.bench/cole.yaml",
+            "/Users/ana/LoomWatch/teams/.jobs/.bench/cole.yaml",
+            "C:\\Users\\ana\\LoomWatch\\teams\\.jobs\\.bench\\cole.yaml",
+        ] {
+            assert_eq!(
+                run_link(path, "r1"),
+                "/agents/cole?view=chat&run=r1",
+                "{path}"
+            );
+        }
+        // A removed agent's file, and any other team, open on the team's page as before.
+        assert_eq!(
+            run_link(".jobs/.removed/cole.yaml", "r1"),
+            "/?path=.jobs%2F.removed%2Fcole.yaml&run=r1"
+        );
+        assert_eq!(run_link("trip.yaml", "r1"), "/?path=trip.yaml&run=r1");
     }
 
     #[test]

@@ -91,10 +91,12 @@ export function figureFor(id: string, chosen?: FigureChoice | null): FigureChoic
 /**
  * The figure a team's agent wears, so it looks the same in the team as it does in Your agents: one
  * placed from Your agents wears its saved agent's figure (found by the `from` link, not by its id in
- * the team, which can differ); a team's own agent wears the one its id picks.
+ * the team, which can differ); a team's own agent wears the one its id picks. An agent's own chat
+ * (`chatOf`, from `benchChatOwner`) is that agent on a team of one, written with no link, so its
+ * agent wears the figure of the agent the chat is named for.
  */
-export function agentFigure(agent: Pick<AgentConfig, 'id' | 'from'>, saved: readonly { id: string; figure?: FigureChoice }[]): FigureChoice {
-  const linked = agent.from?.agent
+export function agentFigure(agent: Pick<AgentConfig, 'id' | 'from'>, saved: readonly { id: string; figure?: FigureChoice }[], chatOf: string | null = null): FigureChoice {
+  const linked = agent.from?.agent ?? chatOf ?? undefined
   const job = linked ? saved.find((candidate) => candidate.id === linked) : undefined
   return figureFor(linked ?? agent.id, job?.figure)
 }

@@ -3,15 +3,18 @@ import { Network, Plus, UserRoundPlus, X } from 'lucide-react'
 
 import type { DetectedCapability } from '../../lib/library/client'
 import type { AgentDraft } from '../../lib/library/draft'
-import type { SavedJob } from '../../lib/library/jobs'
+import { benchChatOwner, type SavedJob } from '../../lib/library/jobs'
 import { draftFromTeamAgent, readsOf, teamKnowledge, type TeamKnowledge } from '../../lib/library/teamDraft'
 import type { RunRecord } from '../../lib/runs/client'
 import type { ModelMove } from '../../lib/team-file/useModelFollowing'
 import type { AgentConfig } from '../../lib/team-file/types'
 import { agentFigure, figureFor } from '../../lib/library/figures'
 import { FigureStill } from '../agents/FigureStill'
+import { useAgentFigure } from '../agents/figureContext'
 import { useBenchFile } from '../../lib/files/useBenchFile'
+import { useBenchDetails } from '../../lib/runs/useBenchDetails'
 import { AgentAnswer, AgentChat, AgentFile } from '../agents/AgentChat'
+import { AgentDetails } from '../agents/AgentDetails'
 import { AgentBuilder, AgentHead } from '../agents/AgentBuilder'
 import { ByHand, type ByHandProps } from '../agents/ByHand'
 import type { AgentView } from '../agents/route'
@@ -75,7 +78,7 @@ export function TeamAgents({ agents, responder, selected, onSelect, teamName, te
           const job = candidate.from ? savedJobs.find((each) => each.id === candidate.from?.agent) : undefined
           return (
             <button key={candidate.id} type="button" className="team-agents-chip" aria-pressed={candidate.id === agent?.id} onClick={() => onSelect(candidate.id)}>
-              <FigureStill className="team-agents-figure" figure={agentFigure(candidate, savedJobs)} alt="" width={40} height={40} />
+              <FigureStill className="team-agents-figure" figure={agentFigure(candidate, savedJobs, benchChatOwner(teamPath))} alt="" width={40} height={40} />
               <span><b>{candidate.name}</b><em>{!candidate.from ? 'Joins My agents when you save' : job ? (job.does?.trim() || 'One of My agents') : savedJobsLoaded ? 'Not in My agents' : ''}</em></span>
             </button>
           )
@@ -168,7 +171,9 @@ function OwnAgent({ agent, team, teamPath, editable, skills, skillsLoading, onEd
   const [answerRun, setAnswerRun] = useState<string | null>(null)
   // A file its answers name, read over the bench too (ADR 0077).
   const benchFile = useBenchFile()
-  const figure = figureFor(agent.id)
+  // A piece's Details, read over the bench (AgentDetails).
+  const details = useBenchDetails(chatId)
+  const figure = useAgentFigure(agent)
   const name = draft.name.trim() || agent.name || 'New agent'
   return (
     <div className="team-agents-own">
@@ -181,9 +186,12 @@ function OwnAgent({ agent, team, teamPath, editable, skills, skillsLoading, onEd
       <ByHand
         draft={draft} set={(key, value) => onEdit(agent.id, key, value)} skills={skills} skillsLoading={skillsLoading} roleField={roleField} figure={figure} record={record} hideDoes readOnly={!editable} teamOwn={{ teamPath }} onShowWorkflow={onShowWorkflow} suggestFor={{ agent, team }} following={following}
         learned={teamPath ? { teamPath, agent: agent.id } : null}
-        chat={view === 'chat' ? <AgentChat draft={chatDraft} model={draft.model} chatId={chatId} figure={figure} onAllow={(what) => (typeof what === 'string' ? onEdit(agent.id, 'allow', { ...draft.allow, [what]: true }) : onEdit(agent.id, 'toolAllow', withAllowed(draft.toolAllow, what.tool, what.call)))} onRecord={setRecord} answerRunId={answerRun} onOpenAnswer={setAnswerRun} knowledge={knowledge} file={benchFile.chat} /> : undefined}
+        chat={view === 'chat' ? <AgentChat draft={chatDraft} model={draft.model} chatId={chatId} figure={figure} onAllow={(what) => (typeof what === 'string' ? onEdit(agent.id, 'allow', { ...draft.allow, [what]: true }) : onEdit(agent.id, 'toolAllow', withAllowed(draft.toolAllow, what.tool, what.call)))} onRecord={setRecord} answerRunId={answerRun} onOpenAnswer={(runId) => { setAnswerRun(runId); if (runId) details.close() }} knowledge={knowledge} file={benchFile.chat}
+          detailsRunId={details.asked?.runId ?? null} onDetails={(asked) => { details.open(asked); setAnswerRun(null); benchFile.close() }} reveal={details.reveal} /> : undefined}
         onBuild={() => setView('build')}
-        cover={view === 'chat' && benchFile.reading ? <AgentFile bench={benchFile} chatId={chatId} name={name} figure={figure} /> : view === 'chat' && answerRun ? <AgentAnswer runId={answerRun} name={name} onClose={() => setAnswerRun(null)} /> : undefined}
+        cover={view === 'chat' && benchFile.reading ? <AgentFile bench={benchFile} chatId={chatId} name={name} figure={figure} />
+          : view === 'chat' && details.asked ? <AgentDetails key={details.asked.at} asked={details.asked} draft={chatDraft} model={draft.model} chatId={chatId} figure={figure} onClose={details.close} onAllow={(key) => onEdit(agent.id, 'allow', { ...draft.allow, [key]: true })} onRevealMessage={details.revealMessage} />
+          : view === 'chat' && answerRun ? <AgentAnswer runId={answerRun} name={name} onClose={() => setAnswerRun(null)} /> : undefined}
       />
     </div>
   )

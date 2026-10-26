@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { daemonFetch } from '../daemonFetch'
-import { safeFileStem } from '../files/paths'
+import { safeFileStem, splitPath } from '../files/paths'
 import { movedInPlace } from '../team-file/inPlace'
 import type { AgentAllow, AgentConfig } from '../team-file/types'
 import type { FigureChoice } from './figures'
@@ -127,6 +127,16 @@ export async function benchFolder(): Promise<string> {
   const response = await daemonFetch('/api/bench', { method: 'POST', cache: 'no-store' })
   if (!response.ok) throw await failure(response)
   return ((await response.json()) as { folder: string }).folder
+}
+
+/**
+ * Whose chat a team file is: `<id>` for `.jobs/.bench/<id>.yaml`, the one-agent team an agent's
+ * own chat keeps (the daemon's `pinned.rs` reads the same path back), or `null` for any other team.
+ */
+export function benchChatOwner(teamPath: string | null | undefined): string | null {
+  const names = splitPath(teamPath ?? '')
+  const [jobs, bench, file] = names.slice(-3)
+  return names.length >= 3 && jobs === '.jobs' && bench === '.bench' && /\.yaml$/.test(file) ? file.replace(/\.yaml$/, '') : null
 }
 
 /** Remove a saved job. Its file is moved to `.jobs/.removed/`, so it can be put back by hand. */

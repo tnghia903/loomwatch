@@ -858,6 +858,18 @@ pub(crate) fn bench_folder(teams_root: &Path) -> Result<String, JobError> {
     Ok(format!("{JOBS_DIR}/{BENCH_DIR}"))
 }
 
+/// Whose own chat `team_path` is: `<id>` for `.jobs/.bench/<id>.yaml`, the one-agent team an
+/// agent's chat runs, written either way round (`benchChatOwner` in ui/src/lib/library/jobs.ts and
+/// the Mac app's `progress::chat_of` read the same).
+pub(crate) fn chat_of(team_path: &str) -> Option<&str> {
+    let mut names = team_path
+        .rsplit(['/', '\\'])
+        .filter(|name| !name.is_empty());
+    let file = names.next()?;
+    let in_bench = names.next() == Some(BENCH_DIR) && names.next() == Some(JOBS_DIR);
+    in_bench.then(|| file.strip_suffix(".yaml")).flatten()
+}
+
 /// Keep a file one of Your agents reads, in `.jobs/.files/`, and name it by its full path: what
 /// the agent's `reads` holds, so every team it joins reads the same file wherever that team is.
 /// An identical file already there is reused; another with the same name gets a numbered name.

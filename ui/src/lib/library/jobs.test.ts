@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_MODEL } from '../ai/modelIds'
 import type { AgentConfig } from '../team-file/types'
 import { buildAgentFromSource } from './createAgent'
-import { fetchJobs, guessIcon, JobApiError, jobIdFor, JOBS_CHANGED_EVENT, removeJob, saveJob, savedJobPreset, type SavedJob } from './jobs'
+import { benchChatOwner, fetchJobs, guessIcon, JobApiError, jobIdFor, JOBS_CHANGED_EVENT, removeJob, saveJob, savedJobPreset, type SavedJob } from './jobs'
 import { ROLE_PRESETS, roleSource } from './roles'
 
 const agent: AgentConfig = {
@@ -133,5 +133,26 @@ describe('the jobs API', () => {
     expect(calls[2]).toMatchObject({ url: '/api/jobs/notes', init: { method: 'DELETE' } })
     expect(changed).toHaveBeenCalledTimes(2)
     window.removeEventListener(JOBS_CHANGED_EVENT, changed)
+  })
+})
+
+// An agent's own chat is the one-agent team `.jobs/.bench/<id>.yaml`; the daemon's pinned.rs reads
+// the same path back to the agent.
+describe('whose chat a team file is', () => {
+  it('is the agent its file is named for, however the path is written', () => {
+    expect(benchChatOwner('.jobs/.bench/cole.yaml')).toBe('cole')
+    expect(benchChatOwner('/Users/ana/LoomWatch/teams/.jobs/.bench/cole.yaml')).toBe('cole')
+    expect(benchChatOwner('C:\\Users\\ana\\LoomWatch\\teams\\.jobs\\.bench\\cole.yaml')).toBe('cole')
+    expect(benchChatOwner('.jobs/.bench/team-trip-planner.yaml')).toBe('team-trip-planner')
+  })
+
+  it('is no one for any other team, the agent’s own file included', () => {
+    expect(benchChatOwner('trip.yaml')).toBeNull()
+    expect(benchChatOwner('.jobs/cole.yaml')).toBeNull()
+    // A removed agent's file, kept in `.jobs/.removed/`, is no chat.
+    expect(benchChatOwner('.jobs/.removed/cole.yaml')).toBeNull()
+    expect(benchChatOwner('/teams/.bench/cole.yaml')).toBeNull()
+    expect(benchChatOwner('.jobs/.bench/notes/cole.yaml')).toBeNull()
+    expect(benchChatOwner(null)).toBeNull()
   })
 })

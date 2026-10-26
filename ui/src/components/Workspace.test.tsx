@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { forgetKeyStatus } from '../lib/ai/useKeyStatus'
 import { forgetModels } from '../lib/ai/useModels'
+import { figureFor, figureStill } from '../lib/library/figures'
 import type { RunEvent } from '../lib/watch/events'
 import type { AgentConfig } from '../lib/team-file/types'
 import { keys } from '../lib/platform'
@@ -250,6 +251,14 @@ describe('Workspace', () => {
       expect(within(pane).getAllByRole('tab').map((each) => each.textContent)).toEqual(['Details', 'market.md'])
       fireEvent.click(within(pane).getByRole('tab', { name: 'Details' }))
       expect(within(pane).getByRole('main', { name: 'Run workspace' })).toBeInTheDocument()
+    })
+
+    // The owner (2026-10-26): a link to a team's run opens the team's chat at that run's message.
+    it('opens the chat at the message of the run its link names', async () => {
+      const earlier = finished('run-2', 'Done.')
+      serve([work(earlier)], [earlier])
+      renderWorkspace('run-2')
+      await waitFor(() => expect(document.querySelector('[data-said="request:run-2"]')).toHaveClass('flash'))
     })
 
     it('keeps a closed tab closed for that work, until Read opens it again in its place', async () => {
@@ -1313,6 +1322,15 @@ describe('Workspace', () => {
         HTMLDialogElement.prototype.showModal = showModal
       }
     })
+
+    // Details' "What was recorded" is Details' own to wire (DeliveryLane's onShowRecorded), so a
+    // team's Details that stops passing it would lose the link without a word.
+    it('opens every record behind the run from Details’ What was recorded', async () => {
+      sessionState.events = [event(0, 'process', { phase: 'spawned', pid: 1 })]
+      renderWorkspace('run-1')
+      fireEvent.click(await screen.findByRole('button', { name: /What was recorded/ }))
+      expect(await screen.findByRole('complementary', { name: 'Provenance' })).toBeInTheDocument()
+    })
   })
   // ---- ADR 0016: positions in the sidecar, contract in the team file -------------------------
 
@@ -1471,6 +1489,34 @@ describe('the Workflow canvas cards', () => {
     for (const card of agentCards()) expect(card).toContain('build-node')
     expect(document.querySelector('.build-node.has-run')).toBeNull()
     expect(document.querySelector('.lw-shell')).toHaveClass('build-workspace', 'build-graph')
+  })
+})
+
+// The owner (2026-10-26): Cole wore a lilac spool in My agents, and another figure on the screen a
+// link to a run of Cole's chat opened. The chat is a team of one in `.jobs/.bench/cole.yaml` whose
+// agent names no link, so the file it is says whose agent it is.
+describe('an agent’s own chat, opened on the team screen', () => {
+  const lilac = '/agent/figures/spool-lilac.webp'
+  let nodes: typeof documentState.nodes
+  beforeEach(() => {
+    nodes = documentState.nodes
+    const [, reviewer] = nodes
+    Object.assign(documentState, { path: '/teams/.jobs/.bench/reviewer.yaml', nodes: [{ ...reviewer, data: { ...reviewer.data, isEntrypoint: true } }], edges: [], entrypoint: 'reviewer' })
+    const fallback = globalThis.fetch
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => String(input) === '/api/jobs'
+      ? new Response(JSON.stringify({ folder: '.jobs', jobs: [{ id: 'reviewer', file: '.jobs/reviewer.yaml', name: 'Reviewer', instructions: 'Review it.', figure: { kind: 'spool', color: 'lilac' } }], problems: [] }), { status: 200 })
+      : fallback(input, init)))
+  })
+  afterEach(() => { Object.assign(documentState, { path: '/teams/demo.yaml', nodes, edges: [{ id: 'researcher->reviewer', source: 'researcher', target: 'reviewer', data: { kind: 'sequence', ts: '' }, selected: false }], entrypoint: 'researcher' }) })
+
+  it('draws its agent in the figure it wears in My agents: its card, the team’s sentence, the palette and the rail', async () => {
+    expect(figureStill(figureFor('reviewer'))).not.toBe(lilac)
+    renderWorkspace()
+    await waitFor(() => expect(document.querySelector('[data-node="agent"] .build-node-figure')).toHaveAttribute('src', lilac))
+    expect(document.querySelector('.story-face img')).toHaveAttribute('src', lilac)
+    expect(screen.getByRole('button', { name: /^Reviewer\s*On this canvas/ }).querySelector('.palette-figure')).toHaveAttribute('src', lilac)
+    const rail = screen.getByRole('navigation', { name: 'My team' })
+    await waitFor(() => expect(rail.querySelector('[aria-current="page"] .crew-team img')).toHaveAttribute('src', lilac))
   })
 })
 

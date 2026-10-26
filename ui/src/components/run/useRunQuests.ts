@@ -5,7 +5,7 @@ import { BOBBIN_LINE, questsEarned, wholeCraft, type Award } from '../../lib/que
 import { earnItem, fetchWardrobe, useWardrobe } from '../../lib/quests/wardrobe'
 import { fetchRuns, type RunRecord } from '../../lib/runs/client'
 import { fetchTeamFile } from '../../lib/team-file/client'
-import { fetchJobs } from '../../lib/library/jobs'
+import { benchChatOwner, fetchJobs } from '../../lib/library/jobs'
 import { filledTeam } from '../../lib/team-file/myAgents'
 import { LESSON_RUNS, lessonRun } from '../../lib/team-file/runLessons'
 import type { AgentConfig } from '../../lib/team-file/types'
@@ -20,14 +20,13 @@ export interface RunEarned {
   agentId: string | null
 }
 
-const BENCH = /(?:^|\/)\.jobs\/\.bench\/([^/]+)\.yaml$/
 const ENDED = new Set(['succeeded', 'failed', 'cancelled'])
 
 /** The saved agents with a test bench run that finished before `before`. */
 export function benchedBefore(records: readonly RunRecord[], before: string): Set<string> {
   return new Set(records.flatMap((record) => {
-    const match = BENCH.exec(record.teamPath)
-    return match && record.status === 'succeeded' && record.createdAt < before ? [match[1]] : []
+    const owner = benchChatOwner(record.teamPath)
+    return owner && record.status === 'succeeded' && record.createdAt < before ? [owner] : []
   }))
 }
 

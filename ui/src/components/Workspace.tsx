@@ -122,9 +122,9 @@ import { APPROVAL_TEXT } from '../lib/story/needsYou'
 import { DEPTH_LABEL, DEPTH_ZOOM, STORY_MAX_ZOOM } from '../lib/story/depth'
 import { modelForPreset, ROLE_PRESETS, roleSource } from '../lib/library/roles'
 import { agentFigure, FIGURE_HUES, figureHue } from '../lib/library/figures'
-import { GuestNamesContext, SavedAgentsContext, TeamFiguresContext } from './agents/figureContext'
+import { ChatOfContext, GuestNamesContext, SavedAgentsContext, TeamFiguresContext } from './agents/figureContext'
 import { alwaysAllowGuest } from '../lib/library/bringIn'
-import { savedJobPreset, toolAllowOf, useSavedJobs, type SavedJob } from '../lib/library/jobs'
+import { benchChatOwner, savedJobPreset, toolAllowOf, useSavedJobs, type SavedJob } from '../lib/library/jobs'
 import { readKey } from '../lib/library/reads'
 import { guestsOf } from '../lib/chat/guests'
 import { teamAgentEdit } from '../lib/library/teamDraft'
@@ -265,6 +265,8 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   const { jobs: savedJobs, loaded: savedJobsLoaded } = useSavedJobs()
   // ADR 0092: the person's other agents a run may bring in, named and drawn as in My agents.
   const guests = useMemo(() => guestsOf(savedJobs, doc.nodes.map((node) => node.data.agent.name || node.id)), [savedJobs, doc.nodes])
+  // An agent's own chat, opened here from a link to one of its runs: its agent wears its figure.
+  const chatOf = benchChatOwner(doc.path)
   // One of the agent's own reads in My agents (ADR 0094): knowledge isn't turned off for one team,
   // so taking it off a team's canvas takes it off the agent, and the canvas says so.
   const isOwnRead = useCallback((agent: AgentConfig, capability: Pick<CapabilityRef, 'kind' | 'path' | 'notion'>) => {
@@ -1557,8 +1559,8 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   // Each agent's figure, the one it wears in Your agents (lib/library/figures.ts agentFigure).
   const agentFigures = useMemo(() => new Map([
     ...guests.figures,
-    ...doc.nodes.filter((node) => node.data.agent.kind !== 'operator').map((node) => [node.id, agentFigure(node.data.agent, savedJobs)] as const),
-  ]), [doc.nodes, savedJobs, guests])
+    ...doc.nodes.filter((node) => node.data.agent.kind !== 'operator').map((node) => [node.id, agentFigure(node.data.agent, savedJobs, chatOf)] as const),
+  ]), [doc.nodes, savedJobs, guests, chatOf])
   const chatAgents = useMemo(() => {
     const step = (id: string) => stepById.get(id)?.step ?? Infinity
     return [...doc.nodes].sort((left, right) => step(left.id) - step(right.id)).map((node) => ({ id: node.id, name: node.data.agent.name || node.id, operator: node.data.agent.kind === 'operator' }))
@@ -2417,8 +2419,6 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
 
   const canvasActions: CanvasActions = useMemo(() => ({
     editable, renameAgent: doc.renameAgent, touchField: doc.touchField, mode: doc.mode, stepById, nodeNames,
-    inspectHandover: (id) => { setHandoverAgentId(id); setInspectedEvidenceId(null) },
-    toggleProvenance: () => setProvenanceOpen((open) => !open),
     focusComposer,
     briefCount: memory?.entries.length ?? 0,
     teamDeliverAs: memory?.deliverAs,
@@ -2531,6 +2531,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
 
   return (
     <SavedAgentsContext.Provider value={savedJobs}>
+    <ChatOfContext.Provider value={chatOf}>
     <TeamFiguresContext.Provider value={agentFigures}>
     <GuestNamesContext.Provider value={guests.names}>
     <CanvasActionsContext.Provider value={canvasActions}>
@@ -2558,6 +2559,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
             onAlwaysAllow={editable ? allowAlways : undefined}
             announce={setStatusAnnouncement}
             reveal={chatReveal}
+            landAt={initialRunId}
             onOpenFinding={openFinding}
             startTeam={startTeam}
             onStartTeamTaken={startTeamTaken}
@@ -2607,6 +2609,8 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
                   events={shownEvents}
                   focusAgentId={attentionFocusAgentId}
                   onInspectEvidence={(id) => setInspectedEvidenceId(id)}
+                  onShowRecorded={() => setProvenanceOpen((open) => !open)}
+                  onShowReceived={(id) => { setHandoverAgentId(id); setInspectedEvidenceId(null) }}
                   onRevealMessage={activeRunId ? (id) => setChatReveal({ runId: activeRunId, id, at: Date.now() }) : undefined}
                   onSelectAgent={(id) => doc.onNodesChange(doc.nodes.map((node) => ({ id: node.id, type: 'select' as const, selected: node.id === id })))}
                 />
@@ -2997,6 +3001,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     </CanvasActionsContext.Provider>
     </GuestNamesContext.Provider>
     </TeamFiguresContext.Provider>
+    </ChatOfContext.Provider>
     </SavedAgentsContext.Provider>
   )
 }

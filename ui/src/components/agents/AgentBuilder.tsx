@@ -27,7 +27,9 @@ import { AgentChip } from './AgentChip'
 import type { AgentBarSlots } from './AgentFrame'
 import { AgentBadge } from './AgentBadge'
 import { useBenchFile } from '../../lib/files/useBenchFile'
+import { useBenchDetails } from '../../lib/runs/useBenchDetails'
 import { AgentAnswer, AgentChat, AgentFile } from './AgentChat'
+import { AgentDetails } from './AgentDetails'
 import { ByHand } from './ByHand'
 import { FigurePicker } from './FigurePicker'
 import { navigate, withView, type AgentView } from './route'
@@ -44,6 +46,8 @@ export interface AgentBuilderProps {
   cameFrom?: string | null
   /** Which tab of its page is open, from the address: Build, or its Chat. Inside a team the page keeps it. */
   view?: AgentView
+  /** A piece of its chat the address names (`historyRunUrl`), opened with its Details. */
+  run?: string | null
   /**
    * Shown inside a team's Agents tab: there is no page to go back to, and after each save the team
    * shows the agent as it is now (ADR 0094). What the team gives it to read besides its own stays
@@ -75,7 +79,7 @@ type SaveState = { kind: 'idle' } | { kind: 'saving' } | { kind: 'saved' } | { k
  * Inside a team (`inTeam`) it has the same two tabs, and its Chat is the one it has in Your agents:
  * talking to one agent on its own is a different thing from giving the team work in the team's chat.
  */
-export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, cameFrom = null, view: asked = 'build', inTeam, leaveRef, bar }: AgentBuilderProps) {
+export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, cameFrom = null, view: asked = 'build', run = null, inTeam, leaveRef, bar }: AgentBuilderProps) {
   // Inside a team the address is the team's, so the page keeps which tab is open.
   const [teamView, setTeamView] = useState<AgentView>('build')
   const view: AgentView = inTeam ? teamView : asked
@@ -204,16 +208,27 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
     try { await removeJob(saved.id); navigate('/agents') } catch (failed) { setSave({ kind: 'error', message: failed instanceof Error ? failed.message : String(failed), removing: true }); setRemoving(false) }
   }
 
-  if (id && !saved) {
-    const missing = <p className="home-empty">{!loaded ? 'Loading…' : available ? `There is no agent “${id}” in My agents.` : 'This LoomWatch server is older than My agents. Restart it to use them.'}</p>
-    if (bar) return <div className="agent-builder">{bar.chip && createPortal(<AgentChip name={id} state="clean" detail={!loaded ? 'Loading…' : 'Not in My agents'} />, bar.chip)}{missing}</div>
-    return <div className="agent-builder"><a className="link agent-back" href="/agents" onClick={(event) => { event.preventDefault(); navigate('/agents') }}><ArrowLeft size={14} aria-hidden="true" />My agents</a><p className="home-empty">{!loaded ? 'Loading…' : available ? `There is no agent “${id}” in My agents.` : 'This LoomWatch server is older than My agents. Restart it to use them.'}</p></div>
-  }
-
   // Its chat is kept under the id it is saved as, so a new agent saved under the name it had in its
   // chat goes on talking in the same chat. A name one of your agents already has keeps its own.
   const provisional = jobIdFor(draft.name || 'agent')
   const chatId = saved ? saved.id : jobs.some((job) => job.id === provisional) ? `new-${provisional}` : provisional
+  // A piece's Details, read over the bench (AgentDetails).
+  const details = useBenchDetails(chatId)
+  // A link to a piece of its chat opens it with its Details, once the agent is known. A chat that is
+  // none of My agents' (a team's own agent's, or a new one's not saved yet) is read on the team
+  // screen, where such a link always went.
+  const savedId = saved?.id ?? null
+  const showDetails = details.show
+  useEffect(() => { if (run && savedId) showDetails({ runId: run }) }, [run, savedId, showDetails])
+  const elsewhere = id && run && loaded && available && !saved ? `/?${new URLSearchParams({ path: `.jobs/.bench/${id}.yaml`, view: 'chat', run })}` : null
+  useEffect(() => { if (elsewhere) window.location.replace(elsewhere) }, [elsewhere])
+
+  if (id && !saved) {
+    const missing = <p className="home-empty">{!loaded || elsewhere ? 'Loading…' : available ? `There is no agent “${id}” in My agents.` : 'This LoomWatch server is older than My agents. Restart it to use them.'}</p>
+    if (bar) return <div className="agent-builder">{bar.chip && createPortal(<AgentChip name={id} state="clean" detail={!loaded ? 'Loading…' : 'Not in My agents'} />, bar.chip)}{missing}</div>
+    return <div className="agent-builder"><a className="link agent-back" href="/agents" onClick={(event) => { event.preventDefault(); navigate('/agents') }}><ArrowLeft size={14} aria-hidden="true" />My agents</a><p className="home-empty">{!loaded ? 'Loading…' : available ? `There is no agent “${id}” in My agents.` : 'This LoomWatch server is older than My agents. Restart it to use them.'}</p></div>
+  }
+
   const showView = (next: AgentView) => { if (next !== view) { if (inTeam) setTeamView(next); else navigate(withView(next), true) } }
   // The team the operator came from, which the team panel names by its file, absolute or not.
   const cameFromUse = cameFrom ? mine.find((use) => use.teamPath === cameFrom || cameFrom.endsWith(`/${use.teamPath}`)) ?? null : null
@@ -233,9 +248,12 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
     <ByHand
       draft={draft} set={set} skills={skills} skillsLoading={skillsLoading} roleField={roleField} figure={figure} record={benchRecord} reads={inTeam?.reads} onShowWorkflow={inTeam?.onShowWorkflow}
       learned={saved ? { savedAgent: saved.id } : null}
-      chat={view === 'chat' ? <AgentChat draft={draft} model={draft.model} chatId={chatId} figure={figure} onAllow={(what) => (typeof what === 'string' ? set('allow', { ...draft.allow, [what]: true }) : set('toolAllow', withAllowed(draft.toolAllow, what.tool, what.call)))} onRecord={setBenchRecord} answerRunId={answerRun} onOpenAnswer={setAnswerRun} knowledge={inTeam?.knowledge} file={benchFile.chat} /> : undefined}
+      chat={view === 'chat' ? <AgentChat draft={draft} model={draft.model} chatId={chatId} figure={figure} onAllow={(what) => (typeof what === 'string' ? set('allow', { ...draft.allow, [what]: true }) : set('toolAllow', withAllowed(draft.toolAllow, what.tool, what.call)))} onRecord={setBenchRecord} answerRunId={answerRun} onOpenAnswer={(runId) => { setAnswerRun(runId); if (runId) details.close() }} knowledge={inTeam?.knowledge} file={benchFile.chat}
+        detailsRunId={details.asked?.runId ?? null} onDetails={(asked) => { details.open(asked); setAnswerRun(null); benchFile.close() }} reveal={details.reveal} landAt={run} /> : undefined}
       onBuild={() => showView('build')}
-      cover={view === 'chat' && benchFile.reading ? <AgentFile bench={benchFile} chatId={chatId} name={name} figure={figure} /> : view === 'chat' && answerRun ? <AgentAnswer runId={answerRun} name={name} onClose={() => setAnswerRun(null)} /> : undefined}
+      cover={view === 'chat' && benchFile.reading ? <AgentFile bench={benchFile} chatId={chatId} name={name} figure={figure} />
+        : view === 'chat' && details.asked ? <AgentDetails key={details.asked.at} asked={details.asked} draft={draft} model={draft.model} chatId={chatId} figure={figure} onClose={details.close} onAllow={(key) => set('allow', { ...draft.allow, [key]: true })} onRevealMessage={details.revealMessage} />
+        : view === 'chat' && answerRun ? <AgentAnswer runId={answerRun} name={name} onClose={() => setAnswerRun(null)} /> : undefined}
     />
   )
   const side = view === 'build' && (

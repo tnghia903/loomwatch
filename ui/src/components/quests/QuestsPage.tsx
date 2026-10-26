@@ -3,6 +3,7 @@ import { ArrowRight, Check, Lock, Moon, Sun } from 'lucide-react'
 import { figureStill, type FigureKind } from '../../lib/library/figures'
 import { AREA_NAMES, AREAS, isAccessory, isGarment, QUESTS, type Quest } from '../../lib/quests/catalog'
 import { partsDone, useWardrobe, type EarnedItem, type Wardrobe } from '../../lib/quests/wardrobe'
+import { historyRunUrl } from '../../lib/runs/history'
 import type { LoomMarkState } from '../../lib/story/loomMark'
 import { useTheme } from '../../lib/theme'
 import { AccessoryIcon } from '../agents/AccessoryArt'
@@ -97,7 +98,7 @@ function QuestCard({ quest, entry, wardrobe }: { quest: Quest; entry: EarnedItem
             {AREAS.map((area) => <li key={area} className={parts.has(area) ? 'on' : ''}>{parts.has(area) && <Check size={11} aria-hidden="true" />}{AREA_NAMES[area]}</li>)}
           </ul>
         )}
-        {entry?.teamPath && <a className="link quest-run" href={`/?path=${encodeURIComponent(entry.teamPath)}&run=${encodeURIComponent(entry.runId)}`}>See the run that earned it<ArrowRight size={12} aria-hidden="true" /></a>}
+        {entry?.teamPath && <a className="link quest-run" href={historyRunUrl({ id: entry.runId, teamPath: entry.teamPath })}>See the run that earned it<ArrowRight size={12} aria-hidden="true" /></a>}
       </div>
     </li>
   )

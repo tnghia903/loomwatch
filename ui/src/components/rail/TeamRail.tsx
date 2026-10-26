@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 
 import { agentFigure, type FigureChoice } from '../../lib/library/figures'
-import type { SavedJob } from '../../lib/library/jobs'
+import { benchChatOwner, type SavedJob } from '../../lib/library/jobs'
 import { isOpenTeam } from '../../lib/library/uses'
 import { teamPresence } from '../../lib/rail/presence'
 import { useTeamCrews, type CrewAgent } from '../../lib/rail/teamCrews'
@@ -65,7 +65,7 @@ export function TeamRail({ open, runs, savedJobs, view, go, onNewTeam, leave }: 
       detail: (names.get(team.name) ?? 0) > 1 ? team.path : team.agents.map((agent) => agent.name ?? agent.id).join(', ') || undefined,
       presence: teamPresence(runs, team.path, team.current && !listed.some((other) => other.current) ? null : root),
       current: team.current,
-      art: <TeamCrewArt figures={team.agents.map((agent) => agentFigure(agent, savedJobs))} />,
+      art: <TeamCrewArt figures={team.agents.map((agent) => agentFigure(agent, savedJobs, benchChatOwner(team.path)))} />,
     }))
   }, [teams, root, open, left, runs, savedJobs, view])
   return <CrewRail label="My team" items={items} find="Find a team" none="No teams yet." add={{ label: 'New team', onAdd: onNewTeam }} go={go} leave={leave} />

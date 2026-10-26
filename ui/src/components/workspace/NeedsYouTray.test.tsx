@@ -599,3 +599,27 @@ describe('the open tray beside the page’s own gold fill', () => {
     outside.remove()
   })
 })
+
+// The owner (2026-10-26): a one-to-one chat with one of My agents opens in My agents, at the piece
+// that waits on you; a team's run opens on the team's page.
+describe('opening the run a ticket is about', () => {
+  const real = window.location
+  afterEach(() => { Object.defineProperty(window, 'location', { configurable: true, value: real }) })
+
+  it('opens a run of an agent’s own chat in that agent’s chat', () => {
+    const assign = vi.fn()
+    Object.defineProperty(window, 'location', { configurable: true, value: { href: 'http://localhost/?path=trip.yaml', origin: 'http://localhost', pathname: '/', search: '?path=trip.yaml', assign } })
+    // A team's page is on screen: it takes a team's link in place, never an agent's page.
+    const inPlace = vi.fn((event: Event) => event.preventDefault())
+    window.addEventListener('loomwatch:open-team', inPlace)
+    try {
+      render(<NeedsYouTray tickets={[{ ...ticket, runId: 'c1', teamPath: '.jobs/.bench/cole.yaml', teamName: 'Cole · chat' }]} working={0} onAnswer={vi.fn()} onPermission={vi.fn()} onDismiss={vi.fn()} />)
+      fireEvent.click(screen.getByRole('button', { name: /1 needs you/ }))
+      fireEvent.click(screen.getByRole('button', { name: 'Open run' }))
+      expect(assign).toHaveBeenCalledWith('/agents/cole?view=chat&run=c1')
+      expect(inPlace).not.toHaveBeenCalled()
+    } finally {
+      window.removeEventListener('loomwatch:open-team', inPlace)
+    }
+  })
+})

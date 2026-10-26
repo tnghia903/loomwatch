@@ -1383,3 +1383,31 @@ fn ask_is_told_whether_commands_here_are_sandboxed() {
         "{other}"
     );
 }
+
+/// The owner (2026-10-26): a run of Cole's own chat opened the team screen on its chat file. A link
+/// to it opens where you work with Cole. Twin cases: `historyRunUrl` (ui/src/lib/runs/history.ts)
+/// and the Mac app's `run_link`.
+#[test]
+fn a_run_of_an_agents_own_chat_opens_that_agents_chat() {
+    let origin = "http://127.0.0.1:3000";
+    for path in [
+        ".jobs/.bench/cole.yaml",
+        "/Users/ana/LoomWatch/teams/.jobs/.bench/cole.yaml",
+        "C:\\Users\\ana\\LoomWatch\\teams\\.jobs\\.bench\\cole.yaml",
+    ] {
+        assert_eq!(
+            super::run_address(origin, path, "r1"),
+            "http://127.0.0.1:3000/agents/cole?view=chat&run=r1",
+            "{path}"
+        );
+    }
+    // A removed agent's file, and any other team, open on the team's page as before.
+    assert_eq!(
+        super::run_address(origin, ".jobs/.removed/cole.yaml", "r1"),
+        "http://127.0.0.1:3000/?path=.jobs/.removed/cole.yaml&run=r1"
+    );
+    assert_eq!(
+        super::run_address(origin, "trip.yaml", "r1"),
+        "http://127.0.0.1:3000/?path=trip.yaml&run=r1"
+    );
+}
