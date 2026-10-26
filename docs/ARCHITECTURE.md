@@ -432,8 +432,11 @@ allow it rather than "not found". Ask is told never to ask the person for a path
 that points at one of My agents is filled in from it, a skill must be installed, a tool connected,
 and a folder or file it connects, or a folder an agent works in, must be on this computer. What the
 saved team already names is let through. A check step that doesn't say how it sends work back gets
-`sendBack: {rounds: 2, whenStillNotMet: ask}`, and a new team that sets no `spend` gets the new-team
-limit, `perRun: 1.00`, as the editor writes them.
+`sendBack: {rounds: 2, whenStillNotMet: ask}`, as the editor writes it, and a new team that sets no
+`spend` gets `perRun: 1.00`, or `2.00` when it has three or more agents or a check step that sends
+work back. Ask's first turn also says whether this computer is a Mac, where an agent's commands run
+in a sandbox: there Ask gives a maker or the Analyst the edits and commands switches, so a newcomer
+isn't asked to approve each program it runs; elsewhere they ask first.
 
 ---
 

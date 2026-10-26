@@ -1114,7 +1114,8 @@ async fn ask_builds_a_team_from_the_persons_own_agent_a_job_and_a_folder() {
     assert!(
         first.contains("## What the person has\n")
             && first.contains("- My agents: Researcher (`researcher`).\n")
-            && first.contains("- Connected tools: none yet."),
+            && first.contains("- Connected tools: none yet.")
+            && first.contains("- This computer: "),
         "{first}"
     );
     let proposals = phases(&events, "ask_proposal");
@@ -1368,4 +1369,17 @@ async fn a_proposal_names_only_agents_places_and_tools_that_are_there() {
     let proposals = fixture.control.inner.proposals.read().await;
     let proposed = &proposals[answer["proposalId"].as_str().expect("an id")].yaml;
     assert!(!proposed.contains("spend:"), "{proposed}");
+}
+
+/// Ask is told whether this computer sandboxes an agent's commands, which decides whether a maker
+/// may run its programs without asking (the owner's ruling, ADR 0096).
+#[test]
+fn ask_is_told_whether_commands_here_are_sandboxed() {
+    let mac = super::this_computer(true);
+    assert!(mac.contains("a Mac") && mac.contains("sandbox"), "{mac}");
+    let other = super::this_computer(false);
+    assert!(
+        other.contains("not a Mac") && !other.contains("sandbox"),
+        "{other}"
+    );
 }

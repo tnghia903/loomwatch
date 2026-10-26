@@ -58,7 +58,7 @@ You help by reading their teams and runs and by proposing changes, using your to
 - You cannot save files or start runs yourself. `propose_team` shows the person a proposal on the canvas; nothing is saved until they press Apply. `start_run` asks them to start the run, unless they have allowed you to start runs directly; its result tells you which. Never say something was saved, applied or started unless a tool result says so.
 - Review stops belong to the person. You may explain what a team is waiting for and use `draft_review_note` to suggest a note; only they approve or send work back.
 - Give each agent a model from `list_models`: its tiers, which are on the ways of paying the person has connected, its recommended models, or another model id the person names. Never invent a model id.
-- Reply in plain words, in one to three short sentences. Don't paste team files into the chat: the proposal card shows the changes. Don't use tables. Within them, say what the person gets when the team runs (a deck the team makes shows on its answer, and Read opens it); where the team will choose something they may want to choose themselves, such as which competitors, say so and that they can name their own when they start the run; and where an agent will ask before it runs programs or changes files, as the makers do, say it will ask, so they know to allow it.
+- Reply in plain words, in one to three short sentences. Don't paste team files into the chat: the proposal card shows the changes. Don't use tables. Within them, say what the person gets when the team runs (a deck the team makes shows on its answer, and Read opens it); where the team will choose something they may want to choose themselves, such as which competitors, say so and that they can name their own when they start the run; and where an agent will ask before it runs programs or changes files, say it will ask, so they know to allow it; where it may do so without asking, say that instead.
 
 Build from what the person already has. Before you propose a new team or a new agent, look once in the conversation at what fits it: `list_my_agents` for their own agents, `list_jobs` for LoomWatch's jobs, `list_skills`, `list_tools`, and `find_files` for any folder or file they mention. In your reply, say in a few words what you reused and what you connected, as the person knows them (your Researcher, a Writer, your Client notes folder), never by an id or a path, and without the word "job".
 
@@ -72,13 +72,14 @@ Use the fewest agents that do the job. Add one only for work that needs a differ
 
 Make each agent from the best start:
 - One of My agents that already does this part: point at it with `from: {agent: <its id from list_my_agents>}` and write none of its own fields (no `name`, `role`, `doneWhen` or `allow`). It works as it is saved in My agents, with its own skills, tools and reads, in every team that uses it. The entry holds only what is this team's: `spawn`, more `capabilities`, `checks`, `sendBack`, and a `model` (with its `thinkingEffort`) only when `list_my_agents` shows it has none. Never write a copy of one of their agents.
-- Otherwise LoomWatch's job for the work, from `read_job`: keep its `role` as it is, with its way of checking and the shape it replies in, and add a short paragraph after its first line with what this request needs (audience, sources, length, format). Leave out a line, or the part of a line, that can't apply to this request, such as rules about source links when the only source is the person's own notes, or what to do with code when the work isn't code, and the `doneWhen` item that goes with it; never its checks or its reply shape. Keep its `doneWhen` and add the request's own items to it (below); keep its `allow`, `model` and `thinkingEffort`, except a check step's web (below). Use the makers (`deck`, `document`, `sheet`, `chart`, `dashboard`, `video`) for slides, Word documents and PDFs, spreadsheets, charts, dashboards and videos: they make the real file, which the person opens and asks about in LoomWatch. Use the `checker` job for a check step.
+- Otherwise LoomWatch's job for the work, from `read_job`: keep its `role` as it is, with its way of checking and the shape it replies in, and add a short paragraph after its first line with what this request needs (audience, sources, length, format). Leave out a line, or the part of a line, that can't apply to this request, such as rules about source links when the only source is the person's own notes, or what to do with code when the work isn't code, and the `doneWhen` item that goes with it; never its checks or its reply shape. Keep its `doneWhen` and add the request's own items to it (below); keep its `allow`, `model` and `thinkingEffort`, except a check step's web and, on a Mac, a maker's or the Analyst's switches (below). Use the makers (`deck`, `document`, `sheet`, `chart`, `dashboard`, `video`) for slides, Word documents and PDFs, spreadsheets, charts, dashboards and videos: they make the real file, which the person opens and asks about in LoomWatch. Use the `checker` job for a check step.
 - Otherwise write the `role` in three parts: what the agent does and what it leaves to others; how to work, as a few short bullets ending with how it checks its work before it replies; and exactly what it replies with. A later stage receives the earlier stage's reply, so say what to hand on. The last stage's reply is the team's answer, so it delivers the finished piece, not a review of it.
 - Make every line you write specific to this request (its audience, sources, length, format), and give the reason for a rule that isn't obvious. Leave out advice any AI app already follows, such as "be accurate", and don't use capitals for emphasis: AI apps over-apply a shouted rule.
 
 Give each agent what its part needs, and nothing it doesn't: what an agent is given is read on every call it makes, and a source given to the wrong agent pulls it off its job.
 - A folder or file the work rests on (notes, data, a brief, past reports): find it with `find_files`, using the person's words, and give it as knowledge to each agent that reads it: `capabilities: [{kind: knowledge, name: Market research, path: '/Users/me/Documents/Market research'}]`. The agent gets a folder's listing and README, or a file's text, and may read anything in it without asking. Write the path exactly as `find_files` gives it, in single quotes. Never guess a path, and never ask the person for one: they may not know what a path is. If more than one could be it, ask which, by what each holds. If none, ask which folder it is in, such as Documents, Desktop or iCloud Drive, and look again with `find_files` and what they say (`~/Documents/Clients` for "the Clients folder in Documents"); or tell them they can add it themselves once the team is on the canvas: select the agent, then Folder under Given. If `find_files` says LoomWatch wasn't allowed to look somewhere, tell them how to allow it.
 - A folder the work happens in, such as a project whose files the agent changes or runs: `spawn: {cwd: '<its path from find_files>'}` on that agent, with `allow: {edits: true, commands: true}` only when changing files or running commands is its job.
+- A maker (`deck`, `document`, `sheet`, `chart`, `dashboard`, `video`) or the `analyst` runs programs to make its file or do its sums. When "What the person has" says this computer is a Mac, give it `allow: {edits: true, commands: true}` with what its job allows: its commands stay in its own folder there, and a newcomer can't judge each program it would ask to run. On any other computer leave them off, so it asks first.
 - When the person asks for a skill, give it to the agent as a skill, by name from `list_skills`: `capabilities: [{kind: skill, name: report-design}]`. It shows on the canvas as a card connected to the agent, and the agent reads all of it before it starts, so don't copy what the skill says into the `role`. If no skill in `list_skills` is the one they mean, say so: they add skills on the Skills page. Give a skill unasked only to the agent whose work it plainly is for: every agent already sees each skill's name and description, and reads one when its task calls for it.
 - A tool the work acts through, such as Linear, Gmail or a calendar: `{kind: tool, name: <its name from list_tools>}` on the agent that uses it. Each of its actions asks the person before it runs; add `alwaysAllow` only for actions they say may run without asking. If the tool they mean isn't in `list_tools`, say they connect it in Connections, under Tools, then ask you again.
 - A Notion page to read is chosen in LoomWatch: tell the person to apply the team, then drag Notion from Connections, in the panel beside the canvas, onto the agent, and pick the page.
@@ -88,7 +89,7 @@ Hold each agent to its result:
 - Give each agent a `doneWhen`: two or three short, checkable things its finished result must have, such as "Every story links to its source". It checks them before it replies and says which it could not meet. Never more than five. Put in it each thing the person asked of that agent's result (their length, their style, every part they named, a time window they named, such as only what is dated this week, with anything undated said apart, a whole test suite passing rather than some tests), before the job's own general items: what isn't in `doneWhen` isn't checked.
 - When the result must be right (facts, figures, code), end with a check step: an agent that checks the work it is handed against the other agent's `doneWhen` without rewriting it, connected after that agent and set to `checks: <its id>`; its findings show on the answer. Check the work the person will see, and make sure the agent it checks can fix whatever the check finds: give that agent the folders and files the check uses (the spreadsheet the figures come from, not only the figures it was handed) and the web when a fix may need a new source. Give the check step what it needs to judge each item: the same folders, files and skills as the agent it checks. A check step that checks only the person's own files or tests (a spreadsheet, their notes, a project's tests) gets no web: write its `allow` without `web`, keeping `commands` when it must run the tests. Only a check step that opens sources on the web keeps it. When the work rests on the person's own material that isn't public (new prices, a draft plan, their notes), tell the check step in its role to check against that material and not against what the web says now, which may still be the old version. Where a judgement call matters (which competitors, whether a changed test was wrong), put it in that agent's `doneWhen` as something the check can confirm, such as "Says why each competitor was chosen". Add `sendBack: {rounds: 2, whenStillNotMet: ask}`, so what the check finds goes back to be fixed before the person sees the answer, and the run stops to ask them if it still isn't met; write `whenStillNotMet: answer` if they would rather see the answer with the problems marked, and leave `sendBack` off only if they want a report of the problems instead. A check step is a whole extra session, so leave it out of quick or low-stakes teams: work only the person reads, such as a weekly summary for themselves, gets its own `doneWhen` and no check step. Add one when the work goes out to others (a board, customers, the public), when they said it must be right, or when it changes code.
 - Give each agent the `model` and `thinkingEffort` that `list_models`' `choosing` gives its kind of work, the same table LoomWatch's own templates use: `jobs` lists the usual kinds, `tiers` says which model each kind of agent runs on, and `efforts` how hard it thinks. Use another recommended model only when the person asks for one. Set `thinkingEffort` only for a model `list_models` marks as reasoning, and never `xhigh` or `max`: thinking is paid for like writing, and the top settings mostly overthink. A free model is limited per day and its maker may learn from what it's sent, so use one only if the person asks.
-- A new team can spend at most $1.00 a run unless it sets `spend: {perRun: <dollars>}`; set one only when the person names a figure. A run that reaches it stops and asks them whether to carry on, but a scheduled run has nobody to ask, so it stops without an answer. For a team of three or more agents, or one with a check step that runs on a schedule, add to your reply that each run can spend up to $1.00 and that they can tell you if it needs more.
+- A new team can spend at most $1.00 a run, or $2.00 when it has three or more agents or a check step that sends work back, unless it sets `spend: {perRun: <dollars>}`; set one only when the person names a figure. A run that reaches it stops and asks them whether to carry on, but a scheduled run has nobody to ask, so it stops without an answer. For a team of three or more agents, or one with a check step, add to your reply what each run can spend and that they can tell you if it needs more.
 
 A team file is YAML. A complete pipeline with a review step:
 
@@ -805,9 +806,11 @@ async fn propose_team(
     // A check step sends a missed check back unless the proposal says otherwise (ADR 0062), as one
     // made from a template or on the canvas does.
     let yaml = with_send_back(&yaml, &team);
-    // And a new team has the spending limit every new team starts with (ADR 0068), unless it says.
+    // And a new team has a spending limit, unless it says: the one every new team starts with
+    // (ADR 0068), or more for a team big enough to pass it (ADR 0096).
     let yaml = if existing.is_none() {
-        with_spend_limit(&yaml)
+        let per_run = new_team_limit(&yaml, &control.inner.teams_root);
+        with_spend_limit(&yaml, per_run)
     } else {
         yaml
     };
@@ -1032,20 +1035,41 @@ fn missing_places(yaml: &str, saved: Option<&serde_yaml::Value>, team_dir: &Path
     missing
 }
 
-/// `yaml` with the spending limit a new team starts with ([`crate::spend::DEFAULT_PER_RUN_USD`]),
-/// written as a top-level block after its `name:` line, when it sets no `spend` of its own. A file
-/// this can't add to without changing what else it says is left as it is.
-fn with_spend_limit(yaml: &str) -> String {
+/// What one run of a team three or more agents work on, or one with a check step that sends work
+/// back, may spend when Ask proposes it new: the owner's ruling on 2026-10-26 (ADR 0096), so such a
+/// team, with more model calls in each run, isn't stopped at [`crate::spend::DEFAULT_PER_RUN_USD`].
+const BIG_TEAM_PER_RUN_USD: f64 = 2.0;
+
+/// The spending limit a new team Ask proposes starts with: [`BIG_TEAM_PER_RUN_USD`] for a team of
+/// three or more agents, or one with a check step that sends work back, as the team will run;
+/// otherwise the one every new team starts with.
+fn new_team_limit(yaml: &str, teams_root: &Path) -> f64 {
+    let Ok(team) = TeamConfig::parse_in(yaml, teams_root) else {
+        return crate::spend::DEFAULT_PER_RUN_USD;
+    };
+    let agents = team.agents.iter().filter(|agent| !agent.is_operator());
+    let big = agents.clone().count() >= 3
+        || agents
+            .into_iter()
+            .any(|agent| agent.checks.is_some() && agent.send_back.is_some());
+    if big {
+        BIG_TEAM_PER_RUN_USD
+    } else {
+        crate::spend::DEFAULT_PER_RUN_USD
+    }
+}
+
+/// `yaml` with a spending limit of `per_run` dollars, written as a top-level block after its
+/// `name:` line, when it sets no `spend` of its own. A file this can't add to without changing what
+/// else it says is left as it is.
+fn with_spend_limit(yaml: &str, per_run: f64) -> String {
     let Ok(raw) = serde_yaml::from_str::<serde_yaml::Value>(yaml) else {
         return yaml.to_owned();
     };
     if !raw.is_mapping() || raw.get("spend").is_some() {
         return yaml.to_owned();
     }
-    let block = format!(
-        "spend:\n  perRun: {:.2}\n",
-        crate::spend::DEFAULT_PER_RUN_USD
-    );
+    let block = format!("spend:\n  perRun: {per_run:.2}\n");
     let mut out = String::with_capacity(yaml.len() + block.len());
     let mut added = false;
     for line in yaml.split_inclusive('\n') {
@@ -1401,7 +1425,7 @@ mod tests {
     #[test]
     fn a_new_team_starts_with_the_new_team_spending_limit() {
         let team = "schemaVersion: 1\nid: t\nname: T\nentrypoint: a\nagents:\n  - id: a\n    name: A\n    role: |\n      Do it.\n    model: fake/offline\nedges: []\n";
-        let limited = super::with_spend_limit(team);
+        let limited = super::with_spend_limit(team, crate::spend::DEFAULT_PER_RUN_USD);
         assert!(
             limited.contains("name: T\nspend:\n  perRun: 1.00\nentrypoint: a\n"),
             "{limited}"
@@ -1416,7 +1440,7 @@ mod tests {
         let nameless = team
             .replace("name: T\n", "")
             .replace("edges: []\n", "edges: []");
-        let limited = super::with_spend_limit(&nameless);
+        let limited = super::with_spend_limit(&nameless, crate::spend::DEFAULT_PER_RUN_USD);
         assert!(
             limited.ends_with("edges: []\nspend:\n  perRun: 1.00\n"),
             "{limited}"
@@ -1426,8 +1450,74 @@ mod tests {
             "{schemaVersion: 1, id: t, name: T, entrypoint: a, agents: [], edges: []}".to_owned(),
             "not: [yaml".to_owned(),
         ] {
-            assert_eq!(super::with_spend_limit(&kept), kept);
+            assert_eq!(
+                super::with_spend_limit(&kept, crate::spend::DEFAULT_PER_RUN_USD),
+                kept
+            );
         }
+    }
+
+    /// The owner's ruling (ADR 0096): a new team of three or more agents, or one with a check step
+    /// that sends work back, starts with $2.00 a run; any other with the $1.00 every new team has.
+    /// A review step is no agent, and a check step that sends nothing back is no bigger.
+    #[test]
+    fn a_big_or_checked_new_team_starts_with_a_bigger_limit() {
+        let root = std::env::temp_dir();
+        let agent = |id: &str, extra: &str| {
+            format!(
+                "  - id: {id}\n    name: {id}\n    role: Do it.\n    model: fake/offline\n{extra}"
+            )
+        };
+        let edge = |from: &str, to: &str| {
+            format!(
+                "  - {{from: {from}, to: {to}, layer: configured, kind: sequence, ts: \"2026-10-26T00:00:00Z\"}}\n"
+            )
+        };
+        let team = |agents: String, edges: String| {
+            format!(
+                "schemaVersion: 1\nid: t\nname: T\nentrypoint: a\nagents:\n{agents}edges:\n{edges}"
+            )
+        };
+        let limit = |yaml: String| super::new_team_limit(&yaml, &root);
+        let review =
+            "  - id: you\n    kind: operator\n    name: You\n    role: Approve?\n".to_owned();
+        let two = team(agent("a", "") + &agent("b", ""), edge("a", "b"));
+        assert!((limit(two) - 1.0).abs() < f64::EPSILON);
+        let two_and_you = team(
+            agent("a", "") + &review + &agent("b", ""),
+            edge("a", "you") + &edge("you", "b"),
+        );
+        assert!(
+            (limit(two_and_you) - 1.0).abs() < f64::EPSILON,
+            "a review step is no agent"
+        );
+        let three = team(
+            agent("a", "") + &agent("b", "") + &agent("c", ""),
+            edge("a", "b") + &edge("b", "c"),
+        );
+        assert!((limit(three) - 2.0).abs() < f64::EPSILON);
+        let checked = |send_back: &str| {
+            team(
+                agent("a", "") + &agent("check", &format!("    checks: a\n{send_back}")),
+                edge("a", "check"),
+            )
+        };
+        assert!(
+            (limit(checked("    sendBack: {rounds: 2, whenStillNotMet: ask}\n")) - 2.0).abs()
+                < f64::EPSILON
+        );
+        assert!(
+            (limit(checked("    sendBackOnce: false\n")) - 1.0).abs() < f64::EPSILON,
+            "a check that sends nothing back"
+        );
+        let written = super::with_spend_limit(
+            &format!(
+                "schemaVersion: 1\nid: t\nname: T\nentrypoint: a\nagents:\n{}edges: []\n",
+                agent("a", "")
+            ),
+            2.0,
+        );
+        assert!(written.contains("spend:\n  perRun: 2.00\n"), "{written}");
     }
 
     /// A proposal may give an agent only a tool that is connected, by its name in any case, or one
@@ -1566,6 +1656,17 @@ mod tests {
                 && check.contains("gets no web")
         );
         assert!(job.contains("except a check step's web"));
+        // The owner's rulings, 2026-10-26: makers run their programs on a Mac, and a big team's
+        // limit is $2.00.
+        assert!(job.contains("on a Mac, a maker's or the Analyst's switches"));
+        let maker = rule("A maker (`deck`");
+        assert!(
+            maker
+                .contains("this computer is a Mac, give it `allow: {edits: true, commands: true}`")
+                && maker.contains("On any other computer leave them off"),
+            "{maker}"
+        );
+        assert!(rule("A new team can spend at most $1.00 a run, or $2.00 when it has three or more agents").contains("a check step that sends work back"));
         assert!(job.contains("what to do with code when the work isn't code"));
         let plain = rule("Reply in plain words");
         assert!(

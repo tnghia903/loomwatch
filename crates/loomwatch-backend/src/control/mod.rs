@@ -664,7 +664,21 @@ async fn what_they_have(control: &Control) -> String {
     has.push_str(&line("Skills", &skills));
     has.push_str(&line("Connected tools", &tools));
     has.push_str(&line("Ways of paying connected", &paying));
+    has.push_str(this_computer(cfg!(target_os = "macos")));
     has.trim_end().to_owned()
+}
+
+/// What an agent's commands can reach on this computer, said to Ask so it knows whether a maker may
+/// run its programs without asking (the owner's ruling, ADR 0096): on a Mac, commands run in a
+/// sandbox that keeps the files they change to the agent's own folder and temporary folders
+/// (`agent/sandbox.rs`); elsewhere nothing does, so each command asks.
+fn this_computer(mac: bool) -> &'static str {
+    if mac {
+        "- This computer: a Mac, where an agent's commands run in a sandbox that keeps the files \
+         they change to its own folder.\n"
+    } else {
+        "- This computer: not a Mac, so an agent's commands could change any file the person can.\n"
+    }
 }
 
 fn describe_context(control: &Control, context: &AskContext) -> String {
