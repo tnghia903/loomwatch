@@ -272,22 +272,29 @@
 .tc-to { font-size: 11.5px; color: var(--color-ink-3); }
 /* A line saying what you decided, quoting what you answered: one line, its end cut by the line. */
 .tc-to.tc-to-line { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* An @mention in your words is the agent's chip, as in the team's sentence (.story-name, loom.css):
-   its figure's head and its name in its colour on the gold tint, with the same touch of ink, sized
-   to the message's line. @team is the words' own, in bold. A message still sending is faded, too
-   faint for a colour, so its chips keep ink until it lands. The chip is laid out inline, not as a
-   flex box, so its words read in line with the message's: "@Writer", not "@", a break, "Writer".
-   A message with a chip takes a little more line, so chips on lines above each other keep apart. */
+/* An agent's chip, wherever an agent is named: in your words and the box you write them in, in
+   what agents said, in the chat's own lines, and in the team's sentence (.story-name, loom.css).
+   Its figure's head and its name in its colour on the gold tint, with a touch of ink that keeps
+   every colour at 4.8:1 or more. One shape at two sizes, set by --chip: 22px in a line of words,
+   28px in the sentence's larger serif; the head fills the chip inside its ring, and the room
+   round it grows with the chip. @team is the words' own, in bold. A message still sending is
+   faded, too faint for a colour, so its chips keep ink until it lands. The chip is laid out inline,
+   not as a flex box, so its words read in line with the message's: "@Writer", not "@", a break,
+   "Writer". A message with a chip takes a little more line, so chips on lines above each other
+   keep apart. */
 .chat-text :is(p, li):has(.tc-mention) { line-height: 24px; }
 .md-said-keep { white-space: nowrap; }
 .tc-mention {
-  display: inline-block; max-width: calc(100% - 2px); height: 22px; margin: 0 1px; padding: 0 8px 0 3px;
+  --chip: 22px;
+  display: inline-block; max-width: calc(100% - 2px); height: var(--chip); margin: 0 1px;
+  padding: 0 round(var(--chip) * .36, 1px) 0 round(var(--chip) * .14, 1px);
   overflow: hidden; vertical-align: middle; text-overflow: ellipsis; white-space: nowrap;
-  border-radius: 99px; font: 600 12.5px/20px var(--font-sans);
-  color: color-mix(in srgb, var(--hue) 94%, var(--color-ink));
+  border-radius: 99px; font: 600 12.5px/calc(var(--chip) - 2px) var(--font-sans);
+  color: color-mix(in srgb, var(--hue, var(--color-ink)) 94%, var(--color-ink));
   background: var(--color-accent-tint); border: 1px solid color-mix(in srgb, var(--color-accent) 35%, transparent);
 }
-.tc-mention-face { display: inline-block; width: 20px; height: 20px; margin-right: 4px; vertical-align: top; }
+.tc-mention.story-name { --chip: 28px; font-size: 13px; }
+.tc-mention-face { display: inline-block; width: calc(var(--chip) - 2px); height: calc(var(--chip) - 2px); margin-right: round(var(--chip) * .18, 1px); vertical-align: top; }
 .tc-mention .tc-mention-face > * { display: inline-block; width: 100%; height: 100%; vertical-align: top; object-fit: contain; }
 /* The @ is unseen but stays in the words, for screen readers. */
 .tc-mention-at { display: inline-block; width: 0; overflow: hidden; vertical-align: top; }
@@ -508,50 +515,39 @@
 .tc-box:focus-within { border-color: color-mix(in srgb, var(--color-accent) 60%, transparent); }
 .tc-composer.answering .tc-box { border-color: color-mix(in srgb, var(--color-accent) 60%, transparent); }
 .tc-input {
+  position: relative;
   flex: 1;
+  min-width: 0;
   /* One line is exactly the height of the send button beside it, so the two sit centred. Lines
      keep 24 px, as a sent message with a chip does, so chips on lines above each other keep apart. */
   min-height: 34px;
   max-height: 40vh;
+  overflow-y: auto;
   padding: 5px 0;
-  border: 0;
   outline: none;
-  resize: none;
-  field-sizing: content;
   background: transparent;
   font: 400 14.5px/24px var(--font-sans);
   color: var(--color-ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  cursor: text;
 }
-.tc-input::placeholder { color: var(--color-ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* Each agent @mentioned in the box is its chip as you type (ChatComposer TypedWords), drawn on a
-   layer of the same words under the box's own, which go clear while there is one. Anything that
-   moves a letter on that layer — a bolder weight, padding, a wider face — would set the caret off
-   its letters, so the tint and ring are shadows round the name that take no room, and the figure's
-   head stands in the room of the @. The layer reaches 4 px past the box each side, with as much
-   padding, so a chip at a line's end keeps its round end; a scroll bar that takes room (Windows,
-   or a Mac set to show them) takes the same room from both, so their lines wrap alike. */
+/* The words an empty box asks for (ChipField), under it so the caret stays at the line's start. */
+.tc-input-hint {
+  position: absolute; inset: 5px 0 auto;
+  font: 400 14.5px/24px var(--font-sans); color: var(--color-ink-3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none;
+}
+/* Gone as soon as there are letters, before the chat hears of them (an input method's first ones). */
+.tc-input-wrap:has(.tc-input:not(:empty)) .tc-input-hint { display: none; }
+.tc-input[aria-disabled="true"] { color: var(--color-ink-3); cursor: default; }
+/* Each agent @mentioned in the box is its chip (ChipField), the very chip a sent message shows
+   (.tc-mention): one piece in the words, which the caret steps over. */
 .tc-input-wrap { position: relative; display: flex; flex: 1; min-width: 0; }
-.tc-input-wrap > .tc-input { position: relative; z-index: 1; min-width: 0; scrollbar-gutter: stable; }
-.tc-input, .tc-input-words { letter-spacing: normal; word-spacing: normal; text-transform: none; text-indent: 0; tab-size: 8; }
-.tc-input-words {
-  position: absolute; inset: 0 -4px; overflow: hidden; scrollbar-gutter: stable; pointer-events: none; user-select: none;
-  padding: 5px 4px; white-space: pre-wrap; overflow-wrap: break-word;
-  font: 400 14.5px/24px var(--font-sans); color: var(--color-ink);
-}
-.tc-input.chipped { color: transparent; caret-color: var(--color-ink); }
-/* Selected words are the box's own, chip or none, in ink on the gold tint, solid so the layer's
-   letters stay under it. Not the system's Highlight: Chromium keeps it light in the dark theme. */
-.tc-input::selection { color: var(--color-ink); background: color-mix(in srgb, var(--color-accent) 30%, var(--color-panel-solid)); }
-.tc-typed-mention {
-  border-radius: 99px; color: color-mix(in srgb, var(--hue) 94%, var(--color-ink)); background: var(--color-accent-tint);
-  box-shadow: 0 0 0 1px var(--color-accent-tint), 0 0 0 2px color-mix(in srgb, var(--color-accent) 35%, transparent);
-  -webkit-box-decoration-break: clone; box-decoration-break: clone;
-}
-.tc-typed-at { position: relative; color: transparent; }
-.tc-typed-face { position: absolute; left: 50%; top: 50%; width: 18px; height: 18px; translate: -50% -50%; }
-.tc-typed-face > * { display: block; width: 100%; height: 100%; object-fit: contain; }
-/* Forced colours draw the box's own words whatever they are set to: the chips step aside. */
-@media (forced-colors: active) { .tc-input-words { display: none; } }
+.tc-chip { white-space: nowrap; }
+/* Selected words, chips with them, in ink on the gold tint. Not the system's Highlight: Chromium
+   keeps it light in the dark theme. */
+.tc-input::selection, .tc-input ::selection { color: var(--color-ink); background: color-mix(in srgb, var(--color-accent) 30%, var(--color-panel-solid)); }
 .tc-send { display: flex; align-items: center; gap: 6px; flex: none; }
 .tc-send .btn { display: inline-flex; align-items: center; gap: 5px; height: 34px; padding: 0 12px; font-size: 13px; border-radius: 11px; }
 .tc-now { color: var(--color-live); }

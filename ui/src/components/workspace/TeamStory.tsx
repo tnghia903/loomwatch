@@ -33,9 +33,10 @@ export function TeamStory({ parts, onAgent, onSchedule, onConnect, figures }: Te
           if (part.kind === 'agent') {
             const figure = part.operator ? undefined : figures?.get(part.id)
             return (
-              <button key={index} type="button" className={`story-name ${part.operator ? 'you' : figure ? `hue-${figureHue(figure)}` : ''}`} aria-label={part.operator ? 'You, the review step' : part.name} title={part.title} onClick={() => onAgent(part.id)}>
-                {figure ? <span className="story-face" aria-hidden="true"><FigureStill figure={figure} headOnly alt="" /></span> : <AgentMark id={part.id} size={14} operator={part.operator} />}
-                {part.name}
+              // The agent's chip, as the chat draws it (.tc-mention), at the sentence's size.
+              <button key={index} type="button" className={`tc-mention story-name${part.operator ? ' you' : figure ? ` hue-${figureHue(figure)}` : ''}`} aria-label={part.operator ? 'You, the review step' : part.name} title={part.title} onClick={() => onAgent(part.id)}>
+                <span className="tc-mention-face" aria-hidden="true">{figure ? <FigureStill figure={figure} headOnly alt="" draggable={false} /> : <AgentMark id={part.id} size={14} operator={part.operator} />}</span>
+                <span className="tc-mention-name">{part.name}</span>
               </button>
             )
           }

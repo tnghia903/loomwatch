@@ -7,6 +7,7 @@ import { pastedName, withFolderSource, type ChatAttachments } from '../../lib/ch
 import type { ChatFile, ChatItem, ChatMessage } from '../../lib/chat/client'
 import { FileReaderContext } from '../../lib/files/reader'
 import type { RunRecord } from '../../lib/runs/client'
+import { typeInto, wordsIn } from '../../test/chipField'
 import { FolderPicker } from '../canvas/FolderPicker'
 import { ChatComposer } from './ChatComposer'
 import { TeamChat } from './TeamChat'
@@ -94,7 +95,7 @@ function renderChat(overrides: Partial<Parameters<typeof TeamChat>[0]> = {}) {
 }
 
 const box = () => screen.getByRole('textbox', { name: 'Message the team' })
-const type = (text: string) => fireEvent.change(box(), { target: { value: text, selectionStart: text.length } })
+const type = (text: string) => typeInto(box(), text)
 const sendButton = () => screen.getByRole('button', { name: 'Start' })
 const picture = (name = 'image.png') => new File([new Uint8Array([137, 80, 78, 71])], name, { type: 'image/png' })
 
@@ -133,8 +134,9 @@ describe('pictures and files go with a message (ADR 0082)', () => {
   it('text pastes as text', async () => {
     renderChat()
     await screen.findByRole('textbox', { name: 'Message the team' })
-    const pasted = fireEvent.paste(box(), { clipboardData: { files: [] } })
-    expect(pasted).toBe(true)
+    type('see ')
+    fireEvent.paste(box(), { clipboardData: { files: [], getData: (kind: string) => (kind === 'text/plain' ? 'the\r\nreport' : '') } })
+    expect(wordsIn(box())).toBe('see the\nreport')
     expect(uploads).toHaveLength(0)
   })
 
@@ -145,7 +147,7 @@ describe('pictures and files go with a message (ADR 0082)', () => {
     fireEvent.paste(box(), { clipboardData: { files: [picture('layout.png')] } })
     await waitFor(() => expect(uploads).toHaveLength(1))
     // Files without an @ would be a note that starts nothing: the box says how to start work.
-    expect(box()).toHaveAttribute('placeholder', '@team, then what to do with it')
+    expect(box()).toHaveAttribute('aria-placeholder', '@team, then what to do with it')
     type('@team use this layout')
     expect(sendButton()).toBeDisabled()
     fireEvent.keyDown(box(), { key: 'Enter' })

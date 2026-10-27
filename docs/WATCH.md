@@ -180,6 +180,12 @@ agents said to each other, in any order and any form of a word, with or without 
 What matches shows in place of the chat, best first; a line opens the chat at that message with
 the words lit, and **← Back to the list** returns to it.
 
+In the message box, each agent you @mention becomes its chip (its figure's head and its name), as
+in sent messages and in **Your team, in one sentence**. A chip is one piece: the arrow keys step
+over it and Backspace removes it whole. A name you are still typing stays plain text until you move
+past it, so a typo can be fixed a letter at a time. What you send or copy is plain text, each chip as
+@Name.
+
 Pictures and files go with a message (ADR 0082): paste one into the message box, drop files on the
 chat (a dashed gold line goes round it while you drag), or press the paperclip. Each is kept the
 moment it is added, with `PUT /api/chat/files?teamPath=&name=` (raw bytes, 25 MB at most), in

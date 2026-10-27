@@ -1135,6 +1135,13 @@ describe('a PDF in the reader', () => {
     expect(page(1).querySelector('.rd-box[data-part]')).toBeNull()
     fireEvent.click(bubble)
     expect(answerCard()).toHaveTextContent('That is the total.')
+    // Escape in the message box is the box's, however the box is editable.
+    const field = document.createElement('div')
+    field.setAttribute('contenteditable', 'plaintext-only')
+    document.body.append(field)
+    fireEvent.keyDown(field, { key: 'Escape' })
+    expect(answerCard()).toHaveTextContent('That is the total.')
+    field.remove()
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(answerCard()).toBeNull()
     // A right click, for the menu, opens nothing.

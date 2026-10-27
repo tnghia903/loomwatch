@@ -27,26 +27,23 @@
   .build-workspace.lib-collapsed.inspecting .team-story { max-width: min(680px, calc(100% - 126px - var(--lw-inspector-w) - var(--lw-panel-inset) - 12px)); }
 }
 .team-story-eyebrow { font: 600 10.5px/1.3 var(--font-sans); letter-spacing: .08em; text-transform: uppercase; color: var(--color-ink-3); }
-/* The sentence reads like the landing page's (site/styles.css, .sentence .chip): each name is a
-   28px pill centred on the line's lowercase letters. A pill aligned to its baseline instead sat on
-   the bottom of its figure, above the words around it. The figure stands in it on its own, with no
-   circle or disc behind it, as every agent's avatar does. */
+/* The sentence reads like the landing page's (site/styles.css, .sentence .chip): each name is the
+   agent's chip, as the chat draws it (.tc-mention, team-chat.css), at 28px, centred on the line's
+   lowercase letters. A pill aligned to its baseline instead sat on the bottom of its figure, above
+   the words around it. */
 .team-story p { margin: 0; font: 400 18px/1.75 var(--font-serif); color: var(--color-ink-2); text-wrap: pretty; }
-.story-name, .story-schedule {
+.story-name { cursor: pointer; }
+.story-name:hover, .story-name:focus-visible { border-color: var(--color-accent); }
+.story-name.you { background: transparent; border-style: dashed; color: var(--color-ink); }
+/* Your mark sits inside the head's room, so its dashed ring stays finer than the chip's ring. */
+.story-name.you .tc-mention-face { box-sizing: border-box; padding: 3px; }
+.story-schedule {
   display: inline-flex; align-items: center; gap: 6px; vertical-align: middle;
   margin: 0 1px; padding: 0 10px; height: 28px; border-radius: 99px; white-space: nowrap;
   font: 600 13px/1 var(--font-sans); letter-spacing: -.005em; cursor: pointer;
-  background: var(--color-accent-tint);
+  color: var(--color-accent); background: transparent;
   border: 1px solid color-mix(in srgb, var(--color-accent) 35%, transparent);
 }
-.story-face { flex: none; width: 24px; height: 24px; margin: -4px 2px -4px -4px; }
-.story-face > * { display: block; width: 100%; height: 100%; object-fit: contain; }
-.story-name:hover, .story-name:focus-visible { border-color: var(--color-accent); }
-/* An agent's name wears its figure's colour (.hue-N), as in the chat. On the gold tint a touch of ink
-   keeps every colour at 4.8:1 or more; a name with no colour of its own, and you, stay ink. */
-.story-name { color: color-mix(in srgb, var(--hue, var(--color-ink)) 94%, var(--color-ink)); }
-.story-name.you { background: transparent; border-style: dashed; color: var(--color-ink); }
-.story-schedule { color: var(--color-accent); background: transparent; }
 span.story-schedule { cursor: default; }
 .story-warning { color: var(--color-alert); }
 @media (max-width: 767px) {
@@ -633,7 +630,7 @@ span.story-schedule { cursor: default; }
 .lw-canvas[data-depth="story"] .build-node-icon.mark-holder .agent-mark { width: 34px; height: 34px; }
 .mark-badge { position: absolute; right: -5px; bottom: -5px; display: grid; place-items: center; width: 15px; height: 15px; border-radius: 50%; background: var(--color-panel-solid); border: 1px solid var(--color-hairline); color: var(--color-ink-2); }
 .lw-canvas[data-depth="story"] .mark-badge { width: 20px; height: 20px; }
-.story-name .agent-mark { --mark-ground: var(--color-accent-tint); margin-left: -3px; }
+.story-name .agent-mark { --mark-ground: var(--color-accent-tint); }
 .story-name.you .agent-mark { --mark-ground: var(--color-ground); }
 .weft-names > span { display: inline-flex; align-items: center; gap: 6px; }
 .weft-names .agent-mark { --mark-ground: var(--color-panel); }
