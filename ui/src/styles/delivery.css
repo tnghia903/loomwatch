@@ -270,6 +270,15 @@
   font-family: var(--font-mono);
   font-size: 0.85em;
 }
+/* A picture beside the file: as wide as the words at most, never stretched, on white as a web
+   page in the reader is, so a chart drawn for paper with no background still reads on a dark page. */
+.delivery-response .md-picture {
+  max-width: 100%;
+  height: auto;
+  vertical-align: middle;
+  background: var(--color-white);
+  border-radius: var(--r-sm);
+}
 
 .delivery-skill-receipt {
   display: grid;

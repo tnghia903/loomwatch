@@ -27,6 +27,8 @@ import { AvatarFace } from '../agents/AvatarFace'
 import { AgentCardPopup } from '../chat/AgentFace'
 import { useAgentCard } from '../../lib/chat/useAgentCard'
 import { InlineMarkdown, Markdown } from '../ui/Markdown'
+import { MarkdownPictures } from '../ui/markdownPictures'
+import { linkedPath } from '../../lib/files/paths'
 import { plainWords } from '../../lib/chat/findWords'
 import { CodeView, DocumentView } from './formats'
 import { PageFrame, type Marked } from './PageFrame'
@@ -628,6 +630,11 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
     modifiedAt ? `changed ${relativeTime(new Date(modifiedAt))}` : null,
   ].filter(Boolean).join(' · ')
   const origin = useMemo(() => (file.runId && from ? { runId: file.runId, from } : null), [file.runId, from])
+  // The pictures a Markdown file shows, from beside it on this computer, as they were when it was read.
+  const besideFile = useMemo(() => (link: string) => {
+    const picture = linkedPath(path, link)
+    return picture ? `${rawFileUrl(picture)}&v=${encodeURIComponent(modifiedAt ?? '')}` : null
+  }, [path, modifiedAt])
   // A web page marks its own parts (lib/files/pageFrame.ts), told how each looks and handed its
   // agent's figure as a picture it can show.
   const figures = useContext(TeamFiguresContext)
@@ -720,7 +727,7 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
   else body = (
     // Drawn afresh when the file changes, never updated around the marks in it (lib/files/partMarks.ts).
     <div key={content.changes} ref={page} className={`tc-document-page rd-page rd-as-${asPages ? 'document' : shown}${shown === 'markdown' ? ' delivery-response' : ''}`} onClick={openAt}>
-      {shown === 'markdown' ? <Markdown>{withFolderPaths(text)}</Markdown>
+      {shown === 'markdown' ? <MarkdownPictures.Provider value={besideFile}><Markdown>{withFolderPaths(text)}</Markdown></MarkdownPictures.Provider>
           : asPages ? <DocumentView text={text} />
             : <CodeView text={text} language={shown === 'code' && format === 'page' ? 'html' : extensionOf(path)} />}
     </div>

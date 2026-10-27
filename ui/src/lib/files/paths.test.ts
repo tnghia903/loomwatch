@@ -9,7 +9,7 @@ import { chosenIsFile, chosenName } from '../knowledge/chosen'
 import { teamFolderOf } from '../team-file/workFolder'
 import { shortenDirectory } from '../team-file/problems'
 import { filePathFrom } from './fileRefs'
-import { baseName, dirName, isAbsolutePath, joinUnderRoot, pathFromFileUrl, relativeUnder, safeFileStem } from './paths'
+import { baseName, dirName, isAbsolutePath, joinUnderRoot, linkedPath, pathFromFileUrl, relativeUnder, safeFileStem } from './paths'
 
 // The daemon sends `C:\Users\ana\…` on Windows. Every helper that reads a path must read it as the
 // same file a Mac path names, or a team saved on Windows reloads from the wrong place.
@@ -63,6 +63,28 @@ describe('paths from a Mac and from Windows', () => {
     expect(pathFromFileUrl('file:///Users/ana/report.md')).toBe('/Users/ana/report.md')
     expect(filePathFrom('file:///C:/Users/ana/report.md')).toBe('C:\\Users\\ana\\report.md')
     expect(filePathFrom('C:/Users/ana/report.md')).toBe('C:/Users/ana/report.md')
+  })
+
+  it('finds the picture a report links to beside it, written either way', () => {
+    expect(linkedPath('/Users/ana/out/reports/report.md', 'figures/revenue.svg')).toBe('/Users/ana/out/reports/figures/revenue.svg')
+    expect(linkedPath('/Users/ana/out/reports/report.md', './figures/my%20chart.png?v=2#top')).toBe('/Users/ana/out/reports/figures/my chart.png')
+    expect(linkedPath('/Users/ana/out/reports/report.md', '../shared/../logo.png')).toBe('/Users/ana/out/logo.png')
+    expect(linkedPath('C:\\Users\\ana\\out\\report.md', 'figures/revenue.svg')).toBe('C:\\Users\\ana\\out\\figures\\revenue.svg')
+    expect(linkedPath('C:\\Users\\ana\\out\\report.md', '..\\logo.png')).toBe('C:\\Users\\ana\\logo.png')
+    expect(linkedPath('\\\\server\\share\\report.md', 'chart.png')).toBe('\\\\server\\share\\chart.png')
+    expect(linkedPath('reports/report.md', 'figures/revenue.svg')).toBe('reports/figures/revenue.svg')
+    // A full path or a file URL names its file wherever the report is.
+    expect(linkedPath('/Users/ana/out/report.md', '/Users/ana/charts/a.png')).toBe('/Users/ana/charts/a.png')
+    expect(linkedPath('C:\\Users\\ana\\out\\report.md', 'C:/Users/ana/charts/a.png')).toBe('C:/Users/ana/charts/a.png')
+    expect(linkedPath('/Users/ana/out/report.md', 'file:///C:/Users/ana/a%20b.png')).toBe('C:\\Users\\ana\\a b.png')
+  })
+
+  it('finds no file for a link to the web, to data, to a place in the report, or above the disk', () => {
+    for (const link of ['https://example.com/pixel.png', 'HTTP://example.com/a.png', '//example.com/a.png', 'data:image/png;base64,AAAA', 'javascript:alert(1)', '#figure-1', '', '  '])
+      expect(linkedPath('/Users/ana/out/report.md', link)).toBeNull()
+    expect(linkedPath('/out/report.md', '../../a.png')).toBeNull()
+    expect(linkedPath('C:\\out\\report.md', '..\\..\\a.png')).toBeNull()
+    expect(linkedPath('\\\\server\\share\\report.md', '../a.png')).toBeNull()
   })
 
   it('shortens a Windows home folder to ~ as it does a Mac one', () => {

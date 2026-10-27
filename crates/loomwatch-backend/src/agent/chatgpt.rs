@@ -434,8 +434,11 @@ fn web_result_text(item: &Value) -> Option<String> {
     Some(text)
 }
 
-/// `text` without the private-use citation marks `OpenAI` writes into results. A mark around a
-/// link (`cite`, U+E202, `3†words†site`) keeps the link's words; any other mark goes.
+/// `text` without the private-use citation marks `OpenAI` writes into results, and that its models
+/// write into their own answers for `ChatGPT`'s page to turn into links
+/// (`\u{e200}cite\u{e202}turn2search1\u{e201}`). Those name search results `LoomWatch` is never
+/// given, so they can't become links here. A mark around a link (`cite`, U+E202, `3†words†site`)
+/// keeps the link's words; any other mark goes.
 fn plain(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
@@ -573,6 +576,45 @@ struct Assembled {
     incomplete: Option<String>,
     begun: bool,
     done: bool,
+    unmarked: Unmarked,
+}
+
+/// The longest citation mark held back as it streams: an opening sign with no end this far on
+/// begins no mark, and the words after it go on.
+const MARK_MAX: usize = 512;
+
+/// A message's words as they stream, without citation marks ([`plain`]). The model writes a mark
+/// in pieces (`\u{e200}cite`, then `\u{e202}turn2search1\u{e201}`), so a mark begun is held back
+/// until it ends.
+#[derive(Default)]
+struct Unmarked {
+    held: String,
+}
+
+impl Unmarked {
+    /// The words that can be shown now, `piece` added.
+    fn take(&mut self, piece: &str) -> String {
+        self.held.push_str(piece);
+        let open = self.held.rfind('\u{e200}').filter(|&at| {
+            !self.held[at..].contains('\u{e201}') && self.held.len() - at <= MARK_MAX
+        });
+        let kept = open.map_or_else(String::new, |at| self.held.split_off(at));
+        plain(&std::mem::replace(&mut self.held, kept))
+    }
+
+    /// What was held back, once the message has ended.
+    fn rest(&mut self) -> String {
+        plain(&std::mem::take(&mut self.held))
+    }
+}
+
+/// Shows the words `Unmarked` still held, once a message or the response has ended.
+async fn release(message: &mut Assembled, deltas: &dyn DeltaSink) -> Result<(), CallError> {
+    let rest = message.unmarked.rest();
+    if !rest.is_empty() {
+        deltas.text(&rest).await?;
+    }
+    Ok(())
 }
 
 async fn read_stream(
@@ -632,7 +674,10 @@ async fn take_event(
                 && !text.is_empty()
             {
                 message.begun = true;
-                deltas.text(text).await?;
+                let shown = message.unmarked.take(text);
+                if !shown.is_empty() {
+                    deltas.text(&shown).await?;
+                }
             }
         }
         Some("response.reasoning_summary_text.delta") => {
@@ -650,17 +695,20 @@ async fn take_event(
             }
         }
         Some("response.output_item.done") => {
+            release(message, deltas).await?;
             if let Some(item) = event.get("item") {
                 message.items.push(item.clone());
             }
         }
         Some("response.completed") => {
+            release(message, deltas).await?;
             if let Some(usage) = event.pointer("/response/usage") {
                 message.usage = read_usage(usage);
             }
             message.done = true;
         }
         Some("response.incomplete") => {
+            release(message, deltas).await?;
             if let Some(usage) = event.pointer("/response/usage") {
                 message.usage = read_usage(usage);
             }
@@ -702,8 +750,10 @@ fn finish(message: Assembled) -> Completion {
                     .into_iter()
                     .flatten()
                 {
+                    // The items go back to the model as they came (`native`); the words it said
+                    // go on without their citation marks.
                     if let Some(text) = part.get("text").and_then(Value::as_str) {
-                        written.text(text);
+                        written.text(&plain(text));
                     }
                 }
             }
@@ -1050,7 +1100,7 @@ mod tests {
     }
 
     /// A citation mark around a link keeps the link's words; any other mark goes, and a mark left
-    /// open loses only its opening sign.
+    /// open loses only its opening sign. The same cases as `ui/src/lib/chat/citationMarks.test.ts`.
     #[test]
     fn citation_marks_leave_plain_words() {
         assert_eq!(
@@ -1065,6 +1115,32 @@ mod tests {
         );
         assert_eq!(plain("a \u{e200}cite and more"), "a cite and more");
         assert_eq!(plain("no marks"), "no marks");
+    }
+
+    /// A mark the model writes in pieces is held back until it ends, and never shown; the words
+    /// around it are shown as they come. An opening sign that ends nothing lets its words go.
+    #[test]
+    fn a_mark_written_in_pieces_is_never_shown() {
+        let mut words = Unmarked::default();
+        let shown: Vec<String> = [
+            "in cash. \u{e200}cite",
+            "\u{e202}turn2search1",
+            "\u{e201}\n\nNext, ",
+            "\u{e200}cite\u{e202}7\u{2020}the filing\u{2020}sec.gov\u{e201}.",
+        ]
+        .iter()
+        .map(|piece| words.take(piece))
+        .collect();
+        assert_eq!(shown, ["in cash. ", "", "\n\nNext, ", "the filing."]);
+        assert_eq!(words.rest(), "");
+
+        let mut open = Unmarked::default();
+        assert_eq!(open.take("a \u{e200}cite\u{e202}tu"), "a ");
+        assert_eq!(open.rest(), "cite\u{e202}tu");
+        let mut long = Unmarked::default();
+        assert_eq!(long.take("a \u{e200}"), "a ");
+        let words = "word ".repeat(MARK_MAX / 5 + 1);
+        assert_eq!(long.take(&words), words);
     }
 
     #[test]

@@ -115,6 +115,24 @@ describe('reading a file an agent made', () => {
     expect(screen.getByText('Mark any words')).toBeInTheDocument()
   })
 
+  it('shows the pictures a report links to beside it, as they were when it was read, and never one from the web', async () => {
+    const stat = answer
+    answer = (url) => (url.startsWith('/api/files/read')
+      ? respond(200, read({ text: '# Market report\n\n![Sales by month](figures/sales%20chart.svg)\n\n![Logo](file:///teams/.loomwatch/market/logo.png)\n\n![tracker](https://example.com/pixel.png)\n\n![Old chart](figures/gone.png)\n' }))
+      : stat(url))
+    renderReader()
+    const version = `&v=${encodeURIComponent('2026-10-19T01:00:00Z')}`
+    const chart = await screen.findByRole('img', { name: 'Sales by month' })
+    expect(chart).toHaveAttribute('src', `/api/files/raw?path=${encodeURIComponent('/teams/.loomwatch/market/writer/figures/sales chart.svg')}${version}`)
+    expect(screen.getByRole('img', { name: 'Logo' })).toHaveAttribute('src', `/api/files/raw?path=${encodeURIComponent('/teams/.loomwatch/market/logo.png')}${version}`)
+    expect(screen.queryByRole('img', { name: 'tracker' })).toBeNull()
+    expect(screen.getByText('[Image: tracker]')).toBeInTheDocument()
+    // A picture that isn't there reads as its words.
+    fireEvent.error(screen.getByRole('img', { name: 'Old chart' }))
+    expect(screen.queryByRole('img', { name: 'Old chart' })).toBeNull()
+    expect(screen.getByText('[Image: Old chart]')).toBeInTheDocument()
+  })
+
   it('Ask hands the marked words to the chat as a part of this file, from the agent asked, and lets go of them', async () => {
     const { onAsk } = renderReader()
     const bubble = await mark('Sales grew 12% in Q3.')

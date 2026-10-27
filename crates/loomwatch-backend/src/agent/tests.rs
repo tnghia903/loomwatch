@@ -4675,6 +4675,64 @@ async fn a_chatgpt_plan_search_between_messages_leaves_the_first_out_of_the_repl
     assert_eq!(last_written(&session), said);
 }
 
+/// A `ChatGPT` model cites a search by writing `OpenAI`'s private citation marks into its answer
+/// (`\u{e200}cite\u{e202}turn2search1\u{e201}`), for `ChatGPT`'s own page to turn into links. They
+/// name results `LoomWatch` is never given, so the chat showed them as "cite turn2search1" between
+/// boxes, and the next agent read them too. The answer goes on without them, as it streams and
+/// once it is written; the model's own items go back to it as they came.
+#[tokio::test]
+async fn a_chatgpt_plan_answer_loses_its_citation_marks() {
+    let folder = Folder::new();
+    let written = "It is largely accounting. \u{e200}cite\u{e202}turn2search1\u{e201}\n\nSee \u{e200}cite\u{e202}3\u{2020}the filing\u{2020}sec.gov\u{e201}. A lone \u{e200} sign.";
+    let stream = events(&[
+        json!({"type": "response.output_item.added", "item": {"type": "message"}}),
+        json!({"type": "response.output_text.delta", "delta": "It is largely accounting. \u{e200}cite"}),
+        json!({"type": "response.output_text.delta", "delta": "\u{e202}turn2search1"}),
+        json!({"type": "response.output_text.delta", "delta": "\u{e201}\n\nSee \u{e200}cite\u{e202}3\u{2020}the filing"}),
+        json!({"type": "response.output_text.delta", "delta": "\u{2020}sec.gov\u{e201}."}),
+        // An opening sign that ends nothing holds the words after it back only until the message ends.
+        json!({"type": "response.output_text.delta", "delta": " A lone \u{e200} sign."}),
+        item_done(
+            &json!({"type": "message", "id": "msg_1", "role": "assistant", "status": "completed",
+                          "content": [{"type": "output_text", "text": written, "annotations": []}]}),
+        ),
+        completed(100, 0, 20),
+    ]);
+    let (_, base) = stand(vec![stream]).await;
+    let sink = Arc::new(Recorded::default());
+    let mut session = session_on(
+        &folder,
+        plan(&base, Arc::new(FixedToken::default())),
+        sink.clone(),
+        Arc::new(AllowAll),
+        "chatgpt:gpt-6.1-sol",
+    );
+    let end = session.prompt("Why the loss?").await.unwrap();
+
+    let said = "It is largely accounting. \n\nSee the filing. A lone  sign.";
+    assert_eq!(end.reply, said);
+    let record = as_recorded(&sink).await;
+    assert_eq!(record.said, said);
+    assert!(
+        record
+            .messages
+            .iter()
+            .all(|(_, text)| !text.contains(['\u{e200}', '\u{e201}', '\u{e202}'])),
+        "{:?}",
+        record.messages
+    );
+    assert_eq!(last_written(&session), said);
+    let snapshot = session.snapshot();
+    let Some(Message::Assistant {
+        native: Some(native),
+        ..
+    }) = snapshot.history.last()
+    else {
+        panic!("the model's items should be kept");
+    };
+    assert_eq!(native.items[0]["content"][0]["text"], written);
+}
+
 /// A plan's web search shows what it found only inside the response that ran it, and the Responses
 /// API ignores the results in an item sent back. So the search found nothing on the model's next
 /// call, after another tool or a later message: a morning brief came back empty. The results go
