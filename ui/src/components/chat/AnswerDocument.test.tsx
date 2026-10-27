@@ -6,14 +6,16 @@ import { AnswerDocument } from './AnswerDocument'
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 describe('a document answer, read beside the chat', () => {
-  it('is read in full, as written, and never runs HTML or loads remote images', async () => {
-    const { container } = render(<AnswerDocument by="Writer" streaming={false} text={'# Market report\n\n| Finding | Impact |\n|---|---|\n| Clear | Faster |\n\n<script>alert(1)</script>\n\n![tracking](https://example.com/pixel)'} />)
+  it('is read in full, as written, and never runs HTML or loads images', async () => {
+    const { container } = render(<AnswerDocument by="Writer" streaming={false} text={'# Market report\n\n| Finding | Impact |\n|---|---|\n| Clear | Faster |\n\n<script>alert(1)</script>\n\n![tracking](https://example.com/pixel)\n\n![chart](/Users/ana/out/chart.png)'} />)
     expect(await screen.findByRole('heading', { name: 'Market report', level: 1 })).toBeInTheDocument()
     expect(screen.getByRole('table')).toBeInTheDocument()
     expect(screen.getByText('Written by Writer')).toBeInTheDocument()
     expect(container.querySelector('script')).toBeNull()
     expect(container.querySelector('img')).toBeNull()
     expect(screen.getByText('[Image: tracking]')).toBeInTheDocument()
+    // A picture on this computer is shown only where the screen says where it is: the reader.
+    expect(screen.getByText('[Image: chart]')).toBeInTheDocument()
   })
 
   it('shows a claim’s mark as a tag and the links that close it as its sources', async () => {

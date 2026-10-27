@@ -124,7 +124,9 @@ face in the chat does, and what you asked it. Ask about words that overlap words
 before and only the newer words keep the stroke, with the earlier bubbles beside them; an earlier
 answer then opens at the newer words and says which words it is about. A bubble opens its own
 answer, and the marked words open the one still waiting for you, or else the newest; Esc or ×
-closes it. A web page the agent made is marked the same way. It runs in a sandbox of its own, and
+closes it. A Markdown report shows the pictures it links to on this computer, such as a chart it
+links as `figures/chart.svg` beside it; a picture on the web shows as its words, so reading a report
+never tells a website you did. A web page the agent made is marked the same way. It runs in a sandbox of its own, and
 the data, clips, pictures and fonts beside it load as they would from the page's folder (a
 dashboard's `fetch('sales.csv')` works; LoomWatch reads them for it): its own folder and the folders
 in it only, never anything above it. To ask about any part of the page, not just its words, press

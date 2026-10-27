@@ -1,11 +1,12 @@
-import ReactMarkdown, { type Components, type ExtraProps } from 'react-markdown'
+import ReactMarkdown, { defaultUrlTransform, type Components, type ExtraProps, type UrlTransform } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
-import { useContext, useMemo, type ReactNode } from 'react'
+import { useContext, useMemo, useState, type ReactNode } from 'react'
 import { BACKED, CLAIM_MARK } from '../../lib/chat/claims'
 import { segments, useFoundWords, type FindTerm } from '../../lib/chat/findWords'
 import { filePathFrom, filePathFromLink } from '../../lib/files/fileRefs'
 import { FileChip } from './FileChip'
+import { MarkdownPictures } from './markdownPictures'
 import { SaidMention, type SaidMarks } from './saidMention'
 
 /**
@@ -13,8 +14,11 @@ import { SaidMention, type SaidMarks } from './saidMention'
  * (markdownCode.ts), fetched beside the app's first draw: the unified / micromark stack is the
  * largest dependency in the app, and the page draws before it is in.
  *
- * Raw HTML is skipped and images are never fetched — a report is untrusted model output, and an
- * embedded `<img src>` is a tracking pixel the operator never agreed to load.
+ * Raw HTML is skipped and pictures on the web are never fetched — a report is untrusted model
+ * output, and an embedded `<img src>` is a tracking pixel the operator never agreed to load. A
+ * picture on this computer is shown where the screen says where it is ([`MarkdownPictures`]: the
+ * reader, for the pictures beside the file it reads), through LoomWatch itself; anywhere else a
+ * picture is its words.
  *
  * A file the reply names — an absolute path in inline code, a link to one, or a `file://` URL — is
  * shown as a file the operator can open (FileChip, ADR 0026), not as a path to copy by hand. Fenced
@@ -44,7 +48,7 @@ export default function MarkdownRenderer({ children, inline = false, clickable =
     return plugins
   }, [found, said])
   return (
-    <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={rehype} skipHtml components={clickable ? COMPONENTS : WORDS_ONLY} allowedElements={inline ? (clickable ? INLINE_ELEMENTS : INLINE_WORDS) : undefined} unwrapDisallowed={inline}>
+    <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={rehype} skipHtml urlTransform={urlTransform} components={clickable ? COMPONENTS : WORDS_ONLY} allowedElements={inline ? (clickable ? INLINE_ELEMENTS : INLINE_WORDS) : undefined} unwrapDisallowed={inline}>
       {inline ? numbersAsWords(children) : children}
     </ReactMarkdown>
   )
@@ -106,6 +110,21 @@ function Span({ children, className, title, node }: { children?: ReactNode; clas
     return <>{draw(agent || undefined, text)}</>
   }
   return <span className={className} title={title}>{children}</span>
+}
+
+/**
+ * A picture's link reaches [`Picture`] as it was written (`file:///…`, `C:\…`), which only ever
+ * hands it to [`MarkdownPictures`]; every other link is made safe as usual.
+ */
+const urlTransform: UrlTransform = (url, key, node) => (node.tagName === 'img' && key === 'src' ? url : defaultUrlTransform(url))
+
+/** A picture, shown from where [`MarkdownPictures`] says it is; its words where it says none, or it can't be shown. */
+function Picture({ src, alt }: { src?: string; alt?: string }) {
+  const where = useContext(MarkdownPictures)
+  const shown = src && where ? where(src) : null
+  const [failed, setFailed] = useState<string | null>(null)
+  if (!shown || failed === shown) return <span className="delivery-image-reference">[Image: {alt || 'reference'}]</span>
+  return <img className="md-picture" src={shown} alt={alt ?? ''} onError={() => setFailed(shown)} />
 }
 
 const REMARK_PLUGINS = [remarkGfm]
@@ -229,7 +248,7 @@ const COMPONENTS: Components = {
     const path = inline ? filePathFrom(text) : null
     return path ? <FileChip path={path} /> : <code className={className}>{text}</code>
   },
-  img: ({ alt }) => <span className="delivery-image-reference">[Image: {alt || 'reference'}]</span>,
+  img: Picture,
   span: Span,
 }
 // Nothing to click: inline code stays code, a path in it too.
