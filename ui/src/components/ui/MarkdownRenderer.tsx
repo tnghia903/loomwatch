@@ -3,6 +3,7 @@ import remarkGfm from 'remark-gfm'
 
 import { useContext, useMemo, useState, type ReactNode } from 'react'
 import { BACKED, CLAIM_MARK } from '../../lib/chat/claims'
+import { withoutCitationMarks } from '../../lib/chat/citationMarks'
 import { segments, useFoundWords, type FindTerm } from '../../lib/chat/findWords'
 import { filePathFrom, filePathFromLink } from '../../lib/files/fileRefs'
 import { FileChip } from './FileChip'
@@ -28,7 +29,8 @@ import { SaidMention, type SaidMarks } from './saidMention'
  *
  * Research answers mark each claim and cite it: "[Sourced] … [Paper](https://…)". The mark reads
  * as a small tag and the links after the claim as its sources, not as bracketed text and a run of
- * underlined titles.
+ * underlined titles. The private citation marks a ChatGPT model wrote into answers saved before the
+ * daemon took them out are dropped ([`withoutCitationMarks`]).
  *
  * `inline` keeps it inside a sentence: bold, code and links are shown, and a paragraph, heading or
  * list is kept as its words. With `clickable={false}` as well, a link is its words and a file path
@@ -49,7 +51,7 @@ export default function MarkdownRenderer({ children, inline = false, clickable =
   }, [found, said])
   return (
     <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={rehype} skipHtml urlTransform={urlTransform} components={clickable ? COMPONENTS : WORDS_ONLY} allowedElements={inline ? (clickable ? INLINE_ELEMENTS : INLINE_WORDS) : undefined} unwrapDisallowed={inline}>
-      {inline ? numbersAsWords(children) : children}
+      {inline ? numbersAsWords(withoutCitationMarks(children)) : withoutCitationMarks(children)}
     </ReactMarkdown>
   )
 }

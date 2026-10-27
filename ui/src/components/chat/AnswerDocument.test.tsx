@@ -18,6 +18,15 @@ describe('a document answer, read beside the chat', () => {
     expect(screen.getByText('[Image: chart]')).toBeInTheDocument()
   })
 
+  // A ChatGPT model's answer saved before the daemon took its citation marks out read
+  // "…in cash. [box]cite[box]turn2search1[box]".
+  it('drops the private citation marks a ChatGPT model wrote, keeping a link’s words', async () => {
+    const { container } = render(<AnswerDocument by="Cole" streaming={false} text={'The **$72.4B is largely non-cash accounting**. citeturn2search1\n\nSee cite3†the filing†sec.gov.'} />)
+    expect(await screen.findByText('$72.4B is largely non-cash accounting')).toBeInTheDocument()
+    expect(container.textContent).not.toMatch(/[-]|turn2search1/)
+    expect(container.textContent).toContain('See the filing.')
+  })
+
   it('shows a claim’s mark as a tag and the links that close it as its sources', async () => {
     const { container } = render(<AnswerDocument by="RAG researcher" streaming={false} text={[
       '[ Sourced ] Hybrid search wins. [Anthropic, “Contextual Retrieval”](https://www.anthropic.com/news/contextual-retrieval) [BEIR paper](https://arxiv.org/abs/2104.08663).',
