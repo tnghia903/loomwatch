@@ -543,7 +543,7 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
       if (event.key !== 'Escape' || event.defaultPrevented) return
       const target = event.target as HTMLElement | null
       // Escape in the message box is the message box's.
-      if (target?.closest?.('input, textarea, [contenteditable="true"]') && !card.current?.contains(target)) return
+      if (target?.closest?.('input, textarea, [contenteditable]:not([contenteditable="false"])') && !card.current?.contains(target)) return
       // It closes the answer, and only the answer: not the pane the file is read in too.
       event.preventDefault()
       event.stopPropagation()

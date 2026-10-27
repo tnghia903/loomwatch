@@ -1,5 +1,5 @@
 import { ArrowUp, AtSign, CornerDownLeft, MessageSquareText, Paperclip, Reply, TextQuote, Users, X, Zap } from 'lucide-react'
-import { createElement, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from 'react'
+import { createElement, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 
 import { pastedName, type Attachment, type ChatAttachments } from '../../lib/chat/attachments'
 import type { ChatTarget, ReplyTo } from '../../lib/chat/client'
@@ -8,12 +8,12 @@ import { extensionOf } from '../../lib/files/fileRefs'
 import { fileIcon } from '../../lib/files/icons'
 import { rawFileUrl } from '../../lib/files/reader'
 import { answersDecision, replyWhat, replyWords } from '../../lib/chat/reply'
-import { destination, findMention, mentionChoices, mentionQuery, mentionsIn, type ChatAgent, type Destination, type Mention } from '../../lib/chat/route'
-import { FigureStill } from '../agents/FigureStill'
-import { useTeamFigure } from '../agents/figureContext'
-import { AgentMark } from '../ui/AgentMark'
+import type { ChipAt } from '../../lib/chat/chipField'
+import { destination, findMention, mentionChoices, mentionQuery, mentionsIn, type ChatAgent, type Destination } from '../../lib/chat/route'
 import { InlineMarkdown } from '../ui/Markdown'
 import { Swap } from './Appearing'
+import { ChipField, type ChipFieldHandle } from './ChipField'
+import { MentionChip } from './SaidText'
 import type { RunRecord } from '../../lib/runs/client'
 
 /** What the team is waiting on you for, which a typed answer goes with. */
@@ -79,13 +79,16 @@ interface ChatComposerProps {
  */
 export function ChatComposer({ agents, names, steps, live, decision, disabled = null, value: text, onChange: setText, onSend, onAnswer, mentioned = 0, solo = null, replyTo = null, onCancelReply, onAddress, answerAsked = 0, attachments, notice = null, onDismissNotice }: ChatComposerProps) {
   const [caret, setCaret] = useState(0)
+  // Where the caret was left by letters typed; a caret moved there some other way, or by a
+  // deletion, is not typing a name.
+  const [typedAt, setTypedAt] = useState<number | null>(null)
   const [picked, setPicked] = useState(0)
   const [pickerClosed, setPickerClosed] = useState(false)
   const [sending, setSending] = useState(false)
   const [teamInstead, setTeamInstead] = useState(false)
   // Each send ripples once from the box, the message leaving it.
   const [sent, setSent] = useState(0)
-  const box = useRef<HTMLTextAreaElement>(null)
+  const box = useRef<ChipFieldHandle>(null)
   const chooser = useRef<HTMLInputElement>(null)
   const pickerId = useId()
   const whereId = useId()
@@ -142,18 +145,21 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
   // An answer takes words only, so files wait for a message of their own.
   const filesHold = attached.some((item) => item.state !== 'ready') || Boolean(answering && attached.length > 0)
 
-  // Each agent @mentioned is drawn as its chip as you type, as it will show once sent (SaidText).
+  // Each agent @mentioned is its chip in the box, the very chip the sent message shows (SaidText).
   const said = useChatMentions()
-  const chips = useMemo(() => (said ? mentionsIn(text, said.agents).filter((found) => found.target.kind === 'agent') : []), [said, text])
-  const chipped = said !== null && chips.length > 0
-  const drawn = useRef<HTMLDivElement>(null)
-  useLayoutEffect(() => {
-    if (drawn.current && box.current) drawn.current.scrollTop = box.current.scrollTop
-  })
+  const chipsIn = useCallback((value: string): ChipAt[] => (said
+    ? mentionsIn(value, said.agents).flatMap((found) => (found.target.kind === 'agent' ? [{ start: found.start, end: found.end, agent: found.target.agent }] : []))
+    : []), [said])
+  const drawChip = useCallback((id: string) => {
+    const agent = said?.agents.find((one) => one.id === id)
+    return <MentionChip id={id} name={agent?.name.trim() || id} hue={said?.hue(id) ?? 1} />
+  }, [said])
 
   const mention = useMemo(() => (solo ? null : findMention(text, agents)), [solo, text, agents])
   const target: ChatTarget = solo ? { kind: 'agent', agent: solo.id } : mention?.target ?? null
-  const query = solo ? null : mentionQuery(text, caret)
+  // The picker is for a name being typed: a caret moved to just after a chip has nothing to pick.
+  const afterChip = typedAt !== caret && chipsIn(text).some((chip) => chip.end === caret)
+  const query = solo || afterChip ? null : mentionQuery(text, caret)
   const choices = useMemo(() => (query && !pickerClosed ? mentionChoices(query.query, agents) : []), [query, pickerClosed, agents])
   const pickerOpen = choices.length > 0
   const routed: Destination = destination(target, live, names, steps)
@@ -214,7 +220,7 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
     if (!ok) setText(kept)
   }
 
-  const keyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+  const keyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (pickerOpen) {
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         event.preventDefault()
@@ -345,12 +351,12 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
           </ul>
         )}
         <div className="tc-input-wrap">
-          {chipped && <TypedWords ref={drawn} text={text} chips={chips} hue={said.hue} />}
-          <textarea
+          <ChipField
             ref={box}
-            className={`tc-input${chipped ? ' chipped' : ''}`}
-            rows={1}
+            className="tc-input"
             value={text}
+            chipsIn={chipsIn}
+            chip={drawChip}
             placeholder={placeholder}
             aria-label={solo ? `Message ${solo.name || solo.id}` : 'Message the team'}
             aria-describedby={quiet ? undefined : whereId}
@@ -358,14 +364,15 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
             aria-expanded={pickerOpen}
             aria-activedescendant={pickerOpen ? `${pickerId}-${choices[Math.min(picked, choices.length - 1)].id}` : undefined}
             disabled={Boolean(disabled)}
-            onChange={(event) => {
-              // Letters still being put together by an input method are left as they are.
-              const typed = (event.nativeEvent as InputEvent).isComposing ? { value: event.target.value, at: event.target.selectionStart } : named(event.target.value, event.target.selectionStart)
-              if (typed.value !== event.target.value) pendingCaret.current = typed.at
-              setText(typed.value); setCaret(typed.at); setPickerClosed(false); setPicked(0)
+            onChange={(value, at, typing) => {
+              const typed = named(value, at)
+              if (typed.value !== value) pendingCaret.current = typed.at
+              setText(typed.value); setCaret(typed.at); setTypedAt(typing ? typed.at : null); setPickerClosed(false); setPicked(0)
             }}
-            onSelect={(event) => setCaret(event.currentTarget.selectionStart)}
-            onScroll={(event) => { if (drawn.current) drawn.current.scrollTop = event.currentTarget.scrollTop }}
+            onSelect={(at) => {
+              setCaret(at)
+              setTypedAt((typed) => (typed === at ? typed : null))
+            }}
             onKeyDown={keyDown}
             onPaste={(event) => {
               // A screenshot or a file copied in Finder goes with the words; text pastes as text.
@@ -406,34 +413,6 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
       </div>
       {disabled && <p className="tc-disabled" role="status">{disabled}</p>}
     </form>
-  )
-}
-
-/**
- * The words in the box with each agent @mentioned drawn as its chip: its figure's head and its name
- * in its colour on the gold tint. They lie under the box's own words, which go clear while there is
- * a chip, each letter where the box has it, so typing, the caret and selecting stay the box's own:
- * the head stands in the @'s own room and the name keeps its letters.
- */
-function TypedWords({ text, chips, hue, ref }: { text: string; chips: readonly Mention[]; hue: (id: string) => number; ref: Ref<HTMLDivElement> }) {
-  const parts: ReactNode[] = []
-  let at = 0
-  for (const chip of chips) {
-    if (chip.target.kind !== 'agent') continue
-    parts.push(text.slice(at, chip.start), <TypedChip key={chip.start} id={chip.target.agent} hue={hue(chip.target.agent)} name={text.slice(chip.start + 1, chip.end)} />)
-    at = chip.end
-  }
-  // A last line that is empty still takes its room, as in the box.
-  parts.push(text.slice(at), '​')
-  return <div ref={ref} className="tc-input-words" aria-hidden="true">{parts}</div>
-}
-
-function TypedChip({ id, hue, name }: { id: string; hue: number; name: string }) {
-  const figure = useTeamFigure(id)
-  return (
-    <span className={`tc-typed-mention hue-${hue}`} data-agent={id}>
-      <span className="tc-typed-at">@<span className="tc-typed-face">{figure ? <FigureStill figure={figure} headOnly alt="" draggable={false} /> : <AgentMark id={id} size={14} />}</span></span>{name}
-    </span>
   )
 }
 

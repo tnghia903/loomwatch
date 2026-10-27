@@ -12,7 +12,9 @@ import type { RunRecord } from '../../lib/runs/client'
 import { FileReaderContext } from '../../lib/files/reader'
 import type { TeamMessage } from '../../lib/watch/messages'
 import { cascaded, goldFilled, heightOf, isGoldFill, PHONE } from '../../test/cascade'
+import { caretAt, typeInto, wordsIn } from '../../test/chipField'
 import { ChatComposer } from './ChatComposer'
+import { SaidText } from './SaidText'
 import { TeamChat } from './TeamChat'
 import type { TeamView } from './WorkPiece'
 
@@ -100,7 +102,7 @@ describe('the message box says where a message goes before it is sent', () => {
       return <ChatComposer agents={agents} names={team.names} steps={3} live={live} decision={decision} value={value} onChange={setValue} onSend={onSend} onAnswer={onAnswer} />
     }
     render(<Harness />)
-    const type = (text: string) => fireEvent.change(box(), { target: { value: text, selectionStart: text.length } })
+    const type = (text: string) => typeInto(box(), text)
     return { onSend, onAnswer, type }
   }
 
@@ -145,7 +147,7 @@ describe('the message box says where a message goes before it is sent', () => {
     const { onSend, onAnswer, type } = composer([], review)
     type('add a source')
     expect(screen.getByText('Your review note · Enter sends the work back to Researcher')).toBeInTheDocument()
-    expect(box()).toHaveAttribute('placeholder', 'What to change, or a note to pass on')
+    expect(box()).toHaveAttribute('aria-placeholder', 'What to change, or a note to pass on')
     fireEvent.keyDown(box(), { key: 'Enter', shiftKey: true })
     expect(onAnswer).not.toHaveBeenCalled()
     fireEvent.keyDown(box(), { key: 'Enter' })
@@ -163,7 +165,7 @@ describe('the message box says where a message goes before it is sent', () => {
       expect(screen.getByText('Your review note · press Approve or Send back above')).toBeInTheDocument()
       fireEvent.keyDown(box(), { key: 'Enter' })
       expect(onAnswer).toHaveBeenCalledTimes(2)
-      expect(box()).toHaveValue(elsewhere)
+      expect(wordsIn(box())).toBe(elsewhere)
     }
     // Nor does the @ picker say an @ starts work: from here it starts nothing.
     type('@wr')
@@ -174,17 +176,17 @@ describe('the message box says where a message goes before it is sent', () => {
     const approveOnly = composer([], { ...review, backTo: null })
     approveOnly.type('looks good')
     expect(screen.getByText('Your review note · press Approve above')).toBeInTheDocument()
-    expect(box()).toHaveAttribute('placeholder', 'A note to pass on')
+    expect(box()).toHaveAttribute('aria-placeholder', 'A note to pass on')
     fireEvent.keyDown(box(), { key: 'Enter' })
     expect(approveOnly.onAnswer).not.toHaveBeenCalled()
     expect(approveOnly.onSend).not.toHaveBeenCalled()
-    expect(box()).toHaveValue('looks good')
+    expect(wordsIn(box())).toBe('looks good')
     fireEvent.click(screen.getByRole('button', { name: /Write to the team instead/ }))
     expect(screen.getByText('Team note · starts nothing')).toBeInTheDocument()
   })
 
-  it('draws each agent @mentioned as its chip as you type, letter for letter under the box’s own words', () => {
-    const mentions = { agents: [{ id: 'researcher', name: 'Researcher' }, { id: 'writer', name: 'Writer' }], hue: (id: string) => (id === 'writer' ? 2 : 1) }
+  const mentions = { agents: [{ id: 'researcher', name: 'Researcher' }, { id: 'writer', name: 'Writer' }], hue: (id: string) => (id === 'writer' ? 2 : 1) }
+  const chipped = () => {
     const onSend = vi.fn(async () => true)
     function Harness() {
       const [value, setValue] = useState('')
@@ -195,71 +197,234 @@ describe('the message box says where a message goes before it is sent', () => {
       )
     }
     render(<Harness />)
-    const type = (text: string) => fireEvent.change(box(), { target: { value: text, selectionStart: text.length } })
-    const layer = () => document.querySelector('.tc-input-words')
+    return { onSend }
+  }
+  const chipsIn = (field: HTMLElement) => [...field.querySelectorAll('.tc-chip')].map((host) => [host.getAttribute('data-agent'), host.getAttribute('contenteditable'), host.querySelector('.tc-mention')?.className, host.textContent])
+
+  it('draws each agent @mentioned in the box as the very chip a sent message shows', () => {
+    chipped()
     // A name typed in other letters takes the agent's own once you are past it, as its chip shows it.
-    type('ask @researcher, then\n@Writer and @team')
-    expect(box()).toHaveValue('ask @Researcher, then\n@Writer and @team')
-    expect(layer()).not.toBeNull()
-    const chips = [...layer()!.querySelectorAll('.tc-typed-mention')]
-    expect(chips.map((chip) => [chip.getAttribute('data-agent'), chip.className, chip.textContent])).toEqual([
-      ['researcher', 'tc-typed-mention hue-1', '@Researcher'],
-      ['writer', 'tc-typed-mention hue-2', '@Writer'],
+    typeInto(box(), 'ask @researcher, then\n@Writer and @team')
+    expect(wordsIn(box())).toBe('ask @Researcher, then\n@Writer and @team')
+    expect(chipsIn(box())).toEqual([
+      ['researcher', 'false', 'tc-mention hue-1', '@Researcher'],
+      ['writer', 'false', 'tc-mention hue-2', '@Writer'],
     ])
-    // Each chip has its agent's face where its @ is, and every letter of the box is on the layer.
-    for (const chip of chips) expect(chip.querySelector('.tc-typed-at .tc-typed-face svg, .tc-typed-at .tc-typed-face img')).not.toBeNull()
-    expect(layer()!.textContent).toBe('ask @Researcher, then\n@Writer and @team\u200b')
-    // Still at the end, or under the caret, the name is yours to type on ("@researchers"); past it,
-    // it is the agent's, and the caret stays where it was.
-    type('ask @researcher')
-    expect(box()).toHaveValue('ask @researcher')
-    fireEvent.change(box(), { target: { value: 'ask @researcher again', selectionStart: 15 } })
-    expect(box()).toHaveValue('ask @researcher again')
-    fireEvent.change(box(), { target: { value: 'ask @researcher again!', selectionStart: 22 } })
-    expect(box()).toHaveValue('ask @Researcher again!')
-    expect((box() as HTMLTextAreaElement).selectionStart).toBe(22)
-    expect(layer()).toHaveAttribute('aria-hidden', 'true')
-    expect(box()).toHaveClass('chipped')
-    // Words with no agent in them are the box's own again.
-    type('ask @team')
-    expect(layer()).toBeNull()
-    expect(box()).not.toHaveClass('chipped')
+    // The chip in the box is the chip of the sent message, mark for mark: its face, its name, its room.
+    const sent = render(<ChatMentionsContext.Provider value={mentions}><SaidText text="then @Writer" /></ChatMentionsContext.Provider>)
+    expect(box().querySelectorAll('.tc-mention')[1].outerHTML).toBe(sent.container.querySelector('.tc-mention')!.outerHTML)
+    for (const chip of box().querySelectorAll('.tc-mention')) expect(chip.querySelector('.tc-mention-face svg, .tc-mention-face img')).not.toBeNull()
+    // @team stays words, and so does any @ that names nobody.
+    expect(box().textContent).toBe('ask @Researcher, then\n@Writer and @team')
   })
 
-  it('lays the chips’ words out as the box lays out its own, so the caret stays on its letters', () => {
-    const wrap = document.createElement('div')
-    wrap.className = 'tc-input-wrap'
-    wrap.innerHTML = '<div class="tc-input-words"><span class="tc-typed-mention hue-1"><span class="tc-typed-at">@<span class="tc-typed-face"></span></span>Writer</span></div><textarea class="tc-input chipped"></textarea>'
-    document.body.append(wrap)
-    const layer = wrap.querySelector('.tc-input-words')!
-    const input = wrap.querySelector('.tc-input')!
-    // The layer reaches past the box each side by as much as its own padding, so a chip at a line's
-    // end keeps its round end and the words start where the box's do.
-    const lengths = (value: string | null) => (value ?? '').split(' ').map((one) => Number.parseFloat(one))
-    const [layerY, layerX] = lengths(cascaded(layer, ['padding', 'padding-top', 'padding-left']))
-    const [inputY, inputX] = lengths(cascaded(input, ['padding', 'padding-top', 'padding-left']))
-    const [insetY, insetX] = lengths(cascaded(layer, 'inset'))
-    expect([layerY, insetY, layerX + insetX]).toEqual([inputY, 0, inputX])
-    expect(layerX).toBeGreaterThan(0)
-    for (const property of [['font', 'line-height', 'font-size', 'font-family', 'font-weight'], 'letter-spacing', 'word-spacing', 'text-indent', 'text-transform', 'tab-size', 'scrollbar-gutter']) {
-      expect(cascaded(layer, property), String(property)).toBe(cascaded(input, property))
-      expect(cascaded(layer, property), String(property)).not.toBeNull()
+  it('leaves a name being typed as letters, and makes it a chip once the caret moves on', () => {
+    chipped()
+    // Still at the caret, the name is yours to type on ("@researchers"); past it, it is the agent's,
+    // and the caret stays where it was.
+    typeInto(box(), 'ask @researcher')
+    expect(chipsIn(box())).toEqual([])
+    typeInto(box(), 'ask @researcher again', 15)
+    expect(chipsIn(box())).toEqual([])
+    typeInto(box(), 'ask @researcher again!')
+    expect(wordsIn(box())).toBe('ask @Researcher again!')
+    expect(chipsIn(box())).toEqual([['researcher', 'false', 'tc-mention hue-1', '@Researcher']])
+    expect(document.getSelection()?.focusOffset).toBe(' again!'.length)
+    // Letters typed onto a chip make another word ("@Writers"), which is no agent: letters again.
+    typeInto(box(), 'ask @Writers ')
+    expect(chipsIn(box())).toEqual([])
+    // Moving the caret away, or leaving the box, makes a name being typed its chip too.
+    typeInto(box(), 'ask @Writer')
+    expect(chipsIn(box())).toEqual([])
+    act(() => {
+      caretAt(box(), 2)
+      document.dispatchEvent(new Event('selectionchange'))
+    })
+    expect(chipsIn(box())).toHaveLength(1)
+    typeInto(box(), 'ask @Writer')
+    expect(chipsIn(box())).toEqual([])
+    act(() => box().blur())
+    expect(chipsIn(box())).toHaveLength(1)
+  })
+
+  it('offers names while one is typed, never when the caret is moved to just after a chip', () => {
+    const { onSend: sent } = chipped()
+    typeInto(box(), 'ask @Writer')
+    expect(screen.getByRole('listbox', { name: 'Who to write to' })).toBeInTheDocument()
+    typeInto(box(), 'ask @Writer now')
+    expect(screen.queryByRole('listbox')).toBeNull()
+    act(() => {
+      caretAt(box(), 11)
+      document.dispatchEvent(new Event('selectionchange'))
+    })
+    expect(screen.queryByRole('listbox')).toBeNull()
+    // So ⇧↵ there starts a line rather than picking the name again.
+    fireEvent.keyDown(box(), { key: 'Enter', shiftKey: true })
+    expect(wordsIn(box())).toBe('ask @Writer\n now')
+    // Nor does a deletion that leaves the caret just after a chip: ↵ then sends.
+    typeInto(box(), 'ask @Writer ')
+    act(() => {
+      box().lastChild!.remove()
+      caretAt(box(), 11)
+      fireEvent.input(box(), { inputType: 'deleteContentBackward' })
+    })
+    expect(screen.queryByRole('listbox')).toBeNull()
+    fireEvent.keyDown(box(), { key: 'Enter' })
+    expect(sent).toHaveBeenCalledWith('ask @Writer', { kind: 'agent', agent: 'writer' }, false)
+  })
+
+  it('takes a chip whole: Backspace after it, Delete before it, and undo puts it back', () => {
+    chipped()
+    typeInto(box(), 'ask @Writer to check ')
+    expect(chipsIn(box())).toHaveLength(1)
+    caretAt(box(), 11)
+    fireEvent.keyDown(box(), { key: 'Backspace' })
+    expect(wordsIn(box())).toBe('ask  to check ')
+    expect(chipsIn(box())).toEqual([])
+    fireEvent.keyDown(box(), { key: 'z', metaKey: true })
+    expect(wordsIn(box())).toBe('ask @Writer to check ')
+    expect(chipsIn(box())).toHaveLength(1)
+    fireEvent.keyDown(box(), { key: 'z', metaKey: true, shiftKey: true })
+    expect(wordsIn(box())).toBe('ask  to check ')
+    fireEvent.keyDown(box(), { key: 'z', metaKey: true })
+    caretAt(box(), 4)
+    fireEvent.keyDown(box(), { key: 'Delete' })
+    expect(wordsIn(box())).toBe('ask  to check ')
+    // Backspace anywhere else is the browser's own, a letter at a time.
+    typeInto(box(), 'ask @Writer to check ')
+    caretAt(box(), 13)
+    expect(fireEvent.keyDown(box(), { key: 'Backspace' })).toBe(true)
+  })
+
+  it('writes plain words: ⇧↵ starts a line, a paste is words, a copy gives a chip back as its @name', () => {
+    const { onSend } = chipped()
+    typeInto(box(), '@Writer see ')
+    fireEvent.keyDown(box(), { key: 'Enter', shiftKey: true })
+    expect(wordsIn(box())).toBe('@Writer see \n')
+    // An empty last line keeps its room with a break the words don't hold.
+    expect(box().lastChild?.nodeName).toBe('BR')
+    // The browser's own paste is kept out, or a page's words would come in twice, styled.
+    expect(fireEvent.paste(box(), { clipboardData: { files: [], getData: (kind: string) => (kind === 'text/plain' ? 'the\r\nreport' : '') } })).toBe(false)
+    expect(wordsIn(box())).toBe('@Writer see \nthe\nreport')
+    const copied = vi.fn()
+    caretAt(box(), 0, 11)
+    fireEvent.copy(box(), { clipboardData: { setData: copied } })
+    expect(copied).toHaveBeenCalledWith('text/plain', '@Writer see')
+    fireEvent.cut(box(), { clipboardData: { setData: copied } })
+    expect(wordsIn(box())).toBe(' \nthe\nreport')
+    // Bold and the like are not the box's to give: the words stay words.
+    const bold = new InputEvent('beforeinput', { inputType: 'formatBold', cancelable: true, bubbles: true })
+    box().dispatchEvent(bold)
+    expect(bold.defaultPrevented).toBe(true)
+    fireEvent.keyDown(box(), { key: 'Enter' })
+    expect(onSend).toHaveBeenCalledWith('the\nreport', null, false)
+    expect(wordsIn(box())).toBe('')
+    // The words an empty box asks for lie under it, kept from screen readers, which hear them once.
+    expect(box().childNodes).toHaveLength(0)
+    expect(box()).toHaveAttribute('aria-placeholder', 'Message the team')
+    expect(document.querySelector('.tc-input-hint')).toHaveTextContent('Message the team')
+    expect(document.querySelector('.tc-input-hint')).toHaveAttribute('aria-hidden', 'true')
+    typeInto(box(), 'a')
+    expect(document.querySelector('.tc-input-hint')).toBeNull()
+  })
+
+  it('tells the chat nothing while an input method puts letters together, and all of it once they are done', () => {
+    chipped()
+    typeInto(box(), 'hi @Writer x', 12)
+    expect(screen.getByText('Starts Writer only')).toBeInTheDocument()
+    fireEvent.compositionStart(box())
+    ;(box().lastChild as Text).insertData(0, 'vi')
+    caretAt(box(), 12)
+    fireEvent.input(box(), { inputType: 'insertCompositionText', isComposing: true })
+    expect(screen.getByText('Starts Writer only')).toBeInTheDocument()
+    fireEvent.compositionEnd(box())
+    expect(wordsIn(box())).toBe('hi @Writervi x')
+    expect(screen.getByText('Team note · starts nothing')).toBeInTheDocument()
+  })
+
+  it('draws nothing again while letters are being put together, even when the caret moves', () => {
+    chipped()
+    typeInto(box(), 'hi @Writer x', 12)
+    fireEvent.compositionStart(box())
+    const composed = box().lastChild as Text
+    composed.appendData('vi')
+    act(() => {
+      caretAt(box(), 14)
+      document.dispatchEvent(new Event('selectionchange'))
+    })
+    expect(box().lastChild).toBe(composed)
+    expect(wordsIn(box())).toBe('hi @Writer xvi')
+  })
+
+  it('takes the browser’s own edits as plain words: a line, Undo and Redo from the menu, Ctrl+Y, a drop', () => {
+    chipped()
+    typeInto(box(), 'ask @Writer now')
+    const send = (inputType: string, extra: Record<string, unknown> = {}) => {
+      const event = new InputEvent('beforeinput', { inputType, cancelable: true, bubbles: true })
+      for (const [key, value] of Object.entries(extra)) Object.defineProperty(event, key, { value })
+      act(() => {
+        box().dispatchEvent(event)
+      })
+      return event
     }
-    expect(cascaded(layer, 'white-space')).toBe('pre-wrap')
-    expect(cascaded(layer, 'overflow-wrap')).toBe('break-word')
-    expect(cascaded(layer, 'pointer-events')).toBe('none')
-    expect(cascaded(input, 'color')).toBe('transparent')
-    expect(cascaded(input, 'caret-color')).toBe('var(--color-ink)')
-    // Nothing on a chip takes room: no padding, margin, border or weight of its own, and the face
-    // stands out of the line.
-    for (const part of ['.tc-typed-mention', '.tc-typed-at']) {
-      const element = wrap.querySelector(part)!
-      for (const property of [['padding', 'padding-left', 'padding-right'], ['margin', 'margin-left', 'margin-right'], ['border', 'border-width', 'border-left', 'border-right'], ['font', 'font-weight', 'font-size', 'letter-spacing'], 'display']) {
-        expect(cascaded(element, property), `${part} ${String(property)}`).toBeNull()
-      }
-    }
-    expect(cascaded(wrap.querySelector('.tc-typed-face')!, 'position')).toBe('absolute')
-    wrap.remove()
+    caretAt(box(), 4)
+    expect(send('insertParagraph').defaultPrevented).toBe(true)
+    expect(wordsIn(box())).toBe('ask \n@Writer now')
+    caretAt(box(), 16)
+    send('insertLineBreak')
+    expect(wordsIn(box())).toBe('ask \n@Writer now\n')
+    send('historyUndo')
+    expect(wordsIn(box())).toBe('ask \n@Writer now')
+    send('historyRedo')
+    expect(wordsIn(box())).toBe('ask \n@Writer now\n')
+    fireEvent.keyDown(box(), { key: 'z', ctrlKey: true })
+    expect(wordsIn(box())).toBe('ask \n@Writer now')
+    fireEvent.keyDown(box(), { key: 'y', ctrlKey: true })
+    expect(wordsIn(box())).toBe('ask \n@Writer now\n')
+    // Words dropped in go where they land, as plain words; words dragged out are copied, not taken.
+    expect(send('deleteByDrag').defaultPrevented).toBe(true)
+    fireEvent.dragEnd(box())
+    send('insertFromDrop', { dataTransfer: { getData: (kind: string) => (kind === 'text/plain' ? 'please\r\n' : '') }, getTargetRanges: () => [{ startContainer: box().firstChild!, startOffset: 0 }] })
+    expect(wordsIn(box())).toBe('please\nask \n@Writer now\n')
+    // Words dragged within the box move, chips and all, rather than coming twice.
+    typeInto(box(), 'ask @Writer now')
+    const words = box().firstChild!
+    expect(send('deleteByDrag', { getTargetRanges: () => [{ startContainer: words, startOffset: 3, endContainer: box(), endOffset: 2 }] }).defaultPrevented).toBe(true)
+    send('insertFromDrop', { dataTransfer: { getData: () => 'Writer' }, getTargetRanges: () => [{ startContainer: box().lastChild!, startOffset: 4 }] })
+    expect(wordsIn(box())).toBe('ask now @Writer')
+    expect(chipsIn(box())).toHaveLength(1)
+  })
+
+  it('never leaves the caret inside a chip', () => {
+    chipped()
+    typeInto(box(), 'ask @Writer now')
+    const selection = document.getSelection()!
+    act(() => {
+      const inside = document.createRange()
+      inside.setStart(box().querySelector('.tc-mention-name')!.lastChild!, 2)
+      selection.removeAllRanges()
+      selection.addRange(inside)
+      document.dispatchEvent(new Event('selectionchange'))
+    })
+    expect([selection.anchorNode?.textContent, selection.anchorOffset]).toEqual([' now', 0])
+  })
+
+  it('a click on a chip puts the caret on the side of it clicked, never inside it', () => {
+    chipped()
+    typeInto(box(), 'ask @Writer now')
+    const host = box().querySelector<HTMLElement>('.tc-chip')!
+    host.getBoundingClientRect = () => ({ left: 100, width: 60, right: 160, top: 0, bottom: 22, height: 22, x: 100, y: 0, toJSON: () => ({}) })
+    const inside = document.createRange()
+    inside.setStart(host.querySelector('.tc-mention-name')!.lastChild!, 2)
+    const selection = document.getSelection()!
+    selection.removeAllRanges()
+    selection.addRange(inside)
+    fireEvent.pointerUp(host, { clientX: 150 })
+    expect([selection.anchorNode?.textContent, selection.anchorOffset]).toEqual([' now', 0])
+    selection.removeAllRanges()
+    selection.addRange(inside)
+    fireEvent.pointerUp(host, { clientX: 110 })
+    expect([selection.anchorNode?.textContent, selection.anchorOffset]).toEqual(['ask ', 4])
   })
 })
 
@@ -395,7 +560,7 @@ describe('the team’s chat', () => {
     answer = () => new Promise((resolve) => { release = resolve })
     renderChat()
     await screen.findByRole('heading', { name: 'Talk to News desk' })
-    fireEvent.change(box(), { target: { value: '@team today’s digest' } })
+    typeInto(box(), '@team today’s digest')
     fireEvent.keyDown(box(), { key: 'Enter' })
     expect(await screen.findByText('Sending…')).toBeInTheDocument()
     expect(within(screen.getByRole('log')).getByText((_, element) => element?.classList.contains('chat-text') === true && element.textContent === '@team today’s digest')).toBeInTheDocument()
@@ -408,19 +573,19 @@ describe('the team’s chat', () => {
     expect(working).toHaveTextContent('Researcher is working')
     // The member list says so too, beside the name.
     expect(memberRow('Researcher')).toHaveTextContent('Researcherworking')
-    expect(box()).toHaveValue('')
+    expect(wordsIn(box())).toBe('')
   })
 
   it('keeps a message the daemon refused, with Try again and Edit', async () => {
     answer = () => new Response(JSON.stringify({ error: 'Writer is not an agent of this team.' }), { status: 400 })
     renderChat()
     await screen.findByRole('heading', { name: 'Talk to News desk' })
-    fireEvent.change(box(), { target: { value: 'a note for later' } })
+    typeInto(box(), 'a note for later')
     fireEvent.keyDown(box(), { key: 'Enter' })
     expect(await screen.findByText('Not sent')).toBeInTheDocument()
     expect(screen.getByText('Writer is not an agent of this team.')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
-    expect(box()).toHaveValue('a note for later')
+    expect(wordsIn(box())).toBe('a note for later')
   })
 
   it('never lets a note dead-end: a team note can start the team', async () => {
@@ -448,7 +613,7 @@ describe('the team’s chat', () => {
       : new Response(JSON.stringify({ route: 'team_note', message: hello }), { status: 200 })
     const { props } = renderChat()
     await screen.findByRole('heading', { name: 'Talk to News desk' })
-    fireEvent.change(box(), { target: { value: 'hi @team' } })
+    typeInto(box(), 'hi @team')
     // Enter would pick from the @ list the message ends on; the button sends.
     fireEvent.click(screen.getByRole('button', { name: 'Start' }))
     const researcher = (await screen.findByText('Hi! I find today’s news. What should we cover?')).closest('li')!
@@ -671,14 +836,14 @@ describe('the team’s chat', () => {
   it('an empty chat suggests an @team first message, and starts nothing until you send it', async () => {
     renderChat()
     fireEvent.click(await screen.findByRole('button', { name: '@team today’s AI news digest' }))
-    expect(box()).toHaveValue('@team today’s AI news digest')
+    expect(wordsIn(box())).toBe('@team today’s AI news digest')
     expect(posted).toHaveLength(0)
   })
 
   it('Run team starts the box with @team, so what you write starts the team rather than leaving a note', async () => {
     const onStartTeamTaken = vi.fn()
     renderChat({ startTeam: true, onStartTeamTaken })
-    await waitFor(() => expect(box()).toHaveValue('@team '))
+    await waitFor(() => expect(wordsIn(box())).toBe('@team '))
     expect(onStartTeamTaken).toHaveBeenCalledTimes(1)
     expect(screen.getByText('Starts the team · 3 steps')).toBeInTheDocument()
     expect(posted).toHaveLength(0)
@@ -688,23 +853,23 @@ describe('the team’s chat', () => {
     const onStartTeamTaken = vi.fn()
     renderChat({ startTeam: true, onStartTeamTaken, blocked: 'Researcher’s app isn’t installed.' })
     await waitFor(() => expect(onStartTeamTaken).toHaveBeenCalled())
-    expect(box()).toHaveValue('')
+    expect(wordsIn(box())).toBe('')
   })
 
   it('opening the chat any other way starts with an empty box', async () => {
     renderChat()
     await screen.findByRole('heading', { name: 'Talk to News desk' })
-    expect(box()).toHaveValue('')
+    expect(wordsIn(box())).toBe('')
   })
 
   it('hands a team that needs checking to the review, holding the message', async () => {
     answer = () => new Response(JSON.stringify({ error: 'review it', code: 'team_needs_review', teamPath: 'news.yaml', teamName: 'News desk', teamRevision: 'sha256:2', review: [] }), { status: 409 })
     const { props } = renderChat()
     await screen.findByRole('heading', { name: 'Talk to News desk' })
-    fireEvent.change(box(), { target: { value: '@team today’s digest' } })
+    typeInto(box(), '@team today’s digest')
     fireEvent.keyDown(box(), { key: 'Enter' })
     await waitFor(() => expect(props.onTeamReview).toHaveBeenCalled())
-    expect(box()).toHaveValue('@team today’s digest')
+    expect(wordsIn(box())).toBe('@team today’s digest')
     expect(screen.queryByText('Not sent')).not.toBeInTheDocument()
   })
 })
@@ -720,7 +885,7 @@ describe('a chat that is alive', () => {
     await waitFor(() => expect(props.onNewest).toHaveBeenCalledWith('run-1'))
     // Let the first page paint; what comes after is news.
     await act(async () => { await new Promise((resolve) => requestAnimationFrame(() => resolve(null))) })
-    fireEvent.change(box(), { target: { value: 'a note' } })
+    typeInto(box(), 'a note')
     fireEvent.keyDown(box(), { key: 'Enter' })
     const note = await within(screen.getByRole('log')).findByText('a note')
     expect(note.closest('.chat-msg')).toHaveClass('tc-appear')
@@ -731,7 +896,7 @@ describe('a chat that is alive', () => {
     answer = () => new Response(JSON.stringify({ route: 'team', message: message({ id: 'm-2' }), run: run({ runId: 'run-2', status: 'queued', reply: null }) }), { status: 202 })
     const { props } = renderChat({ onStarted: vi.fn() })
     await screen.findByRole('heading', { name: 'Talk to News desk' })
-    fireEvent.change(box(), { target: { value: '@team today’s digest' } })
+    typeInto(box(), '@team today’s digest')
     fireEvent.keyDown(box(), { key: 'Enter' })
     await waitFor(() => expect(props.onStarted).toHaveBeenCalledWith('run-2'))
   })
@@ -1036,17 +1201,17 @@ describe("an agent's face", () => {
     renderChat({ team: described })
     const list = screen.getByRole('list', { name: 'Who is on the team' })
     fireEvent.click(within(list).getByRole('button', { name: 'Writer: mention in your message' }))
-    expect(box()).toHaveValue('@Writer ')
+    expect(wordsIn(box())).toBe('@Writer ')
     await waitFor(() => expect(box()).toHaveFocus())
     expect(screen.getByText('Starts Writer only')).toBeInTheDocument()
 
-    fireEvent.change(box(), { target: { value: '@Writer make the chip story the lead' } })
+    typeInto(box(), '@Writer make the chip story the lead')
     fireEvent.click(within(list).getByRole('button', { name: 'Researcher: mention in your message' }))
-    expect(box()).toHaveValue('@Researcher make the chip story the lead')
+    expect(wordsIn(box())).toBe('@Researcher make the chip story the lead')
     // A message for no one yet gets the name in front.
-    fireEvent.change(box(), { target: { value: 'check the sources' } })
+    typeInto(box(), 'check the sources')
     fireEvent.click(within(list).getByRole('button', { name: 'Writer: mention in your message' }))
-    expect(box()).toHaveValue('@Writer check the sources')
+    expect(wordsIn(box())).toBe('@Writer check the sources')
   })
 
   it('does both from the folded team list, whose words still open it', async () => {
@@ -1059,7 +1224,7 @@ describe("an agent's face", () => {
     fireEvent.keyDown(face, { key: 'Escape' })
     await waitFor(() => expect(screen.queryByRole('tooltip')).toBeNull())
     fireEvent.click(face)
-    expect(box()).toHaveValue('@Researcher ')
+    expect(wordsIn(box())).toBe('@Researcher ')
     fireEvent.click(screen.getByRole('button', { name: '2 ready. Show who is on the team' }))
     expect(screen.getByRole('list', { name: 'Who is on the team' })).toBeVisible()
   })
@@ -1243,7 +1408,7 @@ describe('a piece of work', () => {
 
   it('sends the work back from a check step’s stop with what you wrote', async () => {
     const card = await checkStop()
-    fireEvent.change(box(), { target: { value: 'Use the 2025 report.' } })
+    typeInto(box(), 'Use the 2025 report.')
     expect(within(card).getByRole('button', { name: 'Approve with your note' })).toBeEnabled()
     fireEvent.click(within(card).getByRole('button', { name: 'Send back to Researcher' }))
     await waitFor(() => expect(posted[0]).toMatchObject({ url: '/api/runs/run-1/answers', body: { node: 'writer', text: 'Use the 2025 report.', sendBack: 'researcher' } }))
@@ -1282,11 +1447,11 @@ describe('a piece of work', () => {
     expect(screen.getByRole('group', { name: "Replying to Researcher's handover" })).toBeInTheDocument()
     await waitFor(() => expect(box()).toHaveFocus())
     // Still your note on the review: no @ goes in, as the note goes where its button sends it.
-    expect(box()).toHaveValue('')
-    expect(box()).toHaveAttribute('placeholder', 'What to change, or a note to pass on')
+    expect(wordsIn(box())).toBe('')
+    expect(box()).toHaveAttribute('aria-placeholder', 'What to change, or a note to pass on')
     // Its ✕ only hides the quote: the box still writes the note.
     expect(screen.getByRole('button', { name: 'Hide the quote' })).toBeInTheDocument()
-    fireEvent.change(box(), { target: { value: 'Leave the repo out.' } })
+    typeInto(box(), 'Leave the repo out.')
     expect(screen.getByText('Your review note · Enter sends the work back to Researcher')).toBeInTheDocument()
     expect(within(talk).getByRole('button', { name: 'Approve with your note' })).toBeEnabled()
     fireEvent.keyDown(box(), { key: 'Enter' })
@@ -1294,7 +1459,7 @@ describe('a piece of work', () => {
     expect(posted).toHaveLength(1)
     // Answered, the quote goes with it.
     await waitFor(() => expect(screen.queryByRole('group', { name: /^Replying to/ })).toBeNull())
-    expect(box()).toHaveValue('')
+    expect(wordsIn(box())).toBe('')
   })
 
   it('keeps the newest in view when the box below grows into the chat’s room, so a review’s buttons stay over the note', async () => {
@@ -1669,7 +1834,7 @@ describe('one agent’s own chat', () => {
     expect(screen.getByRole('heading', { name: 'Ada, ready' })).toBeInTheDocument()
     expect(screen.getByText('To Ada')).toBeInTheDocument()
 
-    fireEvent.change(soloBox(), { target: { value: 'sum up the report' } })
+    typeInto(soloBox(), 'sum up the report')
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
     await waitFor(() => expect(posted[0]).toMatchObject({ url: '/api/chat/messages', body: { teamPath: 'ada.yaml', text: 'sum up the report', to: { kind: 'agent', agent: 'ada' }, expectedRevision: 'sha256:1' } }))
@@ -1692,7 +1857,7 @@ describe('one agent’s own chat', () => {
     const { props } = renderSolo()
     expect(await screen.findByRole('heading', { name: 'Ada, working' })).toBeInTheDocument()
     expect(within(screen.getByRole('log')).getByText('You → Ada')).toBeInTheDocument()
-    fireEvent.change(soloBox(), { target: { value: 'only the first half' } })
+    typeInto(soloBox(), 'only the first half')
     expect(screen.getByText('Note for Ada · after its current step')).toBeInTheDocument()
     fireEvent.keyDown(soloBox(), { key: 'Enter' })
     await waitFor(() => expect(posted[0]).toMatchObject({ url: '/api/chat/messages', body: { to: { kind: 'agent', agent: 'ada' } } }))
@@ -1738,13 +1903,13 @@ describe('replying to something said', () => {
     const { props } = renderChat()
     const log = await screen.findByRole('log', { name: 'Messages' })
     fireEvent.click(await within(log).findByRole('button', { name: "Reply to Writer's answer" }))
-    expect(box()).toHaveValue('@Writer ')
+    expect(wordsIn(box())).toBe('@Writer ')
     await waitFor(() => expect(box()).toHaveFocus())
     expect(screen.getByRole('group', { name: "Replying to Writer's answer" })).toHaveTextContent('Done — I tightened the lead.')
     expect(screen.getByText('Starts Writer only')).toBeInTheDocument()
-    expect(box()).toHaveAttribute('placeholder', 'Reply to Writer…')
+    expect(box()).toHaveAttribute('aria-placeholder', 'Reply to Writer…')
 
-    fireEvent.change(box(), { target: { value: '@Writer shorter' } })
+    typeInto(box(), '@Writer shorter')
     fireEvent.keyDown(box(), { key: 'Enter' })
     await waitFor(() => expect(posted[0]).toMatchObject({ url: '/api/chat/messages', body: { text: '@Writer shorter', to: { kind: 'agent', agent: 'writer' }, replyTo: replied } }))
     expect(props.prepare).toHaveBeenCalledTimes(1)
@@ -1762,10 +1927,10 @@ describe('replying to something said', () => {
     renderChat()
     const said_ = await screen.findByRole('region', { name: 'What the agents said' })
     fireEvent.click(within(said_).getByRole('button', { name: 'Reply to Researcher: handover' }))
-    expect(box()).toHaveValue('@Researcher ')
+    expect(wordsIn(box())).toBe('@Researcher ')
     expect(screen.getByText('Starts Researcher only')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'To Writer instead' }))
-    expect(box()).toHaveValue('@Writer ')
+    expect(wordsIn(box())).toBe('@Writer ')
     expect(screen.getByText('Note for Writer · after its current step')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'To Researcher instead' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: "Don't reply to it" })).toBeInTheDocument()
@@ -1773,7 +1938,7 @@ describe('replying to something said', () => {
     // Esc lets go of the reply and keeps the words.
     fireEvent.keyDown(box(), { key: 'Escape' })
     expect(screen.queryByRole('group', { name: /^Replying to/ })).toBeNull()
-    expect(box()).toHaveValue('@Writer ')
+    expect(wordsIn(box())).toBe('@Writer ')
   })
 
   it('Reply on the question the team waits on you for goes back to answering it, quoted over the box', async () => {
@@ -1783,19 +1948,19 @@ describe('replying to something said', () => {
     ]
     page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null, working: ['researcher'], waitingOn: { node: 'researcher', name: 'Researcher', kind: 'question', since: '2026-10-06T02:01:00.000Z', question: 'Which market?', park: 'reloadable', parkNote: '', sendBackAvailable: false } }), request: message({}), notes: [] }]
     renderChat()
-    expect(await screen.findByPlaceholderText('Answer Researcher…')).toBeInTheDocument()
+    await waitFor(() => expect(box()).toHaveAttribute('aria-placeholder', 'Answer Researcher…'))
     fireEvent.click(screen.getByRole('button', { name: 'Write to the team instead' }))
-    expect(screen.queryByPlaceholderText('Answer Researcher…')).toBeNull()
+    expect(box()).not.toHaveAttribute('aria-placeholder', 'Answer Researcher…')
     const said_ = await screen.findByRole('region', { name: 'What the agents said' })
     fireEvent.click(within(said_).getByRole('button', { name: 'Reply to Researcher: question' }))
-    expect(screen.getByPlaceholderText('Answer Researcher…')).toBeInTheDocument()
+    expect(box()).toHaveAttribute('aria-placeholder', 'Answer Researcher…')
     expect(screen.getByRole('group', { name: "Replying to Researcher's question" })).toBeInTheDocument()
-    expect(box()).toHaveValue('')
+    expect(wordsIn(box())).toBe('')
     // A reply to anything else is a message of its own, not your answer to the question.
     fireEvent.click(within(said_).getByRole('button', { name: 'Reply to Researcher: handover' }))
     expect(screen.getByRole('group', { name: "Replying to Researcher's handover" })).toBeInTheDocument()
-    expect(screen.queryByPlaceholderText('Answer Researcher…')).toBeNull()
-    expect(screen.getByPlaceholderText('Reply to Researcher…')).toBeInTheDocument()
+    expect(box()).not.toHaveAttribute('aria-placeholder', 'Answer Researcher…')
+    expect(box()).toHaveAttribute('aria-placeholder', 'Reply to Researcher…')
   })
 
   it('a reply to an agent’s own answer to your message writes back to that agent, with its answer quoted, and the quote shows it again', async () => {
@@ -1810,12 +1975,12 @@ describe('replying to something said', () => {
     renderChat()
     const log = await screen.findByRole('log', { name: 'Messages' })
     fireEvent.click(await within(log).findByRole('button', { name: "Reply to Writer's answer" }))
-    expect(box()).toHaveValue('@Writer ')
+    expect(wordsIn(box())).toBe('@Writer ')
     await waitFor(() => expect(box()).toHaveFocus())
     expect(screen.getByRole('group', { name: "Replying to Writer's answer" })).toHaveTextContent('A claim is a sentence that could be wrong.')
-    expect(box()).toHaveAttribute('placeholder', 'Reply to Writer…')
+    expect(box()).toHaveAttribute('aria-placeholder', 'Reply to Writer…')
 
-    fireEvent.change(box(), { target: { value: '@Writer an example?' } })
+    typeInto(box(), '@Writer an example?')
     fireEvent.keyDown(box(), { key: 'Enter' })
     await waitFor(() => expect(posted[0]).toMatchObject({ url: '/api/chat/messages', body: { text: '@Writer an example?', to: { kind: 'agent', agent: 'writer' }, replyTo: quoted } }))
     // The reply says what it answered; a click shows that answer, under the message it answered.
@@ -1859,9 +2024,9 @@ describe('asking about a part of a file', () => {
     page = [{ kind: 'work', run: run({}), request: message({}), notes: [] }]
     const onPassages = vi.fn()
     renderChat({ ask: { reply: part, at: 1 }, onPassages })
-    await waitFor(() => expect(box()).toHaveValue('@Writer '))
+    await waitFor(() => expect(wordsIn(box())).toBe('@Writer '))
     expect(screen.getByRole('group', { name: 'Asking about a part of market.md from Writer' })).toHaveTextContent('Sales grew 12% in Q3.')
-    expect(box()).toHaveAttribute('placeholder', 'Ask Writer about this part…')
+    expect(box()).toHaveAttribute('aria-placeholder', 'Ask Writer about this part…')
     await waitFor(() => expect(onPassages).toHaveBeenLastCalledWith([], 'Sales grew 12% in Q3.', expect.any(Array)))
     // Letting go of it lets go of the part the reader lights.
     fireEvent.keyDown(box(), { key: 'Escape' })
@@ -1878,9 +2043,9 @@ describe('asking about a part of a file', () => {
   it('a teammate chosen in the reader is asked about the part, which stays the maker’s', async () => {
     page = [{ kind: 'work', run: run({}), request: message({}), notes: [] }]
     renderChat({ ask: { reply: part, agent: 'researcher', at: 3 } })
-    await waitFor(() => expect(box()).toHaveValue('@Researcher '))
+    await waitFor(() => expect(wordsIn(box())).toBe('@Researcher '))
     expect(screen.getByRole('group', { name: 'Asking about a part of market.md from Writer' })).toBeInTheDocument()
-    expect(box()).toHaveAttribute('placeholder', 'Ask Researcher about this part…')
+    expect(box()).toHaveAttribute('aria-placeholder', 'Ask Researcher about this part…')
   })
 
   it('Explain goes at once to a teammate chosen in the reader', async () => {
@@ -1927,12 +2092,12 @@ describe('asking about a part of a file', () => {
       page = [{ kind: 'work', run: run({}), request: message({}), notes: [] }]
       const onPassages = vi.fn()
       renderChat({ ask: { reply: boxPart, pictures: [picture()], at: 6 }, onPassages })
-      await waitFor(() => expect(box()).toHaveValue('@Writer '))
+      await waitFor(() => expect(wordsIn(box())).toBe('@Writer '))
       const going = await screen.findByRole('list', { name: 'Going with your message' })
       await waitFor(() => expect(within(going).getByLabelText('chart part.png')).toHaveAttribute('aria-busy', 'false'))
       expect(posted).toHaveLength(0)
       // The box asks about the part, though a picture is in it too.
-      expect(box()).toHaveAttribute('placeholder', 'Ask Writer about this part…')
+      expect(box()).toHaveAttribute('aria-placeholder', 'Ask Writer about this part…')
       await waitFor(() => expect(onPassages).toHaveBeenLastCalledWith([], 'The top right of the picture\u0001box:5000,0,5000,5000', expect.any(Array)))
     })
 
@@ -1953,7 +2118,7 @@ describe('asking about a part of a file', () => {
       const chart = { ...part, messageId: 'passage:chart', text: 'The chart under “Sales”', file: '/w/dash/index.html', at: { kind: 'element' as const, what: 'chart' as const, path: 'canvas#chart' } }
       page = [{ kind: 'work', run: run({}), request: message({}), notes: [] }]
       renderChat({ ask: { reply: chart, at: 11 } })
-      await waitFor(() => expect(box()).toHaveAttribute('placeholder', 'Ask Writer about this chart…'))
+      await waitFor(() => expect(box()).toHaveAttribute('aria-placeholder', 'Ask Writer about this chart…'))
     })
 
     it('quotes cells with their rows kept and their sheet first, in the box and under the message', async () => {
@@ -1968,7 +2133,7 @@ describe('asking about a part of a file', () => {
       page = [{ kind: 'work', run: run({}), request: message({}), notes: [] }]
       keeps = false
       renderChat({ ask: { reply: boxPart, words: 'Explain this part in plain words.', pictures: [picture()], at: 9 } })
-      await waitFor(() => expect(box()).toHaveValue('@Writer Explain this part in plain words.'))
+      await waitFor(() => expect(wordsIn(box())).toBe('@Writer Explain this part in plain words.'))
       expect(screen.getByRole('group', { name: 'Asking about a part of chart.png from Writer' })).toBeInTheDocument()
       expect(await screen.findByRole('list', { name: 'Going with your message' })).toBeInTheDocument()
       expect(posted).toHaveLength(0)
@@ -1996,9 +2161,9 @@ describe('asking about a part of a file', () => {
     renderChat()
     const log = await screen.findByRole('log', { name: 'Messages' })
     fireEvent.click(await within(log).findByRole('button', { name: "Reply to Researcher's answer" }))
-    expect(box()).toHaveValue('@Researcher ')
+    expect(wordsIn(box())).toBe('@Researcher ')
     expect(screen.getByRole('group', { name: 'Asking about a part of market.md from Writer' })).toHaveTextContent('Sales grew 12% in Q3.')
-    fireEvent.change(box(), { target: { value: '@Researcher an example?' } })
+    typeInto(box(), '@Researcher an example?')
     fireEvent.keyDown(box(), { key: 'Enter' })
     await waitFor(() => expect(posted[0]).toMatchObject({ url: '/api/chat/messages', body: { text: '@Researcher an example?', to: { kind: 'agent', agent: 'researcher' }, replyTo: part } }))
   })
@@ -2009,7 +2174,7 @@ describe('asking about a part of a file', () => {
     renderChat()
     const log = await screen.findByRole('log', { name: 'Messages' })
     fireEvent.click(await within(log).findByRole('button', { name: "Reply to Researcher's answer" }))
-    expect(box()).toHaveValue('@Researcher ')
+    expect(wordsIn(box())).toBe('@Researcher ')
     expect(screen.getByRole('group', { name: 'Asking about a part of market.md from Writer' })).toHaveTextContent('Sales grew 12% in Q3.')
   })
 

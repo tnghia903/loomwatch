@@ -517,7 +517,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   // §15.2.2: the permanent Prompt node is the composer seen in a second place, so clicking it
   // puts the caret in the one editor rather than opening another.
   const focusComposer = useCallback(() => {
-    document.querySelector<HTMLTextAreaElement>('.tc-input, .lw-composer textarea')?.focus()
+    document.querySelector<HTMLElement>('.tc-input, .lw-composer textarea')?.focus()
   }, [])
 
   const closeRun = useCallback(() => {

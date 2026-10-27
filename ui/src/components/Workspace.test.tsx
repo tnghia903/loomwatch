@@ -8,6 +8,7 @@ import type { RunEvent } from '../lib/watch/events'
 import type { AgentConfig } from '../lib/team-file/types'
 import { keys } from '../lib/platform'
 import { background, cascaded, DESKTOP, goldFilled, heightOf, isGoldFill, PHONE } from '../test/cascade'
+import { typeInto, wordsIn } from '../test/chipField'
 import { useTeamPage } from '../lib/team-file/teamPage'
 import { FrameTeamRail } from './rail/TeamRail'
 import { Workspace } from './Workspace'
@@ -421,7 +422,7 @@ describe('Workspace', () => {
       renderWorkspace()
       const pane = await openPane()
       await waitFor(() => expect(within(pane).getByRole('tab', { name: 'market.md' })).toHaveAttribute('aria-selected', 'true'))
-      fireEvent.change(screen.getByRole('textbox', { name: 'Message the team' }), { target: { value: '@team Make the west part shorter' } })
+      typeInto(screen.getByRole('textbox', { name: 'Message the team' }), '@team Make the west part shorter')
       await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Start' })) })
       await waitFor(() => expect(window.location.search).toContain('run=run-3'))
       expect(within(pane).getByRole('tab', { name: 'market.md' })).toHaveAttribute('aria-selected', 'true')
@@ -1216,8 +1217,8 @@ describe('Workspace', () => {
       const { container } = renderWorkspace()
       expect(nodeKinds(container)).not.toContain('prompt')
       fireEvent.click(screen.getByRole('button', { name: 'Run team' }))
-      fireEvent.change(screen.getByRole('textbox', { name: 'Message the team' }), { target: { value: '@team Audit the harnesses' } })
-      expect(screen.getByRole('textbox', { name: 'Message the team' })).toHaveValue('@team Audit the harnesses')
+      typeInto(screen.getByRole('textbox', { name: 'Message the team' }), '@team Audit the harnesses')
+      expect(wordsIn(screen.getByRole('textbox', { name: 'Message the team' }))).toBe('@team Audit the harnesses')
       expect(screen.getByText(/^Starts the team/)).toBeInTheDocument()
       expect(nodeKinds(container)).not.toContain('prompt')
     })
@@ -1533,7 +1534,7 @@ describe('an agent’s own chat, opened on the team screen', () => {
     expect(figureStill(figureFor('reviewer'))).not.toBe(lilac)
     renderWorkspace()
     await waitFor(() => expect(document.querySelector('[data-node="agent"] .build-node-figure')).toHaveAttribute('src', lilac))
-    expect(document.querySelector('.story-face img')).toHaveAttribute('src', lilac)
+    expect(document.querySelector('.story-name .tc-mention-face img')).toHaveAttribute('src', lilac)
     expect(screen.getByRole('button', { name: /^Reviewer\s*On this canvas/ }).querySelector('.palette-figure')).toHaveAttribute('src', lilac)
     const rail = screen.getByRole('navigation', { name: 'My team' })
     await waitFor(() => expect(rail.querySelector('[aria-current="page"] .crew-team img')).toHaveAttribute('src', lilac))
@@ -1800,7 +1801,7 @@ describe('a team whose way of paying isn’t connected', () => {
     expect(screen.getAllByText(said).length).toBeGreaterThanOrEqual(1)
     fireEvent.click(screen.getByRole('button', { name: 'Run team' }))
     expect(screen.getAllByText(said).length).toBeGreaterThanOrEqual(1)
-    expect(screen.getByRole('textbox', { name: 'Message the team' })).toBeDisabled()
+    expect(screen.getByRole('textbox', { name: 'Message the team' })).toHaveAttribute('aria-disabled', 'true')
     expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0)
   })
 
@@ -1811,8 +1812,8 @@ describe('a team whose way of paying isn’t connected', () => {
     expect(await screen.findByRole('heading', { name: 'Your team is ready' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Run team' }))
     // Run team means start the team: the box starts with @team, not as a note that starts nothing.
-    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Message the team' })).toHaveValue('@team '))
-    fireEvent.change(screen.getByRole('textbox', { name: 'Message the team' }), { target: { value: '@team Summarise the repo' } })
+    await waitFor(() => expect(wordsIn(screen.getByRole('textbox', { name: 'Message the team' }))).toBe('@team '))
+    typeInto(screen.getByRole('textbox', { name: 'Message the team' }), '@team Summarise the repo')
     expect(screen.getByText(/^Starts the team/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Start' })).toBeEnabled()
   })
