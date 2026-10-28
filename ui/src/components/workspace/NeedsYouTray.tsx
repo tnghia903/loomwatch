@@ -70,6 +70,13 @@ export function NeedsYouTray({ tickets, working, onAnswer, onPermission, onSpend
   // One gold fill per screen: only the active ticket's main action is filled; J and K move it.
   const main = (index: number) => (index === shown ? 'btn btn-primary' : 'btn')
 
+  // Your desk's Review on Home opens this tray at the first one waiting (ADR 0097): one control.
+  useEffect(() => {
+    const show = () => { setOpen(true); setActive(0); setSaid('') }
+    window.addEventListener('loomwatch:open-needs-you', show)
+    return () => window.removeEventListener('loomwatch:open-needs-you', show)
+  }, [])
+
   // The bell rings when something new needs you, then rests: ringing for as long as a ticket waits
   // runs past WCAG 2.2.2's five seconds. A count that only goes down never rings. The ring is the
   // glyph's CSS animation, started here and taken off when it ends.

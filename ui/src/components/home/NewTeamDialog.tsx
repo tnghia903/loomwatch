@@ -5,6 +5,7 @@ import { figureFor } from '../../lib/library/figures'
 import { fetchJobs, saveJob, useSavedJobs } from '../../lib/library/jobs'
 import { saveTeamFile } from '../../lib/team-file/client'
 import { teamOfMyAgents } from '../../lib/team-file/myAgents'
+import { TeamFileModel } from '../../lib/team-file/document'
 import { teamIdForPath } from '../../lib/team-file/useTeamDocument'
 import { agentsTeamYaml, TEAM_TEMPLATES, templateTeamYaml, uniqueTeamPath, type TeamTemplateId } from '../../lib/team-file/templates'
 import { openTeam } from '../../lib/team-file/useTeamList'
@@ -19,6 +20,18 @@ export interface NewTeamDialogProps {
   onClose: () => void
   /** The open team has unsaved changes that creating a new team would discard. */
   openTeamUnsaved?: boolean
+  /** The project the new team works in (ADR 0097): from a project's room. */
+  project?: string
+  /** Where to go once it is saved; its page in place, by default. */
+  onCreated?: (path: string) => void
+}
+
+/** `yaml` working in `project`, when there is one. */
+function withProject(yaml: string, project: string | undefined): string {
+  if (!project) return yaml
+  const model = TeamFileModel.parse(yaml)
+  model.setProject(project)
+  return model.toYaml()
 }
 
 /** Where a new team starts: some of Your agents, or a template. */
@@ -30,7 +43,7 @@ type Start = 'agents' | TeamTemplateId
  * screen after this dialog is one where typing a request and pressing Enter runs it. Each agent
  * runs on its own model, which team setup can change.
  */
-export function NewTeamDialog({ existingPaths, onClose, openTeamUnsaved = false }: NewTeamDialogProps) {
+export function NewTeamDialog({ existingPaths, onClose, openTeamUnsaved = false, project, onCreated = (path) => openTeam(path) }: NewTeamDialogProps) {
   const [name, setName] = useState('')
   const saved = useSavedJobs()
   const hasAgents = saved.available && saved.jobs.length > 0
@@ -61,9 +74,9 @@ export function NewTeamDialog({ existingPaths, onClose, openTeamUnsaved = false 
       // Its agents are agents of My agents first (ADR 0094), so a change saved to one reaches this
       // team too. My agents as they are now: a template's agent may join one saved a moment ago.
       const mine = await fetchJobs()
-      const yaml = mine ? await teamOfMyAgents(written, mine.jobs, saveJob) : written
+      const yaml = withProject(mine ? await teamOfMyAgents(written, mine.jobs, saveJob) : written, project)
       await saveTeamFile(path, yaml, null)
-      openTeam(path)
+      onCreated(path)
     } catch (caught) {
       setBusy(null)
       setError(`The team couldn’t be saved. ${caught instanceof Error ? caught.message : String(caught)}`)

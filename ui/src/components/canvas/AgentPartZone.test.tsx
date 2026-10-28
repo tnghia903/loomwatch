@@ -1,7 +1,8 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { AgentPartZone, tidyPart } from './AgentPartZone'
+import { tidyPart } from '../../lib/team-file/part'
+import { AgentPartZone } from './AgentPartZone'
 
 afterEach(cleanup)
 

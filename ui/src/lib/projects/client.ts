@@ -68,7 +68,9 @@ export async function fetchProjects(): Promise<ProjectList | null> {
   const response = await daemonFetch('/api/projects', { cache: 'no-store' })
   if (response.status === 404) return null
   if (!response.ok) throw await failure(response)
-  return (await response.json()) as ProjectList
+  const body = (await response.json()) as Partial<ProjectList>
+  // Anything but a list of projects is a LoomWatch from before them.
+  return Array.isArray(body.projects) ? { projects: body.projects, loose: body.loose ?? [], missing: body.missing ?? [] } : null
 }
 
 /** Keep project `id` as `project` says, whole. */
