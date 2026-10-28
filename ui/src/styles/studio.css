@@ -16,8 +16,10 @@
 .desk-figure[data-glow="waiting"] { --glow: var(--color-accent); }
 .desk-figure[data-glow="failed"] { --glow: var(--color-alert); }
 .desk-figure[data-glow] { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 3px var(--glow)); }
-.desk-outline circle, .desk-outline path { fill: none; stroke: var(--color-ink-3); stroke-width: 1.5; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
-.desk-you { display: block; width: calc(var(--fig, 44px) * .64); height: calc(var(--fig, 44px) * .64); margin: calc(var(--fig, 44px) * .18) 0; border-radius: var(--r-full); border: 1.5px solid var(--color-ink-3); box-sizing: border-box; }
+/* Somewhere else now: its own figure, faint and grey, with no glow, faded whole with what it wears. */
+.desk-figure.away { opacity: .55; filter: grayscale(1); }
+/* Where you check: the review step's ring, as on the canvas, in a figure's square. */
+.desk-you { display: grid; place-items: center; width: var(--fig, 44px); height: var(--fig, 44px); }
 
 /* A room card's row stays one row: its desks narrow, and their names end in an ellipsis. */
 .team-desks { display: flex; align-items: flex-start; flex-wrap: nowrap; gap: 2px; min-width: 0; max-width: 100%; }
@@ -98,15 +100,18 @@ button.desk:focus-visible { outline: 2px solid var(--color-accent); outline-offs
 .project-mark[data-mark="butter"] { --mark: var(--color-fig-butter); }
 
 .room-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--sp-4); }
-/* The whole card opens the room: its name's button stretches over it, and an outline that says
-   where its agent is stays pressable above that. */
+/* The whole card opens the room: its name's button stretches over it, and an agent at your desk
+   stays pressable above that, to go to it. */
 .room-card {
   position: relative; display: flex; flex-direction: column; min-height: 228px; padding: 14px 16px; box-sizing: border-box;
   border: 1px solid var(--color-hairline); border-radius: var(--r-lg); background: var(--color-panel-solid);
 }
 .room-card-name button::after { content: ''; position: absolute; inset: 0; border-radius: var(--r-lg); }
 .room-card:hover { border-color: var(--color-accent-dim); }
-.room-card .desk.away { position: relative; z-index: 1; }
+.room-card button.desk.away { position: relative; z-index: 1; }
+/* Every other desk passes a click to the card: a figure's light (a filter) or fade would otherwise
+   lift it above the card's link and swallow the click. */
+.room-card span.desk { pointer-events: none; }
 .room-card-name { margin: 0; }
 .room-card-name button {
   display: inline-flex; align-items: center; gap: var(--sp-2); min-height: 28px; max-width: 100%; padding: 0;

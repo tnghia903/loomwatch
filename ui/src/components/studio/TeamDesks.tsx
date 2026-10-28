@@ -1,17 +1,8 @@
 import { PRESENCE_WORDS } from '../../lib/rail/presence'
-import { seatWords, shownSeats, type RoomTeam, type Seat } from '../../lib/projects/studio'
+import { AT_YOUR_DESK, seatWords, shownSeats, type RoomTeam, type Seat } from '../../lib/projects/studio'
 import type { FigureOf } from '../../lib/projects/studioUi'
 import { FigureStill } from '../agents/FigureStill'
-
-/** An agent's outline where it isn't now: its desk keeps its place in the row. */
-function Outline({ size }: { size: number }) {
-  return (
-    <svg className="desk-outline" width={Math.round(size * 0.77)} height={size} viewBox="0 0 40 52" aria-hidden="true">
-      <circle cx="20" cy="13" r="9" />
-      <path d="M6 50 C6 34 11 26 20 26 C29 26 34 34 34 50 Z" />
-    </svg>
-  )
-}
+import { AgentMark } from '../ui/AgentMark'
 
 /** The arrow between two desks: work moves on to the next one. */
 function Onward() {
@@ -25,8 +16,9 @@ function Onward() {
 
 /**
  * One desk: the agent at it, glowing with its state (green ready, blue working, gold waiting for
- * you, red failed), or its outline when it is somewhere else now, with where; or the ring where you
- * check. The figure alone carries the glow, one light per element (WebKit drops a second).
+ * you, red failed), or faint with no glow when it is somewhere else now, with where; or, where you
+ * check, the ring you wear on the canvas and in Details. The figure alone carries the glow, one
+ * light per element (WebKit drops a second).
  */
 function Desk({ seat, figureOf, size, onAway }: { seat: Seat; figureOf: FigureOf; size: number; onAway?: (seat: Seat) => void }) {
   const words = seatWords(seat)
@@ -34,17 +26,17 @@ function Desk({ seat, figureOf, size, onAway }: { seat: Seat; figureOf: FigureOf
   const body = (
     <>
       {seat.kind === 'you'
-        ? <span className="desk-you" aria-hidden="true" />
-        : seat.away
-          ? <Outline size={size} />
-          : <span className="desk-figure" data-glow={seat.state}><FigureStill figure={figureOf(seat)} alt="" width={size} height={size} decoding="async" /></span>}
+        ? <span className="desk-you" aria-hidden="true"><AgentMark id={seat.id} operator size={Math.round(size * 0.78)} /></span>
+        // An agent elsewhere is still itself here, faint: its desk keeps its place in the row.
+        : <span className={`desk-figure${seat.away ? ' away' : ''}`} data-glow={seat.away ? undefined : seat.state}><FigureStill figure={figureOf(seat)} alt="" width={size} height={size} decoding="async" /></span>}
       <span className="desk-top" aria-hidden="true" />
       <span className="desk-name">{label}</span>
       {/* Never colour alone: a desk that isn't simply ready says how it is, or where its agent is. */}
       {seat.kind === 'agent' && (seat.away ?? PRESENCE_WORDS[seat.state]) && <span className={`desk-state ${seat.away ? 'away' : seat.state}`}>{seat.away ?? PRESENCE_WORDS[seat.state]}</span>}
     </>
   )
-  if (seat.away && onAway) {
+  // Only an agent at your desk is pressed here, to go to it; any other desk opens the room with its card.
+  if (seat.away === AT_YOUR_DESK && onAway) {
     return <button type="button" className="desk away" title={words} aria-label={words} onClick={() => onAway(seat)}>{body}</button>
   }
   return <span className={`desk${seat.away ? ' away' : ''}`} title={words}>{body}</span>

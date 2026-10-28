@@ -156,7 +156,8 @@ you decide**, and the finished answer comes with the evidence to check before yo
 | You find out what an agent did by scrolling back through its terminal. | Every message, tool call and file it touched is recorded, and you can replay it. |
 | A weak first step quietly shapes everything after it. | A review step stops the team until you approve, or send the work back. |
 | Each AI app keeps its own skills and folders. | Skills and the folders and files you choose are delivered to the agents that need them. Take one off and it is turned off for that agent. |
-| You set the same agent up again in every project. | Build it once in My agents, try it on its own, and add it to any team. It is the same agent in every team, and what it learns goes with it. |
+| You set the same agent up again for every job. | Build it once in My agents, try it on its own, and add it to any team. It is the same agent in every team, and what it learns goes with it. |
+| Every new chat starts knowing nothing about the work. | Each piece of work is a project. Its **About**, folders and notes reach every agent in all its teams. |
 | Doing the job again means retyping the prompt. | One chat per team that remembers the conversation, **@** an agent to redo one step, and daily schedules. |
 
 ## How a run works
@@ -299,10 +300,11 @@ delivers each one to the agents you choose, and turns off what you take off the 
 <tr>
 <td valign="top">
 
-### 🧠 Team memory
+### 🗂️ Projects and memory
 
-A **Brief** of shared instructions and files, and a **Notebook** of reusable notes and checkpoints
-that carry from one run to the next.
+Each piece of work is a **project**. Its **About**, folders and notes reach every agent in all its
+teams, and its **Notebook** keeps what they note down for the next run. A team's own **Brief** adds
+what only that team needs.
 
 </td>
 <td valign="top">
@@ -328,9 +330,9 @@ Run a team every morning and send the answer to Notion. A review stop still wait
 
 ### 💬 Ask LoomWatch
 
-Describe the team you want in a sentence. Ask builds it on the canvas from your own agents,
-folders, skills and tools, on the models you've connected. Nothing is saved until you click
-**Apply**.
+Describe the team you want in a sentence, or, on Home, say what you're working on and click **Set
+up project**. Ask proposes the team on the canvas from your own agents, folders, skills and tools,
+on the models you've connected. Nothing is saved until you click **Apply**.
 
 </td>
 <td valign="top">
@@ -338,7 +340,8 @@ folders, skills and tools, on the models you've connected. Nothing is saved unti
 ### 🎓 Guided first run
 
 Your first agent asks what to make first, and asks which AI should answer only when you send.
-**Just look around** skips to Home, where a three-minute guide shows the rest.
+**Just look around** skips to Home. **Getting started guide** in the ☰ menu shows the rest in three
+minutes.
 
 </td>
 <td valign="top">
@@ -376,9 +379,9 @@ add, connect and rename agents to match. To run a team on a schedule, ask
 <td align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="site/assets/app/home-dark.webp">
-  <img src="site/assets/app/home-light.webp" alt="Home: Put AI agents to work as one team. They improve themselves. Build an agent, New team and the 3-minute guide, a box to describe the job, with an Ask button, the Agents, Workflow and Chat steps, a row of My agents with their figures and a link to tell them about you, and Your teams below, where the Review stop demo is Waiting for you. At the top right are search, Skills, Quests, the bell saying 1 needs you, and the menu.">
+  <img src="site/assets/app/home-light.webp" alt="Home: first Your desk, where Researcher brought work for you to check, with the Review and Chat with one agent buttons. Under Projects, a room for each project with its team's agents at their desks: in SUTD final project, Researcher is drawn faint because it is at your desk, then the gold ring where you check; in Bakery website, Writer is working; and in My thesis, Writer is drawn faint because it is working in the Website team. Then a New project tile, and an agent in no project yet. At the top right are search, Skills, Quests, Ask, the bell saying 1 needs you, and the menu.">
 </picture>
-<br><sub><strong>Home.</strong> Your agents first, each with its face, then the teams they work in.</sub>
+<br><sub><strong>Home.</strong> Your desk first, with whoever waits for you, then a room for each project, with its agents at their desks.</sub>
 </td>
 </tr>
 <tr>
@@ -712,9 +715,8 @@ language and length you want. Then it answers again, made for you. **Keep this a
 agents, and **Go to Home** leaves it there. **Just look around**, at the top, goes to Home at any
 time.
 
-For a tour of the rest, click **New here? Take the 3-minute guide** on Home, or choose **Getting
-started guide** from the ☰ menu or <kbd>⌘</kbd><kbd>K</kbd>. It walks you through building
-an agent, trying it on its own, putting it in a team and running it.
+For a tour of the rest, choose **Getting started guide** from the ☰ menu at the top right, or press
+<kbd>⌘</kbd><kbd>K</kbd> and pick it. It walks you through building an agent, trying it on its own, putting it in a team and running it.
 
 <details>
 <summary>Try a team without a model</summary>
@@ -877,11 +879,12 @@ request box and click **Reply**.
 
 ## Ask LoomWatch to set up a team
 
-Click **Ask** at the top of any screen (or press <kbd>⌘</kbd><kbd>J</kbd>), or type in **Or describe
-the job** on Home. Say what you want in plain words, such as _"Every weekday at 8, brief me on AI
-news"_. Ask sets the team up on the canvas. New and changed agents are marked,
-and nothing is saved until you click **Apply**; **Discard** drops the proposal, and **Undo** takes
-an applied one back.
+Click **Ask** at the top of any screen (or press <kbd>⌘</kbd><kbd>J</kbd>) and say what you want in
+plain words, such as _"Every weekday at 8, brief me on AI news"_. Ask sets the team up on the
+canvas. To start a new piece of work, go to Home, say what you are working on and click **Set up
+project** (once you have a project, click **New project** first). Ask proposes the project with its
+first team. New and changed agents are marked, and nothing is saved until you click **Apply**;
+**Discard** drops the proposal, and **Undo** takes an applied one back.
 
 - **It builds from what you have.** It uses one of My agents when one already does the part, and
   starts the others from LoomWatch's jobs, such as Researcher, Writer, Checker or Presentation
@@ -1119,8 +1122,8 @@ Windows, the program is `%LOCALAPPDATA%\Programs\LoomWatch\bin\loomwatchd.exe`).
 <details>
 <summary>Deleting and restoring a team</summary>
 
-To delete a team, choose **Delete team…** from its **…** menu on Home, or click the team's name at
-the top of its page.
+To delete a team, open it from its project's room, click its name at the top and choose **Delete
+team…**.
 LoomWatch refuses while the team is running, or while another team reads its memory. Nothing is
 erased. The team file, its layout, its own notes folder (`<team>.brief`) and the folder of files
 added to its agents with **Add file…** (`<team>.files`) move to `.trash/<date>-<team>/` inside your
