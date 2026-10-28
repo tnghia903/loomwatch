@@ -2,6 +2,7 @@ import { ArrowDown, ChevronDown, ChevronRight, Play, Reply, RotateCcw, Search, X
 import { Fragment, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import { continueWithTeam, findInChat, sendChatMessage, startFromNote, stillAnswering, uploadChatFile, type ChatFile, type ChatItem, type ChatMessage, type ChatTarget, type Found, type FoundPassage, type FoundPiece, type NoteFailure, type ReplyTo } from '../../lib/chat/client'
+import type { HandOver } from '../../lib/chat/handed'
 import { carriesFiles, dropped, useChatAttachments } from '../../lib/chat/attachments'
 import { FindScopeContext, showFoundWords, type FindTerm } from '../../lib/chat/findWords'
 import { isDocument } from '../../lib/chat/document'
@@ -62,6 +63,19 @@ interface TeamChatProps {
   answerRunId?: string | null
   /** A document answer's card was opened. */
   onOpenAnswer: (runId: string) => void
+  /**
+   * The piece whose replies — what its agents said to each other — that pane shows, and the element
+   * they are drawn into there. Absent `onReplies`, a piece shows its replies in the chat, under its
+   * line, as an agent's own chat does.
+   */
+  repliesRunId?: string | null
+  repliesSlot?: HTMLElement | null
+  /** The piece whose record, Details, that pane shows; absent, any piece it shows but for its answer. */
+  recordRunId?: string | null
+  /** A piece's line was clicked, or one of its replies asked to be shown (`toggle` false). */
+  onReplies?: (runId: string, toggle?: boolean) => void
+  /** The newest piece is done, and hands over what it made (ADR 0077). */
+  onHandOver?: (runId: string, made: Omit<HandOver, 'runId'>) => void
   /** Why nothing can be sent right now, when that is so. */
   blocked: string | null
   /** Save the team before work starts, as Run always has (TNG89 §1.4). */
@@ -127,7 +141,7 @@ const ROSTER_KEY = 'loomwatch.chatRoster'
  * With `team.solo` it is one agent's own chat (its Chat tab): everything you write goes to that
  * agent, starting its work when it is free and joining its turn while it works, so there is no @.
  */
-export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, routine, detailsRunId, answerRunId = null, onOpenAnswer, blocked, prepare, onDetails, onTeamReview, onStale, onAlwaysAllow, announce, onNewest, onStarted, reveal = null, landAt = null, onOpenFinding, onNewestRun, startTeam = false, onStartTeamTaken, ask = null, onPassages, onConnectFolder }: TeamChatProps) {
+export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, routine, detailsRunId, answerRunId = null, repliesRunId = null, repliesSlot = null, recordRunId, onReplies, onHandOver, onOpenAnswer, blocked, prepare, onDetails, onTeamReview, onStale, onAlwaysAllow, announce, onNewest, onStarted, reveal = null, landAt = null, onOpenFinding, onNewestRun, startTeam = false, onStartTeamTaken, ask = null, onPassages, onConnectFolder }: TeamChatProps) {
   const chat = useTeamChat(teamPath)
   // Pictures and files pasted or dropped in, kept as they are added (ADR 0082).
   const attachments = useChatAttachments(teamPath)
@@ -889,7 +903,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
                 {newDay && <li className="tc-day" aria-hidden="true"><span>{dayLabel(at)}</span></li>}
                 {item.kind === 'work'
                   ? <WorkPiece item={item} newest={item.run.runId === newestRun} approveFilled={!decision || decision.runId === item.run.runId} fixFilled={fixFill === item.run.runId} reveal={shown?.runId === item.run.runId ? shown : null} followed={item.run.followsRunId ? runs.get(item.run.followsRunId) ?? null : null} earlier={earlierTries(item.run, runs)} continuedFrom={continuedFrom.has(item.run.runId)} team={team} draft={draft}
-                      detailsOpen={detailsRunId === item.run.runId} answerOpen={answerRunId === item.run.runId} onDetails={onDetails} onOpenAnswer={onOpenAnswer} onRun={chat.applyRun} onBaton={onBaton} onLine={line.onLine} onTryAgain={tryAgain} onContinue={keepGoing}
+                      detailsOpen={detailsRunId === item.run.runId} answerOpen={answerRunId === item.run.runId} repliesSlot={repliesRunId === item.run.runId ? repliesSlot : null} recordOpen={recordRunId === undefined ? undefined : recordRunId === item.run.runId} onReplies={onReplies} onHandOver={onHandOver} onDetails={onDetails} onOpenAnswer={onOpenAnswer} onRun={chat.applyRun} onBaton={onBaton} onLine={line.onLine} onTryAgain={tryAgain} onContinue={keepGoing}
                       onDecided={() => setDraft('')} onAlwaysAllow={onAlwaysAllow} onOpenFinding={onOpenFinding} onReply={startReply} onShowReplied={showReplied} onReact={chat.react} onUndoLesson={undoLearned} onTellAllLesson={tellAllLearned} />
                   : <TeamNote message={item.message} reactions={item.reactions} lessons={item.lessons} fixFill={fixFill} name={name} hue={(id) => team.hues.get(id) ?? 1} flash={noteFlash?.id === item.message.id ? noteFlash.at : null} onReply={startReply} onShowReplied={showReplied} onStart={() => void startNote(item.message)} onReact={chat.react} onUndoLesson={undoLearned} onTellAllLesson={tellAllLearned} />}
               </Fragment>

@@ -13,6 +13,7 @@ import type { CapabilityRef, ScheduleConfig } from '../lib/team-file/types'
 import { newSchedule } from '../lib/team-file/schedule'
 import type { TeamNotionPage, TeamSource } from './library/ComponentPalette'
 import { PALETTE_WIDTH, clampPaletteWidth } from '../lib/library/paletteWidth'
+import { openStops } from '../lib/runs/spend'
 import { approveTeam, isTerminalRun, runScheduleNow, scheduleForPath, useRefreshOnRoutineRun, useSchedules, type TeamReview } from '../lib/runs/client'
 import { ownerLabelFor } from '../lib/runs/graph'
 import { modelLabelForAgent } from '../lib/models'
@@ -92,6 +93,7 @@ import { describeDocument, isDocument } from '../lib/chat/document'
 import type { AgentFacts } from '../lib/chat/faces'
 import { nameWithHelpers } from '../lib/chat/helpers'
 import { afterClosing, closedKey, fileTab, madeTabs, paneTabId, shownPaneTab, type MadeTab, type PaneTab } from '../lib/chat/paneTabs'
+import type { HandOver } from '../lib/chat/handed'
 import type { ReceiptLine } from '../lib/story/receipt'
 import { PromptNodeCard } from './run/StoryNodes'
 import { ChipDot, LoomMark, LoomWordmark } from './ui/glyphs'
@@ -153,6 +155,7 @@ import type { LeaveGuard } from './rail/CrewRail'
 import { showTeamRail } from './rail/teamRailStore'
 import { FileOriginContext, FileReaderContext, readerFormat, type FileToRead } from '../lib/files/reader'
 import { useFilesFound } from '../lib/files/useFile'
+import { lookupFile } from '../lib/files/client'
 
 // The Workflow canvas: the team as it is configured. A run is read in the team's chat and its
 // Details, never drawn here. The Output card is the planned one: the canvas holds no answer.
@@ -1609,9 +1612,11 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     for (const added of withFolderSource(doc.nodes.map((node) => ({ ...node.data.agent, id: node.id })), folder)) doc.setAgentCapabilities(added.id, added.capabilities)
     void doc.save()
   }, [doc, chatFolder])
-  // ADR 0051: Details is open by default on a wide screen, beside the chat, and follows the newest
-  // piece of work — until you open an older piece (it stays there) or close it (it stays closed).
-  // Starting work from the chat follows again. A narrow screen keeps the chat first.
+  // ADR 0051: the pane beside the chat opens when you open something in it — a piece's replies,
+  // its record, its answer or a file — and by itself only to hand you what the newest work made
+  // (ADR 0077), never on its record or its replies, so the chat is the screen. Open, it follows
+  // newer work, until you open an older piece (it stays there) or close it (it stays closed, and
+  // hands you nothing more until you start work again). A narrow screen keeps the chat first.
   const wide = useWideScreen()
   const [detailsFollow, setDetailsFollow] = useState(() => !initialRunId)
   const [newestPiece, setNewestPiece] = useState<string | null>(null)
@@ -1621,6 +1626,9 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   // choice: following the newest work, the first thing it made once it is finished, while work in
   // progress shows its record.
   const [paneTab, setPaneTab] = useState<PaneTab | null>(null)
+  // What the agents said to each other on the piece in the pane is drawn there by its piece in the
+  // chat (components/chat/WorkPiece.tsx), into this element, with everything it answers through.
+  const [repliesSlot, setRepliesSlot] = useState<HTMLElement | null>(null)
   // ADR 0077: a file read in the pane stays a tab of its own until it is closed, so following newer
   // work, or reading another piece's file, leaves it where it is — every one read, not only the last.
   // Each with its kind once known, for its mark.
@@ -1668,6 +1676,10 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   // stopped or failed keeps its record on screen, where that is said.
   const shownTab = shownPaneTab(paneTab, paneTabs, detailsFollow, session.terminal && record?.status === 'succeeded' && foundFiles !== null)
   const shownMade = paneTabs.find((made) => made.tab === shownTab)
+  // On a narrow screen the pane covers the chat, where what the work waits on you for is answered:
+  // while it waits, the replies step aside, and come back once you have answered.
+  const waitsOnYou = Boolean(record && !isTerminalRun(record.status) && (record.waitingOn || (record.permissionRequests?.length ?? 0) > 0 || openStops(record).length > 0))
+  const repliesStepAside = !wide && shownTab === 'replies' && waitsOnYou
   const shownFile = shownMade?.file ?? null
   const shownFileRef = useRef(shownFile)
   useEffect(() => { shownFileRef.current = shownFile })
@@ -1676,15 +1688,26 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   const shownKind = shownMade?.kind
   useEffect(() => { if (shownPath && shownFileRef.current) keep(shownFileRef.current, shownKind) }, [shownPath, shownKind, keep])
   // Following newer work changes the record and what it made, and leaves the file on screen.
+  // Replies being read go on being read, on the newer work.
+  const shownTabRef = useRef(shownTab)
+  useEffect(() => { shownTabRef.current = shownTab })
   const keepShownFile = useCallback(() => {
     const file = shownFileRef.current
-    if (file) { keep(file); setPaneTab(fileTab(file.path)) } else setPaneTab(null)
+    if (file) { keep(file); setPaneTab(fileTab(file.path)) } else setPaneTab(shownTabRef.current === 'replies' ? 'replies' : null)
   }, [keep])
   const closeDetails = useCallback(() => { setDetailsFollow(false); closeRun(); setRunSetup(true) }, [closeRun])
   const openDetails = useCallback((runId: string) => {
     if (detailsOpen && activeRunId === runId && shownTab === 'details') { closeDetails(); return }
     setDetailsFollow(runId === newestPiece)
     setPaneTab('details')
+    if (activeRunId !== runId || !detailsOpen) showRun(runId)
+  }, [detailsOpen, activeRunId, shownTab, closeDetails, newestPiece, showRun])
+  // A piece's replies: its line in the chat opens them, and closes them again; showing a message
+  // in them (`toggle` false) only opens.
+  const openReplies = useCallback((runId: string, toggle = true) => {
+    if (toggle && detailsOpen && activeRunId === runId && shownTab === 'replies') { closeDetails(); return }
+    setDetailsFollow(runId === newestPiece)
+    setPaneTab('replies')
     if (activeRunId !== runId || !detailsOpen) showRun(runId)
   }, [detailsOpen, activeRunId, shownTab, closeDetails, newestPiece, showRun])
   const openAnswer = useCallback((runId: string) => {
@@ -1696,13 +1719,40 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   }, [detailsOpen, activeRunId, shownTab, closeDetails, newestPiece, showRun, reopen])
   const followNewest = useCallback((runId: string | null) => {
     setNewestPiece(runId)
-    if (runId && detailsFollow && wide && runId !== activeRunId) { keepShownFile(); showRun(runId) }
-  }, [detailsFollow, wide, activeRunId, showRun, keepShownFile])
+    if (runId && detailsFollow && wide && detailsOpen && runId !== activeRunId) { keepShownFile(); showRun(runId) }
+  }, [detailsFollow, wide, detailsOpen, activeRunId, showRun, keepShownFile])
+  // Work you start moves an open pane on to it; a closed one stays closed, and will hand you what
+  // this work makes.
   const followStarted = useCallback((runId: string) => {
     setDetailsFollow(true)
+    if (!detailsOpen || !wide) return
     keepShownFile()
-    if (wide) showRun(runId)
-  }, [wide, showRun, keepShownFile])
+    showRun(runId)
+  }, [detailsOpen, wide, showRun, keepShownFile])
+  // The newest piece, done, hands over what it made (ADR 0077): the files its answer names, and
+  // whether its answer is long enough to be read as a document. Found on this computer, the first
+  // file the work made opens in the pane, else the answer — once for each piece, and only while
+  // the pane follows the newest work and is closed; an open one already shows what it made.
+  const handedTo = useRef<string | null>(null)
+  const following = useRef({ follow: detailsFollow, wide, open: detailsOpen, newest: newestPiece })
+  useEffect(() => { following.current = { follow: detailsFollow, wide, open: detailsOpen, newest: newestPiece } })
+  const handOver = useCallback((runId: string, made: Omit<HandOver, 'runId'>) => {
+    if (handedTo.current === runId) return
+    const paths = made.files.filter((path) => readerFormat(path) !== null)
+    void Promise.all(paths.map((path) => lookupFile(path))).then((lookups) => {
+      const now = following.current
+      if (handedTo.current === runId || !now.follow || !now.wide || now.open || now.newest !== runId) return
+      const wrote = new Set(made.written)
+      const file = paths.find((path, at) => {
+        const lookup = lookups[at]
+        return lookup.state === 'found' && lookup.facts.exists && !lookup.facts.isDir && (wrote.has(path) || workspaceAgent(lookup.facts.folder) !== null) && readerFormat(path) !== 'code'
+      })
+      if (!file && !made.document) return
+      handedTo.current = runId
+      setPaneTab(file ? fileTab(file) : 'answer')
+      showRun(runId)
+    })
+  }, [showRun])
   const readHere = useCallback((file: FileToRead) => {
     const runId = file.runId ?? activeRunId ?? newestPiece
     reopen(runId, fileTab(file.path))
@@ -2550,6 +2600,11 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
             routine={routine ? <RoutineNote schedule={routine} onRunNow={() => void runRoutineNow()} busy={routineBusy} /> : undefined}
             detailsRunId={detailsOpen ? activeRunId : null}
             answerRunId={detailsOpen && shownTab === 'answer' ? activeRunId : null}
+            repliesRunId={detailsOpen && shownTab === 'replies' ? activeRunId : null}
+            recordRunId={detailsOpen && shownTab === 'details' ? activeRunId : null}
+            onHandOver={handOver}
+            repliesSlot={repliesSlot}
+            onReplies={openReplies}
             onOpenAnswer={openAnswer}
             blocked={composerState.kind === 'blocked' ? composerState.reason : null}
             prepare={prepareChat}
@@ -2570,15 +2625,17 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
             onConnectFolder={connectChatFolder}
           />
           {detailsOpen && wide && <ChatResizer width={chatWidth} onResize={setChatWidth} />}
-          {detailsOpen && (
+          {detailsOpen && !repliesStepAside && (
             <aside className="tc-details" aria-label="Details of this piece of work">
               <header className="tc-details-head">
-                {paneTabs.length ? <PaneTabs tabs={paneTabs} shown={shownTab} hue={(id) => chatTeam.hues.get(id) ?? 1} onShow={setPaneTab} onClose={closeTab} /> : <span className="tc-pane-title">Details</span>}
+                <PaneTabs tabs={paneTabs} shown={shownTab} replies hue={(id) => chatTeam.hues.get(id) ?? 1} onShow={setPaneTab} onClose={closeTab} />
                 <h2>{shownFile || !record?.prompt ? '' : <InlineMarkdown>{record.prompt.split('\n')[0] ?? ''}</InlineMarkdown>}</h2>
                 <button type="button" className="btn btn-icon" onClick={() => { closeDetails(); setKept([]) }} aria-label="Close details"><X size={15} aria-hidden="true" /></button>
               </header>
-              <div className="tc-details-body" id="tc-pane-body" role={paneTabs.length ? 'tabpanel' : undefined} aria-labelledby={paneTabs.length ? paneTabId(paneTabs, shownTab) : undefined}>
-                {shownFile ? (
+              <div className="tc-details-body" id="tc-pane-body" role="tabpanel" aria-labelledby={paneTabId(paneTabs, shownTab)}>
+                {shownTab === 'replies' ? (
+                  <div className="tc-replies-pane" ref={setRepliesSlot} />
+                ) : shownFile ? (
                   <FileReader key={shownFile.path} file={shownFile} name={(id) => chatTeam.names.get(id) ?? id} hue={(id) => chatTeam.hues.get(id) ?? 1} team={askable} role={(id) => agentRoles.get(id) ?? ''}
                     onAsk={composerState.kind === 'blocked' ? undefined : askInChat} asked={passages.asked} asking={passages.asking} faces={passages.faces} onShowAsked={showAsked} />
                 ) : shownTab === 'answer' ? (
@@ -2613,7 +2670,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
                   onInspectEvidence={(id) => setInspectedEvidenceId(id)}
                   onShowRecorded={() => setProvenanceOpen((open) => !open)}
                   onShowReceived={(id) => { setHandoverAgentId(id); setInspectedEvidenceId(null) }}
-                  onRevealMessage={activeRunId ? (id) => setChatReveal({ runId: activeRunId, id, at: Date.now() }) : undefined}
+                  onRevealMessage={activeRunId ? (id) => { setPaneTab('replies'); setChatReveal({ runId: activeRunId, id, at: Date.now() }) } : undefined}
                   onSelectAgent={(id) => doc.onNodesChange(doc.nodes.map((node) => ({ id: node.id, type: 'select' as const, selected: node.id === id })))}
                 />
                 )}

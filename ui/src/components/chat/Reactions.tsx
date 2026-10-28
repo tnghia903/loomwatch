@@ -189,9 +189,10 @@ const TRAY_WIDTH = 248
 function placeTray(button: HTMLElement | null, mine: boolean): Placement {
   const at = button?.getBoundingClientRect()
   // The chat's column inside its padding, and the part of it on screen.
-  const log = button?.closest('[role="log"]')
+  // In the chat, or in a piece's replies beside it, which scroll on their own.
+  const log = button?.closest('[role="log"]') ?? button?.closest('.tc-replies-pane')
   const column = log?.getBoundingClientRect()
-  const view = button?.closest('.tc-scroll')?.getBoundingClientRect()
+  const view = (button?.closest('.tc-scroll') ?? button?.closest('.tc-replies-pane'))?.getBoundingClientRect()
   if (!at || !log || !column || !view) return { below: false, end: mine, shift: 0 }
   const style = getComputedStyle(log)
   const left = column.left + (parseFloat(style.paddingLeft) || 0)
