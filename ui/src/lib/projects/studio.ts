@@ -34,6 +34,9 @@ export interface TeamShape {
 }
 
 /** A desk as drawn now: who is at it, or where they are instead. */
+/** Where an agent waiting for you is: at Your desk, where pressing its faint figure takes you. */
+export const AT_YOUR_DESK = 'at your desk'
+
 export interface Seat extends SeatSpec {
   state: Presence
   /** Where the agent is instead of this desk: "at your desk", or the team it is working in. */
@@ -117,10 +120,10 @@ function lastOf(runs: readonly RunRecord[]): string | null {
 }
 
 /**
- * Every project as a room: its teams' desks, each with who is there now. An agent is drawn only
- * where it is now: one waiting for you stands at Your desk, so its desk here is an outline saying
- * so; one working in another team, and not here, is an outline naming that team. One working in
- * two projects at once is drawn in each.
+ * Every project as a room: its teams' desks, each with who is there now. An agent is lit only
+ * where it is now: one waiting for you stands at Your desk, so here it is faint, saying so; one
+ * working in another team, and not here, is faint, naming that team. One working in two projects
+ * at once is drawn in each.
  */
 export function roomsOf(
   projects: readonly ProjectEntry[],
@@ -150,9 +153,9 @@ export function roomsOf(
       const seats = shape.seats.map((spec): Seat => {
         if (spec.kind === 'you') return { ...spec, state: 'ready', away: null }
         const state = here.get(spec.id) ?? 'ready'
-        if (state === 'waiting') return { ...spec, state, away: 'at your desk' }
+        if (state === 'waiting') return { ...spec, state, away: AT_YOUR_DESK }
         if (state === 'working' || !spec.agent) return { ...spec, state, away: null }
-        if (atYourDesk.has(spec.agent)) return { ...spec, state, away: 'at your desk' }
+        if (atYourDesk.has(spec.agent)) return { ...spec, state, away: AT_YOUR_DESK }
         const elsewhere = (workingIn.get(spec.agent) ?? []).filter((name) => name !== shape.name)
         return { ...spec, state, away: elsewhere.length > 0 ? `in ${elsewhere[0]}` : null }
       })

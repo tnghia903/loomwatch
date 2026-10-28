@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { figureFor, type FigureChoice } from '../../lib/library/figures'
 import type { SavedJob } from '../../lib/library/jobs'
 import { useProjects, type ProjectEntry } from '../../lib/projects/client'
-import { deskItems, roomsOf, studioLayout, type Room, type Seat } from '../../lib/projects/studio'
+import { AT_YOUR_DESK, deskItems, roomsOf, studioLayout, type Room, type Seat } from '../../lib/projects/studio'
 import { useTeamShapes } from '../../lib/projects/useTeamShapes'
 import { benchChatId } from '../../lib/rail/presence'
 import type { RunRecord } from '../../lib/runs/client'
@@ -137,10 +137,10 @@ export function Studio({ runs, onSetUp, setUpUnavailable, asking = false }: {
     if (room.id.startsWith('team:')) openTeam(room.id.slice('team:'.length))
     else window.location.assign(roomHref(room.id))
   }
-  // An outline's label says where its agent is; pressing it goes there.
+  // An agent at your desk is faint in its rooms; pressing it there goes to Your desk.
   const onAway = (seat: Seat) => {
     const still = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-    if (seat.away === 'at your desk') document.getElementById('your-desk-title')?.scrollIntoView({ behavior: still ? 'auto' : 'smooth', block: 'center' })
+    if (seat.away === AT_YOUR_DESK) document.getElementById('your-desk-title')?.scrollIntoView({ behavior: still ? 'auto' : 'smooth', block: 'center' })
   }
 
   if (error) return <p role="alert" className="home-empty alert">Couldn’t list your projects. {error} <button type="button" className="link" onClick={reload}>Try again</button></p>
