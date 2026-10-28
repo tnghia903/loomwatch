@@ -162,6 +162,15 @@ Rules the loader enforces beyond the schema:
 - The team's `id` is the memory scope: renaming a team keeps its memory, and a duplicated file with
   the same id shares it, which the panel states rather than hides.
 
+## 5a. Projects
+
+A team that works in a project (ADR 0097, [TEAM_CONFIG.md](TEAM_CONFIG.md#project)) reads the
+project's About and notes as pinned entries before its own Brief, labelled "From the project
+<name>", within the same `packet.maxChars` budget. The project's folders reach every agent as
+knowledge. Its Notebook scope is `project:<id>` rather than the team's id, so what one team keeps
+the project's other teams read; the team's own earlier scope is read as inherited, so nothing it
+kept before is lost.
+
 ## 6. Storage
 
 | Table | Holds | Notes |

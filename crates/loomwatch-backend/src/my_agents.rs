@@ -163,7 +163,7 @@ pub fn record_moved(
 }
 
 /// A short name for a teams folder, so two folders' moves never share a mark or a backup.
-fn folder_key(teams_root: &Path) -> String {
+pub(crate) fn folder_key(teams_root: &Path) -> String {
     use sha2::Digest as _;
     use std::fmt::Write as _;
     let digest = sha2::Sha256::digest(teams_root.as_os_str().as_encoded_bytes());

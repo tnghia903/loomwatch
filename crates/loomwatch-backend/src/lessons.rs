@@ -388,6 +388,9 @@ pub enum Edit {
     Drop(usize),
     /// The feedback shows the agent did not follow lesson `number`.
     Missed(usize),
+    /// A lesson about the project the team works in, not about how the agent works (ADR 0097):
+    /// kept as one of the project's notes, which every agent in it reads, never with the agent.
+    Project(String),
 }
 
 /// What a learning was made from, kept on every lesson it makes.
@@ -636,6 +639,8 @@ impl Lessons {
                     let Some(old) = still(*number) else { continue };
                     missed(&mut tx, &old.id, &now).await?;
                 }
+                // Kept in the project by the learner, never in the agent's own list.
+                Edit::Project(_) => {}
             }
         }
         let fresh: Vec<&str> = made.iter().map(|lesson| lesson.id.as_str()).collect();
@@ -1118,6 +1123,29 @@ pub struct Learning {
     /// How it went about the work: one line per tool it used and per permission it was refused,
     /// from the run's record ([`steps_of`]). Read by the learner when it is not given any.
     pub steps: Vec<String>,
+    /// The project its team works in (ADR 0097), where a lesson about the project is kept. `None`
+    /// outside any project, and the learner is then asked exactly as before.
+    pub project: Option<LearnedProject>,
+}
+
+/// The project a lesson about it is kept in: its file's teams folder, id and name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LearnedProject {
+    pub teams_root: PathBuf,
+    pub id: String,
+    pub name: String,
+}
+
+/// The project a team works in, as the learner keeps a lesson about it, or `None`.
+#[must_use]
+pub fn project_of(team: &TeamConfig, team_path: &Path) -> Option<LearnedProject> {
+    let id = team.project.as_deref()?.trim();
+    let project = team.project_file.as_ref()?;
+    Some(LearnedProject {
+        teams_root: crate::my_agents::teams_root_of(team_path),
+        id: id.to_owned(),
+        name: project.name.clone(),
+    })
 }
 
 /// The learner's message.
@@ -1194,16 +1222,31 @@ pub fn compose(learning: &Learning, source: LessonSource, lessons: &[Lesson]) ->
             let _ = writeln!(text, "{}. {}", index + 1, one_line(&lesson.text));
         }
     }
+    let project = learning.project.as_ref().map(|project| project.name.as_str());
     if source == LessonSource::Liked {
-        ask_what_worked(&mut text, agent);
+        ask_what_worked(&mut text, agent, project);
         return text;
     }
-    ask_what_to_change(&mut text, agent);
+    ask_what_to_change(&mut text, agent, project);
     text
 }
 
+/// The rule for a lesson about the project the team works in (ADR 0097), or nothing outside one.
+fn about_project(agent: &str, project: Option<&str>) -> String {
+    project.map_or_else(String::new, |project| {
+        format!(
+            "- Add \"aboutProject\": true to an add when the lesson is about the project \"{project}\", \
+             not about how {agent} does its kind of work: who the project's work is for, or a name, \
+             file, decision or requirement of the project. It is kept as one of the project's \
+             notes, which every agent in the project reads, and never goes with {agent} to other \
+             work.\n"
+        )
+    })
+}
+
 /// What the learner is asked after a correction or a check: what to do differently, and its rules.
-fn ask_what_to_change(text: &mut String, agent: &str) {
+fn ask_what_to_change(text: &mut String, agent: &str, project: Option<&str>) {
+    let project = about_project(agent, project);
     let _ = write!(
         text,
         "\nSay what {agent} should do differently on work like this from now on, because of this \
@@ -1232,6 +1275,7 @@ fn ask_what_to_change(text: &mut String, agent: &str) {
          when they asked for it on everything (\"always\", \"never\", \"every reply\"), as with the \
          tone they like. A lesson that fits one kind of work (\"When <kind of work>, ...\") is about \
          the work, even when they said \"next time\". They can then give it to all their agents.\n\
+         {project}\
          - At most {EDITS_PER_FEEDBACK} adds, changes and drops in all. No edits at all is a good \
          answer.\n\n\
          Reply with JSON only, in this shape:\n\
@@ -1243,7 +1287,8 @@ fn ask_what_to_change(text: &mut String, agent: &str) {
 }
 
 /// What the learner is asked after Love it: the one particular choice worth keeping, if any.
-fn ask_what_worked(text: &mut String, agent: &str) {
+fn ask_what_worked(text: &mut String, agent: &str, project: Option<&str>) {
+    let project = about_project(agent, project);
     let _ = write!(
         text,
         "\nSay what about this answer {agent} should keep doing on work like this.\n\n\
@@ -1260,6 +1305,7 @@ fn ask_what_worked(text: &mut String, agent: &str) {
              applies and what to do: \"When <kind of work>, <do this>.\"\n\
              - Learn nothing that its instructions or a lesson already say, and nothing when no \
              particular choice stands out: an answer can simply be done well.\n\
+             {project}\
              - At most one lesson. No edits at all is a good answer.\n\n\
              Reply with JSON only, in this shape:\n\
              {{\"edits\": [{{\"do\": \"add\", \"lesson\": \"...\"}}]}}\n\
@@ -1285,6 +1331,9 @@ struct ReplyEdit {
     /// so a stray value costs the edit its mark, never the whole reply.
     #[serde(default, rename = "aboutYou", alias = "about_you")]
     about_you: Option<serde_json::Value>,
+    /// Only `true` counts, as for `aboutYou`: an add about the project the team works in.
+    #[serde(default, rename = "aboutProject", alias = "about_project")]
+    about_project: Option<serde_json::Value>,
 }
 
 /// The learner's edits, checked: each add or change one sentence within [`LESSON_CHARS`], each
@@ -1316,7 +1365,9 @@ pub fn parse_reply(reply: &str, shown: usize) -> Result<Vec<Edit>, String> {
     };
     for edit in parsed.edits {
         let about_you = matches!(edit.about_you, Some(serde_json::Value::Bool(true)));
+        let about_project = matches!(edit.about_project, Some(serde_json::Value::Bool(true)));
         let made = match edit.action.trim() {
+            "add" if about_project => sentence(edit.lesson).map(Edit::Project),
             "add" => sentence(edit.lesson).map(|text| Edit::Add { text, about_you }),
             "change" => on_list(edit.number)
                 .zip(sentence(edit.lesson))
@@ -1425,8 +1476,43 @@ impl Learner {
         let mut edits = parse_reply(&reply, shown.len())?;
         if request.from.source == LessonSource::Liked {
             // What worked adds one lesson at most; it never changes, drops or marks another.
-            edits.retain(|edit| matches!(edit, Edit::Add { .. }));
+            edits.retain(|edit| matches!(edit, Edit::Add { .. } | Edit::Project(_)));
             edits.truncate(1);
+        }
+        // A lesson about the project is kept as one of its notes (ADR 0097). Outside a project the
+        // learner isn't offered that, and one it marks so anyway is about the work.
+        let mut kept_in_project = Vec::new();
+        for edit in &mut edits {
+            let Edit::Project(text) = edit else { continue };
+            match &learning.project {
+                Some(_) => kept_in_project.push(std::mem::take(text)),
+                None => {
+                    *edit = Edit::Add {
+                        text: std::mem::take(text),
+                        about_you: false,
+                    };
+                }
+            }
+        }
+        edits.retain(|edit| !matches!(edit, Edit::Project(_)));
+        if let Some(project) = &learning.project {
+            for text in kept_in_project {
+                let note = crate::projects::ProjectNote {
+                    text: text.clone(),
+                    at: Some(crate::operator::now_rfc3339()),
+                    by: Some(learning.agent.clone()),
+                };
+                match crate::projects::add_note(&project.teams_root, &project.id, note) {
+                    Ok(_) => println!(
+                        "lessons: {} kept {text:?} in the project {}",
+                        request.from.agent_id, project.name
+                    ),
+                    Err(error) => eprintln!(
+                        "loomwatchd: {} could not keep a note in the project {}: {error}",
+                        request.from.agent_id, project.name
+                    ),
+                }
+            }
         }
         if edits.is_empty() {
             return Ok(Vec::new());

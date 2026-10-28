@@ -247,6 +247,8 @@ export interface TeamDocument {
   schemaVersion: 1
   id: string
   name: string
+  /** The project this team works in (ADR 0097): `<teams root>/.projects/<id>.yaml`. */
+  project?: string
   entrypoint: string
   /** Optional explicit owner of the canonical team output. */
   responder?: string

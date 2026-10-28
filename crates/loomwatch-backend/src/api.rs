@@ -223,6 +223,15 @@ pub fn router_with_archive(
             axum::routing::put(put_job).delete(delete_job),
         )
         .route("/api/jobs/{id}/versions", get(get_job_versions))
+        // Projects hold the work (ADR 0097): each one, its teams, and the one-time move of every
+        // team into a project of its own, which the app makes.
+        .route("/api/projects", get(get_projects))
+        .route("/api/projects/{id}", axum::routing::put(put_project))
+        .route("/api/projects/{id}/notes", axum::routing::post(post_project_note))
+        .route(
+            "/api/move-into-projects",
+            get(get_projects_move).post(post_projects_moved),
+        )
         // The one-time move of every team onto My agents (ADR 0094), which the app makes.
         .route(
             "/api/my-agents/move",
@@ -750,6 +759,151 @@ struct MovedRequest {
     /// What the move changed in each team, by the team's path: the lines its chat says once.
     #[serde(default)]
     changed: std::collections::BTreeMap<String, Vec<String>>,
+}
+
+/// One project as the app shows it: its file's fields, its id, and its teams' paths.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectView {
+    id: String,
+    #[serde(flatten)]
+    project: crate::projects::Project,
+    /// Each team that works in it, by its path relative to the teams root.
+    teams: Vec<String>,
+}
+
+/// Every project, with its teams, and the teams that work in none yet (ADR 0097).
+async fn get_projects(State(state): State<ApiState>) -> Result<Json<Value>, ApiError> {
+    let teams_root = state.teams_root.clone();
+    let (projects, mut teams) = tokio::task::spawn_blocking(move || {
+        (
+            crate::projects::list(&teams_root),
+            crate::projects::teams_of(&teams_root),
+        )
+    })
+    .await
+    .map_err(|error| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    let loose = teams.remove("").unwrap_or_default();
+    let projects: Vec<ProjectView> = projects
+        .into_iter()
+        .map(|(id, project)| ProjectView {
+            teams: teams.remove(&id).unwrap_or_default(),
+            id,
+            project,
+        })
+        .collect();
+    // A team that names a project with no file: listed apart, so it isn't lost.
+    let missing: Vec<String> = teams.into_values().flatten().collect();
+    Ok(Json(json!({ "projects": projects, "loose": loose, "missing": missing })))
+}
+
+/// Keep project `id` as the body says, whole: a new project, or a change to one.
+async fn put_project(
+    State(state): State<ApiState>,
+    AxumPath(id): AxumPath<String>,
+    Json(project): Json<crate::projects::Project>,
+) -> Result<Json<ProjectView>, ApiError> {
+    if !crate::projects::is_id(&id) {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            format!("“{id}” isn't a project's name: use lowercase letters, digits and hyphens."),
+        ));
+    }
+    let project = project
+        .checked()
+        .map_err(|message| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, message))?;
+    {
+        let _write = state.writes.lock().map_err(|_| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "team write lock unavailable".into(),
+            )
+        })?;
+        crate::projects::write(&state.teams_root, &id, &project).map_err(|error| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("LoomWatch could not keep the project: {error}"),
+            )
+        })?;
+    }
+    let teams = crate::projects::teams_of(&state.teams_root)
+        .remove(&id)
+        .unwrap_or_default();
+    Ok(Json(ProjectView { id, project, teams }))
+}
+
+#[derive(Debug, Deserialize)]
+struct ProjectNoteRequest {
+    text: String,
+}
+
+/// Add the person's note to project `id`: every agent in it reads it from the next run.
+async fn post_project_note(
+    State(state): State<ApiState>,
+    AxumPath(id): AxumPath<String>,
+    Json(request): Json<ProjectNoteRequest>,
+) -> Result<Json<ProjectView>, ApiError> {
+    let project = {
+        let _write = state.writes.lock().map_err(|_| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "team write lock unavailable".into(),
+            )
+        })?;
+        crate::projects::add_note(
+            &state.teams_root,
+            &id,
+            crate::projects::ProjectNote {
+                text: request.text,
+                at: Some(chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)),
+                by: None,
+            },
+        )
+        .map_err(|message| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, message))?
+    };
+    let teams = crate::projects::teams_of(&state.teams_root)
+        .remove(&id)
+        .unwrap_or_default();
+    Ok(Json(ProjectView { id, project, teams }))
+}
+
+/// Where the move of every team into a project of its own stands (ADR 0097): whether the app has
+/// made it, and each team with no project yet, with whether it may be moved (one that waits for a
+/// review isn't).
+async fn get_projects_move(State(state): State<ApiState>) -> Result<Json<Value>, ApiError> {
+    let Some((approvals, state_dir)) = approvals_and_state(&state) else {
+        return Ok(Json(json!({ "moved": true, "teams": [] })));
+    };
+    let loose = crate::projects::teams_of(&state.teams_root)
+        .remove("")
+        .unwrap_or_default();
+    let teams: Vec<Value> = loose
+        .into_iter()
+        .map(|path| {
+            let approved = fs::read(state.teams_root.join(&path)).is_ok_and(|bytes| {
+                approvals.is_approved(&path, &crate::approvals::revision(&bytes))
+            });
+            json!({ "path": path, "approved": approved })
+        })
+        .collect();
+    Ok(Json(json!({
+        "moved": crate::projects::moved(&state_dir, &state.teams_root),
+        "teams": teams,
+    })))
+}
+
+/// The app moved every team it could into a project of its own: keep that.
+async fn post_projects_moved(State(state): State<ApiState>) -> Result<StatusCode, ApiError> {
+    let Some((_, state_dir)) = approvals_and_state(&state) else {
+        return Ok(StatusCode::NO_CONTENT);
+    };
+    crate::projects::record_moved(&state_dir, &state.teams_root).map_err(|error| {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("LoomWatch could not keep that your teams moved into projects: {error}"),
+        )
+    })?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// The app moved every team it could onto My agents: keep that, and what it changed where.
@@ -1480,6 +1634,10 @@ pub struct MemoryView {
     pub inherited_teams: Vec<String>,
     /// Whether agents on this team get the four memory tools.
     pub notebook_enabled: bool,
+    /// The About and notes of the project the team works in (ADR 0097), which every agent reads
+    /// first. Changed in the project, never here.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub project: Vec<MemoryEntryView>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -1516,7 +1674,7 @@ async fn get_memory(
     // A Brief file that cannot be read is the operator's problem to fix and would refuse a run,
     // so the panel must say so rather than showing a short list that looks complete.
     let roots = crate::memory::MemoryRoots::for_team(&resolved, Some(&state.teams_root));
-    let memory = crate::memory::TeamMemory::load(&roots, &resolved, team.memory.as_ref())
+    let memory = crate::memory::TeamMemory::load_for(&roots, &resolved, &team)
         .map_err(|error| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, error.message))?;
     let view = |entry: &crate::memory::BriefEntry| MemoryEntryView {
         path: entry.path.clone(),
@@ -1546,6 +1704,7 @@ async fn get_memory(
         inherited,
         inherited_teams: memory.inherited_teams.clone(),
         notebook_enabled: memory.notebook_enabled,
+        project: memory.project.iter().map(view).collect(),
     }))
 }
 
@@ -2443,6 +2602,94 @@ mod tests {
             !message.contains("version") && !message.chars().any(|c| c.is_ascii_digit()),
             "{message}"
         );
+    }
+
+    /// ADR 0097: a project is kept through the API, a note is added to it, and the list names each
+    /// project's teams and the teams in none yet. The project's file never shows as a team, and a
+    /// team's Memory names what it reads from its project.
+    #[tokio::test]
+    async fn projects_are_kept_listed_with_their_teams_and_read_by_their_teams() {
+        let root = TempDirectory::new();
+        let send = |method: &str, uri: &str, body: &str| {
+            Request::builder()
+                .method(method)
+                .uri(uri)
+                .header(header::HOST, "localhost")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_owned()))
+                .expect("request")
+        };
+        let response = test_router(&root.0)
+            .oneshot(send(
+                "PUT",
+                "/api/projects/sutd",
+                r#"{"name":" SUTD final project ","about":"Colin's gate.","folders":[{"name":"","path":"/Users/colin/SUTD"}]}"#,
+            ))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let kept = response_json(response).await;
+        assert_eq!(kept["name"], "SUTD final project");
+        assert_eq!(kept["folders"][0]["name"], "SUTD");
+        let refused = test_router(&root.0)
+            .oneshot(send("PUT", "/api/projects/Bad%20id", r#"{"name":"X"}"#))
+            .await
+            .expect("response");
+        assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
+        let refused = test_router(&root.0)
+            .oneshot(send("PUT", "/api/projects/x", r#"{"name":"X","folders":[{"name":"N","path":"notes"}]}"#))
+            .await
+            .expect("response");
+        assert_eq!(refused.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+        let noted = response_json(
+            test_router(&root.0)
+                .oneshot(send("POST", "/api/projects/sutd/notes", r#"{"text":"Colin picked B."}"#))
+                .await
+                .expect("response"),
+        )
+        .await;
+        assert_eq!(noted["notes"][0]["text"], "Colin picked B.");
+        assert!(noted["notes"][0]["at"].is_string());
+
+        fs::write(
+            root.0.join("gate.yaml"),
+            "schemaVersion: 1\nid: gate\nname: Gate\nproject: sutd\nentrypoint: a\nagents:\n  - id: a\n    model: fake/offline\n    role: Research.\nedges: []\n",
+        )
+        .unwrap();
+        fs::write(
+            root.0.join("blog.yaml"),
+            "schemaVersion: 1\nid: blog\nname: Blog\nentrypoint: a\nagents:\n  - id: a\n    model: fake/offline\n    role: Write.\nedges: []\n",
+        )
+        .unwrap();
+        let list = response_json(
+            test_router(&root.0)
+                .oneshot(send("GET", "/api/projects", ""))
+                .await
+                .expect("response"),
+        )
+        .await;
+        assert_eq!(list["projects"][0]["id"], "sutd");
+        assert_eq!(list["projects"][0]["teams"], json!(["gate.yaml"]));
+        assert_eq!(list["loose"], json!(["blog.yaml"]));
+        let teams = response_json(
+            test_router(&root.0)
+                .oneshot(send("GET", "/api/teams", ""))
+                .await
+                .expect("response"),
+        )
+        .await;
+        assert_eq!(teams["files"], json!(["blog.yaml", "gate.yaml"]), "a project is never a team");
+
+        let memory = response_json(
+            test_router(&root.0)
+                .oneshot(send("GET", "/api/memory?path=gate.yaml", ""))
+                .await
+                .expect("response"),
+        )
+        .await;
+        assert_eq!(memory["project"][0]["title"], "About SUTD final project");
+        assert_eq!(memory["project"][1]["body"], "- Colin picked B.");
     }
 
     /// A saved job round-trips through the API: created once, refused a second create so the UI

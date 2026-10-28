@@ -110,6 +110,7 @@ fn the_learner_reads_the_work_the_feedback_and_the_numbered_lessons() {
         said: "Too long.\nThree bullets, please.".to_owned(),
         missed_items: Vec::new(),
         steps: Vec::new(),
+        project: None,
     };
     let shown = vec![lesson("When writing a digest, open with the date.")];
     let prompt = compose(&learning, LessonSource::You, &shown);
@@ -1099,4 +1100,58 @@ async fn undo_into_a_full_list_makes_room_for_the_lesson_it_brings_back() {
     assert!(now.iter().any(|lesson| lesson.id == told.id));
     let made_room = lessons.get(scope, &full[0].id).await.unwrap().unwrap();
     assert_eq!(made_room.dropped_by.as_deref(), Some("room"));
+}
+
+/// ADR 0097: inside a project, the learner may mark a lesson as about the project. It is kept as
+/// one of the project's notes, by the agent, and never joins the agent's own list, which goes with
+/// it to other work. Outside a project the learner isn't offered that, and is asked exactly as
+/// before; a lesson it marks so anyway is about the work.
+#[tokio::test]
+async fn a_lesson_about_the_project_is_kept_in_the_project_not_with_the_agent() {
+    let root = std::env::temp_dir().join(format!("loomwatch-learn-project-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    crate::projects::write(
+        &root,
+        "sutd",
+        &crate::projects::Project {
+            name: "SUTD final project".to_owned(),
+            ..crate::projects::Project::default()
+        },
+    )
+    .unwrap();
+    let answer = "{\"edits\": [\
+        {\"do\": \"add\", \"lesson\": \"The course staff read every report, so name the module codes.\", \"aboutProject\": true},\
+        {\"do\": \"add\", \"lesson\": \"When writing a digest, use three bullets.\"}]}";
+    let lessons = store().await;
+    let (learner, asked) = learner_answering(lessons.clone(), answer);
+    let mut inside = request("agent:writer");
+    inside.learning.project = Some(LearnedProject {
+        teams_root: root.clone(),
+        id: "sutd".to_owned(),
+        name: "SUTD final project".to_owned(),
+    });
+    let made = learner.learn(&inside).await.unwrap();
+    assert_eq!(
+        made.iter().map(|lesson| lesson.text.as_str()).collect::<Vec<_>>(),
+        ["When writing a digest, use three bullets."],
+        "only the lesson about the work is the agent's"
+    );
+    let project = crate::projects::read(&root, "sutd").unwrap().unwrap();
+    assert_eq!(project.notes.len(), 1);
+    assert_eq!(
+        project.notes[0].text,
+        "The course staff read every report, so name the module codes."
+    );
+    assert_eq!(project.notes[0].by.as_deref(), Some("Writer"));
+    assert!(asked.lock().unwrap()[0].contains(
+        "Add \"aboutProject\": true to an add when the lesson is about the project \"SUTD final project\""
+    ));
+
+    // Outside any project: asked as before, and the same answer is all the agent's.
+    let lessons = store().await;
+    let (learner, asked) = learner_answering(lessons.clone(), answer);
+    let made = learner.learn(&request("agent:writer")).await.unwrap();
+    assert_eq!(made.len(), 2);
+    assert!(!asked.lock().unwrap()[0].contains("aboutProject"));
+    let _ = std::fs::remove_dir_all(&root);
 }

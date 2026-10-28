@@ -776,6 +776,51 @@ Every field is optional and the defaults above apply. Lower `asWrittenUpTo` for 
 a model without prompt caching; the cost of raising the other bounds is paid by every stage
 downstream.
 
+## Project
+
+`project` names the one project the team works in (ADR 0097), a file of its own in the teams
+folder, `<teams root>/.projects/<id>.yaml`:
+
+```yaml
+# .projects/sutd-final-project.yaml
+name: SUTD final project
+about: |                 # what it is, who it is for, the person's requirements and decisions
+  Colin's final project: a gate for the campus library, in two parts, ekis-gate and ekis-kb.
+folders:                 # every agent in the project may read these without asking
+  - { name: SUTD, path: /Users/colin/Documents/SUTD }
+notes:                   # kept from earlier work: the person's, and lessons about the project
+  - { text: Colin picked option B., at: 2026-10-27T09:00:00Z }
+  - { text: The course staff read every report., by: Researcher }
+mark: sky                # the colour of the small mark beside its name
+putAway: true            # optional: shown on Home with the others put away
+```
+
+```yaml
+# the team file
+project: sutd-final-project
+```
+
+- **Read with the team.** When a team is read in its teams folder, its project file is read too,
+  each time, so a change reaches every team of the project from its next run. Every agent of the
+  team is given the project's folders as a folder connected to it is (their listing, and reading
+  anything in them without asking), and reads the project's About and notes first under
+  `## What the team knows`, before the team's own Brief. A review stop reads nothing.
+- **One Notebook for the project.** The notes a team's agents keep are the project's: every team
+  in it reads them. Notes a team kept before it joined the project stay readable.
+- **Lessons about the project.** When the person's feedback teaches an agent something about the
+  project rather than about its kind of work, the learner keeps it as one of the project's notes,
+  by that agent, never in the agent's own lessons, which go with it to other work (ADR 0078).
+- **A project that is gone** stops the team with a message saying to choose its project again.
+  A team read on its own (`loomwatchd run team.yaml` with no teams folder) runs without it.
+- **Every team works in one.** The app moves each team that names no project into a project of its
+  own, named after it, the first time it opens after projects arrived (and any later team it
+  finds without one): the team's Brief becomes the About (one for some agents only stays the
+  team's), and every folder or file connected to its agents becomes one of the project's folders,
+  while the agents keep their own. The daemon keeps a copy of every team file in
+  `<state dir>/backups/<date>-before-projects-<key>/` before the first move.
+- **Limits.** A name of at most 80 characters, an About of at most 4,000, each note at most 500
+  and 40 notes (the oldest goes first); folders by full path or from `~/`.
+
 ## Memory
 
 `memory` is what the team knows before a run starts. The Brief is Markdown beside this file, so it

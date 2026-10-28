@@ -39,6 +39,7 @@ pub mod permissions;
 pub mod pinned;
 pub mod platform;
 pub mod prompt_blocks;
+pub mod projects;
 pub mod runs;
 pub mod schedule;
 pub mod skill_routing;
@@ -330,10 +331,10 @@ async fn run_loaded_team(
         }
     })
     .await?;
-    let memory = Arc::new(memory::TeamMemory::load(
+    let memory = Arc::new(memory::TeamMemory::load_for(
         &memory::MemoryRoots::for_team(team_path, teams_root),
         team_path,
-        team.memory.as_ref(),
+        &team,
     )?);
     // Build every agent's packet now and throw the result away. An oversized pinned Brief must
     // refuse the *run*, not fail whichever stage happens to reach it — a scoped entry that only
@@ -2557,7 +2558,7 @@ impl NotebookSupply<'_> {
             return Ok(());
         };
         let selection = memory::NotebookSelection {
-            team_id: &memory::scope_id(&self.team.id, self.team_path),
+            team_id: &memory::notebook_scope(self.team, self.team_path),
             run_id,
             agent_id,
             lineage,
@@ -4048,6 +4049,7 @@ fn learn_from_checks(
             said: String::new(),
             missed_items: fixed,
             steps: Vec::new(),
+            project: lessons::project_of(team, team_path),
         },
     });
 }
@@ -5289,6 +5291,8 @@ mod tests {
         )]);
 
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "pipeline-test-team".into(),
             name: "Pipeline test team".into(),
@@ -5417,6 +5421,8 @@ mod tests {
             always_allow: Vec::new(),
         }];
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "skill-team".into(),
             name: "Skill".into(),
@@ -5484,6 +5490,8 @@ mod tests {
         let mut agent = pipeline_agent("a", &script);
         agent.done_when = vec!["Every story has a link".into()];
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "done-when-team".into(),
             name: "Done when".into(),
@@ -5621,6 +5629,8 @@ mod tests {
 
     fn check_team(id: &str, agents: Vec<AgentConfig>, edges: &[(&str, &str)]) -> Arc<TeamConfig> {
         Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: id.into(),
             name: id.into(),
@@ -6399,6 +6409,8 @@ mod tests {
             crate::test_support::stand_in(turns).0
         };
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "notebook-checkpoints".into(),
             name: "Notebook checkpoints".into(),
@@ -6480,6 +6492,8 @@ mod tests {
             });
         }
         TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "shape".into(),
             name: "Shape".into(),
@@ -6689,6 +6703,8 @@ mod tests {
     #[test]
     fn a_helpers_long_reply_is_capped_in_the_turn_that_hands_it_back() {
         let team = TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "desk".into(),
             name: "Desk".into(),
@@ -6768,6 +6784,8 @@ mod tests {
         };
 
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "pipeline-diamond-team".into(),
             name: "Pipeline diamond team".into(),
@@ -7141,6 +7159,8 @@ mod tests {
             crate::engine::demo_model(crate::agent::Demo::failing_after(Vec::new(), refusal));
         let reader = never_prompted();
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "refused-pipeline".into(),
             name: "Refused pipeline".into(),
@@ -7211,6 +7231,8 @@ mod tests {
     async fn pipeline_mode_archives_every_node_under_a_pre_minted_session_id() -> Result<()> {
         let pool = crate::db::Db::temp().await;
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "pre-minted-pipeline".into(),
             name: "Pre-minted pipeline".into(),
@@ -7292,6 +7314,8 @@ mod tests {
     async fn team_mode_archives_under_a_pre_minted_session_id() -> Result<()> {
         let pool = crate::db::Db::temp().await;
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "pre-minted-team".into(),
             name: "Pre-minted team".into(),
@@ -7368,6 +7392,8 @@ mod tests {
             })
         }));
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "dispatching-team".into(),
             name: "Dispatching team".into(),
@@ -7648,6 +7674,8 @@ mod tests {
         });
         let model = crate::engine::demo_model(demo.clone());
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "bench-ada".into(),
             name: "Ada · chat".into(),
@@ -7791,6 +7819,8 @@ mod tests {
         );
         let model = crate::engine::demo_model(demo);
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "bench-ada".into(),
             name: "Ada · chat".into(),
@@ -7924,6 +7954,8 @@ mod tests {
             ))
         }));
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "looping-team".into(),
             name: "Looping team".into(),
@@ -8039,6 +8071,8 @@ mod tests {
         let mut worker = pipeline_agent("worker", &never_prompted());
         worker.spend.per_run = Some(0.003);
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "dispatching-team".into(),
             name: "Dispatching team".into(),
@@ -8134,6 +8168,8 @@ mod tests {
             })
         }));
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "asking-team".into(),
             name: "Asking team".into(),
@@ -8219,6 +8255,8 @@ mod tests {
     async fn a_run_with_no_key_fails_and_its_pre_minted_session_says_why() -> Result<()> {
         let pool = crate::db::Db::temp().await;
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "broken".into(),
             name: "Broken harness".into(),
@@ -8303,6 +8341,8 @@ mod tests {
         ]);
 
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "brief-team".into(),
             name: "Brief team".into(),
@@ -8572,6 +8612,8 @@ mod tests {
         ]);
 
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "notebook-team".into(),
             name: "Notebook team".into(),
@@ -8740,6 +8782,8 @@ mod tests {
 
         let never = never_prompted();
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "oversize-team".into(),
             name: "Oversize team".into(),
@@ -9554,6 +9598,8 @@ mod tests {
 
     fn material_team(agents: Vec<AgentConfig>) -> TeamConfig {
         TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "material".into(),
             name: "Material".into(),
@@ -9837,6 +9883,8 @@ mod tests {
         const OUTPUT: &str = "the answer the followed run produced";
         let pool = crate::db::Db::temp().await;
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "follow-up-team".into(),
             name: "Follow-up team".into(),
@@ -10001,6 +10049,8 @@ mod tests {
     -> Result<()> {
         let pool = crate::db::Db::temp().await;
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "follow-failed-team".into(),
             name: "Follow a failed run".into(),
@@ -10173,6 +10223,8 @@ mod tests {
             ts: "2026-09-13T00:00:00Z".into(),
         };
         Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: id.into(),
             name: "Review stop".into(),
@@ -11020,6 +11072,8 @@ mod tests {
         ]);
         let (after, _) = stand_in(vec![turn(&[], "done")]);
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "asking".into(),
             name: "Asking team".into(),
@@ -11674,6 +11728,8 @@ mod tests {
         let mut lead = named("lead", "Lead", &model);
         let team_of = |lead: AgentConfig| {
             Arc::new(TeamConfig {
+                project: None,
+                project_file: None,
                 schema_version: 1,
                 id: "learning-lead".into(),
                 name: "Learning lead".into(),

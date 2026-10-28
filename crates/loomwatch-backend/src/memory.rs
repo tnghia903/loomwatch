@@ -80,6 +80,9 @@ pub struct BriefEntry {
     /// supplies an entry has to say where it came from — the panel labels it, the packet's
     /// rationale names it, and an inherited entry is never editable from here.
     pub origin: Option<String>,
+    /// The project it comes from, by name, when it is the project's About or notes (ADR 0097):
+    /// every team of the project reads it, and it changes only in the project.
+    pub project: Option<String>,
 }
 
 impl BriefEntry {
@@ -95,6 +98,13 @@ impl BriefEntry {
     }
 
     fn render(&self) -> String {
+        if let Some(project) = &self.project {
+            return format!(
+                "### {}\nFrom the project {project}\n{}\n",
+                self.title,
+                self.body.trim()
+            );
+        }
         match &self.origin {
             Some(origin) => format!(
                 "### {}\n{} · inherited from team {origin}\n{}\n",
@@ -114,6 +124,8 @@ impl BriefEntry {
 /// "Reviewer still has the 14:20 version" strip in the panel promises.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TeamMemory {
+    /// The project's About and notes (ADR 0097), first: what the work is, for every team in it.
+    pub project: Vec<BriefEntry>,
     pub brief: Vec<BriefEntry>,
     /// Brief entries read from the teams this team inherits, in the order the `inherits:` list
     /// names them. Pinned exactly like the team's own and labelled with their origin.
@@ -144,6 +156,7 @@ impl Default for TeamMemory {
     /// what they were before memory existed.
     fn default() -> Self {
         Self {
+            project: Vec::new(),
             brief: Vec::new(),
             inherited: Vec::new(),
             inherited_teams: Vec::new(),
@@ -214,6 +227,7 @@ impl TeamMemory {
             .collect::<Result<Vec<_>, _>>()?;
         let inherited = resolve_inherits(roots, team_path, memory)?;
         Ok(Self {
+            project: Vec::new(),
             brief,
             inherited: inherited.brief,
             inherited_teams: inherited.teams,
@@ -224,20 +238,47 @@ impl TeamMemory {
         })
     }
 
+    /// [`Self::load`] for a team as it was read in its teams folder: with the project it works in
+    /// (ADR 0097), whose About and notes come first, and whose Notebook the team reads and keeps
+    /// to. Notes the team kept before it joined the project stay readable.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::load`].
+    pub fn load_for(
+        roots: &MemoryRoots<'_>,
+        team_path: &Path,
+        team: &crate::config::TeamConfig,
+    ) -> Result<Self, MemoryError> {
+        let mut memory = Self::load(roots, team_path, team.memory.as_ref())?;
+        if let (Some(id), Some(project)) = (team.project.as_deref(), team.project_file.as_ref()) {
+            memory.project = project_entries(id, project);
+            let own = scope_id(&team.id, team_path);
+            if !memory.inherited_teams.contains(&own) {
+                memory.inherited_teams.push(own);
+            }
+        }
+        Ok(memory)
+    }
+
     /// Whether this team has anything to supply at all. An empty memory renders nothing and
     /// leaves every prompt byte-identical to a team without a `memory:` block.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.brief.is_empty() && self.inherited.is_empty()
+        self.project.is_empty() && self.brief.is_empty() && self.inherited.is_empty()
     }
 
-    /// Every pinned entry, this team's own first and inherited ones after, in file order.
+    /// Every pinned entry: the project's first, then this team's own, then inherited ones, in file
+    /// order.
     ///
     /// Own-then-inherited is the selection order the design specifies, and it is also the safe
     /// one: when the budget runs out, what a team wrote about itself survives and what it
-    /// borrowed is what gets cut.
+    /// borrowed is what gets cut. The project's About is what the work is (ADR 0097), so it leads.
     pub fn entries(&self) -> impl Iterator<Item = &BriefEntry> {
-        self.brief.iter().chain(self.inherited.iter())
+        self.project
+            .iter()
+            .chain(self.brief.iter())
+            .chain(self.inherited.iter())
     }
 
     /// Brief entries that apply to one agent, in file order.
@@ -877,7 +918,46 @@ fn load_entry(
         applies_to: entry.applies_to.clone(),
         sha256,
         origin,
+        project: None,
     })
+}
+
+/// The project's About and its kept notes as pinned entries (ADR 0097), read from its file.
+fn project_entries(id: &str, project: &crate::projects::Project) -> Vec<BriefEntry> {
+    let path = format!("{}/{id}.yaml", crate::projects::FOLDER);
+    let entry = |title: String, body: String| BriefEntry {
+        sha256: hex(&Sha256::digest(body.as_bytes())),
+        title,
+        path: path.clone(),
+        body,
+        applies_to: None,
+        origin: None,
+        project: Some(project.name.clone()),
+    };
+    let mut entries = Vec::new();
+    if !project.about.trim().is_empty() {
+        entries.push(entry(format!("About {}", project.name), project.about.trim().to_owned()));
+    }
+    if !project.notes.is_empty() {
+        let notes = project
+            .notes
+            .iter()
+            .map(|note| format!("- {}", note.text.trim()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        entries.push(entry("Notes kept in the project".to_owned(), notes));
+    }
+    entries
+}
+
+/// The Notebook scope a team keeps and reads its notes in: its project's, shared by every team in
+/// it (ADR 0097), or its own [`scope_id`] when it works in none.
+#[must_use]
+pub fn notebook_scope(team: &crate::config::TeamConfig, team_path: &Path) -> String {
+    match team.project.as_deref().map(str::trim).filter(|id| !id.is_empty()) {
+        Some(project) => format!("project:{project}"),
+        None => scope_id(&team.id, team_path),
+    }
 }
 
 /// The memory scope for one team: its declared `id`, or its file stem when it has none.
@@ -941,6 +1021,9 @@ fn hex(bytes: &[u8]) -> String {
 
 /// Why one pinned Brief entry is in a packet, naming its origin when it is not this team's own.
 fn brief_rationale(entry: &BriefEntry) -> String {
+    if let Some(project) = &entry.project {
+        return format!("From the project {project}, which every team in it reads.");
+    }
     let scope = match &entry.applies_to {
         Some(agents) => format!("scoped to {}", agents.join(", ")),
         None => "applies to the whole team".to_owned(),
@@ -1382,6 +1465,7 @@ impl Pack {
                 applies_to: None,
                 sha256: actual,
                 origin: Some(manifest.origin_team_id.clone()),
+                project: None,
             });
         }
         let notebook = resolved.join(PACK_NOTEBOOK);

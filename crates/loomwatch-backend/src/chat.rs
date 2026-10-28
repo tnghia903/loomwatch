@@ -2738,6 +2738,7 @@ async fn learn_from_love(
             done_when: agent.done_when.clone(),
             request: task_text(&answered.request, team).to_owned(),
             work,
+            project: crate::lessons::project_of(team, &resolved),
             ..crate::lessons::Learning::default()
         },
     });
@@ -2827,6 +2828,7 @@ async fn learn_from_words(
             said: text.to_owned(),
             missed_items: Vec::new(),
             steps: Vec::new(),
+            project: crate::lessons::project_of(team, &resolved),
         },
     });
 }

@@ -404,6 +404,19 @@ MCP settings is not delivered (`delivery::WiredTool`): LoomWatch's agents don't 
 other apps' settings, which hold those apps' credentials. The run records the tool as unavailable
 (`tools_unavailable`) and goes on without it.
 
+### Projects
+
+Projects hold the work, and My agents hold who does it (ADR 0097). A project is
+`<teams root>/.projects/<id>.yaml` (`projects.rs`): its name, an About, folders every agent in it
+may read, notes, the colour of its mark, and whether it is put away. A team names its project with
+`project: <id>`; `TeamConfig::parse_in` reads the file with the team and gives every agent its
+folders, `memory::TeamMemory::load_for` puts its About and notes first in the packet, and
+`memory::notebook_scope` makes the Notebook the project's. A lesson the learner marks as about the
+project becomes one of its notes. `GET /api/projects` lists each project with its teams' paths and
+the teams in none; `PUT /api/projects/{id}` keeps one whole and `POST /api/projects/{id}/notes`
+adds the person's note. The daemon keeps a copy of every team file once before the app moves each
+team into a project of its own (`/api/move-into-projects`), through its normal save.
+
 ### Ask LoomWatch
 
 Ask (`control/`) is the same agent, on the operator's key and the model they chose, but outside

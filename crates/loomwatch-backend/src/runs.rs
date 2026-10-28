@@ -4097,6 +4097,7 @@ fn learn_from_review(
             request: record.prompt.clone(),
             work: waiting.context.clone().unwrap_or_default(),
             said: text.trim().to_owned(),
+            project: crate::lessons::project_of(&team, &path),
             ..crate::lessons::Learning::default()
         },
     });

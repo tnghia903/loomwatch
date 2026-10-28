@@ -72,6 +72,13 @@ pub struct TeamConfig {
     /// What one run may spend (ADR 0068). Absent: no limit, though spend is still counted.
     #[serde(default)]
     pub spend: crate::spend::SpendConfig,
+    /// The project this team works in (ADR 0097): `<teams root>/.projects/<id>.yaml`.
+    #[serde(default)]
+    pub project: Option<String>,
+    /// That project as it was read with the team. Read only in the teams folder
+    /// ([`Self::parse_in`]): a team read on its own runs without it.
+    #[serde(skip)]
+    pub project_file: Option<crate::projects::Project>,
 }
 
 /// The `permissions:` block (ADR 0061).
@@ -974,6 +981,18 @@ pub struct CapabilityRef {
 const MAX_ALWAYS_ALLOWED: usize = 200;
 
 impl CapabilityRef {
+    /// A folder or file to read, labelled `name`: what a project gives every agent in it (ADR 0097).
+    #[must_use]
+    pub fn knowledge(name: &str, path: PathBuf) -> Self {
+        Self {
+            kind: CapabilityKind::Knowledge,
+            name: name.to_owned(),
+            path: Some(path),
+            notion: None,
+            always_allow: Vec::new(),
+        }
+    }
+
     /// Where a path or a Notion page may appear, and that a Notion page is named by its id.
     fn validate(&self) -> Result<(), String> {
         let (name, kind) = (&self.name, self.kind.as_str());
@@ -1570,7 +1589,16 @@ impl TeamConfig {
         let mut document: serde_yaml::Value =
             serde_yaml::from_str(source).context("invalid team YAML")?;
         crate::my_agents::fill(&mut document, teams_root).map_err(anyhow::Error::msg)?;
-        let team: Self = serde_yaml::from_value(document).context("invalid team YAML")?;
+        let mut team: Self = serde_yaml::from_value(document).context("invalid team YAML")?;
+        // The project it works in: its folders are every agent's to read (ADR 0097), and its About
+        // and notes reach them through the memory packet.
+        if let Some(id) = team.project.as_deref().map(str::trim).filter(|id| !id.is_empty()) {
+            let project = crate::projects::read(teams_root, id)
+                .map_err(anyhow::Error::msg)?
+                .ok_or_else(|| anyhow::Error::msg(crate::projects::missing(id)))?;
+            crate::projects::give_folders(&mut team, &project);
+            team.project_file = Some(project);
+        }
         Self::checked(team)
     }
 

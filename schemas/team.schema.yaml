@@ -22,6 +22,13 @@ properties:
   name:
     type: string
     minLength: 1
+  project:
+    description: >-
+      The project this team works in (ADR 0097): `<teams root>/.projects/<id>.yaml`. Every agent of
+      the team reads the project's About and notes first in what the team knows, may read its
+      folders without asking, and shares its Notebook with the project's other teams.
+    type: string
+    pattern: "^[a-z0-9][a-z0-9-]{0,63}$"
   budget:
     $ref: "#/$defs/RetiredBudget"
   spend:
