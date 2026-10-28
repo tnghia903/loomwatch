@@ -14,7 +14,7 @@ import { answerTeamRequest, fetchTeamRequests, type TeamRequest } from '../lib/r
 import type { Ticket } from '../lib/story/needsYou'
 import { fetchTeamFile } from '../lib/team-file/client'
 import { inApp, listen, openInLoomWatch, tellApp } from './bridge'
-import { takeDropped } from './dropped'
+import { pickFiles } from './dropped'
 import { sortDropped } from './readable'
 import type { Intake } from './intake'
 import { pinnedNow, pinnedWorking, sendToPinned, type PinnedNow } from './pinned'
@@ -24,6 +24,7 @@ import { copyText, tucked, type TeamNow, type Tucked } from './teams'
 import { ISLAND_WAITS } from './waits'
 
 const NO_TEAMS: TeamNow[] = []
+const NONE_UPLOADED: ReadonlySet<File> = new Set()
 
 /** How far back the island looks for finished runs: an hour, as the menu bar does. */
 const FINISHED_WITHIN_SECONDS = 60 * 60
@@ -91,6 +92,8 @@ export interface Island {
   setDraft: (text: string) => void
   pinnedWorking: boolean
   sending: boolean
+  /** While a message goes, the files of it already with its agent, each as its upload ends. */
+  uploaded: ReadonlySet<File>
   sent: { ok: boolean; text: string } | null
   /** What was just sent, for a moment, as it folds into the agent's head, from where it was
       written (`from`, in the page; `null` when that couldn't be told). */
@@ -111,6 +114,11 @@ export interface Island {
   drop: (intake: Intake, folders?: readonly string[]) => void
   dragOver: (over: boolean) => void
   clearIntake: () => void
+  /** Take one of the files waiting out. */
+  takeOut: (file: File) => void
+  /** Choose files to go to the box's agent, as a drop of them: + in the box. Chosen or not, the
+      box is written in again after. */
+  chooseFiles: () => void
   /** The whole answer of a finished turn of the pinned agent, once read: what its card shows, and
       what Copy takes. `null` until then, when Copy is off. */
   answerOf: (team: TeamNow) => WholeAnswer | null
@@ -140,6 +148,7 @@ export function useIsland(): Island {
   const [savedRead, setSavedRead] = useState(false)
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
+  const [uploaded, setUploaded] = useState<ReadonlySet<File>>(NONE_UPLOADED)
   const [sent, setSent] = useState<{ ok: boolean; text: string } | null>(null)
   const [folding, setFolding] = useState<Island['folding']>(null)
 
@@ -169,7 +178,7 @@ export function useIsland(): Island {
     const stop = listen((message) => {
       if (message.kind === 'seen') for (const run of message.runs) toldSeen.current.add(run)
       if (message.kind === 'dropped') {
-        takeDropped((files) => dropping.current({ files, link: null, text: null }))
+        pickFiles((files) => dropping.current({ files, link: null, text: null }))
         return
       }
       dispatch({ type: 'app', message })
@@ -345,15 +354,17 @@ export function useIsland(): Island {
     const text = (job ?? draft).trim()
     if (!text || !box || sending) return
     // The words fold from where they are written: the field's place now, before sending disables it.
-    const field = document.querySelector('.island-field')?.getBoundingClientRect()
-    const from = field ? { x: field.left + 14, y: field.top + 7 } : null
+    const input = document.querySelector('.island-field')
+    const field = input?.getBoundingClientRect()
+    const from = input && field ? { x: field.left + (parseFloat(getComputedStyle(input).paddingLeft) || 0), y: field.top + 7 } : null
     setSending(true)
+    setUploaded(NONE_UPLOADED)
     setSent(null)
     // The first message from the box to an agent not yet pinned pins it: its work and answer then
     // come back here, and the box opens with it next time.
     const pinFirst = pinned?.id === box.id ? Promise.resolve() : pinAgent(box.id).then((now) => setPinnedId(now.agent))
     pinFirst
-      .then(() => sendToPinned(box, text, records.current, intake))
+      .then(() => sendToPinned(box, text, records.current, intake, (file) => setUploaded((before) => new Set(before).add(file))))
       .then(() => {
         if (job === undefined) setDraft('')
         dispatch({ type: 'intakeDone' })
@@ -364,7 +375,10 @@ export function useIsland(): Island {
         dispatch({ type: 'sent' })
         read()
       }, () => setSent({ ok: false, text: `That didn’t go through. Try again, or open ${box.name}’s chat.` }))
-      .finally(() => setSending(false))
+      .finally(() => {
+        setSending(false)
+        setUploaded(NONE_UPLOADED)
+      })
   }, [draft, box, pinned, sending, intake, putAway, read])
 
   // The whole answer of each finished turn of the pinned agent, read once: the run's reply, or for
@@ -495,6 +509,7 @@ export function useIsland(): Island {
     setDraft,
     pinnedWorking: box ? pinnedWorking(state.records, box) : false,
     sending,
+    uploaded,
     sent,
     folding,
     compose,
@@ -510,6 +525,8 @@ export function useIsland(): Island {
     drop,
     dragOver: useCallback((over: boolean) => dispatch({ type: 'dragOver', over }), []),
     clearIntake: useCallback(() => dispatch({ type: 'intakeDone' }), []),
+    takeOut: useCallback((file: File) => dispatch({ type: 'intakeLess', file }), []),
+    chooseFiles: useCallback(() => pickFiles((files) => dropping.current({ files, link: null, text: null }), () => compose(true)), [compose]),
     answerOf,
     copy,
     copied,

@@ -9,7 +9,7 @@ import { createPortal } from 'react-dom'
 
 import { AgentFigure } from '../components/agents/benchFigure'
 import { FigureStill } from '../components/agents/FigureStill'
-import { ArrowUp, CornerDownLeft } from 'lucide-react'
+import { ArrowUp, CornerDownLeft, Plus } from 'lucide-react'
 
 import { LoomMark, StatusGlyph } from '../components/ui/glyphs'
 import { dropped } from '../lib/chat/attachments'
@@ -29,6 +29,8 @@ import { InlineMarkdown } from '../components/ui/Markdown'
 
 /** Rows in the list before "N more teams in LoomWatch", as in the menu. */
 const LIST_ROWS = 5
+/** While files wait in the box, which takes their room in the panel: the rest are counted. */
+const LIST_ROWS_WITH_FILES = 2
 /** Other agents shown beside the box before "+N"; Tab reaches every one. */
 const OTHER_AGENTS = 5
 
@@ -451,7 +453,7 @@ function List({ island, mode, benchSlot, openedFrom, ear }: { island: IslandStat
   // A team the pinned agent started works on its stage, in its row; a question from it stays a row.
   const crews = island.teams.filter((team) => team.crewFor && team.moment === 'work')
   const teams = mode !== 'list' || island.bench ? [] : island.teams.filter((team) => !team.pinned && !(team.crewFor && team.moment === 'work'))
-  const rows = teams.slice(0, LIST_ROWS)
+  const rows = teams.slice(0, island.intake?.files.length ? LIST_ROWS_WITH_FILES : LIST_ROWS)
   const more = teams.length - rows.length
   const firstPermission = [...(pinnedWork ? [pinnedWork] : []), ...rows].flatMap((team) => team.asks.filter((ask) => team.quick.includes(ask.id)))[0]?.id
   // The island grows to the list's height, which only the drawn list knows.
@@ -536,13 +538,18 @@ function PinnedRow({ island, work, crews, firstPermission, watching, foot, flyin
   const others = island.agents.filter((agent) => agent.id !== pinned.id)
   const field = useRef<HTMLInputElement>(null)
   // Writing began without the box, from ⌃⌥Space or a drop, and the app gave the panel the
-  // keyboard: the box takes it. Only then; pointing at the notch never does.
+  // keyboard: the box takes it. Only then; pointing at the notch never does. Files chosen with +
+  // come back to a field that kept the page's focus while the Open panel had the keyboard: the box
+  // asks for the keyboard again, so what is typed next comes here.
   const writing = island.composing
+  const { compose } = island
   useEffect(() => {
+    if (!writing) return
     // Without scrolling: the box is still growing, and WebKit scrolled the island to show the field,
     // lifting the agent's row, head first, out of its top.
-    if (writing && document.activeElement !== field.current) field.current?.focus({ preventScroll: true })
-  }, [writing])
+    if (document.activeElement !== field.current) field.current?.focus({ preventScroll: true })
+    else if (!document.hasFocus()) compose(true)
+  }, [writing, compose])
   const moment = work?.moment ?? 'ready'
   const phase = useActing(work, work?.agent ?? null, island.now)
   const teamAsk = work?.teamAsks?.[0]
@@ -637,8 +644,13 @@ function PinnedRow({ island, work, crews, firstPermission, watching, foot, flyin
         }}
       >
         {/* Send is a mark in the field's end, there once something is written; Enter sends too. A
-            note while it works is the team chat's mark for one: a return arrow, not up. */}
+            note while it works is the team chat's mark for one: a return arrow, not up. + at its
+            start chooses files to go with it, as dropping them does; pressing it keeps the keyboard
+            in the box, as pressing a figure does. */}
         <span className="island-field-box" data-written={island.draft.trim() ? '' : undefined}>
+        <button type="button" className="island-add" aria-label="Add pictures or files" title="Add pictures or files" disabled={island.sending} onPointerDown={(event) => event.preventDefault()} onClick={island.chooseFiles}>
+          <Plus size={16} aria-hidden="true" />
+        </button>
         <input
           ref={field}
           className="island-field"

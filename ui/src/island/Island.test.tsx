@@ -32,6 +32,8 @@ let sendFails = false
 let requests: TeamRequest[] = []
 const answeredTeams: { id: string; decision: string }[] = []
 const uploads: string[] = []
+/** Uploads held back, by file name, until their promise settles. */
+let holdUploads: Partial<Record<string, Promise<void>>> = {}
 let jobs: SavedJob[] = []
 const posted: { url: string; body: unknown }[] = []
 /** Team files written, and messages sent to a chat. */
@@ -71,6 +73,7 @@ beforeEach(() => {
   requests = []
   answeredTeams.length = 0
   uploads.length = 0
+  holdUploads = {}
   jobs = []
   posted.length = 0
   wrote.length = 0
@@ -109,6 +112,7 @@ beforeEach(() => {
     }
     if (url.startsWith('/api/chat/files?')) {
       const name = new URLSearchParams(url.split('?')[1]).get('name')!
+      if (holdUploads[name]) await holdUploads[name]
       uploads.push(name)
       return json({ name, path: `/teams/.jobs/.bench/files/${name}`, bytes: 10, picture: false })
     }
@@ -1329,14 +1333,19 @@ describe('the notch as the pinned agent’s slot, and its crew', () => {
     const shape = container.querySelector<HTMLElement>('.island-shape')!
     fireEvent.dragEnter(shape, carrying([pdf]))
     expect(island.getAttribute('data-view')).toBe('slot')
-    expect(getByRole('status', { name: 'Drop it here for Maya' })).toBeTruthy()
+    // A tray in a gold line, with Maya behind it.
+    const slot = getByRole('status', { name: 'Drop it here for Maya' })
+    expect(slot.querySelector('.island-tray rect')).toBeTruthy()
+    expect(slot.querySelector('.island-tray-figure .figure-still, .island-tray-figure img')).toBeTruthy()
     fireEvent.drop(shape, carrying([pdf]))
     // The slot stays open while what was dropped is sorted, then the list opens to write.
     expect(island.getAttribute('data-view')).toBe('slot')
     await waitFor(() => expect(island.getAttribute('data-view')).toBe('list'))
-    // What went in, the jobs that fit it, and a box for your own words, which has the keyboard.
+    // What went in, as a page marked PDF with its name under it, the jobs that fit it, and a box
+    // for your own words, which has the keyboard.
     const row = within(container.querySelector<HTMLElement>('.island-pinned')!)
-    expect(row.getByText('Lease 2027.pdf')).toBeTruthy()
+    const lease = row.getByRole('listitem', { name: 'Lease 2027.pdf' })
+    expect([lease.querySelector('.island-file-face.is-page')?.textContent, lease.querySelector('.island-file-name')?.textContent]).toEqual(['PDF', 'Lease 2027'])
     expect(row.getAllByRole('button').map((button) => button.textContent)).toEqual(expect.arrayContaining(['What should I check?', 'Summarize it', 'Pull out the dates']))
     const field = await findByRole('textbox', { name: 'Or say what to do' })
     await waitFor(() => expect(document.activeElement).toBe(field))
@@ -1439,7 +1448,7 @@ describe('the notch as the pinned agent’s slot, and its crew', () => {
     fireEvent.drop(shape, carrying([pdf, recording]))
     await waitFor(() => expect(within(container).getByRole('alert').textContent).toBe('Left out Call with landlord.m4a. Maya can’t listen to recordings.'))
     const row = within(container.querySelector<HTMLElement>('.island-pinned')!)
-    expect(row.getByText('Lease 2027.pdf')).toBeTruthy()
+    expect(row.getAllByRole('listitem').map((file) => file.getAttribute('aria-label'))).toEqual(['Lease 2027.pdf'])
     fireEvent.click(row.getByRole('button', { name: 'What should I check?' }))
     await waitFor(() => expect(messages).toHaveLength(1))
     expect(uploads).toEqual(['Lease 2027.pdf'])
@@ -1457,7 +1466,7 @@ describe('the notch as the pinned agent’s slot, and its crew', () => {
     const plan = new File([new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x00])], 'Budget plan.pages')
     fireEvent.dragEnter(shape, carrying([pdf, plan]))
     fireEvent.drop(shape, carrying([pdf, plan]))
-    await waitFor(() => expect(within(container).getByRole('alert').textContent).toBe('Left out Budget plan.pages. Maya can’t open Pages files. In Pages, choose File › Export To › PDF, then drop the PDF.'))
+    await waitFor(() => expect(within(container).getByRole('alert').textContent).toBe('Left out Budget plan.pages. Maya can’t open Pages files. In Pages, choose File › Export To › PDF, then add the PDF.'))
     // The list closes while the person exports it: the line stays with the lease that waits.
     tellPage({ kind: 'clickOutside' })
     await waitFor(() => expect(container.querySelector('.island')!.getAttribute('data-view')).not.toBe('list'))
@@ -1467,13 +1476,218 @@ describe('the notch as the pinned agent’s slot, and its crew', () => {
     const exported = new File(['%PDF-1.7 plan'], 'Budget plan.pdf', { type: 'application/pdf' })
     fireEvent.dragEnter(shape, carrying([exported]))
     fireEvent.drop(shape, carrying([exported]))
-    await waitFor(() => expect(container.querySelector('.island-intake-what')?.textContent).toBe('2 files×'))
+    await waitFor(() => expect(names(container)).toEqual(['Lease 2027.pdf', 'Budget plan.pdf']))
     const row = within(container.querySelector<HTMLElement>('.island-pinned')!)
     expect(within(container).queryByRole('alert')).toBeNull()
     fireEvent.click(row.getByRole('button', { name: 'Summarize each' }))
     await waitFor(() => expect(messages).toHaveLength(1))
     expect(uploads).toEqual(['Lease 2027.pdf', 'Budget plan.pdf'])
   }, 15_000)
+
+  const budget = new File(['Month,Rent\nMarch,1200\n'], 'Budget.csv', { type: 'text/csv' })
+  const names = (container: HTMLElement) => [...container.querySelectorAll('.island-pinned .island-file')].map((file) => file.getAttribute('aria-label'))
+
+  it('takes one dropped file out with its ×, and sends only what is left', async () => {
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
+    const shape = container.querySelector<HTMLElement>('.island-shape')!
+    fireEvent.drop(shape, carrying([pdf, budget]))
+    await waitFor(() => expect(names(container)).toEqual(['Lease 2027.pdf', 'Budget.csv']))
+    // Each file is a page with its kind on it and its name under it; both together, the jobs for files.
+    expect([...container.querySelectorAll('.island-file-face.is-page')].map((page) => page.textContent)).toEqual(['PDF', 'CSV'])
+    expect([...container.querySelectorAll('.island-file-name')].map((name) => name.textContent)).toEqual(['Lease 2027', 'Budget'])
+    const row = within(container.querySelector<HTMLElement>('.island-pinned')!)
+    expect(row.getByRole('button', { name: 'Compare them' })).toBeTruthy()
+    // The lease out, as the team chat says it, the keyboard staying in the box: the budget stays,
+    // and the jobs are a table's.
+    expect(within(container).getByRole('list', { name: 'Going with your message' })).toBeTruthy()
+    const notLease = row.getByRole('button', { name: 'Don’t send Lease 2027.pdf' })
+    expect(fireEvent.pointerDown(notLease)).toBe(false)
+    fireEvent.click(notLease)
+    expect(names(container)).toEqual(['Budget.csv'])
+    expect(row.getByRole('button', { name: 'What stands out?' })).toBeTruthy()
+    // The last one out: nothing waits.
+    fireEvent.click(row.getByRole('button', { name: 'Don’t send Budget.csv' }))
+    expect(container.querySelector('.island-intake')).toBeNull()
+    // Dropped again, only what is there goes.
+    fireEvent.drop(shape, carrying([pdf]))
+    await waitFor(() => expect(names(container)).toEqual(['Lease 2027.pdf']))
+    fireEvent.click(within(container.querySelector<HTMLElement>('.island-pinned')!).getByRole('button', { name: 'Summarize it' }))
+    await waitFor(() => expect(messages).toHaveLength(1))
+    expect(uploads).toEqual(['Lease 2027.pdf'])
+  }, 15_000)
+
+  it('+ in the box chooses files through the picker the app answers, and they join what waits', async () => {
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
+    tellPage({ kind: 'compose' })
+    const add = await within(container).findByRole('button', { name: 'Add pictures or files' })
+    // Pressing it keeps the keyboard in the box.
+    expect(fireEvent.pointerDown(add)).toBe(false)
+    let chosen: File[] = []
+    const asked: HTMLInputElement[] = []
+    const click = vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(function (this: HTMLInputElement) {
+      asked.push(this)
+      Object.defineProperty(this, 'files', { value: chosen })
+      this.dispatchEvent(new Event('change'))
+    })
+    chosen = [pdf]
+    fireEvent.click(add)
+    await waitFor(() => expect(names(container)).toEqual(['Lease 2027.pdf']))
+    chosen = [budget]
+    fireEvent.click(within(container).getByRole('button', { name: 'Add pictures or files' }))
+    await waitFor(() => expect(names(container)).toEqual(['Lease 2027.pdf', 'Budget.csv']))
+    click.mockRestore()
+    // One picker each time, for several files, gone once it has answered.
+    expect(asked.map((picker) => [picker.type, picker.multiple, picker.isConnected])).toEqual([['file', true, false], ['file', true, false]])
+    const field = within(container).getByRole('textbox', { name: 'Or say what to do' })
+    fireEvent.change(field, { target: { value: 'Can I afford it?' } })
+    fireEvent.submit(field.closest('form')!)
+    await waitFor(() => expect(messages).toHaveLength(1))
+    expect(uploads).toEqual(['Lease 2027.pdf', 'Budget.csv'])
+  }, 15_000)
+
+  it('after + the box asks for the keyboard again, whether files were chosen or the Open panel was cancelled', async () => {
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
+    tellPage({ kind: 'compose' })
+    const field = await within(container).findByRole('textbox', { name: 'Message Maya' })
+    await waitFor(() => expect(document.activeElement).toBe(field))
+    // The Open panel takes the keyboard: the field loses it but stays the page's focused element.
+    const focused = vi.spyOn(document, 'hasFocus').mockReturnValue(false)
+    let answer: (picker: HTMLInputElement) => void = () => {}
+    const click = vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(function (this: HTMLInputElement) { answer(this) })
+    const asks = () => toApp.filter((message) => JSON.stringify(message) === JSON.stringify({ kind: 'keyboard', on: true })).length
+    // Cancelled: the box asks for it back.
+    answer = (picker) => {
+      fireEvent.blur(field)
+      picker.dispatchEvent(new Event('cancel'))
+    }
+    let before = asks()
+    fireEvent.click(within(container).getByRole('button', { name: 'Add pictures or files' }))
+    expect(asks()).toBe(before + 1)
+    expect(container.querySelector('.island')!.getAttribute('data-view')).toBe('list')
+    // Chosen: the files arrive in the box, and it asks for the keyboard again.
+    answer = (picker) => {
+      fireEvent.blur(field)
+      Object.defineProperty(picker, 'files', { value: [pdf] })
+      picker.dispatchEvent(new Event('change'))
+    }
+    before = asks()
+    fireEvent.click(within(container).getByRole('button', { name: 'Add pictures or files' }))
+    await waitFor(() => expect(names(container)).toEqual(['Lease 2027.pdf']))
+    await waitFor(() => expect(asks()).toBe(before + 1))
+    expect(document.activeElement).toBe(within(container).getByRole('textbox', { name: 'Or say what to do' }))
+    click.mockRestore()
+    focused.mockRestore()
+  }, 15_000)
+
+  it('as a message goes, each file shows a line until it is with Maya, then a tick; if it fails, they wait as before', async () => {
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
+    const shape = container.querySelector<HTMLElement>('.island-shape')!
+    fireEvent.drop(shape, carrying([pdf, budget]))
+    await waitFor(() => expect(names(container)).toEqual(['Lease 2027.pdf', 'Budget.csv']))
+    const file = (name: string) => container.querySelector<HTMLElement>(`.island-file[aria-label^="${name}"]`)!
+    // It fails: the files wait as they were, each with its ×.
+    sendFails = true
+    fireEvent.click(within(container).getByRole('button', { name: 'Compare them' }))
+    await within(container).findByText('That didn’t go through. Try again, or open Maya’s chat.')
+    expect(container.querySelectorAll('.island-file-in, .island-file-line')).toHaveLength(0)
+    expect(within(container).getAllByRole('button', { name: /^Don’t send / })).toHaveLength(2)
+    // Again, with the lease slow to arrive: the budget is in, the lease on its way, and none can be
+    // taken out while they go.
+    sendFails = false
+    let arrive = () => {}
+    holdUploads = { 'Lease 2027.pdf': new Promise<void>((done) => { arrive = done }) }
+    uploads.length = 0
+    fireEvent.click(within(container).getByRole('button', { name: 'Compare them' }))
+    await waitFor(() => expect(file('Budget.csv').querySelector('.island-file-in')).toBeTruthy())
+    expect([file('Budget.csv').getAttribute('aria-label'), file('Budget.csv').getAttribute('aria-busy')]).toEqual(['Budget.csv, with Maya', 'false'])
+    expect(file('Lease 2027.pdf').getAttribute('aria-busy')).toBe('true')
+    expect(file('Lease 2027.pdf').querySelector('.island-file-line')).toBeTruthy()
+    expect(file('Lease 2027.pdf').querySelector('.island-file-in')).toBeNull()
+    expect(within(container).queryAllByRole('button', { name: /^Don’t send / })).toHaveLength(0)
+    expect(messages).toHaveLength(0)
+    arrive()
+    await waitFor(() => expect(messages).toHaveLength(1))
+    expect(uploads).toEqual(['Budget.csv', 'Lease 2027.pdf'])
+    expect(container.querySelector('.island-files')).toBeNull()
+  }, 15_000)
+
+  it('while files wait in the box, two teams show and the rest are counted, so the box keeps its room', async () => {
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    runs = ['r1', 'r2', 'r3', 'r4'].map((id, index) => run(id, { teamPath: `team${index}.yaml`, teamName: `Team ${index + 1}`, working: ['writer'] }))
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
+    await waitFor(() => expect(container.querySelector('.island')?.getAttribute('data-view')).toBe('tucked'))
+    fireEvent.pointerEnter(container.querySelector('.island-shape')!, { pointerType: 'mouse' })
+    const teamRows = () => container.querySelectorAll('.island-row:not(.island-pinned)').length
+    await waitFor(() => expect(teamRows()).toBe(4))
+    fireEvent.drop(container.querySelector<HTMLElement>('.island-shape')!, carrying([pdf, budget]))
+    await waitFor(() => expect(names(container)).toEqual(['Lease 2027.pdf', 'Budget.csv']))
+    expect(teamRows()).toBe(2)
+    expect(container.querySelector('.island-list-foot')?.textContent).toContain('2 more teams in LoomWatch')
+    // Taken out, the teams come back.
+    fireEvent.click(within(container).getByRole('button', { name: 'Don’t send Lease 2027.pdf' }))
+    fireEvent.click(within(container).getByRole('button', { name: 'Don’t send Budget.csv' }))
+    expect(teamRows()).toBe(4)
+  }, 15_000)
+
+  it('shows a dropped picture as itself, and lets it go once it is taken out', async () => {
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    const made = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:kyoto')
+    const letGo = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
+    const photo = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])], 'Kyoto trip.png', { type: 'image/png' })
+    fireEvent.drop(container.querySelector<HTMLElement>('.island-shape')!, carrying([photo, pdf]))
+    await waitFor(() => expect(container.querySelector('.island-file[aria-label="Kyoto trip.png"] img')?.getAttribute('src')).toBe('blob:kyoto'))
+    // Only the picture is drawn from its file; the lease is a page.
+    expect(made.mock.calls.map(([file]) => (file as File).name)).toEqual(['Kyoto trip.png'])
+    expect(container.querySelector('.island-file[aria-label="Lease 2027.pdf"] img')).toBeNull()
+    fireEvent.click(within(container).getByRole('button', { name: 'Don’t send Kyoto trip.png' }))
+    expect(letGo).toHaveBeenCalledWith('blob:kyoto')
+    expect(names(container)).toEqual(['Lease 2027.pdf'])
+    made.mockRestore()
+    letGo.mockRestore()
+  }, 15_000)
+
+  it('opens as a tray in a gold line with Maya behind it, which reduced motion holds still', () => {
+    const rules = rulesOf(readFileSync(resolve(process.cwd(), 'src/island/island.css'), 'utf8'))
+    const css = readFileSync(resolve(process.cwd(), 'src/island/island.css'), 'utf8')
+    const reduced = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)'))
+    // Gold is a line here, never a fill: the tray is the notch's black, tinted.
+    const tray = document.createElement('span')
+    tray.className = 'island-tray'
+    tray.innerHTML = '<svg><rect></rect></svg>'
+    document.body.append(tray)
+    expect(cascaded(tray, 'background', DESKTOP, rules)).toBe('var(--color-accent-tint)')
+    // Its edge is a dashed gold line, which runs; a file on its way has a running line. Reduced
+    // motion stops both, and the line stands part way along instead.
+    const edge = tray.querySelector('rect')!
+    expect([cascaded(edge, 'fill', DESKTOP, rules), cascaded(edge, 'stroke', DESKTOP, rules), cascaded(edge, 'stroke-dasharray', DESKTOP, rules)]).toEqual(['none', 'var(--color-accent)', '7 6'])
+    expect(cascaded(edge, 'animation', DESKTOP, rules)).toMatch(/^island-tray-edge /)
+    tray.remove()
+    expect(reduced).toContain('.island *, .island *::before, .island *::after { animation: none !important; }')
+    expect(reduced).toContain('.island-file-line::after { translate: 50% 0; }')
+  })
 
   it('sends a dropped link with the job picked, and opens when the app says something is dragged near', async () => {
     pinnedAgent = 'maya'
@@ -1557,9 +1771,10 @@ describe('the notch as the pinned agent’s slot, and its crew', () => {
     await waitFor(() => expect(row.querySelector('.island-for')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('to First-principles school · no spending limit'))
     await waitFor(() => expect(row.querySelectorAll('.island-crew-figure')).toHaveLength(2))
     expect(row.querySelector('.island-request')?.querySelectorAll('small')).toHaveLength(1)
-    // Start sits where Send would, and is the only other button but her figure, her workbench's.
+    // Start sits where Send would, and is the only other button but her figure, her workbench's,
+    // and + to add files to the message.
     const field = inRow.getByRole('textbox', { name: 'Or message Maya' })
-    expect(inRow.getAllByRole('button').map((button) => button.getAttribute('aria-label') ?? button.textContent)).toEqual(['See Maya’s workbench', 'Don’t start First-principles school', 'Start First-principles school'])
+    expect(inRow.getAllByRole('button').map((button) => button.getAttribute('aria-label') ?? button.textContent)).toEqual(['See Maya’s workbench', 'Don’t start First-principles school', 'Add pictures or files', 'Start First-principles school'])
     expect(field.closest('form')?.contains(inRow.getByRole('button', { name: 'Start First-principles school' }))).toBe(true)
     // Writing something else brings Send back; an empty box, Start.
     fireEvent.change(field, { target: { value: 'Make it shorter first' } })

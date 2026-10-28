@@ -7,7 +7,7 @@ import type { FromApp } from './bridge'
 import { withPinned, type PinnedNow } from './pinned'
 import { advance, arrive, next, NOTHING_OUT, tuckNow, tuckOnClick, type Circumstances, type PopState } from './popouts'
 import type { TeamRequest } from '../lib/runs/teamRequests'
-import { withDropped, type Intake } from './intake'
+import { withDropped, withoutFile, type Intake } from './intake'
 import { momentsBetween, teamAskKey, teamsNow, tucked, type Pop, type PopKind, type TeamNow } from './teams'
 import { ISLAND_WAITS } from './waits'
 
@@ -120,6 +120,8 @@ export type IslandAction =
   | { type: 'drop'; intake: Intake | null; away?: string | null }
   /** What was dropped went with a message, or was put away. */
   | { type: 'intakeDone' }
+  /** One of the files waiting is taken out. */
+  | { type: 'intakeLess'; file: File }
 
 export function initialIsland(now: number, inApp: boolean): IslandState {
   return {
@@ -230,6 +232,9 @@ export function islandReducer(state: IslandState, action: IslandAction & { now: 
     case 'intakeDone':
       s = { ...s, intake: null, away: null }
       break
+    case 'intakeLess':
+      s = { ...s, intake: s.intake && withoutFile(s.intake, action.file) }
+      break
   }
   // What a drop left out is said while what went in waits, or the list is open.
   return settle(s.listOpen || s.intake || !s.away ? s : { ...s, away: null })
@@ -271,7 +276,7 @@ function fromApp(s: IslandState, message: FromApp): IslandState {
     case 'seen':
       return markSeen(s, message.runs)
     case 'dropped':
-      // The files come as a drop of their own, once the page's picker has them (`takeDropped`).
+      // The files come as a drop of their own, once the page's picker has them (`pickFiles`).
       return s
   }
 }

@@ -1,8 +1,9 @@
-// The agent pinned to the notch, drawn (ADR 0083, decisions 9 and 10): the slot that opens when
+// The agent pinned to the notch, drawn (ADR 0083, decisions 9 and 10): the tray that opens when
 // something is dragged near, what went in waiting for a job, its answer with Copy, its request to
 // start one of your teams in its own words, and the team it started at work under the notch as its
 // crew.
-import { Check, Copy } from 'lucide-react'
+import { Check, Copy, Mail, X } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 
 import { FigureStill } from '../components/agents/FigureStill'
 import type { WorkPhase } from '../lib/library/figure'
@@ -11,44 +12,110 @@ import { dollars } from '../lib/runs/spend'
 import type { TeamRequest } from '../lib/runs/teamRequests'
 import { useRunSession } from '../lib/runs/useRunSession'
 import { workPhase } from '../lib/watch/workPhase'
-import { intakeLabel, jobsFor, kindOf } from './intake'
+import { extensionOf } from '../lib/files/fileRefs'
+import { intakeLabel, isEmail, isPicture, jobsFor, kindOf, tileName } from './intake'
 import { plainText, type TeamNow } from './teams'
 import type { Island } from './useIsland'
 import { useRunLimit } from './useRunLimit'
 import { InlineMarkdown } from '../components/ui/Markdown'
 import { plainWords } from '../lib/chat/findWords'
 
-/** The open slot: a gold lip along the island's edge, and the box's agent's eyes over it. */
+/** The open slot: a tray drawn in a gold line, and the box's agent behind it, ready to take it. */
 export function Slot({ island }: { island: Island }) {
   const agent = island.box
   if (!agent) return null
   return (
     <div className="island-slot-open" role="status" aria-label={`Drop it here for ${agent.name}`}>
-      <span className="island-slot-eyes glow" data-moment="ready" aria-hidden="true">
+      <span className="island-tray-figure glow" data-moment="ready" aria-hidden="true">
         <FigureStill figure={figureFor(agent.id, agent.job.figure)} alt="" />
       </span>
-      <i className="island-slot-lip" aria-hidden="true" />
+      <span className="island-tray" aria-hidden="true">
+        <svg><rect width="100%" height="100%" rx="16" pathLength="728" /></svg>
+      </span>
     </div>
   )
 }
 
-/** What was dropped into the slot, and the jobs that fit it; the box under them takes your own. */
+/** What was dropped into the slot, and the jobs that fit it; the box under them takes your own.
+    Files show one by one, each to take out on its own; a link or some text, as one. */
 export function IntakeJobs({ island }: { island: Island }) {
   const intake = island.intake
   if (!intake) return null
   const [first, ...rest] = jobsFor(kindOf(intake))
   return (
     <div className="island-intake">
-      <span className="island-intake-what">
-        <span>{intakeLabel(intake)}</span>
-        <button type="button" className="island-intake-remove" aria-label="Take it out" onClick={island.clearIntake}>×</button>
-      </span>
+      {intake.files.length > 0 ? (
+        <ul className="island-files" aria-label="Going with your message">
+          {intake.files.map((file) => <FileTile key={`${file.name}\n${file.size}`} island={island} file={file} />)}
+        </ul>
+      ) : (
+        <span className="island-intake-what">
+          <span>{intakeLabel(intake)}</span>
+          <button type="button" className="island-intake-remove" aria-label="Don’t send it" onPointerDown={(event) => event.preventDefault()} onClick={island.clearIntake}>×</button>
+        </span>
+      )}
       <span className="island-jobs">
         {[first, ...rest].map((job, index) => (
           <button key={job} type="button" className={`island-chip${index === 0 ? ' is-likely' : ''}`} disabled={island.sending} onClick={() => island.send(job)}>{job}</button>
         ))}
       </span>
     </div>
+  )
+}
+
+/** A picture drawn from the file itself, with no request; its address is let go once it is out. */
+function Picture({ file, unreadable }: { file: File; unreadable: () => void }) {
+  const picture = useRef<HTMLImageElement>(null)
+  useEffect(() => {
+    const drawn = picture.current
+    if (!drawn) return
+    const address = URL.createObjectURL(file)
+    drawn.src = address
+    return () => {
+      drawn.removeAttribute('src')
+      URL.revokeObjectURL(address)
+    }
+  }, [file])
+  return <img ref={picture} alt="" decoding="async" onError={unreadable} />
+}
+
+/** A file's name under its tile: as it wraps, or cut into its first and last words. */
+function TileName({ lines }: { lines: readonly string[] }) {
+  if (lines.length === 1) return <span className="island-file-name" aria-hidden="true">{lines[0]}</span>
+  return (
+    <span className="island-file-name is-cut" aria-hidden="true">
+      {lines.map((line, index) => <span key={index}>{line}</span>)}
+    </span>
+  )
+}
+
+/**
+ * A file waiting to go: the picture itself, or a page with its kind on it (an envelope for an
+ * email), its name under it, and × to take it out, as the team chat has it. As the message goes, a
+ * line runs along it until it is with the agent, then it has a tick. Pressing × keeps the keyboard
+ * in the box, as pressing a figure does.
+ */
+function FileTile({ island, file }: { island: Island; file: File }) {
+  const [unreadable, setUnreadable] = useState(false)
+  const arrived = island.uploaded.has(file)
+  const going = island.sending && !arrived
+  const extension = extensionOf(file.name).toUpperCase()
+  const drawn = isPicture(file) && !unreadable
+  return (
+    <li className={`island-file${going ? ' is-going' : ''}`} aria-label={arrived ? `${file.name}, with ${island.box?.name ?? 'the agent'}` : file.name} title={file.name} aria-busy={going}>
+      <span className={`island-file-face${drawn ? '' : ' is-page'}`} aria-hidden="true">
+        {drawn ? <Picture file={file} unreadable={() => setUnreadable(true)} /> : isEmail(file) ? <Mail size={20} /> : extension && <b>{extension}</b>}
+        {going && <i className="island-file-line" />}
+      </span>
+      <TileName lines={tileName(file)} />
+      {arrived ? (
+        <span className="island-file-in" aria-hidden="true"><Check size={12} strokeWidth={3} /></span>
+      ) : !island.sending && (
+        <button type="button" className="island-file-remove" aria-label={`Don’t send ${file.name}`} onPointerDown={(event) => event.preventDefault()} onClick={() => island.takeOut(file)}>
+          <X size={12} strokeWidth={2.5} aria-hidden="true" />
+        </button>
+      )}
+    </li>
   )
 }
 

@@ -432,9 +432,11 @@ its headings, lists and links when you paste, and **Open in LoomWatch** shows it
 with the agent you last wrote to.
 
 To hand it a file, a picture, an email from Mail, a link or some text, drag it to the top middle of
-the screen: the box opens to take it and offers a few jobs that fit. iPhone photos go in as JPEGs. A
-file your agent can't open, such as a Pages document or a video, stays out, and the box says what to
-do instead, such as exporting it as a PDF; drop the PDF and it joins what is already there. If your
+the screen, and the box opens to take it, or press **+** at the start of the box's message field to
+choose files. The box shows each file and offers a few jobs that fit. Press **×** on a file to take
+it out. iPhone photos go in as JPEGs. A file your agent can't open, such as a Pages document or a
+video, stays out, and the box says what to do instead, such as exporting it as a PDF; drop the PDF,
+or add it with **+**, and it joins what is already there. If your
 agent asks one of your teams for help, the team starts only when you press **Start**, and that run
 costs what any run of the team costs. To hide the notch and all of this, turn off **Show at the
 notch** in the menu. LoomWatch's face then sits at the right of the menu bar: click it for the same
