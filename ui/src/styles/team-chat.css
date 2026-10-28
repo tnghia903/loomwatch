@@ -164,11 +164,11 @@
    waiting for you, blue at work (breathing where motion is welcome), red stopped by an error, or
    LoomWatch out of reach. On a piece's line only the figures doing something glow. */
 .tc-member { --glow: var(--color-ok); }
-.tc-member.waiting, .tc-weft .chat-avatar.waiting { --glow: var(--color-accent); }
-.tc-member.working, .tc-weft .chat-avatar.working { --glow: var(--color-live); }
-.tc-member:is(.failed, .away), .tc-weft .chat-avatar.failed { --glow: var(--color-alert); }
+.tc-member.waiting, .tc-replies-faces .chat-avatar.waiting { --glow: var(--color-accent); }
+.tc-member.working, .tc-replies-faces .chat-avatar.working { --glow: var(--color-live); }
+.tc-member:is(.failed, .away), .tc-replies-faces .chat-avatar.failed { --glow: var(--color-alert); }
 .tc-member .chat-avatar-figure,
-.tc-weft .chat-avatar:is(.waiting, .working, .failed) .chat-avatar-figure { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 2px var(--glow)); }
+.tc-replies-faces .chat-avatar:is(.waiting, .working, .failed) .chat-avatar-figure { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 2px var(--glow)); }
 .tc-member em { font-style: normal; font-size: 11.5px; color: var(--color-ink-3); }
 .tc-member.working em { color: var(--color-live); }
 .tc-member.waiting em { color: var(--color-accent); }
@@ -253,8 +253,7 @@
 .tc-day { display: flex; justify-content: center; margin: 22px 0 2px; }
 .tc-day span { padding: 3px 12px; border-radius: 99px; background: color-mix(in srgb, var(--color-ink) 6%, transparent); font-size: 11.5px; font-weight: 600; color: var(--color-ink-2); }
 
-.tc-piece { display: grid; gap: 2px; padding: 6px 0 14px; border-bottom: 1px dashed color-mix(in srgb, var(--color-hairline) 70%, transparent); }
-.tc-piece:last-child { border-bottom: 0; }
+.tc-piece { display: grid; gap: 2px; padding: 6px 0 10px; }
 /* The piece Details shows: a gold thread down its side, tying the chat to the record beside it. */
 .tc-piece { position: relative; }
 .tc-piece.in-details { padding-left: 12px; margin-left: -12px; }
@@ -306,54 +305,45 @@
 .tc-pending:not(.failed) .tc-mention { color: var(--color-ink); }
 .tc-schedule { display: inline-grid; place-items: center; }
 
-/* The talk between the agents, folded to one line. It reads like a message: its words in the text
-   column, and the agents' faces in the gutter with the faces of the messages (loom.css .chat-msg:
-   a 42px gutter, 36px in a narrow chat, a 28px face at its start). */
-.tc-talk {
+/* What the agents said to each other, as one line under the piece, in the text column: their faces
+   and how many replies, which open the replies beside the chat, then while the work runs who has
+   it. The faces glow what each is doing, as in the header. */
+.tc-replies {
   --tc-gutter: 42px;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 6px 10px;
-  margin: 10px 0 2px;
+  margin: 8px 0 2px;
   padding-left: var(--tc-gutter);
   font-size: 12.5px;
   color: var(--color-ink-3);
 }
 @container (max-width: 520px) {
-  .tc-talk { --tc-gutter: 36px; }
+  .tc-replies { --tc-gutter: 36px; }
 }
-/* The team on a piece as a thread: knots for the agents, gold as far as the work has come. The thread
-   starts in the gutter, its first knot centred on the messages' faces, and runs on to the right. */
-.tc-weft { position: relative; display: inline-flex; align-items: center; gap: 14px; margin-left: calc((28px - 22px) / 2 - var(--tc-gutter)); }
-/* One agent is one knot, all in the gutter: the words after it start where a message's words do. */
-.tc-weft.one { margin-right: calc(var(--tc-gutter) - (28px + 22px) / 2 - 10px); }
-.tc-weft .chat-avatar { position: relative; z-index: 1; }
-.tc-weft-track, .tc-weft-fill { position: absolute; left: 11px; right: 11px; top: 50%; height: 2px; margin-top: -1px; border-radius: 2px; }
-.tc-weft-track { background: var(--color-hairline); }
-.tc-weft-fill { background: var(--color-accent); transform-origin: left center; scale: var(--weft-fill, 1) 1; }
-.tc-weft.st-failed .tc-weft-fill { background: color-mix(in srgb, var(--color-alert) 70%, transparent); }
-.tc-weft.st-cancelled .tc-weft-fill { background: var(--color-halt); }
-.tc-weft-bead {
-  position: absolute;
-  left: 0;
-  top: 50%;
-  z-index: 2;
-  width: 6px;
-  height: 6px;
-  margin-top: -3px;
-  border-radius: 50%;
-  background: var(--color-ok);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-ok) 22%, transparent);
-  translate: calc(26px + var(--weft-at, 0) * 36px) 0;
+.tc-replies-open {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 32px; padding: 3px 12px 3px 5px;
+  border: 1px solid var(--color-hairline); border-radius: var(--r-full); background: var(--color-panel-solid);
+  font: 500 12.5px/1.2 var(--font-sans); color: var(--color-ink-2); cursor: pointer;
+  transition: border-color var(--t-instant) var(--ease-out);
 }
-.tc-weft.waiting .tc-weft-bead { background: var(--color-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 25%, transparent); }
+.tc-replies-open b { font-weight: 600; color: var(--color-ink); font-variant-numeric: tabular-nums; }
+/* Shown beside the chat: a gold ring, the words in ink (gold words on the gold tint fail contrast
+   in light, and the piece's gold edge already ties it to the pane). */
+.tc-replies-open:hover, .tc-replies-open:focus-visible { border-color: color-mix(in srgb, var(--color-accent) 55%, transparent); }
+.tc-replies-open:not([aria-pressed='true'], [aria-expanded='true']):is(:hover, :focus-visible) b { color: var(--color-accent); }
+.tc-replies-open[aria-pressed='true'], .tc-replies-open[aria-expanded='true'] { border-color: var(--color-accent); }
+.tc-replies-faces { display: inline-flex; align-items: center; }
+.tc-replies-faces .chat-avatar + .chat-avatar { margin-left: -5px; }
+.tc-replies-open:not(:has(.tc-replies-faces)) { padding-left: 12px; }
+@media (pointer: coarse) { .tc-replies-open { min-height: 44px; } }
 .tc-talk-line { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--color-ink-2); }
 .tc-talk-line b { font-weight: 600; color: var(--color-ink); }
-/* An agent keeps its own colour here, as on its messages; the green dots say it is working. */
+/* An agent keeps its own colour here, as on its messages; the blue dots say it is working, as its glow does. */
 .tc-talk-line .chat-name { color: var(--hue); }
-.tc-piece.live .tc-talk-line .chat-dots i { background: var(--color-ok); }
-.tc-piece.live .tc-talk-line b.tc-wait { color: var(--color-accent); }
+.tc-replies.live .tc-talk-line .chat-dots i { background: var(--color-live); }
+.tc-replies.live .tc-talk-line b.tc-wait { color: var(--color-accent); }
 .tc-talk-acts { display: inline-flex; flex-wrap: wrap; gap: 4px 12px; margin-left: auto; }
 /* What the run spent (ADR 0068): a bobbin that unwinds as the agents spend, the thread run off it
    in each agent's colour, and the figure. Gold once the run has used its limit. */
@@ -703,13 +693,7 @@ a mark.tc-find-hit { box-shadow: none; }
   .tc-mention-glow { animation: tc-attention var(--t-settle) var(--ease-out) both; }
   /* Whoever is working breathes its blue glow, in the header and on the piece. */
   .tc-member.working .chat-avatar-figure,
-  .tc-weft .chat-avatar.working .chat-avatar-figure { animation: tc-glow var(--t-flow) ease-in-out infinite; }
-  .tc-weft .chat-avatar { transition: translate var(--t-move) var(--ease-out); }
-  .tc-weft .chat-avatar.working { translate: 0 -2px; }
-  /* The work passing on: the gold runs to the next agent and the bead slides after it. */
-  .tc-weft-fill { transition: scale var(--t-settle) var(--ease-out); }
-  .tc-weft-bead { transition: translate var(--t-settle) var(--ease-out); animation: tc-bead var(--t-flow) ease-in-out infinite; }
-  .tc-weft.waiting .tc-weft-bead { animation-duration: var(--t-breathe); }
+  .tc-replies-faces .chat-avatar.working .chat-avatar-figure { animation: tc-glow var(--t-flow) ease-in-out infinite; }
   /* The Details thread draws down the piece it ties to the record. */
   .tc-piece.in-details::before { animation: tc-draw-down var(--t-entrance) var(--ease-out) both; }
   /* An answer arrives woven in: a gold thread runs down its edge as the words settle, then rests. */
@@ -766,7 +750,6 @@ a mark.tc-find-hit { box-shadow: none; }
 @keyframes tc-fade-out { to { opacity: 0; } }
 @keyframes tc-slide { from { translate: 24px 0; } }
 @keyframes tc-glow { 50% { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 5px var(--glow)); } }
-@keyframes tc-bead { 50% { scale: .55; } }
 @keyframes tc-draw-down { from { scale: 1 0; } }
 @keyframes tc-thread-rest { to { opacity: 0; } }
 @keyframes tc-ripple { from { opacity: .7; scale: 1; } to { opacity: 0; scale: 1.035 1.18; } }
@@ -784,6 +767,10 @@ a mark.tc-find-hit { box-shadow: none; }
 
 /* ---------- What the agents said, inside the chat ---------- */
 .tc-said .chat.bare { margin: 2px 0 0; border: 0; border-radius: 0; background: transparent; overflow: visible; }
+/* A piece's replies beside the chat (ADR 0051): the talk as the chat would draw it, scrolling in the
+   pane under its tabs, with room for its replies' reactions and Reply. */
+.tc-replies-pane { position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain; padding: 4px 18px 28px; container-type: inline-size; }
+.tc-replies-pane > .tc-said { margin: 0; }
 .tc-said .chat.bare .chat-log { padding: 0 0 4px; }
 /* Your turn, on the message that asks: the buttons stand where "waiting for you" would. */
 .chat-your-turn { display: grid; justify-items: end; gap: 6px; margin-top: 2px; }
@@ -876,9 +863,8 @@ a mark.tc-find-hit { box-shadow: none; }
    with more fades (data-more, set as it scrolls; --tc-pane-pin is where Details ends). */
 .tc-details-head > .tc-pane-tabs { position: relative; flex: 0 1 auto; min-width: 0; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
 .tc-details-head > .tc-pane-tabs::-webkit-scrollbar { display: none; }
-.tc-details-head > .tc-pane-tabs > button { flex: none; }
-.tc-details-head > .tc-pane-tabs > .tc-pane-details { position: sticky; left: 0; z-index: 1; background-color: var(--color-panel-solid); }
-.tc-details-head > .tc-pane-tabs > .tc-pane-details[aria-selected='true'] { background-image: linear-gradient(var(--color-accent-tint), var(--color-accent-tint)); }
+.tc-details-head > .tc-pane-tabs > .tc-pane-own { position: sticky; left: 0; z-index: 1; flex: none; display: inline-flex; gap: 2px; background-color: var(--color-panel-solid); }
+.tc-details-head > .tc-pane-tabs > .tc-pane-own > button { flex: none; }
 .tc-details-head > .tc-pane-tabs[data-more='after'] { -webkit-mask-image: linear-gradient(to left, transparent, black 24px); mask-image: linear-gradient(to left, transparent, black 24px); }
 .tc-details-head > .tc-pane-tabs[data-more='before'] { -webkit-mask-image: linear-gradient(to right, black var(--tc-pane-pin), transparent var(--tc-pane-pin), black calc(var(--tc-pane-pin) + 20px)); mask-image: linear-gradient(to right, black var(--tc-pane-pin), transparent var(--tc-pane-pin), black calc(var(--tc-pane-pin) + 20px)); }
 .tc-details-head > .tc-pane-tabs[data-more='before after'] { -webkit-mask-image: linear-gradient(to right, black var(--tc-pane-pin), transparent var(--tc-pane-pin), black calc(var(--tc-pane-pin) + 20px), black calc(100% - 24px), transparent); mask-image: linear-gradient(to right, black var(--tc-pane-pin), transparent var(--tc-pane-pin), black calc(var(--tc-pane-pin) + 20px), black calc(100% - 24px), transparent); }
@@ -893,7 +879,6 @@ a mark.tc-find-hit { box-shadow: none; }
 .tc-pane-tabs button { padding: 4px 12px; border: 0; border-radius: 5px; background: transparent; color: var(--color-ink-2); font: 500 12.5px/1.3 var(--font-sans); cursor: pointer; transition: background-color var(--t-quick) var(--ease-out), color var(--t-quick) var(--ease-out); }
 .tc-pane-tabs button:hover { color: var(--color-ink); }
 .tc-pane-tabs button[aria-selected='true'] { background: var(--color-accent-tint); box-shadow: inset 0 0 0 1px var(--color-accent); color: var(--color-ink); }
-.tc-pane-title { flex: none; font: 600 14px/1.3 var(--font-sans); color: var(--color-ink); }
 .tc-details-head h2 { font-weight: 400; color: var(--color-ink-2); }
 .tc-document { position: absolute; inset: 0; overflow-y: auto; background: var(--color-ground); }
 .tc-document-by { max-width: 720px; margin: 40px auto 0; padding: 0 40px; font-size: 12.5px; color: var(--color-ink-3); }

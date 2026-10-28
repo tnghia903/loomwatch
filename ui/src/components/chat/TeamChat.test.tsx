@@ -429,12 +429,14 @@ describe('the message box says where a message goes before it is sent', () => {
 })
 
 describe('the team’s chat', () => {
-  it('reads oldest first, by day, with each answer in full and the talk folded to one line', async () => {
+  it('reads oldest first, by day, with each answer in full and one line for the talk under each piece', async () => {
     page = [
       { kind: 'work', run: run({ runId: 'old', createdAt: '2026-10-05T02:00:00.000Z', startedAt: '2026-10-05T02:00:00.000Z', finishedAt: '2026-10-05T02:03:00.000Z', reply: 'Yesterday’s digest.', trigger: 'schedule' }), request: null, notes: [] },
       { kind: 'note', message: message({ id: 'note-1', text: 'we only cover listed companies', route: 'team_note', runId: null, createdAt: '2026-10-05T05:00:00.000Z' }) },
       { kind: 'work', run: run({}), request: message({}), notes: [message({ id: 'n-2', route: 'note', agentId: 'writer', text: 'keep it short', deliveredAt: '2026-10-06T02:03:00.000Z', createdAt: '2026-10-06T02:02:00.000Z' })] },
     ]
+    // Each piece's record read, so the line knows what passed between the agents.
+    said.read = true
     renderChat()
     const log = await screen.findByRole('log', { name: 'Messages' })
     await waitFor(() => expect(within(log).getByText('The chip story.')).toBeInTheDocument())
@@ -446,9 +448,8 @@ describe('the team’s chat', () => {
     // Who worked on each finished piece, and how long it took: their faces on its request, not a line.
     expect(within(log).getAllByRole('button', { name: /^Researcher and Writer worked on this · \d+ min$/ })).toHaveLength(2)
     expect(within(log).queryByText(/worked on this/)).not.toBeInTheDocument()
-    // The newest piece shows what they said; the one before folds it to one line.
-    expect(within(log).getAllByRole('button', { name: 'What they said' })).toHaveLength(1)
-    expect(within(log).getByRole('button', { name: 'Hide what they said' })).toHaveAttribute('aria-expanded', 'true')
+    // Nothing passed between the agents on either piece: each piece's line opens its record.
+    expect(within(log).getAllByRole('button', { name: 'Details' })).toHaveLength(2)
     // The chat speaks the team's words: no "run", "session" or "stage" (those live in Details).
     expect(screen.getByRole('region', { name: 'News desk chat' }).textContent).not.toMatch(/\b(run|runs|session|stage|stages)\b/i)
   })
@@ -548,6 +549,7 @@ describe('the team’s chat', () => {
   })
 
   it('marks the document card that is open beside the chat', async () => {
+    said.read = true
     page = [{ kind: 'work', run: run({ runId: 'long', reply: `# Report\n\n${'Words. '.repeat(120)}` }), request: message({}), notes: [] }]
     renderChat({ detailsRunId: 'long', answerRunId: 'long' })
     const card = await screen.findByRole('button', { name: /^Report, .* Showing beside the chat$/ })
@@ -1034,8 +1036,8 @@ describe('who has the work', () => {
     expect(line).toHaveTextContent('Researcher and Writer are working')
     expect([...line.querySelectorAll('b')].map((name) => [name.textContent, name.className])).toEqual([['Researcher', 'chat-name hue-1'], ['Writer', 'chat-name hue-2']])
     expect(line.querySelector('.chat-dots')).not.toBeNull()
-    // Two agents are a thread, not one knot in the gutter.
-    expect(document.querySelector('.tc-weft')).not.toHaveClass('one')
+    // Both faces on the piece's line glow blue, at work.
+    expect([...document.querySelectorAll('.tc-replies-faces .chat-avatar')].map((face) => [face.getAttribute('class')?.match(/hue-\d/)?.[0], face.classList.contains('working')])).toEqual([['hue-1', true], ['hue-2', true]])
   })
 
   it('flashes nothing between two agents, and brings the count back once the work is done', async () => {
@@ -1070,7 +1072,7 @@ describe('the piece’s line and the header’s pill', () => {
   }
   const scrollLine = (visible: boolean) => act(() => {
     for (const watcher of [...watchers]) {
-      for (const target of watcher.targets.filter((element) => element.classList.contains('tc-talk'))) {
+      for (const target of watcher.targets.filter((element) => element.classList.contains('tc-replies'))) {
         watcher.callback([{ isIntersecting: visible, target } as unknown as IntersectionObserverEntry], watcher as unknown as IntersectionObserver)
       }
     }
@@ -1103,7 +1105,7 @@ describe('the piece’s line and the header’s pill', () => {
   }
   const pill = () => document.querySelector('.tc-faces .tc-baton.on')
   const ghost = () => document.querySelector('.tc-baton-ghost')
-  const line = () => document.querySelector('.tc-talk')
+  const line = () => document.querySelector('.tc-replies')
 
   it('says who has the work on the piece while it is on screen, and flies it up into the pill once it is not', async () => {
     window.localStorage.setItem('loomwatch.chatRoster', 'folded')
@@ -1864,14 +1866,14 @@ describe('one agent’s own chat', () => {
     expect(props.prepare).not.toHaveBeenCalled()
   })
 
-  it('says it is working in its own colour, its face one knot in the gutter', async () => {
+  it('says it is working in its own colour, its face glowing on the piece’s line', async () => {
     page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null, onlyAgent: 'ada', responder: 'ada', agentIds: ['ada'], working: ['ada'] }), request: message({ text: 'sum up the report', route: 'agent', agentId: 'ada' }), notes: [] }]
     renderSolo()
     const line = await within(screen.getByRole('log')).findByText(/is working/)
     expect(line).toHaveTextContent('Ada is working')
     expect(line.querySelector('b')).toHaveClass('chat-name', 'hue-3')
-    expect(document.querySelector('.tc-weft')).toHaveClass('one')
-    expect(document.querySelector('.tc-weft .chat-avatar')).toHaveClass('hue-3', 'working')
+    expect(document.querySelectorAll('.tc-replies-faces .chat-avatar')).toHaveLength(1)
+    expect(document.querySelector('.tc-replies-faces .chat-avatar')).toHaveClass('hue-3', 'working')
   })
 
   it('reports the newest piece’s run, for the figure at the bench', async () => {
@@ -2407,5 +2409,140 @@ describe('a link to one of the team’s runs', () => {
     await waitFor(() => expect(document.querySelector('[data-said="request:run-0"]')).toHaveClass('flash'))
     expect(asked.some((url) => url.includes('before='))).toBe(true)
     expect(document.querySelector('[data-said="request:run-1"]')).not.toHaveClass('flash')
+  })
+})
+
+// ADR 0051: in a team's chat each piece's talk is one line — faces, "N replies" — and the replies
+// are read beside the chat, so the chat holds what is said to you and the files handed to you.
+describe('replies beside the chat', () => {
+  const said_ = (extra: Partial<TeamMessage> & Pick<TeamMessage, 'id' | 'kind'>): TeamMessage => ({
+    from: null, handedBy: null, to: null, text: 'x', context: null, eventId: extra.id, evidenceId: null, seq: 1, ts: '2026-10-06T02:01:00.000Z',
+    offsetMs: 0, state: 'delivered', error: null, reply: null, carried: false, ...extra,
+  })
+  const answered = (text: string) => ({ from: 'researcher', text, eventId: 'r1', seq: 2, ts: '2026-10-06T02:02:00.000Z', offsetMs: 0, source: 'open' as const, sentBackTo: null })
+  const slot = () => {
+    const element = document.createElement('div')
+    document.body.append(element)
+    return element
+  }
+
+  it('counts the replies as they are drawn, and opens them beside the chat rather than in it', async () => {
+    said.messages = [
+      said_({ id: 'a1', kind: 'ask', from: 'writer', to: 'researcher', text: 'Which outlet broke the chip story?', reply: answered('Reuters, at 9:02.') }),
+      said_({ id: 'a2', kind: 'ask', from: 'writer', to: 'researcher', text: 'And the second source?', seq: 3, state: 'pending' }),
+    ]
+    page = [{ kind: 'work', run: run({}), request: message({}), notes: [] }]
+    const onReplies = vi.fn()
+    renderChat({ onReplies })
+    const log = await screen.findByRole('log', { name: 'Messages' })
+    // Two things said and one answer; the answer still awaited is no reply.
+    const line = await within(log).findByRole('button', { name: '3 replies' })
+    expect(line).toHaveAttribute('aria-pressed', 'false')
+    // Who they are from, and when the last came, said on hover: the line keeps few words.
+    expect(line).not.toHaveTextContent('Last reply')
+    expect(line).toHaveAttribute('title', `From Writer and Researcher · last reply ${clockTime('2026-10-06T02:02:00.000Z')}`)
+    // Who said them, by their faces, in the order they spoke, and then who answered you.
+    expect([...line.querySelectorAll('.chat-avatar')].map((face) => face.getAttribute('class')?.match(/hue-\d/)?.[0])).toEqual(['hue-2', 'hue-1'])
+    expect(log).not.toHaveTextContent('Which outlet broke the chip story?')
+    fireEvent.click(line)
+    expect(onReplies).toHaveBeenCalledWith('run-1')
+    // The answer is still the team's, in the chat.
+    expect(within(log).getByText('The chip story.')).toBeInTheDocument()
+  })
+
+  it('draws the replies where the pane shows them, and leaves what they ask of you on the chat’s card', async () => {
+    const waitingOn = { node: 'review', name: 'Your review', kind: 'review_stop' as const, since: '2026-10-06T02:03:00.000Z', question: 'Check it', context: 'Three stories', handoverFrom: 'researcher', park: 'reloadable' as const, parkNote: '', sendBackAvailable: true }
+    said.messages = [
+      said_({ id: 'a1', kind: 'ask', from: 'writer', to: 'researcher', text: 'Which outlet broke the chip story?', reply: answered('Reuters, at 9:02.') }),
+      said_({ id: 'h1', kind: 'handover', from: 'researcher', to: 'review', text: 'Three stories, with sources.', seq: 4, state: 'pending' }),
+    ]
+    page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null, waitingOn }), request: message({}), notes: [] }]
+    const pane = slot()
+    renderChat({ onReplies: vi.fn(), repliesRunId: 'run-1', repliesSlot: pane })
+    await waitFor(() => expect(pane).toHaveTextContent('Which outlet broke the chip story?'))
+    expect(pane).toHaveTextContent('Reuters, at 9:02.')
+    const log = screen.getByRole('log', { name: 'Messages' })
+    expect(log).not.toHaveTextContent('Which outlet broke the chip story?')
+    expect(within(log).getByRole('button', { name: /^\d+ replies$/ })).toHaveAttribute('aria-pressed', 'true')
+    // One Approve on the screen, on the chat's card; the replies say what waits, without buttons.
+    expect(screen.getAllByRole('button', { name: 'Approve' })).toHaveLength(1)
+    expect(within(log).getByRole('button', { name: 'Approve' })).toBeInTheDocument()
+    expect(within(pane).queryByRole('button', { name: 'Approve' })).toBeNull()
+    pane.remove()
+  })
+
+  it('keeps what you answered in the chat once the work is done', async () => {
+    said.messages = [said_({ id: 'q1', kind: 'question', from: 'writer', to: 'operator', text: 'Which market?', reply: { ...answered('Europe only, please.'), from: 'operator' } })]
+    page = [{ kind: 'work', run: run({}), request: message({}), notes: [] }]
+    renderChat({ onReplies: vi.fn() })
+    const log = await screen.findByRole('log', { name: 'Messages' })
+    await waitFor(() => expect(within(log).getByText('Europe only, please.')).toBeInTheDocument())
+    expect(log).not.toHaveTextContent('Which market?Which market?')
+  })
+
+  it('says Replies, with no count, until the piece’s record is read', async () => {
+    page = [{ kind: 'work', run: run({}), request: message({}), notes: [] }]
+    const onReplies = vi.fn()
+    renderChat({ onReplies })
+    const line = await within(await screen.findByRole('log', { name: 'Messages' })).findByRole('button', { name: 'Replies' })
+    expect(line).not.toHaveAttribute('title')
+    fireEvent.click(line)
+    expect(onReplies).toHaveBeenCalledWith('run-1')
+  })
+
+  it('answers a permission the replies show on the chat’s card, not in the replies', async () => {
+    const asked = { id: 'p1', agent: 'researcher', name: 'Researcher', title: 'Run: ls -la', kind: 'execute', switch: 'commands' as const, since: '2026-10-06T02:01:00.000Z', expiresAt: new Date(Date.now() + 9 * 60000).toISOString() }
+    said.messages = [said_({ id: 'permission:p1', kind: 'permission', from: 'researcher', to: 'operator', text: 'Run: ls -la', state: 'pending', permission: { requestId: 'p1', switch: 'commands', detail: 'ls -la', outcome: null, settled: null } })]
+    page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null, working: ['researcher'], permissionRequests: [asked] }), request: message({}), notes: [] }]
+    const pane = slot()
+    renderChat({ onReplies: vi.fn(), repliesRunId: 'run-1', repliesSlot: pane })
+    await waitFor(() => expect(pane).toHaveTextContent('ls -la'))
+    expect(screen.getAllByRole('button', { name: 'Allow' })).toHaveLength(1)
+    expect(within(screen.getByRole('log', { name: 'Messages' })).getByRole('button', { name: 'Allow' })).toBeInTheDocument()
+    pane.remove()
+  })
+
+  it('opens the replies to show one of them, asked for from the record or a search', async () => {
+    said.messages = [said_({ id: 'a1', kind: 'ask', from: 'writer', to: 'researcher', text: 'Which outlet?', reply: answered('Reuters.') })]
+    page = [{ kind: 'work', run: run({}), request: message({}), notes: [] }]
+    const onReplies = vi.fn()
+    // Coming back to the chat with one already shown opens nothing again.
+    const { props, rerender } = renderChat({ onReplies, reveal: { runId: 'run-1', id: 'a1', at: 0 } })
+    await screen.findByRole('button', { name: '2 replies' })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(onReplies).not.toHaveBeenCalled()
+    rerender(<TeamChat {...props} reveal={{ runId: 'run-1', id: 'a1', at: 1 }} />)
+    await waitFor(() => expect(onReplies).toHaveBeenCalledWith('run-1', false))
+    // The answer, your request and your notes are in the chat already: showing them opens nothing.
+    for (const [id, at] of [['answer:run-1', 2], ['request:run-1', 3]] as const) {
+      onReplies.mockClear()
+      rerender(<TeamChat {...props} reveal={{ runId: 'run-1', id, at }} />)
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      expect(onReplies).not.toHaveBeenCalled()
+    }
+  })
+
+  it('hands over a file another agent made from that agent, before the answer that names it', async () => {
+    const folder = '/Users/me/LoomWatch/teams/.loomwatch/news'
+    said.evidence = [
+      { agentId: 'researcher', toolKind: 'edit', status: 'succeeded', ts: '2026-10-06T02:02:00.000Z', locations: [{ path: `${folder}/researcher/sources.md` }] },
+      { agentId: 'writer', toolKind: 'edit', status: 'succeeded', ts: '2026-10-06T02:03:00.000Z', locations: [{ path: `${folder}/writer/digest.md` }] },
+    ]
+    page = [{ kind: 'work', run: run({ reply: `Done. The digest is \`${folder}/writer/digest.md\`; the sources are \`${folder}/researcher/sources.md\`.` }), request: message({}), notes: [] }]
+    const onHandOver = vi.fn()
+    renderChat({ onReplies: vi.fn(), onHandOver })
+    const fromResearcher = await screen.findByRole('group', { name: 'Files from Researcher' })
+    expect(within(fromResearcher).getByText('sources.md')).toBeInTheDocument()
+    const handed = fromResearcher.closest<HTMLElement>('.chat-msg')!
+    expect(handed).toHaveClass('tc-handed')
+    expect(within(handed).getByText('Researcher')).toHaveClass('chat-name')
+    // Before the answer, which keeps only the file its own agent wrote.
+    const answer = document.querySelector<HTMLElement>('.tc-answer')!
+    expect(handed.compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const own = within(answer).getByRole('group', { name: 'Files in this answer' })
+    expect(within(own).getByText('digest.md')).toBeInTheDocument()
+    expect(within(own).queryByText('sources.md')).toBeNull()
+    // The newest piece, done, hands both over to the pane beside the chat.
+    await waitFor(() => expect(onHandOver).toHaveBeenCalledWith('run-1', { files: [`${folder}/writer/digest.md`, `${folder}/researcher/sources.md`], written: [`${folder}/researcher/sources.md`, `${folder}/writer/digest.md`], document: false }))
   })
 })

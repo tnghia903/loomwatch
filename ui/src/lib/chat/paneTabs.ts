@@ -1,12 +1,13 @@
 import type { FileToRead } from '../files/reader'
 
 /**
- * The pane beside the team chat (ADR 0051, ADR 0077): the record of the piece of work on screen
- * (Details), and everything it came to, each a tab of its own — the answer itself when it is long
- * enough to be a document, then the files its answer names that LoomWatch reads. The chat keeps the
- * answer short (a card, for a document); what the work made is read here.
+ * The pane beside the team chat (ADR 0051, ADR 0077): what the agents said to each other on the
+ * piece of work on screen (Replies), its record (Details), and everything it came to, each a tab of
+ * its own — the answer itself when it is long enough to be a document, then the files its answer
+ * names that LoomWatch reads. The chat keeps what is said to you; the team's talk, its record and
+ * what it made are read here.
  */
-export type PaneTab = 'details' | 'answer' | `file:${string}`
+export type PaneTab = 'replies' | 'details' | 'answer' | `file:${string}`
 
 export const fileTab = (path: string): PaneTab => `file:${path}`
 
@@ -67,6 +68,7 @@ export function madeTabs({ runId, files, answer, kept, closed }: {
 
 /** A tab's element id, by its place: a path can hold spaces, which `aria-labelledby` splits on. */
 export function paneTabId(tabs: readonly MadeTab[], tab: PaneTab): string {
+  if (tab === 'replies') return 'tc-pane-replies'
   const at = tabs.findIndex((made) => made.tab === tab)
   return at < 0 ? 'tc-pane-details' : `tc-pane-made-${at}`
 }
@@ -77,7 +79,7 @@ export function paneTabId(tabs: readonly MadeTab[], tab: PaneTab): string {
  * while work in progress shows its record.
  */
 export function shownPaneTab(chosen: PaneTab | null, tabs: readonly MadeTab[], following: boolean, done: boolean): PaneTab {
-  if (chosen === 'details' || (chosen && tabs.some((made) => made.tab === chosen))) return chosen
+  if (chosen === 'replies' || chosen === 'details' || (chosen && tabs.some((made) => made.tab === chosen))) return chosen
   if (!following || !done) return 'details'
   return (tabs.find((made) => made.lead && made.file) ?? tabs.find((made) => made.lead))?.tab ?? 'details'
 }
