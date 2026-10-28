@@ -338,7 +338,11 @@
 .tc-replies-faces .chat-avatar + .chat-avatar { margin-left: -5px; }
 .tc-replies-open:not(:has(.tc-replies-faces)) { padding-left: 12px; }
 @media (pointer: coarse) { .tc-replies-open { min-height: 44px; } }
-.tc-talk-line { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--color-ink-2); }
+/* What the line says reads as a sentence: beside the pill when it fits, else on its own row, where
+   it wraps as words do; never squeezed into a column per word. */
+.tc-talk-line { display: block; flex: 0 1 auto; min-width: 0; color: var(--color-ink-2); text-wrap: pretty; }
+.tc-talk-line .chat-dots { margin-left: 6px; vertical-align: middle; }
+.tc-talk-end { white-space: nowrap; }
 .tc-talk-line b { font-weight: 600; color: var(--color-ink); }
 /* An agent keeps its own colour here, as on its messages; the blue dots say it is working, as its glow does. */
 .tc-talk-line .chat-name { color: var(--hue); }
@@ -485,6 +489,8 @@
 .tc-where.route-note { color: var(--color-live); }
 .tc-where.route-answer { color: var(--color-accent); }
 .tc-where .tc-swap { position: relative; }
+/* Where the message goes stays beside its mark and wraps as words do, never dropping under it. */
+.tc-where-label { flex: 1 1 calc(100% - 40px); min-width: 0; }
 .tc-where-hint { font-style: normal; font-weight: 400; color: var(--color-ink-3); }
 .tc-where-escape { display: inline-flex; align-items: center; gap: 3px; margin-left: auto; padding: 0; border: 0; background: none; font-size: 12px; font-weight: 400; color: var(--color-ink-3); cursor: pointer; }
 .tc-where-escape:hover, .tc-where-escape:focus-visible { color: var(--color-accent); }
@@ -664,7 +670,7 @@ a mark.tc-find-hit { box-shadow: none; }
    older page draws it still. Entrances use the individual `translate` / `scale` properties and
    never move position, opacity and scale at once. Everything sits behind reduced motion. */
 .tc-swap { display: inline-block; }
-.tc-talk-line.tc-swap { display: inline-flex; }
+.tc-talk-line.tc-swap { display: block; }
 @media (prefers-reduced-motion: no-preference) {
   /* A message rises into place; yours comes up from the box it was written in. */
   .tc-appear { animation: tc-rise var(--t-entrance) var(--ease-out) both; }

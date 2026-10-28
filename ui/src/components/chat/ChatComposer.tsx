@@ -300,7 +300,7 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
       {!quiet && (
         <div className={`tc-where route-${route ?? 'answer'}`} id={whereId} aria-live="polite">
           {icon}
-          <Swap key={answeringLabel ?? where.label}>{answeringLabel ?? where.label}</Swap>
+          <Swap key={answeringLabel ?? where.label} className="tc-where-label">{answeringLabel ?? where.label}</Swap>
           {answering && (
             <button type="button" className="tc-where-escape" onClick={() => setTeamInstead(true)}>
               <X size={12} aria-hidden="true" />{solo ? 'Write a note instead' : 'Write to the team instead'}

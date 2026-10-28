@@ -24,9 +24,9 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/readme/demo.gif" width="880" alt="The offline demo in LoomWatch: the three-step team on the Workflow canvas, then its chat. The operator writes @team Prepare a short getting-started guide for new users. Researcher's handover arrives as a message to You, with Approve and Send back to Researcher under it, and the team waits. The operator types the note Keep it to one page in the message box and presses Approve with your note. The approval goes on to Writer, and Writer's answer appears in the chat, marked Nothing flagged.">
+  <img src="docs/assets/readme/demo.gif" width="880" alt="The offline demo in LoomWatch: the three-step team on the Workflow canvas, then its chat. You write @team Prepare a short getting-started guide for new users. Under it, Researcher's figure, 1 reply and Waiting for you; below, a card with Researcher's handover, Approve and Send back to Researcher. Clicking 1 reply opens Replies beside the chat, with what Researcher handed over. You type Keep it to one page and press Approve with your note. Your approval and note stay in the chat, Replies shows them passed on to Writer, and Writer's answer appears, marked Nothing flagged.">
   <br>
-  <sub>A team in its chat: ask it, approve the handover with a note, read the answer.</sub>
+  <sub>A team in its chat: ask it, open its replies, approve with a note, read the answer.</sub>
 </p>
 
 **Install on a Mac** (macOS 11 or newer; nothing else to install first): download
@@ -98,7 +98,7 @@ anything runs.
 <td valign="middle">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/step-watch-dark.png">
-  <img src="docs/assets/readme/step-watch-light.png" alt="The team's chat while it works: the request @team Prepare a short getting-started guide for new users, then a note for Researcher, Assume readers have never used AI before, which waits for Researcher's current step to end. Below them: Researcher is working.">
+  <img src="docs/assets/readme/step-watch-light.png" alt="The team's chat while it works: the request @team Prepare a short getting-started guide for new users, then a note for Researcher, Assume readers have never used AI before, which waits for Researcher's current step to end. Under them, one line: a Details button with Researcher's figure glowing blue, then Researcher is working, and Stop.">
 </picture>
 </td>
 <td valign="middle">
@@ -129,7 +129,7 @@ you decide**, and the finished answer comes with the evidence to check before yo
 <td valign="middle">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/step-review-dark.png">
-  <img src="docs/assets/readme/step-review-light.png" alt="Researcher's handover to You in the chat: a summary, and the open question Which format should Writer use? Below it, your turn: Approve, or Send back to Researcher. To send it back, write what to change in the box below.">
+  <img src="docs/assets/readme/step-review-light.png" alt="The review in the chat: Researcher's figure with 1 reply, then Waiting for you: Researcher's work is ready for your review, and Stop. Below, a card: Researcher handed over its work for your review, the handover open to read, and Approve or Send back to Researcher, with the hint To send it back, write what to change in the box below.">
 </picture>
 </td>
 </tr>
@@ -393,9 +393,9 @@ you built, then add, connect and rename agents to match. To run a team on a sche
 <td align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="site/assets/app/chat-dark.webp">
-  <img src="site/assets/app/chat-light.webp" alt="A team's Chat tab: the request @team Prepare a short getting-started guide for new users, then Researcher's handover to You, with Approve and Send back to Researcher waiting under it. Beside the chat, Details shows the live timeline with a replay slider and the team handoff, stage by stage, with the model each agent runs on.">
+  <img src="site/assets/app/chat-light.webp" alt="A team's Chat tab: the request @team Prepare a short getting-started guide for new users; under it, Researcher's figure with 1 reply and Waiting for you: Researcher's work is ready for your review; then a card with Researcher's handover, Approve and Send back to Researcher. Beside the chat, the Replies tab shows Researcher's handover and your review still to come, with a Details tab next to it.">
 </picture>
-<br><sub><strong>Chat.</strong> What the agents say to each other, your review, and the record one pane away in Details.</sub>
+<br><sub><strong>Chat.</strong> Your review waits in the chat, the agents' replies open beside it, and every step is a tab away in Details.</sub>
 </td>
 </tr>
 </table>

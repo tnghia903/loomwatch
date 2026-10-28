@@ -92,6 +92,12 @@ function renderChat(overrides: Partial<Parameters<typeof TeamChat>[0]> = {}) {
 }
 
 const box = () => screen.getByRole('textbox', { name: 'Message the team' })
+/** The newest piece's line's words, once they read `words`: the sentence, its last word and dots kept together. */
+async function talkLine(words: RegExp): Promise<HTMLElement> {
+  const words_ = () => [...document.querySelectorAll<HTMLElement>('.tc-replies .tc-talk-line')].at(-1)
+  await waitFor(() => expect(words_()).toHaveTextContent(words))
+  return words_()!
+}
 
 describe('the message box says where a message goes before it is sent', () => {
   const composer = (live: RunRecord[] = [], decision = null as Parameters<typeof ChatComposer>[0]['decision']) => {
@@ -111,6 +117,10 @@ describe('the message box says where a message goes before it is sent', () => {
     const idle = composer()
     idle.type('@team now do Asia')
     expect(screen.getByText('Starts the team · 3 steps')).toBeInTheDocument()
+    // Where it goes stays beside its mark, wrapping as words do in a narrow box, never dropping under it.
+    const where = screen.getByText('Starts the team · 3 steps')
+    expect(where).toHaveClass('tc-where-label')
+    expect([cascaded(where, 'flex'), cascaded(where, 'min-width')]).toEqual(['1 1 calc(100% - 40px)', '0'])
     idle.type('@Writer make the chip story the lead')
     expect(screen.getByText('Starts Writer only')).toBeInTheDocument()
     idle.type('we only cover listed companies')
@@ -571,7 +581,7 @@ describe('the team’s chat', () => {
       release(new Response(JSON.stringify({ route: 'team', message: message({}), run: run({ status: 'running', reply: null, finishedAt: null, working: ['researcher'] }) }), { status: 202 }))
     })
     expect(screen.queryByText('Sending…')).not.toBeInTheDocument()
-    const working = await within(screen.getByRole('log')).findByText(/is working/)
+    const working = await talkLine(/is working/)
     expect(working).toHaveTextContent('Researcher is working')
     // The member list says so too, beside the name.
     expect(memberRow('Researcher')).toHaveTextContent('Researcherworking')
@@ -1032,10 +1042,18 @@ describe('who has the work', () => {
     fold()
     page = working({ working: ['researcher', 'writer'] })
     renderChat()
-    const line = await within(screen.getByRole('log')).findByText(/are working/)
+    const line = await talkLine(/are working/)
     expect(line).toHaveTextContent('Researcher and Writer are working')
     expect([...line.querySelectorAll('b')].map((name) => [name.textContent, name.className])).toEqual([['Researcher', 'chat-name hue-1'], ['Writer', 'chat-name hue-2']])
-    expect(line.querySelector('.chat-dots')).not.toBeNull()
+    // The dots stay with the last word, so a wrapped line never leaves them alone on a row.
+    const dots = line.querySelector('.chat-dots')!
+    expect(dots.parentElement).toHaveClass('tc-talk-end')
+    expect(dots.parentElement).toHaveTextContent(/^working$/)
+    expect(cascaded(dots.parentElement!, 'white-space')).toBe('nowrap')
+    // The words read as a sentence: they wrap as words do, under the pill when it doesn't fit,
+    // never squeezed into a column per word.
+    const said = document.querySelector('.tc-replies .tc-talk-line')!
+    expect([cascaded(said, 'display'), cascaded(said, 'flex')]).toEqual(['block', '0 1 auto'])
     // Both faces on the piece's line glow blue, at work.
     expect([...document.querySelectorAll('.tc-replies-faces .chat-avatar')].map((face) => [face.getAttribute('class')?.match(/hue-\d/)?.[0], face.classList.contains('working')])).toEqual([['hue-1', true], ['hue-2', true]])
   })
@@ -1254,7 +1272,7 @@ describe('a piece of work', () => {
     cleanup()
     said.events = [event('thought', { role: 'thought', content: { text: 'Which stories matter' } })]
     renderChat()
-    expect(await within(screen.getByRole('log')).findByText(/is working/)).toBeInTheDocument()
+    expect(await talkLine(/is working/)).toBeInTheDocument()
     expect(screen.queryByRole('status', { name: /is writing/ })).not.toBeInTheDocument()
   })
 
@@ -1869,7 +1887,7 @@ describe('one agent’s own chat', () => {
   it('says it is working in its own colour, its face glowing on the piece’s line', async () => {
     page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null, onlyAgent: 'ada', responder: 'ada', agentIds: ['ada'], working: ['ada'] }), request: message({ text: 'sum up the report', route: 'agent', agentId: 'ada' }), notes: [] }]
     renderSolo()
-    const line = await within(screen.getByRole('log')).findByText(/is working/)
+    const line = await talkLine(/is working/)
     expect(line).toHaveTextContent('Ada is working')
     expect(line.querySelector('b')).toHaveClass('chat-name', 'hue-3')
     expect(document.querySelectorAll('.tc-replies-faces .chat-avatar')).toHaveLength(1)
