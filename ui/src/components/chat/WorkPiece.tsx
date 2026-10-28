@@ -475,9 +475,10 @@ export function WorkPiece({ item, newest = false, approveFilled = true, fixFille
             : stops.length > 0
               ? <><b className="tc-wait">Waiting for you</b> · {stopSentence(stops[0]).replace(/\.$/, '')}</>
             : passLine
-              ? <>{passLine.map((part, index) => (part.agent ? <Named key={index} hue={hue(part.agent)}>{part.text}</Named> : <Fragment key={index}>{part.text}</Fragment>))}<span className="chat-dots" aria-hidden="true"><i /><i /><i /></span></>
+              // The dots stay with the last words, so a wrapped line never leaves them alone.
+              ? <>{passLine.slice(0, -1).map((part, index) => (part.agent ? <Named key={index} hue={hue(part.agent)}>{part.text}</Named> : <Fragment key={index}>{part.text}</Fragment>))}<span className="tc-talk-end">{passLine.slice(-1).map((part) => (part.agent ? <Named key="last" hue={hue(part.agent)}>{part.text}</Named> : <Fragment key="last">{part.text}</Fragment>))}<span className="chat-dots" aria-hidden="true"><i /><i /><i /></span></span></>
             : working.length > 0
-              ? <><span>{whoWorks(working).map((part, index, parts) => <Fragment key={part.agent ?? part.text}>{index === 0 ? '' : index === parts.length - 1 ? ' and ' : ', '}{part.agent ? <Named hue={hue(part.agent)}>{part.helpers ? `${name(part.agent)}’s ${part.text}` : name(part.agent)}</Named> : part.text}</Fragment>)}</span> {working.length === 1 ? 'is' : 'are'} working<span className="chat-dots" aria-hidden="true"><i /><i /><i /></span></>
+              ? <><span>{whoWorks(working).map((part, index, parts) => <Fragment key={part.agent ?? part.text}>{index === 0 ? '' : index === parts.length - 1 ? ' and ' : ', '}{part.agent ? <Named hue={hue(part.agent)}>{part.helpers ? `${name(part.agent)}’s ${part.text}` : name(part.agent)}</Named> : part.text}</Fragment>)}</span> {working.length === 1 ? 'is' : 'are'} <span className="tc-talk-end">working<span className="chat-dots" aria-hidden="true"><i /><i /><i /></span></span></>
               : run.status === 'queued' || run.status === 'starting' ? 'Starting…' : 'Handing over…'}
         </Swap>}
         <Spool spend={record.spend} stops={stops} name={name} hue={hue} />
