@@ -62,6 +62,37 @@ describe('a project’s room (ADR 0097)', () => {
     expect(await screen.findByRole('group', { name: /Research and design: Researcher/ })).toBeInTheDocument()
   })
 
+  // Ruling 1: teams that started as projects of their own can be moved into one project.
+  it('moves a team into another of your projects, as the editor saves it', async () => {
+    const thesis = { id: 'thesis', name: 'My thesis', teams: [] }
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => (url === '/api/projects' ? respond({ projects: [project, thesis], loose: [], missing: [] }) : daemon(url, init)))
+    render(<ProjectRoom id="sutd" />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Move Research and design to another project' }))
+    const menu = screen.getByRole('menu', { name: 'Move Research and design to' })
+    // Only the other projects: never the one it is in.
+    expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['My thesis'])
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'My thesis' }))
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/team' && init?.method === 'PUT')).toBe(true))
+    const put = fetchMock.mock.calls.find(([url, init]) => url === '/api/team' && init?.method === 'PUT')
+    const body = JSON.parse(String(put?.[1]?.body)) as { path: string; yaml: string }
+    // Saved over the file it read, never over a change made since.
+    expect(new Headers(put?.[1]?.headers).get('If-Match')).toBe('"r"')
+    expect(body.path).toBe('sutd/gate.yaml')
+    expect(body.yaml).toContain('project: thesis')
+    expect(body.yaml).not.toContain('project: sutd')
+    // The rest of the team stays as it was.
+    expect(body.yaml).toMatch(/from: \{ ?agent: researcher ?\}/)
+    expect(body.yaml).toMatch(/schedule: \{ ?cron: "0 17 \* \* 5" ?\}/)
+    expect(await screen.findByRole('status')).toHaveTextContent('Research and design works in My thesis now.')
+    expect(within(screen.getByRole('status')).getByRole('link', { name: 'My thesis' })).toHaveAttribute('href', '/projects/thesis')
+  })
+
+  it('offers no move when there is no other project', async () => {
+    render(<ProjectRoom id="sutd" />)
+    expect(await screen.findByRole('link', { name: /Research and design/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /to another project/ })).toBeNull()
+  })
+
   it('changes the About in place, and keeps a note every agent here reads', async () => {
     render(<ProjectRoom id="sutd" />)
     fireEvent.click(await screen.findByRole('button', { name: 'About. Change it' }))

@@ -415,7 +415,8 @@ folders, `memory::TeamMemory::load_for` puts its About and notes first in the pa
 project becomes one of its notes. `GET /api/projects` lists each project with its teams' paths and
 the teams in none; `PUT /api/projects/{id}` keeps one whole and `POST /api/projects/{id}/notes`
 adds the person's note. The daemon keeps a copy of every team file once before the app moves each
-team into a project of its own (`/api/move-into-projects`), through its normal save.
+team into a project of its own (`/api/move-into-projects`), through its normal save. Moving a
+team to another project later is the same save, with only its `project` changed.
 
 In the app, Home is the studio (`components/studio/`, `lib/projects/studio.ts`): Your desk first,
 with whoever waits for the person (its Review opens the bell's tray), then a room per project with

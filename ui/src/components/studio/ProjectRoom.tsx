@@ -19,7 +19,7 @@ import { FigureStill } from '../agents/FigureStill'
 import { FolderPicker } from '../canvas/FolderPicker'
 import { NewTeamDialog } from '../home/NewTeamDialog'
 import { SectionHead } from '../ui/SectionHead'
-import { MARKS, MARK_NAMES, defaultFigureOf, markOf } from '../../lib/projects/studioUi'
+import { MARKS, MARK_NAMES, defaultFigureOf, markOf, roomHref } from '../../lib/projects/studioUi'
 import { RoomAsk } from './RoomAsk'
 import { ProjectMark } from './RoomCard'
 import { TeamDesks } from './TeamDesks'
@@ -66,6 +66,43 @@ function About({ project, onSave }: { project: ProjectEntry; onSave: (about: str
       <span className="wall-paper-head">About</span>
       <span className="wall-paper-text">{project.about?.trim() || 'Say what this project is, who it is for, and what you have decided.'}</span>
     </button>
+  )
+}
+
+/** A team moved into another project (ADR 0097, ruling 1): its file names that project, saved as the editor saves it. */
+async function moveTeam(path: string, project: string): Promise<void> {
+  const file = await fetchTeamFile(path)
+  const team = TeamFileModel.parse(file.yaml)
+  team.setProject(project)
+  await saveTeamFile(path, team.toYaml(), file.revision ?? await hashTeamYaml(file.yaml))
+  projectsChanged()
+}
+
+/** A team's way into another of your projects, from its row in the room. */
+function MoveTeam({ team, projects, onMove }: { team: { path: string; name: string }; projects: readonly ProjectEntry[]; onMove: (to: ProjectEntry) => void }) {
+  const [open, setOpen] = useState(false)
+  const box = useRef<HTMLSpanElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const away = (event: PointerEvent) => { if (!box.current?.contains(event.target as Node)) setOpen(false) }
+    window.addEventListener('pointerdown', away)
+    return () => window.removeEventListener('pointerdown', away)
+  }, [open])
+  if (projects.length === 0) return null
+  return (
+    <span className="room-team-move" ref={box}>
+      <button type="button" className="iconbtn" aria-label={`Move ${team.name} to another project`} title="Move to another project" aria-expanded={open} aria-haspopup="menu" onClick={() => setOpen((value) => !value)}><MoreHorizontal size={16} aria-hidden="true" /></button>
+      {open && (
+        <span className="idle-agent-menu" role="menu" aria-label={`Move ${team.name} to`}>
+          <span className="room-team-move-head" aria-hidden="true">Move to</span>
+          {projects.map((other) => (
+            <button key={other.id} type="button" role="menuitem" onClick={() => { setOpen(false); onMove(other) }}>
+              <ProjectMark id={other.id} mark={other.mark} />{other.name}
+            </button>
+          ))}
+        </span>
+      )}
+    </span>
   )
 }
 
@@ -167,6 +204,7 @@ export function ProjectRoom({ id }: { id: string }) {
   const [newTeam, setNewTeam] = useState(false)
   const [adding, setAdding] = useState<string | null | false>(() => new URLSearchParams(window.location.search).get('add') ?? false)
   const [problem, setProblem] = useState<string | null>(null)
+  const [moved, setMoved] = useState<{ team: string; to: ProjectEntry } | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const project = list?.projects.find((candidate) => candidate.id === id) ?? null
   const figures = useMemo(() => new Map<string, FigureChoice | undefined>(jobs.map((job) => [job.id, job.figure])), [jobs])
@@ -274,9 +312,18 @@ export function ProjectRoom({ id }: { id: string }) {
           {room?.teams.map((team) => (
             <div key={team.path} className="room-team">
               <a className="room-team-name" href={teamHref(team.path, 'chat')}><b>{team.name}</b>{team.schedule && <span>{team.schedule}</span>}</a>
+              <MoveTeam
+                team={team}
+                projects={list.projects.filter((other) => other.id !== project.id)}
+                onMove={(to) => {
+                  setProblem(null)
+                  moveTeam(team.path, to.id).then(() => { setMoved({ team: team.name, to }); reload() }, (caught: unknown) => setProblem(`Couldn’t move ${team.name}. ${caught instanceof Error ? caught.message : String(caught)}`))
+                }}
+              />
               <TeamDesks team={team} figureOf={figureOf} size={56} all />
             </div>
           ))}
+          {moved && <p role="status" className="studio-quiet">{moved.team} works in <a className="link" href={roomHref(moved.to.id)}>{moved.to.name}</a> now.</p>}
           {room && room.teams.length === 0 && <p className="studio-quiet">No team works here yet.</p>}
           <span className="room-floor-acts">
             <button type="button" className="btn" onClick={() => setAdding(null)}>Add an agent</button>

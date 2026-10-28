@@ -251,9 +251,12 @@ button.wall-paper:focus-visible { outline: 2px solid var(--color-accent); outlin
 .wall-folder svg { color: var(--color-ink-3); }
 
 .room-floor { display: flex; flex-direction: column; gap: var(--sp-5); padding: var(--sp-2) 0; }
-/* A team's whole row opens it, as its name does. */
+/* A team's whole row opens it, as its name does; its ⋯ stays pressable above that. */
 .room-team { position: relative; display: flex; flex-direction: column; gap: var(--sp-3); }
 .room-team-name::after { content: ''; position: absolute; inset: 0; }
+.room-team-move { position: absolute; top: -8px; right: 0; z-index: 1; }
+.room-team-move .iconbtn { width: 44px; height: 44px; }
+.room-team-move-head { padding: 4px var(--sp-3) 2px; font-size: 12px; color: var(--color-ink-3); }
 .room-team-name { align-self: flex-start; display: inline-flex; align-items: baseline; gap: var(--sp-2); min-height: 28px; color: var(--color-ink); text-decoration: none; }
 .room-team-name b { font-weight: 600; }
 .room-team-name span { font-size: 13px; color: var(--color-ink-3); }

@@ -817,7 +817,9 @@ project: sutd-final-project
   finds without one): the team's Brief becomes the About (one for some agents only stays the
   team's), and every folder or file connected to its agents becomes one of the project's folders,
   while the agents keep their own. The daemon keeps a copy of every team file in
-  `<state dir>/backups/<date>-before-projects-<key>/` before the first move.
+  `<state dir>/backups/<date>-before-projects-<key>/` before the first move. To put teams together
+  in one project afterwards, open a team's ⋯ in its project's room and choose the other project:
+  the team's `project` changes and nothing else does.
 - **Limits.** A name of at most 80 characters, an About of at most 4,000, each note at most 500
   and 40 notes (the oldest goes first); folders by full path or from `~/`.
 
