@@ -193,6 +193,17 @@ describe('useAskActions', () => {
     await waitFor(() => expect(client.reportProposalOutcome).toHaveBeenCalledWith('p1', 'applied'))
   })
 
+  it('keeps the proposal’s Brief when it is saved another way too (ADR 0097)', async () => {
+    const brief = 'Colin’s SUTD final project.'
+    client.fetchProposal.mockResolvedValue(proposal({ brief }))
+    const { result, person, spies } = setup()
+    await act(async () => { await result.current.actions.showProposal('p1') })
+    await act(async () => { await person.save() })
+    await waitFor(() => expect(memory.writeMemoryFile).toHaveBeenCalledWith('/Users/me/teams/brief.yaml', expect.stringMatching(/^brief\.brief\/.+\.md$/), `${brief}\n`))
+    await waitFor(() => expect(spies.addBriefEntry).toHaveBeenCalled())
+    await waitFor(() => expect(spies.save).toHaveBeenCalledTimes(2))
+  })
+
   it('opens a new team from Home unsaved, and Discard goes back to no team', async () => {
     client.fetchProposal.mockResolvedValue(proposal({ isNew: true, baseRevision: null, file: 'new-brief.yaml' }))
     const { result, options, spies } = setup(HOME)

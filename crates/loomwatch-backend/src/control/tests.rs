@@ -923,6 +923,62 @@ async fn a_proposed_check_step_is_saved_sending_a_miss_back() {
     );
 }
 
+/// ADR 0097: a proposal's Brief, what every agent of the team should know about the work, is kept
+/// with the proposal the panel fetches and recorded with it in the conversation, trimmed, so Apply
+/// can save it beside the team even after a restart; a proposal with none carries none.
+#[tokio::test]
+async fn a_proposals_brief_is_kept_with_it_and_recorded() {
+    let fixture = Fixture::start(Some(EventArchive::new(crate::db::Db::temp().await)), None).await;
+    let model = crate::engine::demo_model(assistant());
+    let (status, started) = fixture
+        .post("/api/ask/conversations", &json!({"model": model}))
+        .await;
+    assert_eq!(status, 201, "{started}");
+    let conversation = started["id"].as_str().expect("id").to_owned();
+    let tools = ControlTools::new(
+        fixture.control.clone(),
+        Caller::Conversation(conversation.clone()),
+    );
+    let yaml = "schemaVersion: 1\nid: gate\nname: Gate\nentrypoint: a\nagents:\n  - id: a\n    name: Researcher\n    role: Research.\n    model: anthropic/claude-sonnet-5.5\n    part:\n      text: Find options for the gate.\nedges: []\n";
+    let (answer, failed) = tools
+        .call(
+            "propose_team",
+            json!({"file": "gate.yaml", "yaml": yaml, "summary": "A team.", "brief": " Colin's SUTD final project. \n"}),
+        )
+        .await;
+    assert!(!failed, "{answer}");
+    let answer: Value = serde_json::from_str(&answer).expect("json");
+    let id = answer["proposalId"].as_str().expect("a proposal id").to_owned();
+    let kept = serde_json::to_value(
+        fixture
+            .control
+            .inner
+            .proposals
+            .read()
+            .await
+            .get(&id)
+            .expect("the proposal is kept"),
+    )
+    .expect("json");
+    assert_eq!(kept["brief"], "Colin's SUTD final project.");
+    let events = fixture.events(&conversation).await;
+    let recorded = phases(&events, "ask_proposal");
+    assert_eq!(recorded.last().expect("recorded")["brief"], "Colin's SUTD final project.");
+
+    let (answer, failed) = tools
+        .call(
+            "propose_team",
+            json!({"file": "gate.yaml", "yaml": yaml, "summary": "A team."}),
+        )
+        .await;
+    assert!(!failed, "{answer}");
+    let answer: Value = serde_json::from_str(&answer).expect("json");
+    let id = answer["proposalId"].as_str().expect("a proposal id").to_owned();
+    let kept = serde_json::to_value(fixture.control.inner.proposals.read().await.get(&id).expect("kept"))
+        .expect("json");
+    assert!(kept.get("brief").is_none(), "{kept}");
+}
+
 /// Without the daemon's model list (no state folder set up), `list_models` says so rather than
 /// inventing models.
 #[tokio::test]

@@ -1672,6 +1672,9 @@ mod tests {
             job.contains("What this request needs goes in the agent's `part` (below), never in its `role` or `doneWhen`"),
             "{job}"
         );
+        // However the old rule is put, a job's role gains no paragraph about the request.
+        assert_eq!(job.matches("this request needs").count(), 1, "{job}");
+        assert!(!job.contains("paragraph"), "{job}");
         let mine = rule("One of My agents whose instructions fit this part of the work");
         assert!(
             mine.contains("its `part` (below)")
