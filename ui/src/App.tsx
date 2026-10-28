@@ -136,8 +136,9 @@ export default function App() {
     return <p className="t-meta" role="status" style={{ padding: 32, color: 'var(--color-ink-3)' }}>Putting each team in a project…</p>
   }
   if (pathname === '/agents' || pathname.startsWith('/agents/')) return <Agents />
-  // A project's room (ADR 0097): its wall, and its teams at their desks.
-  if (pathname.startsWith('/projects/')) return <ProjectRoom id={decodeURIComponent(pathname.slice('/projects/'.length))} />
+  // A project's room (ADR 0097): its wall, and its teams at their desks. The guide carries on here,
+  // where a team is started.
+  if (pathname.startsWith('/projects/')) return <><Guide /><ProjectRoom id={decodeURIComponent(pathname.slice('/projects/'.length))} /></>
   if (pathname === '/quests') return <Quests />
   if (pathname === '/skills') return <Skills />
   if (pathname === '/usage') {

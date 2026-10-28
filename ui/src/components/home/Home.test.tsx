@@ -99,6 +99,8 @@ describe('Home, the studio (ADR 0097)', () => {
     expect(await screen.findByRole('heading', { name: 'What are you working on?' })).toBeInTheDocument()
     expect(screen.getByText('You see the team before anything runs.')).toBeInTheDocument()
     const setUp = screen.getByRole('button', { name: 'Set up project' })
+    // The getting-started guide points here to put your first agent to work (lib/tour/steps.ts).
+    expect(setUp.closest('[data-tour="set-up-project"]')).toContainElement(screen.getByRole('textbox', { name: 'What you are working on' }))
     // With nothing said, it puts you where to say it, and asks nothing.
     fireEvent.click(setUp)
     expect(onAsk).not.toHaveBeenCalled()
@@ -122,6 +124,8 @@ describe('Home, the studio (ADR 0097)', () => {
     const rooms = await screen.findAllByRole('article')
     await waitFor(() => expect(rooms[0]).toHaveTextContent('Researcher is waiting for you'))
     expect(rooms.map((room) => within(room).getByRole('heading').textContent)).toEqual(['SUTD final project', 'Blog'])
+    // The guide's "Open a project" points at the rooms, New project with them.
+    expect(rooms[0].closest('[data-tour="projects"]')).toContainElement(screen.getByRole('button', { name: 'New project' }))
     // The Researcher stands at Your desk, so its desk in the room is its outline, saying where it is.
     expect(within(rooms[0]).getByTitle('Researcher is at your desk')).toBeInTheDocument()
     expect(within(rooms[0]).getByRole('group', { name: /Research and design: Researcher is at your desk, then You check, then Designer/ })).toBeInTheDocument()

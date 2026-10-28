@@ -40,7 +40,7 @@ export function SetUpProject({ onSetUp, unavailable = null, asking = false, onCl
     onSetUp({ words: words.trim(), folder })
   }
   const form = (
-    <form className="set-up-project" onSubmit={(event) => { event.preventDefault(); submit() }}>
+    <form className="set-up-project" data-tour="set-up-project" onSubmit={(event) => { event.preventDefault(); submit() }}>
       <LoomMark size={56} />
       <h1 id="set-up-title">What are you working on?</h1>
       <div className="set-up-row">

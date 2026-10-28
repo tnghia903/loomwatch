@@ -42,7 +42,7 @@ function ProposalView({ card, actions }: { card: ProposalCard; actions: CardActi
   // What it changes, while there is still a choice to make; afterwards the outcome says enough.
   const lines = !card.outcome && (card.isNew || actions.savedYamlFor(card.file) !== null) ? changes.lines : []
   return (
-    <article className={`ask-card ask-proposal ${card.outcome ? `is-${card.outcome}` : 'is-open'} ${showing ? 'is-showing' : ''}`} aria-label={`Proposed team: ${card.name}`}>
+    <article className={`ask-card ask-proposal ${card.outcome ? `is-${card.outcome}` : 'is-open'} ${showing ? 'is-showing' : ''}`} data-tour={card.outcome || showing ? undefined : 'ask-proposal'} aria-label={`Proposed team: ${card.name}`}>
       {!card.outcome && <DashedEdge />}
       <header className="ask-card-head">
         <span className="t-micro">{card.isNew ? 'New team' : 'Changes'}</span>
@@ -57,7 +57,7 @@ function ProposalView({ card, actions }: { card: ProposalCard; actions: CardActi
       ) : showing ? (
         <div className="ask-card-acts">
           <span className="ask-card-hint">On the canvas now. Nothing is saved until you apply it.</span>
-          <button type="button" className="btn btn-act" onClick={actions.onApply}>Apply</button>
+          <button type="button" className="btn btn-act" data-tour="apply-proposal" onClick={actions.onApply}>Apply</button>
           <button type="button" className="btn" onClick={actions.onDiscard}>Discard</button>
         </div>
       ) : (

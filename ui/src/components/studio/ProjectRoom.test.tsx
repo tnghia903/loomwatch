@@ -49,6 +49,10 @@ describe('a project’s room (ADR 0097)', () => {
   it('holds on its wall what every agent here knows, and its teams at their desks', async () => {
     render(<ProjectRoom id="sutd" />)
     expect(await screen.findByRole('heading', { level: 1, name: 'SUTD final project' })).toBeInTheDocument()
+    // The getting-started guide counts a room as Home and points at its New team (lib/tour/steps.ts).
+    const newTeam = screen.getByRole('button', { name: 'New team' })
+    expect(newTeam).toHaveAttribute('data-tour', 'new-team')
+    expect(newTeam.closest('[data-tour="room"]')).toContainElement(screen.getByRole('heading', { level: 1 }))
     expect(screen.getByRole('button', { name: 'About. Change it' })).toHaveTextContent('Colin’s final project: a gate for the library.')
     expect(screen.getByTitle('/Users/colin/SUTD')).toHaveTextContent('SUTD')
     expect(screen.getByText('Colin picked option B.')).toBeInTheDocument()

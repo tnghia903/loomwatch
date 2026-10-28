@@ -2587,7 +2587,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     <TeamFiguresContext.Provider value={agentFigures}>
     <GuestNamesContext.Provider value={guests.names}>
     <CanvasActionsContext.Provider value={canvasActions}>
-      <div className={shellClass} style={{ '--lw-palette-w': `${paletteWidth}px`, ...(chatWidth === null ? {} : { '--tc-chat-w': `clamp(${CHAT_WIDTH.min}px, ${chatWidth}px, calc(100vw - ${CHAT_WIDTH.details}px))` }) } as CSSProperties} data-tour="workspace" data-tour-agents={doc.nodes.length} data-tour-view={runView || runSetup ? 'chat' : agentsView ? 'agents' : 'workflow'} onDragEnter={(event) => { if (event.dataTransfer.types.includes(LIBRARY_DRAG_MIME)) setLibraryDragging(true) }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as HTMLElement | null)) { setLibraryDragging(false); setDropAgentId(null) } }}>
+      <div className={shellClass} style={{ '--lw-palette-w': `${paletteWidth}px`, ...(chatWidth === null ? {} : { '--tc-chat-w': `clamp(${CHAT_WIDTH.min}px, ${chatWidth}px, calc(100vw - ${CHAT_WIDTH.details}px))` }) } as CSSProperties} data-tour="workspace" data-tour-agents={doc.nodes.length} data-tour-proposal={askActions.preview ? 'showing' : undefined} data-tour-view={runView || runSetup ? 'chat' : agentsView ? 'agents' : 'workflow'} onDragEnter={(event) => { if (event.dataTransfer.types.includes(LIBRARY_DRAG_MIME)) setLibraryDragging(true) }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as HTMLElement | null)) { setLibraryDragging(false); setDropAgentId(null) } }}>
         {deliveryShown ? (
           <FileReaderContext.Provider value={readHere}>
           <TeamChat

@@ -140,7 +140,7 @@ export function AskPanel({ ask, view, cards, hidden = false, onHome = false, tit
   const shownModel = (!finished && thread.model) || ask.selectedModel
 
   return (
-    <aside className={`ask-panel ${onHome ? 'on-home' : ''}`} aria-labelledby={titleId} onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); ask.setOpen(false) } }}>
+    <aside className={`ask-panel ${onHome ? 'on-home' : ''}`} data-tour="ask" aria-labelledby={titleId} onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); ask.setOpen(false) } }}>
       <div className="ask-glass" aria-hidden="true" />
       <header className="ask-head">
         <div className="ask-head-text">
