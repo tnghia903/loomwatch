@@ -1442,9 +1442,10 @@ impl TeamBus {
             )
             .await?;
 
-        let execution = self
-            .execute_tool(&session, token, &event_log, name, &arguments)
-            .await;
+        // Boxed: every tool's work lives in this one future, which would otherwise put every
+        // caller over `clippy::large_futures` on Windows.
+        let execution =
+            Box::pin(self.execute_tool(&session, token, &event_log, name, &arguments)).await;
         let (status, raw_output, result) = match execution {
             Ok(output) if name == "ask" => ("completed", output.clone(), ask_success(&output)),
             Ok(output) => ("completed", output.clone(), tool_success(&output)),
