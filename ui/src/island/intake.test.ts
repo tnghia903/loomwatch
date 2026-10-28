@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { intakeFrom, intakeLabel, jobsFor, kindOf, messageFor, withDropped, type Intake } from './intake'
+import { intakeFrom, intakeLabel, jobsFor, kindOf, messageFor, tileName, withDropped, withoutFile, type Intake } from './intake'
 
 function dropped(files: File[], data: Record<string, string> = {}) {
   return { files: files as unknown as FileList, getData: (type: string) => data[type] ?? '' }
@@ -62,5 +62,30 @@ describe('what goes into the slot', () => {
     expect(withDropped(waiting, { files: [], link: 'https://example.com', text: null })).toEqual({ files: [], link: 'https://example.com', text: null })
     expect(withDropped({ files: [], link: null, text: 'hi' }, { files: [sheet], link: null, text: null })).toEqual({ files: [sheet], link: null, text: null })
     expect(withDropped(null, { files: [sheet], link: null, text: null }).files).toEqual([sheet])
+  })
+
+  it('takes one file out, the same file dropped twice too; the last one out leaves nothing', () => {
+    const again = new File(['%PDF'], 'Lease 2027.pdf', { type: 'application/pdf' })
+    expect(withoutFile({ files: [pdf, sheet], link: null, text: null }, again)).toEqual({ files: [sheet], link: null, text: null })
+    expect(withoutFile({ files: [sheet], link: null, text: null }, sheet)).toBeNull()
+    // Another file of the same name but another size stays.
+    const longer = new File(['a,b,c'], 'budget.csv', { type: 'text/csv' })
+    expect(withoutFile({ files: [sheet], link: null, text: null }, longer)?.files).toEqual([sheet])
+  })
+
+  it('names a file under its tile without the kind its page shows', () => {
+    expect(tileName(pdf)).toEqual(['Lease 2027'])
+    expect(tileName(new File(['x'], 'Rent for March.eml'))).toEqual(['Rent for March'])
+    expect(tileName(new File(['x'], 'v2.final.docx'))).toEqual(['v2.final'])
+    // A name that is only a kind, or has none, is kept whole.
+    expect(tileName(new File(['x'], '.env'))).toEqual(['.env'])
+    expect(tileName(new File(['x'], 'README'))).toEqual(['README'])
+    expect(tileName(new File(['x'], 'Quarterly numbers.xlsx'))).toEqual(['Quarterly numbers'])
+    // A long one loses its middle, its first words and its last on a line each, so two versions
+    // still differ by their ends.
+    expect(tileName(new File(['x'], 'Budget 2027 with the new rent v1.xlsx'))).toEqual(['Budget', '…rent v1'])
+    expect(tileName(new File(['x'], 'Budget 2027 with the new rent v2.xlsx'))).toEqual(['Budget', '…rent v2'])
+    // A name with no spaces is cut by letters.
+    expect(tileName(new File(['x'], 'IMG_20261028_134501_HDR.jpg'))).toEqual(['IMG_202610', '…34501_HDR'])
   })
 })

@@ -604,7 +604,19 @@ at a little desk, whose workbench opens while it is pointed at. For the agent in
   the old way and the new, as Mail does, only the new are asked (`island::promises_to_ask`); the
   files are written into a new folder in the user's temporary folder, each kept once
   (`island::received_once`), and the page asks for them through a file picker the app answers
-  (`ToPage::Dropped`, `island/dropped.ts`), so they arrive as a file from Finder does;
+  (`ToPage::Dropped`, `pickFiles` in `island/dropped.ts`), so they arrive as a file from Finder
+  does. + at the start of the box's field asks through the same picker; with no dropped files
+  waiting, the app answers it with an Open panel (`choose_files` in `notch_panel.rs`), above the
+  island. That is the one time `LoomWatch` comes to the front: it stays there while the box is
+  written in after, so typing goes to the box, and the app that had the front has it again once the
+  box gives back the keyboard, unless the person has gone to another app since. Chosen or
+  cancelled, the box asks for the keyboard again;
+- what is waiting shows file by file (`FileTile` in `island/PinnedAgent.tsx`), as the team chat
+  holds files before they go: a picture drawn from the file itself, any other file as a page with
+  its corner folded and its extension on it, each with × to take it out (`withoutFile`). As the
+  message goes, each file has a line until its upload ends, then a tick (`uploaded` in
+  `useIsland`). While files wait, the list shows two teams' rows and counts the rest, so the box
+  keeps its room in the panel;
 - what is dropped goes in only as far as the box's agent can open it (`island/readable.ts`, the
   twin of `documents::Kind::of` and `read_file`'s check for text). A HEIC, TIFF or BMP picture is
   turned into a JPEG in the page first (`createImageBitmap` and a canvas, at most 2,576 px on its

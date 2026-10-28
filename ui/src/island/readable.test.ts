@@ -30,12 +30,12 @@ describe('what the pinned agent can open, as `read_file` does', () => {
   })
 
   it('turns away what it can’t open, saying where to go to make one it can', () => {
-    expect(cantOpen('Plan.pages', 1000, binary, 'Maya')).toBe('Maya can’t open Pages files. In Pages, choose File › Export To › PDF, then drop the PDF.')
-    expect(cantOpen('Sums.numbers', 1000, binary, 'Maya')).toBe('Maya can’t open Numbers files. In Numbers, choose File › Export To › Excel, then drop that.')
-    expect(cantOpen('Talk.key', 1000, binary, 'Maya')).toBe('Maya can’t open Keynote files. In Keynote, choose File › Export To › PDF, then drop the PDF.')
-    expect(cantOpen('IMG_0001.HEIC', 1000, binary, 'Maya')).toBe('Maya can’t open this photo. In Preview, choose File › Export, pick JPEG, then drop the new photo.')
-    expect(cantOpen('Letter.doc', 1000, binary, 'Maya')).toBe('Maya can’t open old Word files. Open it in Pages, choose File › Export To › PDF, then drop the PDF.')
-    expect(cantOpen('Photos.zip', 1000, binary, 'Maya')).toBe('Maya can’t open compressed files. Double-click to open, then drop the files inside.')
+    expect(cantOpen('Plan.pages', 1000, binary, 'Maya')).toBe('Maya can’t open Pages files. In Pages, choose File › Export To › PDF, then add the PDF.')
+    expect(cantOpen('Sums.numbers', 1000, binary, 'Maya')).toBe('Maya can’t open Numbers files. In Numbers, choose File › Export To › Excel, then add that.')
+    expect(cantOpen('Talk.key', 1000, binary, 'Maya')).toBe('Maya can’t open Keynote files. In Keynote, choose File › Export To › PDF, then add the PDF.')
+    expect(cantOpen('IMG_0001.HEIC', 1000, binary, 'Maya')).toBe('Maya can’t open this photo. In Preview, choose File › Export, pick JPEG, then add the new photo.')
+    expect(cantOpen('Letter.doc', 1000, binary, 'Maya')).toBe('Maya can’t open old Word files. Open it in Pages, choose File › Export To › PDF, then add the PDF.')
+    expect(cantOpen('Photos.zip', 1000, binary, 'Maya')).toBe('Maya can’t open compressed files. Double-click it in Finder to open it, then add the files inside.')
     expect(cantOpen('Call.m4a', 1000, binary, 'Maya')).toBe('Maya can’t listen to recordings.')
     expect(cantOpen('Demo.mov', 1000, binary, 'Maya')).toBe('Maya can’t watch videos.')
     // Anything else that isn't text: the daemon finds a NUL in its first bytes and won't read it.
@@ -61,7 +61,7 @@ describe('a drop, sorted', () => {
     // Two reasons: two lines, each with its own way on.
     expect(await sortDropped([pdf, file('A.mp3', binary), file('Plan.pages', binary)], [], 'Maya')).toEqual({
       taken: [pdf],
-      away: 'Left out A.mp3. Maya can’t listen to recordings.\nLeft out Plan.pages. Maya can’t open Pages files. In Pages, choose File › Export To › PDF, then drop the PDF.',
+      away: 'Left out A.mp3. Maya can’t listen to recordings.\nLeft out Plan.pages. Maya can’t open Pages files. In Pages, choose File › Export To › PDF, then add the PDF.',
     })
   })
 
@@ -74,21 +74,21 @@ describe('a drop, sorted', () => {
     const files = Array.from({ length: 14 }, (_, index) => file(`Page ${index + 1}.pdf`))
     const sorted = await sortDropped(files, [], 'Maya')
     expect(sorted.taken).toEqual(files.slice(0, 10))
-    expect(sorted.away).toBe('Left out Page 11.pdf, Page 12.pdf and 2 more. Only 10 files at a time. Send these, then drop the rest.')
+    expect(sorted.away).toBe('Left out Page 11.pdf, Page 12.pdf and 2 more. Only 10 files at a time. Send these, then add the rest.')
     const more = await sortDropped(files.slice(0, 3), [], 'Maya', 8)
     expect(more.taken).toEqual(files.slice(0, 2))
-    expect(more.away).toBe('Left out Page 3.pdf. Only 10 files at a time. Send these, then drop the rest.')
+    expect(more.away).toBe('Left out Page 3.pdf. Only 10 files at a time. Send these, then add the rest.')
   })
 
   it('turns a folder away, and a Pages file that comes as one says what it is', async () => {
-    expect(await sortDropped([], ['Receipts'], 'Maya')).toEqual({ taken: [], away: 'Maya can’t take a folder here. Open it and drop the files inside.' })
-    expect(await sortDropped([], ['Plan.pages'], 'Maya')).toEqual({ taken: [], away: 'Maya can’t open Pages files. In Pages, choose File › Export To › PDF, then drop the PDF.' })
+    expect(await sortDropped([], ['Receipts'], 'Maya')).toEqual({ taken: [], away: 'Maya can’t take a folder here. Open it and add the files inside.' })
+    expect(await sortDropped([], ['Plan.pages'], 'Maya')).toEqual({ taken: [], away: 'Maya can’t open Pages files. In Pages, choose File › Export To › PDF, then add the PDF.' })
   })
 
   it('turns an iPhone photo into a JPEG it can open, and says how when it can’t be drawn', async () => {
     const photo = file('IMG_0001.HEIC', binary)
     // Where the picture can't be drawn, as in a page without `createImageBitmap`: why, and how.
-    expect(await sortDropped([photo], [], 'Maya')).toEqual({ taken: [], away: 'Maya can’t open this photo. In Preview, choose File › Export, pick JPEG, then drop the new photo.' })
+    expect(await sortDropped([photo], [], 'Maya')).toEqual({ taken: [], away: 'Maya can’t open this photo. In Preview, choose File › Export, pick JPEG, then add the new photo.' })
     // Where it can, as WebKit draws HEIC, TIFF and BMP: a JPEG no longer on its longest side than a
     // model is sent, white where the picture was see-through.
     const drawn: { width: number; height: number; fill?: string }[] = []

@@ -21,20 +21,20 @@ const PICTURE_SIDE = 2576
 /** Kinds it can't open, with what the person can do instead, in their words. A kind is told by its
     name only when the file isn't text, so a text file that happens to end in `.key` still goes. */
 const NOT_READ: ReadonlyArray<readonly [RegExp, (who: string) => string]> = [
-  [/\.pages$/i, (who) => `${who} can’t open Pages files. In Pages, choose File › Export To › PDF, then drop the PDF.`],
-  [/\.numbers$/i, (who) => `${who} can’t open Numbers files. In Numbers, choose File › Export To › Excel, then drop that.`],
-  [/\.key$/i, (who) => `${who} can’t open Keynote files. In Keynote, choose File › Export To › PDF, then drop the PDF.`],
-  [/\.(heic|heif)$/i, (who) => `${who} can’t open this photo. In Preview, choose File › Export, pick JPEG, then drop the new photo.`],
-  [/\.(tiff?|bmp)$/i, (who) => `${who} can’t open this kind of picture. In Preview, choose File › Export, pick PNG, then drop the new picture.`],
-  [/\.doc$/i, (who) => `${who} can’t open old Word files. Open it in Pages, choose File › Export To › PDF, then drop the PDF.`],
-  [/\.(ppt|pps)$/i, (who) => `${who} can’t open old PowerPoint files. Open it in Keynote, choose File › Export To › PDF, then drop the PDF.`],
-  [/\.(zip|rar|7z|tar|gz|tgz)$/i, (who) => `${who} can’t open compressed files. Double-click to open, then drop the files inside.`],
+  [/\.pages$/i, (who) => `${who} can’t open Pages files. In Pages, choose File › Export To › PDF, then add the PDF.`],
+  [/\.numbers$/i, (who) => `${who} can’t open Numbers files. In Numbers, choose File › Export To › Excel, then add that.`],
+  [/\.key$/i, (who) => `${who} can’t open Keynote files. In Keynote, choose File › Export To › PDF, then add the PDF.`],
+  [/\.(heic|heif)$/i, (who) => `${who} can’t open this photo. In Preview, choose File › Export, pick JPEG, then add the new photo.`],
+  [/\.(tiff?|bmp)$/i, (who) => `${who} can’t open this kind of picture. In Preview, choose File › Export, pick PNG, then add the new picture.`],
+  [/\.doc$/i, (who) => `${who} can’t open old Word files. Open it in Pages, choose File › Export To › PDF, then add the PDF.`],
+  [/\.(ppt|pps)$/i, (who) => `${who} can’t open old PowerPoint files. Open it in Keynote, choose File › Export To › PDF, then add the PDF.`],
+  [/\.(zip|rar|7z|tar|gz|tgz)$/i, (who) => `${who} can’t open compressed files. Double-click it in Finder to open it, then add the files inside.`],
   [/\.(mp3|m4a|wav|aiff?|aac|flac|ogg)$/i, (who) => `${who} can’t listen to recordings.`],
   [/\.(mov|mp4|m4v|avi|mkv|webm)$/i, (who) => `${who} can’t watch videos.`],
 ]
 
 const TOO_BIG = 'Files over 25 MB are too big to send.'
-const TOO_MANY = `Only ${MAX_CHAT_FILES} files at a time. Send these, then drop the rest.`
+const TOO_MANY = `Only ${MAX_CHAT_FILES} files at a time. Send these, then add the rest.`
 
 /** Whether a file's first bytes are a PDF or a picture `read_file` takes, whatever its name. */
 function readByContent(head: Uint8Array): boolean {
@@ -71,7 +71,7 @@ export async function sortDropped(files: readonly File[], folders: readonly stri
   const taken = opened.slice(0, room)
   const left = [
     // A Pages, Numbers or Keynote file may come as a folder: it says what it is.
-    ...folders.map((name) => ({ name, why: NOT_READ.find(([kind]) => kind.test(name))?.[1](who) ?? `${who} can’t take a folder here. Open it and drop the files inside.` })),
+    ...folders.map((name) => ({ name, why: NOT_READ.find(([kind]) => kind.test(name))?.[1](who) ?? `${who} can’t take a folder here. Open it and add the files inside.` })),
     ...checked.filter((each) => each.why !== null).map((each) => ({ name: each.file.name, why: each.why! })),
     ...opened.slice(room).map((file) => ({ name: file.name, why: TOO_MANY })),
   ]

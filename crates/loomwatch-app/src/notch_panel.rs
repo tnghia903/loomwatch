@@ -22,12 +22,14 @@ use objc2::{
     ClassType, DefinedClass, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send,
 };
 use objc2_app_kit::{
-    NSApplication, NSApplicationDidChangeScreenParametersNotification,
-    NSApplicationPresentationOptions, NSAutoresizingMaskOptions, NSBackingStoreType, NSColor,
-    NSDraggingInfo, NSEvent, NSEventMask, NSFilePromiseReceiver, NSMainMenuWindowLevel, NSPanel,
-    NSPasteboard, NSPasteboardNameDrag, NSPasteboardTypeHTML, NSPasteboardTypeString, NSResponder,
-    NSScreen, NSView, NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask, NSWorkspace,
-    NSWorkspaceActiveSpaceDidChangeNotification, NSWorkspaceDidActivateApplicationNotification,
+    NSApplication, NSApplicationActivationOptions,
+    NSApplicationDidChangeScreenParametersNotification, NSApplicationPresentationOptions,
+    NSAutoresizingMaskOptions, NSBackingStoreType, NSColor, NSDraggingInfo, NSEvent, NSEventMask,
+    NSFilePromiseReceiver, NSMainMenuWindowLevel, NSModalResponse, NSModalResponseOK, NSOpenPanel,
+    NSPanel, NSPasteboard, NSPasteboardNameDrag, NSPasteboardTypeHTML, NSPasteboardTypeString,
+    NSResponder, NSRunningApplication, NSScreen, NSView, NSWindow, NSWindowCollectionBehavior,
+    NSWindowStyleMask, NSWorkspace, NSWorkspaceActiveSpaceDidChangeNotification,
+    NSWorkspaceDidActivateApplicationNotification,
 };
 use objc2_foundation::{
     NSArray, NSDictionary, NSError, NSNotification, NSNotificationCenter, NSNumber, NSObject,
@@ -646,13 +648,15 @@ impl ScreenIsland {
     }
 
     /// The panel steps out and back, and the window server gives the key back to the app in
-    /// front, which never stopped being in front.
+    /// front, which never stopped being in front; after an Open panel, the app that was in front
+    /// before it has the front again.
     fn give_back_keyboard(&self) {
         self.panel.ivars().keyboard.set(false);
         if self.panel.isKeyWindow() {
             self.panel.orderOut(None);
             self.panel.orderFrontRegardless();
         }
+        self.web.front_again();
     }
 
     /// While something dragged is near, the whole panel takes the pointer at once: macOS offers a
@@ -867,6 +871,9 @@ impl IslandPanel {
 struct WebIvars {
     /// Files taken from a drop, waiting for the page's file picker to ask for them.
     taken: RefCell<Vec<Retained<NSURL>>>,
+    /// The app in front before `LoomWatch` came forward for an Open panel (`choose_files`), to
+    /// have the front again once the box gives back the keyboard.
+    front_before: RefCell<Option<Retained<NSRunningApplication>>>,
 }
 
 define_class!(
@@ -905,19 +912,21 @@ define_class!(
 
     // SAFETY: the method's signature is `WKUIDelegate`'s.
     unsafe impl WKUIDelegate for IslandWebView {
-        /// The page's file picker: the files taken from a drop, if any wait; otherwise nothing
-        /// is chosen, as `WebKit` has it without this.
+        /// The page's file picker: the files taken from a drop, if any wait; otherwise the files
+        /// the person chooses in an Open panel, as + in the box asks for (`choose_files`).
         #[unsafe(method(webView:runOpenPanelWithParameters:initiatedByFrame:completionHandler:))]
         fn run_open_panel(
             &self,
             _web_view: &WKWebView,
-            _parameters: &WKOpenPanelParameters,
+            parameters: &WKOpenPanelParameters,
             _frame: &WKFrameInfo,
             chosen: &DynBlock<dyn Fn(*mut NSArray<NSURL>)>,
         ) {
             let taken = self.ivars().taken.take();
             if taken.is_empty() {
-                chosen.call((std::ptr::null_mut(),));
+                // SAFETY: a getter of the parameters `WebKit` handed over, on the main thread.
+                let several = unsafe { parameters.allowsMultipleSelection() };
+                choose_files(self, several, chosen.copy());
             } else {
                 let files = NSArray::from_retained_slice(&taken);
                 chosen.call((Retained::as_ptr(&files).cast_mut(),));
@@ -925,6 +934,57 @@ define_class!(
         }
     }
 );
+
+/// Files chosen in an Open panel, for the page's file picker (`chosen`), or none if it is
+/// cancelled. The island never makes `LoomWatch` the app in front, but a panel to choose files in
+/// must be, so `LoomWatch` steps in front while it is open. It stays in front while the box is
+/// written in after, so what is typed goes to the box, and the app that had the front has it again
+/// once the box gives back the keyboard (`front_again`). The panel is above the island, which could
+/// otherwise cover its top.
+fn choose_files(web: &IslandWebView, several: bool, chosen: RcBlock<dyn Fn(*mut NSArray<NSURL>)>) {
+    let mtm = web.mtm();
+    let panel = NSOpenPanel::openPanel(mtm);
+    panel.setCanChooseFiles(true);
+    panel.setCanChooseDirectories(false);
+    panel.setAllowsMultipleSelection(several);
+    panel.setPrompt(Some(ns_string!("Add")));
+    panel.setMessage(Some(ns_string!(
+        "Choose pictures or files to add to your message."
+    )));
+    panel.setLevel(NSMainMenuWindowLevel + 4);
+    let before = NSWorkspace::sharedWorkspace()
+        .frontmostApplication()
+        .filter(|front| *front != NSRunningApplication::currentApplication());
+    if before.is_some() {
+        web.ivars().front_before.replace(before);
+    }
+    // `activate` is only on macOS 14 and later.
+    #[allow(deprecated)]
+    NSApplication::sharedApplication(mtm).activateIgnoringOtherApps(true);
+    let open = panel.clone();
+    let done = RcBlock::new(move |answer: NSModalResponse| {
+        if answer == NSModalResponseOK {
+            let files = open.URLs();
+            chosen.call((Retained::as_ptr(&files).cast_mut(),));
+        } else {
+            chosen.call((std::ptr::null_mut(),));
+        }
+    });
+    panel.beginWithCompletionHandler(&done);
+}
+
+impl IslandWebView {
+    /// The app that was in front before an Open panel has the front again, unless the person has
+    /// gone to another app since, which then keeps it.
+    fn front_again(&self) {
+        let Some(front) = self.ivars().front_before.take() else {
+            return;
+        };
+        if NSApplication::sharedApplication(self.mtm()).isActive() {
+            front.activateWithOptions(NSApplicationActivationOptions::empty());
+        }
+    }
+}
 
 impl IslandWebView {
     /// Ask each app that promised files to write them into a folder of their own, and once the
