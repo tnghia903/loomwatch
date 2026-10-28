@@ -1,8 +1,8 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ConnectTool } from './ConnectTool'
-import { TOOLS_CHANNEL, type CatalogEntry, type ConnectedTool } from '../../lib/tools/client'
+import { isToolAddress, TOOLS_CHANNEL, type CatalogEntry, type ConnectedTool } from '../../lib/tools/client'
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
@@ -14,6 +14,13 @@ const catalog: CatalogEntry[] = [
   { name: 'Linear', url: 'https://mcp.linear.app/mcp', does: 'Find, create and update issues', auth: 'signIn' },
   { name: 'DeepWiki', url: 'https://mcp.deepwiki.com/mcp', does: 'Ask about any public GitHub project', auth: 'none' },
   { name: 'GitHub', url: 'https://api.githubcopilot.com/mcp/', does: 'Read code', auth: 'token', tokenHelp: 'https://github.com/settings/personal-access-tokens/new' },
+]
+/** A list across topics, out of their order, as a daemon might send it. */
+const topical: CatalogEntry[] = [
+  { name: 'Kiwi.com', url: 'https://mcp.kiwi.com', does: 'Search flights by city and date', auth: 'none', topic: 'travel', example: 'Find the cheapest flight from Hanoi to Tokyo.' },
+  { name: 'Todoist', url: 'https://ai.todoist.net/mcp', does: 'Add, find and finish your to-dos', auth: 'signIn', topic: 'tasks' },
+  { name: 'Atlassian', url: 'https://mcp.atlassian.com/v1/mcp', does: 'Find and update Jira issues and Confluence pages', auth: 'signIn', topic: 'tasks' },
+  { name: 'GitHub', url: 'https://api.githubcopilot.com/mcp/', does: 'Read code, issues and pull requests', auth: 'token', topic: 'code', tokenHelp: 'https://github.com/settings/personal-access-tokens/new' },
 ]
 /** The body of the `index`th request. */
 const sent = (fetch: ReturnType<typeof vi.fn>, index: number) => {
@@ -94,23 +101,107 @@ describe('connecting a tool (ADR 0069)', () => {
     landing.close()
   })
 
-  it('shows the starter list under its headings, each with something to try', () => {
+  it('starts from topics, as the Skills page does, and shows one topic at a time', () => {
     vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('no daemon'))))
-    const grouped: CatalogEntry[] = [
-      { name: 'Kiwi.com', url: 'https://mcp.kiwi.com', does: 'Search flights by city and date', auth: 'none', group: 'travel', example: 'Find the cheapest flight from Hanoi to Tokyo.' },
-      { name: 'Todoist', url: 'https://ai.todoist.net/mcp', does: 'Add, find and finish your to-dos', auth: 'signIn', group: 'work', example: 'Add “Call the printer” for Friday.' },
-    ]
-    render(<ConnectTool catalog={grouped} connected={[]} keptIn="keychain" onConnected={vi.fn()} />)
-    expect(screen.getAllByRole('heading', { level: 5 }).map((heading) => heading.textContent)).toEqual(['Work', 'Travel and fun'])
-    expect(screen.getByRole('list', { name: 'Travel and fun tools to connect' })).toHaveTextContent('No sign-in needed')
+    render(<ConnectTool catalog={topical} connected={[]} keptIn="keychain" onConnected={vi.fn()} />)
+    const topics = screen.getByRole('group', { name: 'Topics' })
+    // Only topics the list has, in their order, and every topic shown under its heading at first.
+    expect(within(topics).getAllByRole('button').map((chip) => chip.textContent)).toEqual(['All', 'Tasks', 'Travel', 'Apps and code'])
+    expect(within(topics).getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getAllByRole('heading', { level: 5 }).map((heading) => heading.textContent)).toEqual(['Tasks', 'Travel', 'Apps and code'])
+    expect(screen.getByRole('list', { name: 'Travel tools to connect' })).toHaveTextContent('No sign-in needed')
     expect(screen.getByRole('button', { name: /Kiwi\.com/ })).toHaveAttribute('title', 'Try asking: Find the cheapest flight from Hanoi to Tokyo.')
+
+    fireEvent.click(within(topics).getByRole('button', { name: 'Tasks' }))
+    expect(within(topics).getByRole('button', { name: 'Tasks' })).toHaveAttribute('aria-pressed', 'true')
+    expect(within(topics).getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.getByRole('list', { name: 'Tasks tools to connect' }).querySelectorAll('li')).toHaveLength(2)
+    expect(screen.queryByRole('button', { name: /Kiwi\.com/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { level: 5 })).not.toBeInTheDocument()
+
+    // The topic shown, picked again, shows them all again.
+    fireEvent.click(within(topics).getByRole('button', { name: 'Tasks' }))
+    expect(within(topics).getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: /Kiwi\.com/ })).toBeInTheDocument()
+  })
+
+  it('finds a tool by what it does in every topic, and says when none does', () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('no daemon'))))
+    render(<ConnectTool catalog={topical} connected={[]} keptIn="keychain" onConnected={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Travel' }))
+    const box = screen.getByRole('searchbox', { name: 'Find a tool or paste its address' })
+    fireEvent.change(box, { target: { value: 'jira' } })
+    // Words look in every topic, whichever was shown.
+    expect(screen.getByRole('list', { name: 'Tools that match jira' })).toHaveTextContent('Atlassian')
+    expect(screen.getAllByRole('listitem')).toHaveLength(1)
+    expect(screen.getByRole('button', { name: 'Travel' })).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.queryByRole('button', { name: 'Connect' })).not.toBeInTheDocument()
+    // A topic's name finds its tools too: Kiwi.com never says "travel" itself.
+    fireEvent.change(box, { target: { value: 'travel flights' } })
+    expect(screen.getAllByRole('listitem').map((item) => item.textContent)).toEqual([expect.stringContaining('Kiwi.com')])
+    // Every word must match: Atlassian has issues, but not code.
+    fireEvent.change(box, { target: { value: 'code issues' } })
+    expect(screen.getAllByRole('listitem').map((item) => item.textContent)).toEqual([expect.stringContaining('GitHub')])
+    fireEvent.change(box, { target: { value: 'zoom' } })
+    expect(screen.getByRole('status')).toHaveTextContent('No tool here matches “zoom”. Try other words, or pick a topic.')
+    expect(screen.queryAllByRole('listitem')).toHaveLength(0)
+    expect(screen.getByText(/Not here\? Find its “MCP server” address/)).toBeInTheDocument()
+  })
+
+  it('says a popular service can’t be connected yet, and why, rather than send you to look for its address', () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('no daemon'))))
+    render(<ConnectTool catalog={topical} connected={[]} keptIn="keychain" onConnected={vi.fn()} />)
+    const box = screen.getByRole('searchbox', { name: 'Find a tool or paste its address' })
+    fireEvent.change(box, { target: { value: 'my Gmail' } })
+    expect(screen.getByRole('status')).toHaveTextContent('Gmail can’t be connected yet: Google doesn’t offer it')
+    expect(screen.queryByText(/Not here\?/)).not.toBeInTheDocument()
+    // The longest name it says wins.
+    fireEvent.change(box, { target: { value: 'google calendar' } })
+    expect(screen.getByRole('status')).toHaveTextContent('Google Calendar can’t be connected yet')
+    fireEvent.change(box, { target: { value: 'Dropbox' } })
+    expect(screen.getByRole('status')).toHaveTextContent('Dropbox can’t be connected yet: it lets in only apps it approved by hand.')
+    // A name inside another word is not it: an inbox is no Box.
+    fireEvent.change(box, { target: { value: 'inbox' } })
+    expect(screen.getByRole('status')).toHaveTextContent('No tool here matches “inbox”.')
+    expect(screen.getByText(/Not here\? Find its “MCP server” address/)).toBeInTheDocument()
+    // Named among other words, it is still said.
+    fireEvent.change(box, { target: { value: 'jira slack' } })
+    expect(screen.getByRole('status')).toHaveTextContent('Slack can’t be connected yet')
+  })
+
+  it('connects any tool by the address pasted in the same box', async () => {
+    const custom = tool({ id: 't9', name: 'Example', url: 'https://mcp.example.com/mcp', auth: 'none' })
+    const fetch = vi.fn(() => Promise.resolve(json({ tool: custom })))
+    vi.stubGlobal('fetch', fetch)
+    const onConnected = vi.fn()
+    render(<ConnectTool catalog={topical} connected={[]} keptIn="keychain" onConnected={onConnected} />)
+    const box = screen.getByRole('searchbox', { name: 'Find a tool or paste its address' })
+    fireEvent.change(box, { target: { value: 'https://mcp.example.com/mcp' } })
+    // An address is no search: the list and its topics make way for Connect.
+    expect(screen.queryByRole('group', { name: 'Topics' })).not.toBeInTheDocument()
+    expect(screen.queryAllByRole('listitem')).toHaveLength(0)
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
+    await waitFor(() => expect(onConnected).toHaveBeenCalledWith(custom))
+    expect(sent(fetch, 0)).toMatchObject({ url: '/api/tools', method: 'POST', body: { url: 'https://mcp.example.com/mcp' } })
+    expect(box).toHaveValue('')
   })
 
   it('refuses an address the daemon refuses, in its words', async () => {
     vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(json({ error: 'LoomWatch only connects to tools over https://, so nobody on the way can read what an agent sends.' }, 400))))
     render(<ConnectTool catalog={[]} connected={[]} keptIn="keychain" onConnected={vi.fn()} />)
-    fireEvent.change(screen.getByLabelText('Or paste a tool’s address'), { target: { value: 'http://mcp.example.com/mcp' } })
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Find a tool or paste its address' }), { target: { value: 'http://mcp.example.com/mcp' } })
     fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('over https://')
+  })
+})
+
+describe('what counts as an address', () => {
+  it('takes a web address, or a name with a dot and a path, and leaves words and bare names to find tools', () => {
+    expect(isToolAddress('https://mcp.example.com/mcp')).toBe(true)
+    expect(isToolAddress('  http://127.0.0.1:8080/mcp ')).toBe(true)
+    expect(isToolAddress('mcp.example.com/mcp')).toBe(true)
+    expect(isToolAddress('cal.com')).toBe(false)
+    expect(isToolAddress('jira issues')).toBe(false)
+    expect(isToolAddress('https://mcp.example.com/a b')).toBe(false)
   })
 })
