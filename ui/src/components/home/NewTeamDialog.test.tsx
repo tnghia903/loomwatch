@@ -70,7 +70,8 @@ describe('New team', () => {
     const created = vi.fn()
     render(<NewTeamDialog existingPaths={[]} onCreated={created} onClose={vi.fn()} />)
     const dialog = screen.getByRole('dialog', { name: 'Create a team' })
-    expect(await within(dialog).findByRole('radio', { name: /My agents/ })).toBeChecked()
+    // The choice is there, disabled, before your agents load: wait for it to be chosen.
+    await waitFor(() => expect(within(dialog).getByRole('radio', { name: /My agents/ })).toBeChecked())
     expect(within(dialog).queryByRole('radio', { name: /Empty team/ })).toBeNull()
     fireEvent.change(within(dialog).getByLabelText('Team name'), { target: { value: 'Digest' } })
     // Two agents, none ticked yet: nothing to start with, so nothing is created.
