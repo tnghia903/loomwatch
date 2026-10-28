@@ -130,11 +130,17 @@ describe('AskPanel', () => {
     const { rerender } = render(<AskPanel ask={controller({ thread: threadWith(proposal) })} view="home" cards={actions} />)
     const card = screen.getByRole('article', { name: 'Proposed team: Brief' })
     expect(within(card).getByText('2 steps: Collector → Writer')).toBeInTheDocument()
+    // The getting-started guide follows Ask: the panel, a proposal still to show, then its Apply.
+    expect(card.closest('[data-tour="ask"]')).not.toBeNull()
+    expect(card).toHaveAttribute('data-tour', 'ask-proposal')
     fireEvent.click(within(card).getByRole('button', { name: /Show on canvas/ }))
     expect(actions.onShowProposal).toHaveBeenCalledWith('p1', proposal)
 
     rerender(<AskPanel ask={controller({ thread: threadWith(proposal) })} view="build" cards={{ ...actions, previewingId: 'p1' }} />)
-    fireEvent.click(within(screen.getByRole('article', { name: 'Proposed team: Brief' })).getByRole('button', { name: 'Apply' }))
+    const shown = screen.getByRole('article', { name: 'Proposed team: Brief' })
+    expect(shown).not.toHaveAttribute('data-tour')
+    expect(within(shown).getByRole('button', { name: 'Apply' })).toHaveAttribute('data-tour', 'apply-proposal')
+    fireEvent.click(within(shown).getByRole('button', { name: 'Apply' }))
     expect(actions.onApply).toHaveBeenCalled()
 
     rerender(<AskPanel ask={controller({ thread: threadWith({ ...proposal, outcome: 'applied' }) })} view="build" cards={actions} />)

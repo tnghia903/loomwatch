@@ -166,7 +166,7 @@ export function Studio({ runs, onSetUp, setUpUnavailable, asking = false }: {
   return (
     <div className="studio">
       {deskSection}
-      <section className="studio-projects" aria-labelledby="studio-projects-title">
+      <section className="studio-projects" aria-labelledby="studio-projects-title" data-tour="projects">
         <div className="studio-projects-head">
           <h2 id="studio-projects-title" className="studio-head">Projects</h2>
           {rooms.length > 6 && (

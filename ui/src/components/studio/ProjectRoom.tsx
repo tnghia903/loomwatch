@@ -238,7 +238,7 @@ export function ProjectRoom({ id }: { id: string }) {
 
   const teams = (room?.teams ?? []).map((team) => ({ path: team.path, name: team.name }))
   return (
-    <div className="project-room-page">
+    <div className="project-room-page" data-tour="room">
       <header className="room-top">
         <a className="room-home" href="/"><ChevronLeft size={14} aria-hidden="true" />Home</a>
         <ProjectMark id={project.id} mark={project.mark} />
@@ -327,7 +327,7 @@ export function ProjectRoom({ id }: { id: string }) {
           {room && room.teams.length === 0 && <p className="studio-quiet">No team works here yet.</p>}
           <span className="room-floor-acts">
             <button type="button" className="btn" onClick={() => setAdding(null)}>Add an agent</button>
-            <button type="button" className="btn" onClick={() => setNewTeam(true)}>New team</button>
+            <button type="button" className="btn" data-tour="new-team" onClick={() => setNewTeam(true)}>New team</button>
           </span>
         </section>
       </main>

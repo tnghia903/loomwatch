@@ -10,6 +10,10 @@ import { keys } from '../platform'
  * operator to do the real thing (build an agent, create the team, run it), and its `done` check reads
  * the page to see that they did; a `next` step only explains what is on screen. A step can also
  * change what it says as the page changes, e.g. from "click New team" to "fill in the dialog".
+ *
+ * Every team works in a project (ADR 0097), so putting the agent in a team goes through one: a
+ * project's room has New team; before any project, Set up project asks Ask LoomWatch for the
+ * project and its first team, which is applied on its canvas before the team steps go on.
  */
 export type TourStepId =
   | 'welcome' | 'build-agent' | 'agent' | 'try' | 'save' | 'new-team' | 'team-agents' | 'workflow' | 'run-team' | 'ask' | 'watch' | 'review' | 'done'
@@ -45,6 +49,8 @@ export interface TourStepView {
   keepClear?: boolean
   /** A request the operator can drop into the request box with one click. */
   example?: string
+  /** Who an `action` step waits for, when it isn't the operator: "Waiting for Ask LoomWatch". */
+  waiting?: string
 }
 
 export interface TourStep {
@@ -67,6 +73,11 @@ function present(selector: string): boolean {
 /** How many agents the open team has, as the workspace says, not as many as are drawn yet. */
 function agentCount(): number {
   return Number(document.querySelector('[data-tour="workspace"]')?.getAttribute('data-tour-agents') ?? 0)
+}
+
+/** Ask LoomWatch's team is on the open team's canvas, not applied yet. */
+function proposalShowing(): boolean {
+  return present('[data-tour="workspace"][data-tour-proposal]')
 }
 
 /** Which of the open team's views is showing: `agents`, `workflow` or `chat`. */
@@ -172,7 +183,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
     view: () => present('[data-tour="agent-builder"][data-tour-saved]')
       ? {
           title: 'Now put it in a team',
-          body: 'It is in My agents now, ready for any team. Click LoomWatch at the top to see your teams and make one.',
+          body: 'It is in My agents now, ready for any team. Click LoomWatch at the top to go Home.',
           target: ['[data-tour="your-teams"]'],
           sides: ['bottom', 'left'],
           advance: 'action',
@@ -188,29 +199,103 @@ export const TOUR_STEPS: readonly TourStep[] = [
   {
     id: 'new-team',
     screen: 'home',
-    // Creating the team opens it, where the guide carries on by itself.
-    view: () => present('[data-tour="new-team-dialog"]')
-      ? {
+    // Home or a project's room. Creating the team, or showing Ask's team on its canvas, opens it,
+    // where the guide carries on by itself.
+    view: ({ keyReady, keyLoading }) => {
+      if (present('[data-tour="new-team-dialog"]')) {
+        return {
           title: 'Start it with your agent',
-          body: 'Type any name, tick the agent you built under My agents, and press Create team. A team always starts with at least one agent.',
+          body: 'Type a name, check your agent is ticked under My agents, and press Create team.',
           target: ['[data-tour="new-team-dialog"]'],
           sides: ['right', 'left'],
           advance: 'action',
           dim: false,
           keepClear: true,
         }
-      : {
+      }
+      if (present('[data-tour="ask-proposal"]')) {
+        return {
+          title: 'See the proposed team',
+          body: 'Ask LoomWatch proposed a team. Press Show on canvas to look at it.',
+          target: ['[data-tour="ask-proposal"]'],
+          sides: ['left', 'bottom', 'top'],
+          advance: 'action',
+          dim: false,
+          keepClear: true,
+        }
+      }
+      if (present('[data-tour="room"]')) {
+        return {
           title: 'Put it in a team',
           body: 'A team is the agents that work on your request together, and the order they hand work along. Click New team.',
           target: ['[data-tour="new-team"]'],
-          sides: ['bottom', 'right', 'top'],
+          // Beside it: above would cover the room's teams.
+          sides: ['right', 'bottom', 'top'],
           advance: 'action',
-        },
+        }
+      }
+      if (present('[data-tour="ask"]')) {
+        return {
+          title: 'Ask LoomWatch is on it',
+          body: 'It is writing your project and its first team, which opens by itself for you to check. If it asks you something, answer in its box.',
+          target: ['[data-tour="ask"]'],
+          sides: ['left', 'bottom'],
+          advance: 'action',
+          dim: false,
+          keepClear: true,
+          waiting: 'Waiting for Ask LoomWatch',
+        }
+      }
+      if (present('[data-tour="projects"]')) {
+        // New project opens Set up project over the rooms.
+        return present('[data-tour="set-up-project"]')
+          ? {
+              title: 'Set up a project',
+              body: 'Type what you are working on and press Set up project.',
+              target: ['[data-tour="set-up-project"]'],
+              sides: ['bottom', 'right', 'top'],
+              advance: 'action',
+              dim: false,
+            }
+          : {
+              title: 'Open a project',
+              body: 'Every team works in a project, and its agents read what it is about. Click a project to open it, or press New project.',
+              target: ['[data-tour="projects"]'],
+              sides: ['top', 'right', 'bottom'],
+              advance: 'action',
+            }
+      }
+      if (!keyLoading && !keyReady) {
+        return {
+          title: 'Choose how your models are paid first',
+          body: 'Setting up a project needs an AI model for Ask LoomWatch. Connect your ChatGPT plan, your Claude API credit or an OpenRouter key in the cards here.',
+          target: ['[data-tour="key"]'],
+          sides: ['bottom', 'top', 'right'],
+          advance: 'action',
+        }
+      }
+      return {
+        title: 'Set up your first project',
+        body: 'Type what you are working on, or pick Plan a trip below, and press Set up project. Ask LoomWatch proposes a project and its first team, using your agent if it fits. Like your agents, it uses your AI model, so it draws on your plan or credit.',
+        target: ['[data-tour="set-up-project"]'],
+        sides: ['bottom', 'right', 'top'],
+        advance: 'action',
+      }
+    },
   },
   {
     id: 'team-agents',
     screen: 'workspace',
-    view: () => present('[data-tour="agent-picker"]')
+    // A team Ask proposed is on the canvas but not saved: it is applied before anything else.
+    view: () => proposalShowing()
+      ? {
+          title: 'Keep the team',
+          body: 'Nothing is saved yet. Press Apply to keep this team and its project.',
+          target: ['[data-tour="apply-proposal"]'],
+          sides: ['bottom', 'left'],
+          advance: 'action',
+        }
+      : present('[data-tour="agent-picker"]')
       ? {
           title: 'Add your agent',
           body: 'A team starts on Agents. Press Add beside the agent you built, and it joins the team as you saved it. More agents join the same way.',
@@ -225,7 +310,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
           sides: ['bottom'],
           advance: 'action',
         },
-    done: () => agentCount() > 0,
+    done: () => agentCount() > 0 && !proposalShowing(),
   },
   {
     id: 'workflow',

@@ -42,14 +42,18 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-const HOME = '<div data-tour="home"><span data-tour="apps">Ready</span><a data-tour="build-agent">Build an agent</a><button data-tour="new-team">New team</button></div>'
+/** Home as the studio draws it (ADR 0097): with projects, or before any, asking what you work on. */
+const HOME = '<div data-tour="home"><span data-tour="apps">Ready</span><a data-tour="build-agent">Build an agent</a><section data-tour="projects"></section></div>'
+const EMPTY_HOME = '<div data-tour="home"><div data-tour="key"></div><form data-tour="set-up-project"></form><a data-tour="build-agent">Build an agent</a></div>'
+/** A project's room, where its teams are started. */
+const ROOM = '<div data-tour="room"><button data-tour="new-team">New team</button></div>'
 /** Your agents: the builder for one agent, with its chat open or not, or the list with its New agent button. */
 const builder = (saved = false, chat = '') => `<div data-tour="agents"><a data-tour="your-teams">My team</a><div data-tour="agent-builder"${saved ? ' data-tour-saved="true"' : ''}><button data-tour="save-agent">Save to My agents</button><nav><button data-tour="agent-tab-build"></button><button data-tour="agent-tab-chat"></button></nav><div data-tour="agent-blocks"></div>${chat}</div></div>`
 /** Its chat, before and after it answers. */
 const CHAT = '<section data-tour="chat"><form data-tour="composer"></form></section>'
 const ANSWERED = '<section data-tour="chat"><div data-tour="output"></div><form data-tour="composer"></form></section>'
 const AGENTS_LIST = '<div data-tour="agents"><a data-tour="your-teams">My team</a><button data-tour="new-agent">New agent</button></div>'
-const workspace = (inner: string, agents = 1, view = 'workflow') => `<div data-tour="workspace" data-tour-agents="${agents}" data-tour-view="${view}"><nav data-tour="view-tabs"><button data-tour="tab-agents"></button><button data-tour="tab-workflow"></button><button data-tour="tab-chat"></button></nav>${inner}</div>`
+const workspace = (inner: string, agents = 1, view = 'workflow', proposal = false) => `<div data-tour="workspace" data-tour-agents="${agents}" data-tour-view="${view}"${proposal ? ' data-tour-proposal="showing"' : ''}><nav data-tour="view-tabs"><button data-tour="tab-agents"></button><button data-tour="tab-workflow"></button><button data-tour="tab-chat"></button></nav>${inner}</div>`
 
 describe('GettingStarted', () => {
   it('shows nothing until the guide is started', () => {
@@ -161,22 +165,72 @@ describe('GettingStarted', () => {
     tick(250)
     expect(readTourState()?.step).toBe('new-team')
     tick(250)
+    // Every team works in a project: Home points at the projects, and a room at its New team.
+    expect(screen.getByRole('heading', { name: 'Open a project' })).toBeInTheDocument()
+    showPage(ROOM)
+    tick(250)
     expect(screen.getByRole('heading', { name: 'Put it in a team' })).toBeInTheDocument()
+    expect(readTourState()?.step).toBe('new-team')
+  })
+
+  it('with no project yet, asks for one through Set up project and follows Ask to the team it proposes', () => {
+    showPage(EMPTY_HOME)
+    goToStep('new-team')
+    renderGuide()
+    expect(screen.getByRole('heading', { name: 'Set up your first project' })).toBeInTheDocument()
+    expect(screen.getByText(/press Set up project/)).toBeInTheDocument()
+
+    showPage(EMPTY_HOME + '<aside data-tour="ask"></aside>')
+    tick(250)
+    expect(screen.getByRole('heading', { name: 'Ask LoomWatch is on it' })).toBeInTheDocument()
+    // Nothing for the operator to do here: the card says who it waits for.
+    expect(screen.getByText('Waiting for Ask LoomWatch')).toBeInTheDocument()
+    expect(screen.queryByText('Waiting for you')).not.toBeInTheDocument()
+
+    showPage(EMPTY_HOME + '<aside data-tour="ask"><article data-tour="ask-proposal"></article></aside>')
+    tick(250)
+    expect(screen.getByRole('heading', { name: 'See the proposed team' })).toBeInTheDocument()
+    expect(readTourState()?.step).toBe('new-team')
+  })
+
+  it('asks for a way to pay for models before Set up project, which asks Ask LoomWatch', () => {
+    showPage(EMPTY_HOME)
+    goToStep('new-team')
+    render(<GettingStarted keyReady={false} keyLoading={false} />)
+    tick()
+    expect(screen.getByRole('heading', { name: 'Choose how your models are paid first' })).toBeInTheDocument()
+    expect(screen.getByText(/needs an AI model for Ask LoomWatch/)).toBeInTheDocument()
+  })
+
+  it('keeps Ask’s team on its canvas before the team steps go on', () => {
+    showPage(workspace('<header><button data-tour="apply-proposal">Apply</button></header>', 2, 'workflow', true))
+    goToStep('new-team')
+    renderGuide()
+    expect(readTourState()?.step).toBe('team-agents')
+    tick(250)
+    // Its agents are on the canvas, but nothing is saved: the guide waits for Apply.
+    expect(screen.getByRole('heading', { name: 'Keep the team' })).toBeInTheDocument()
+    tick(1000)
+    expect(readTourState()?.step).toBe('team-agents')
+
+    showPage(workspace('<div class="react-flow__node-agent" data-tour="card"></div>', 2, 'workflow'))
+    tick(250)
+    expect(readTourState()?.step).toBe('workflow')
   })
 
   it('follows the operator into the New team dialog and back out of it', () => {
-    showPage(HOME)
+    showPage(ROOM)
     goToStep('new-team')
     renderGuide()
     expect(screen.getByRole('heading', { name: 'Put it in a team' })).toBeInTheDocument()
     expect(screen.getByText('Waiting for you')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Next/ })).not.toBeInTheDocument()
 
-    showPage(HOME + '<div data-tour="new-team-dialog"></div>')
+    showPage(ROOM + '<div data-tour="new-team-dialog"></div>')
     tick(250)
     expect(screen.getByRole('heading', { name: 'Start it with your agent' })).toBeInTheDocument()
 
-    showPage(HOME)
+    showPage(ROOM)
     tick(250)
     expect(screen.getByRole('heading', { name: 'Put it in a team' })).toBeInTheDocument()
   })
@@ -223,7 +277,7 @@ describe('GettingStarted', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Start again' }))
     tick()
-    expect(screen.getByRole('heading', { name: 'Put it in a team' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Open a project' })).toBeInTheDocument()
   })
 
   it('waits in My agents for the operator to go back to My team', () => {
