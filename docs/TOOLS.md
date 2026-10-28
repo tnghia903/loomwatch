@@ -11,15 +11,26 @@ never gets your sign-in.
 ## Connect a tool
 
 Open an agent's **Tools it can use** block and click **Connect a new tool**, or open
-**Connections** and find **Tools**. Pick one from the list, or paste a tool's address.
+**Connections** and find **Tools**. Pick a topic to see its tools, type what you need (such as
+"jira" or "invoices") to find one, or paste a tool's address in the same box.
 
-| Group | Tools | How it connects |
+| Topic | Tools | How it connects |
 |---|---|---|
-| Work | Notion, Todoist, Linear, Airtable, Cal.com | Sign in |
-| Create | Miro, Canva, Mermaid Chart, Replicate (uses your Replicate credits) | Sign in |
-| Travel and fun | Kiwi.com (flights), Peek (things to do), Instant Domain Search | No sign-in |
-| Look things up | Jina Reader, DeepWiki, Hugging Face, Microsoft Learn, Context7 | No sign-in |
-| Build and sell | GitHub (token), Stripe, Sentry | Sign in or token |
+| Tasks | Todoist, Linear, Jira and Confluence, monday.com, ClickUp, Airtable | Sign in |
+| Notes and files | Notion | Sign in |
+| Meetings | Cal.com, Granola, Fireflies | Sign in |
+| Design | Canva, Miro, Lucid, Mermaid Chart, Replicate (uses your Replicate credits) | Sign in |
+| Research | Exa, Jina Reader, Hugging Face, Microsoft Learn, Apify (signs in, uses your Apify credits) | No sign-in |
+| Travel | Kiwi.com (flights), Peek (things to do) | No sign-in |
+| Payments | Stripe, Square, PayPal | Sign in |
+| Customers | Intercom, Attio, Close.com, Klaviyo | Sign in |
+| Websites | Webflow, Wix, Netlify, Vercel, Instant Domain Search (no sign-in) | Sign in |
+| Apps and code | GitHub (token), GitLab, Sentry, Supabase, Neon, Cloudflare, PostHog, Context7 (no sign-in), DeepWiki (no sign-in) | Sign in |
+
+Some popular services can't be connected yet. Gmail, Google Calendar, Google Drive and Outlook
+don't offer an "MCP server" address. Slack, HubSpot, Asana, Box, Dropbox and Figma let in only apps
+they approved by hand, and Gamma's sign-in won't send you back to an app on this computer. Search
+for one and the list says so.
 
 Each tool shows its own icon. LoomWatch fetches it from the service's own website the first time
 it's shown and keeps a copy for a week. The icons belong to their makers and aren't part of
@@ -37,7 +48,7 @@ There are three ways a tool connects:
   on their site, paste it, and click **Connect**. A token the service refuses is never kept.
 
 **Any other tool.** A service that works with AI assistants usually lists an "MCP server" address,
-which often ends in `/mcp`. Paste it under **Or paste a tool's address**. LoomWatch connects over
+which often ends in `/mcp`. Paste it in the box at the top of the list. LoomWatch connects over
 `https://` only.
 
 LoomWatch keeps sign-ins and tokens in your Mac's Keychain (or Windows Credential Manager), never in

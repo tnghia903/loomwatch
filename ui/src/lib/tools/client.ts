@@ -42,16 +42,64 @@ export interface ConnectedTool {
 /** Where the Notion tool is connected — `notion::MCP_URL`. */
 export const NOTION_TOOL_URL = 'https://mcp.notion.com/mcp'
 
-/** What a starter tool is for, for the headings the list is shown under (`catalog::Group`). */
-export type CatalogGroup = 'work' | 'create' | 'travel' | 'lookUp' | 'build'
+/** What a starter tool is for, as the Skills page sorts skills by topic (`catalog::Topic`). */
+export type CatalogTopic =
+  | 'tasks' | 'notes' | 'meetings' | 'design' | 'research' | 'travel' | 'payments' | 'customers' | 'websites' | 'code'
 
-export const CATALOG_GROUPS: readonly { group: CatalogGroup; title: string }[] = [
-  { group: 'work', title: 'Work' },
-  { group: 'create', title: 'Create' },
-  { group: 'travel', title: 'Travel and fun' },
-  { group: 'lookUp', title: 'Look things up' },
-  { group: 'build', title: 'Build and sell' },
+/** The topics to start from, in the order the list is shown. */
+export const CATALOG_TOPICS: readonly { topic: CatalogTopic; label: string }[] = [
+  { topic: 'tasks', label: 'Tasks' },
+  { topic: 'notes', label: 'Notes and files' },
+  { topic: 'meetings', label: 'Meetings' },
+  { topic: 'design', label: 'Design' },
+  { topic: 'research', label: 'Research' },
+  { topic: 'travel', label: 'Travel' },
+  { topic: 'payments', label: 'Payments' },
+  { topic: 'customers', label: 'Customers' },
+  { topic: 'websites', label: 'Websites' },
+  { topic: 'code', label: 'Apps and code' },
 ]
+
+/**
+ * Popular services no app can connect to on its own yet (`catalog.rs` says why), longest name
+ * first. A search for one says so, rather than sending the person to look for an address that
+ * doesn't exist.
+ */
+const NOT_YET: readonly { name: string; why: string }[] = [
+  ...['Google Calendar', 'Google Drive', 'Google Sheets', 'Google Docs', 'Gmail', 'Google'].map((name) => ({ name, why: 'Google doesn’t offer it as a tool that apps like LoomWatch can connect to.' })),
+  ...['Microsoft Teams', 'OneDrive', 'Outlook'].map((name) => ({ name, why: 'Microsoft doesn’t offer it as a tool that apps like LoomWatch can connect to.' })),
+  ...['HubSpot', 'Dropbox', 'Figma', 'Slack', 'Asana', 'Box'].map((name) => ({ name, why: 'it lets in only apps it approved by hand.' })),
+  { name: 'Gamma', why: 'its sign-in won’t send you back to an app on this computer.' },
+]
+
+/** The popular service the words name that can't be connected yet, and why; or null. */
+export function cantConnectYet(text: string): { name: string; why: string } | null {
+  const said = ` ${text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ')} `
+  return NOT_YET.find(({ name }) => said.includes(` ${name.toLowerCase()} `)) ?? null
+}
+
+/**
+ * Whether what was typed is a tool's address to connect, rather than words to find one by: a web
+ * address, or a name with a dot and a path (`mcp.example.com/mcp`), which the daemon reads as
+ * https. A bare name such as `cal.com` finds Cal.com instead.
+ */
+export function isToolAddress(text: string): boolean {
+  const value = text.trim()
+  return /^https?:\/\/\S+$/i.test(value) || /^[\w-]+(\.[\w-]+)+\/\S*$/.test(value)
+}
+
+/**
+ * The starter tools that match every word typed, in the list's order: by name, by what each does,
+ * or by its topic. Nothing typed matches them all.
+ */
+export function findTools(catalog: readonly CatalogEntry[], text: string): CatalogEntry[] {
+  const words = text.toLowerCase().split(/\s+/).filter(Boolean)
+  return catalog.filter((entry) => {
+    const label = CATALOG_TOPICS.find(({ topic }) => topic === entry.topic)?.label ?? ''
+    const said = `${entry.name} ${entry.does} ${label}`.toLowerCase()
+    return words.every((word) => said.includes(word))
+  })
+}
 
 /** A tool to start from, checked to connect as its `auth` says. */
 export interface CatalogEntry {
@@ -59,8 +107,8 @@ export interface CatalogEntry {
   url: string
   does: string
   auth: ToolAuth
-  /** Absent from a daemon older than the groups: shown under no heading. */
-  group?: CatalogGroup
+  /** Absent from a daemon older than the topics: shown under no heading. */
+  topic?: CatalogTopic
   /** Something to ask an agent given it. */
   example?: string
   /** Where LoomWatch serves its icon from (`icons.rs`). */
