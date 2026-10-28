@@ -416,7 +416,7 @@ mod tests {
             about: "Colin's final project: a gate for the campus library.".into(),
             folders: vec![ProjectFolder {
                 name: "SUTD".into(),
-                path: "/Users/colin/Documents/SUTD".into(),
+                path: "~/Documents/SUTD".into(),
             }],
             ..Project::default()
         }
@@ -505,7 +505,7 @@ mod tests {
     #[test]
     fn every_agent_of_a_team_in_a_project_is_given_its_folders_once() {
         let mut team = crate::config::TeamConfig::parse(
-            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    model: fake/offline\n    role: Research.\n    capabilities:\n      - {kind: knowledge, name: Mine, path: /Users/colin/Documents/SUTD}\n  - id: b\n    model: fake/offline\n    role: Design.\n  - id: you\n    kind: operator\n    role: Approve it?\nedges:\n  - {from: a, to: you, layer: configured, kind: sequence, ts: \"2026-10-28T00:00:00Z\"}\n  - {from: you, to: b, layer: configured, kind: sequence, ts: \"2026-10-28T00:00:00Z\"}\n",
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    model: fake/offline\n    role: Research.\n    capabilities:\n      - {kind: knowledge, name: Mine, path: ~/Documents/SUTD}\n  - id: b\n    model: fake/offline\n    role: Design.\n  - id: you\n    kind: operator\n    role: Approve it?\nedges:\n  - {from: a, to: you, layer: configured, kind: sequence, ts: \"2026-10-28T00:00:00Z\"}\n  - {from: you, to: b, layer: configured, kind: sequence, ts: \"2026-10-28T00:00:00Z\"}\n",
         )
         .expect("a team");
         give_folders(&mut team, &sutd());
@@ -522,8 +522,8 @@ mod tests {
                 })
                 .unwrap_or_default()
         };
-        assert_eq!(paths("a"), [PathBuf::from("/Users/colin/Documents/SUTD")]);
-        assert_eq!(paths("b"), [PathBuf::from("/Users/colin/Documents/SUTD")]);
+        assert_eq!(paths("a"), [PathBuf::from("~/Documents/SUTD")]);
+        assert_eq!(paths("b"), [PathBuf::from("~/Documents/SUTD")]);
         assert!(paths("you").is_empty(), "a review stop reads nothing");
     }
 
@@ -548,7 +548,7 @@ mod tests {
         assert_eq!(team.project.as_deref(), Some("sutd"));
         assert_eq!(
             team.agents[0].capabilities[0].path.as_deref(),
-            Some(Path::new("/Users/colin/Documents/SUTD"))
+            Some(Path::new("~/Documents/SUTD"))
         );
         let path = root.0.join("gate.yaml");
         let memory = crate::memory::TeamMemory::load_for(

@@ -2629,7 +2629,7 @@ mod tests {
             .oneshot(send(
                 "PUT",
                 "/api/projects/sutd",
-                r#"{"name":" SUTD final project ","about":"Colin's gate.","folders":[{"name":"","path":"/Users/colin/SUTD"}]}"#,
+                r#"{"name":" SUTD final project ","about":"Colin's gate.","folders":[{"name":"","path":"~/SUTD"}]}"#,
             ))
             .await
             .expect("response");
