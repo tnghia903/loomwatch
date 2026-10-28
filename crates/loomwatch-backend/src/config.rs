@@ -1592,7 +1592,12 @@ impl TeamConfig {
         let mut team: Self = serde_yaml::from_value(document).context("invalid team YAML")?;
         // The project it works in: its folders are every agent's to read (ADR 0097), and its About
         // and notes reach them through the memory packet.
-        if let Some(id) = team.project.as_deref().map(str::trim).filter(|id| !id.is_empty()) {
+        if let Some(id) = team
+            .project
+            .as_deref()
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+        {
             let project = crate::projects::read(teams_root, id)
                 .map_err(anyhow::Error::msg)?
                 .ok_or_else(|| anyhow::Error::msg(crate::projects::missing(id)))?;
@@ -2108,8 +2113,12 @@ mod tests {
         );
         let essay = team(&format!("    part:\n      text: '{}'\n", "x".repeat(1001)))
             .expect_err("a second set of instructions");
-        assert!(format!("{essay:#}").contains("keep it to 1000"), "{essay:#}");
-        let unknown = team("    part:\n      role: Something else.\n").expect_err("only text and doneWhen");
+        assert!(
+            format!("{essay:#}").contains("keep it to 1000"),
+            "{essay:#}"
+        );
+        let unknown =
+            team("    part:\n      role: Something else.\n").expect_err("only text and doneWhen");
         assert!(format!("{unknown:#}").contains("role"), "{unknown:#}");
 
         let operator = TeamConfig::parse(

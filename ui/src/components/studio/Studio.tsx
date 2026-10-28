@@ -30,7 +30,7 @@ function looseProjects(loose: readonly string[]): ProjectEntry[] {
 }
 
 const PROBLEM_LABEL: Record<NonNullable<TeamSummary['problem']>, string> = {
-  unreadable: 'not valid YAML',
+  unreadable: 'the file has a mistake in it',
   not_a_team: 'not a team file',
 }
 
@@ -68,7 +68,7 @@ function NotInAProject({ jobs, rooms, used }: { jobs: readonly SavedJob[]; rooms
         {idle.map((job) => (
           <span key={job.id} className="idle-agent">
             <button type="button" className="idle-agent-chip" aria-expanded={open === job.id} aria-haspopup="menu" onClick={() => { setOpen(open === job.id ? null : job.id); setAdding(false) }}>
-              <FigureStill figure={figureFor(job.id, job.figure)} alt="" width={24} height={31} decoding="async" />
+              <FigureStill figure={figureFor(job.id, job.figure)} alt="" width={30} height={30} decoding="async" />
               {job.name}
             </button>
             {open === job.id && (
@@ -96,10 +96,12 @@ function NotInAProject({ jobs, rooms, used }: { jobs: readonly SavedJob[]; rooms
  * project as a room, its agents at their desks in team order, waiting rooms first; then your agents
  * in no project. With no project yet it asks what you are working on.
  */
-export function Studio({ runs, onSetUp, setUpUnavailable }: {
+export function Studio({ runs, onSetUp, setUpUnavailable, asking = false }: {
   runs: readonly RunRecord[]
   onSetUp: (start: ProjectStart) => void
   setUpUnavailable: string | null
+  /** Ask's panel is open: Set up project says Ask is already at work beside it. */
+  asking?: boolean
 }) {
   const { list, error, reload } = useProjects()
   const { teams: summaries } = useTeamList()
@@ -137,7 +139,8 @@ export function Studio({ runs, onSetUp, setUpUnavailable }: {
   }
   // An outline's label says where its agent is; pressing it goes there.
   const onAway = (seat: Seat) => {
-    if (seat.away === 'at your desk') document.getElementById('your-desk-title')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    const still = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    if (seat.away === 'at your desk') document.getElementById('your-desk-title')?.scrollIntoView({ behavior: still ? 'auto' : 'smooth', block: 'center' })
   }
 
   if (error) return <p role="alert" className="home-empty alert">Couldn’t list your projects. {error} <button type="button" className="link" onClick={reload}>Try again</button></p>
@@ -148,7 +151,7 @@ export function Studio({ runs, onSetUp, setUpUnavailable }: {
   if (rooms.length === 0) {
     return (
       <div className="studio studio-empty">
-        <SetUpProject onSetUp={setUp} unavailable={setUpUnavailable} />
+        <SetUpProject onSetUp={setUp} unavailable={setUpUnavailable} asking={asking} />
         {deskSection}
         <CantBeOpened teams={problems} />
         <NotInAProject jobs={jobs} rooms={rooms} used={used} />
@@ -184,10 +187,12 @@ export function Studio({ runs, onSetUp, setUpUnavailable }: {
               </button>
             ))}
             {putAway.length > 0 && (
-              <button type="button" className="room-tile put-away" aria-expanded={showPutAway} onClick={() => setShowPutAway((value) => !value)}>
-                <span className="room-tile-name">{putAway.length} put away</span>
-                {showPutAway && <span className="room-tile-when">{putAway.map((room) => room.name).join(', ')}</span>}
-              </button>
+              <div className="room-tile put-away">
+                <button type="button" className="room-tile-name" aria-expanded={showPutAway} onClick={() => setShowPutAway((value) => !value)}>{putAway.length} hidden from Home</button>
+                {showPutAway && putAway.map((room) => (
+                  <button key={room.id} type="button" className="link room-tile-when" onClick={() => openRoom(room)}>{room.name}</button>
+                ))}
+              </div>
             )}
             <button type="button" className="room-new" onClick={() => setCreating(true)}><Plus size={20} aria-hidden="true" />New project</button>
           </div>
@@ -202,7 +207,7 @@ export function Studio({ runs, onSetUp, setUpUnavailable }: {
                 </button>
               </li>
             ))}
-            {putAway.length > 0 && !showPutAway && <li><button type="button" className="link" onClick={() => setShowPutAway(true)}>{putAway.length} put away</button></li>}
+            {putAway.length > 0 && !showPutAway && <li><button type="button" className="link" onClick={() => setShowPutAway(true)}>{putAway.length} hidden from Home</button></li>}
             <li><button type="button" className="btn" onClick={() => setCreating(true)}><Plus size={14} aria-hidden="true" />New project</button></li>
           </ul>
         )}
@@ -210,7 +215,7 @@ export function Studio({ runs, onSetUp, setUpUnavailable }: {
         <CantBeOpened teams={problems} />
       </section>
       <NotInAProject jobs={jobs} rooms={rooms} used={used} />
-      {creating && <SetUpProject onSetUp={setUp} unavailable={setUpUnavailable} onClose={() => setCreating(false)} />}
+      {creating && <SetUpProject onSetUp={setUp} unavailable={setUpUnavailable} asking={asking} onClose={() => setCreating(false)} />}
     </div>
   )
 }

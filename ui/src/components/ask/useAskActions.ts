@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { baseName, isAbsolutePath, relativeUnder } from '../../lib/files/paths'
 import { briefFileNameFor, fetchMemory, writeMemoryFile } from '../../lib/memory/client'
+import { addProjectNote, fetchProjects, projectsChanged, saveProject } from '../../lib/projects/client'
 import { decideRunRequest, fetchProposal, reportProposalOutcome, type Proposal } from '../../lib/ask/client'
 import { proposalChanges, type ProposalChanges } from '../../lib/ask/proposal'
 import type { ProposalCard, ReviewNoteCard, RunRequestCard } from '../../lib/ask/thread'
@@ -187,7 +188,7 @@ export function useAskActions({ doc, conversationId, activeRunId, waiting, toBui
       present(await fetchProposal(id))
     } catch (caught) {
       if (recorded?.yaml) {
-        present({ id, source: '', file: recorded.file, name: recorded.name, isNew: recorded.isNew, yaml: recorded.yaml, baseRevision: null, summary: recorded.summary, createdAt: recorded.at, agentNames: recorded.agentNames, ...(recorded.brief ? { brief: recorded.brief } : {}) })
+        present({ id, source: '', file: recorded.file, name: recorded.name, isNew: recorded.isNew, yaml: recorded.yaml, baseRevision: null, summary: recorded.summary, createdAt: recorded.at, agentNames: recorded.agentNames, ...(recorded.brief ? { brief: recorded.brief } : {}), ...(recorded.project ? { project: recorded.project } : {}) })
         return
       }
       say({ text: caught instanceof Error ? caught.message : String(caught) })
@@ -244,6 +245,14 @@ export function useAskActions({ doc, conversationId, activeRunId, waiting, toBui
     const brief = proposal.brief?.trim()
     const current = docRef.current
     if (!brief || !current.path) return false
+    // A team in a project: every agent there reads it, as one of the project's notes.
+    if (proposal.project) {
+      const kept = (await fetchProjects())?.projects.find((project) => project.id === proposal.project?.id)
+      if (kept?.notes?.some((note) => note.text.trim() === brief) || kept?.about?.includes(brief)) return false
+      await addProjectNote(proposal.project.id, brief)
+      projectsChanged()
+      return false
+    }
     const memory = await fetchMemory(current.path)
     if (memory.entries.some((entry) => entry.body.trim() === brief)) return false
     const file = briefFileNameFor(brief, memory.entries.map((entry) => entry.path), `${baseName(current.path).replace(/\.ya?ml$/i, '')}.brief`)
@@ -262,6 +271,17 @@ export function useAskActions({ doc, conversationId, activeRunId, waiting, toBui
   const applyProposal = useCallback(async () => {
     if (!preview || preview.applying) return
     setPreview({ ...preview, applying: true, error: null })
+    // A new project first (ADR 0097): the team names it, and a team naming none there isn't saved.
+    const project = preview.proposal.project
+    if (project?.isNew) {
+      try {
+        await saveProject(project.id, { name: project.name, ...(project.about ? { about: project.about } : {}), ...(project.folders?.length ? { folders: project.folders } : {}) })
+        projectsChanged()
+      } catch (caught) {
+        setPreview({ ...preview, applying: false, error: `Couldn’t set up the project. ${caught instanceof Error ? caught.message : String(caught)}` })
+        return
+      }
+    }
     const saved = await doc.save()
     if (!saved) {
       setPreview({ ...preview, applying: false, error: 'Couldn’t save the team. The list at the top says what to fix first.' })
@@ -283,8 +303,9 @@ export function useAskActions({ doc, conversationId, activeRunId, waiting, toBui
       say({ text: `Saved “${name}”, but not its Brief. ${briefProblem}` })
       return
     }
+    const inProject = project?.isNew ? ` in the new project “${project.name}”` : ''
     say({
-      text: isNew ? `Saved “${name}”. Press Run team when you’re ready.` : `Applied the changes to “${name}”.`,
+      text: isNew ? `Saved “${name}”${inProject}. Press Run team when you’re ready.` : `Applied the changes to “${name}”${inProject}.`,
       undo: isNew ? undefined : () => {
         // The Brief's entry was its own change after the proposal's: both go.
         if (briefAdded) docRef.current.undo()

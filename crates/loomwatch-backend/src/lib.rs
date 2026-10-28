@@ -38,8 +38,8 @@ pub mod orientation;
 pub mod permissions;
 pub mod pinned;
 pub mod platform;
-pub mod prompt_blocks;
 pub mod projects;
+pub mod prompt_blocks;
 pub mod runs;
 pub mod schedule;
 pub mod skill_routing;
@@ -334,7 +334,7 @@ async fn run_loaded_team(
     let memory = Arc::new(memory::TeamMemory::load_for(
         &memory::MemoryRoots::for_team(team_path, teams_root),
         team_path,
-        &team,
+        team,
     )?);
     // Build every agent's packet now and throw the result away. An oversized pinned Brief must
     // refuse the *run*, not fail whichever stage happens to reach it — a scoped entry that only
@@ -8147,6 +8147,7 @@ mod tests {
     /// "asked writer, which failed" and raised it for attention, over an answer the operator chose.
     /// It now comes back as the Writer stopping, saying why, and no model call is made for it.
     #[tokio::test]
+    #[allow(clippy::too_many_lines)]
     async fn a_helper_stopped_when_the_run_is_finished_at_its_spool_did_not_fail() -> Result<()> {
         let pool = crate::db::Db::temp().await;
         let lead = crate::engine::demo_model(crate::agent::Demo::responder(|_| {
@@ -9106,8 +9107,17 @@ mod tests {
             ..NodeTask::goal("do the thing")
         };
         let composed = compose_prompt(writer, &packet, &task);
-        let kinds: Vec<_> = composed.sections.iter().map(|section| section.kind).collect();
-        let at = |kind| kinds.iter().position(|found| *found == kind).expect("a section");
+        let kinds: Vec<_> = composed
+            .sections
+            .iter()
+            .map(|section| section.kind)
+            .collect();
+        let at = |kind| {
+            kinds
+                .iter()
+                .position(|found| *found == kind)
+                .expect("a section")
+        };
         assert!(at(memory::PromptSectionKind::Memory) < at(memory::PromptSectionKind::Part));
         assert!(at(memory::PromptSectionKind::Part) < at(memory::PromptSectionKind::StageResults));
         assert!(composed.text.contains(

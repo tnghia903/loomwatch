@@ -417,6 +417,13 @@ the teams in none; `PUT /api/projects/{id}` keeps one whole and `POST /api/proje
 adds the person's note. The daemon keeps a copy of every team file once before the app moves each
 team into a project of its own (`/api/move-into-projects`), through its normal save.
 
+In the app, Home is the studio (`components/studio/`, `lib/projects/studio.ts`): Your desk first,
+with whoever waits for the person (its Review opens the bell's tray), then a room per project with
+its busiest team's agents at their desks in the order work moves, then the person's agents in no
+project. An agent is drawn only where it is now: one waiting for the person is an outline in its
+rooms, one working elsewhere names that team. A project's room is `/projects/<id>`: its wall (About,
+folders, notes), its teams, Add an agent, New team, and Ask about the project.
+
 ### Ask LoomWatch
 
 Ask (`control/`) is the same agent, on the operator's key and the model they chose, but outside
@@ -453,10 +460,15 @@ isn't asked to approve each program it runs; elsewhere they ask first.
 
 Every agent Ask makes is saved to My agents and joins other teams as it is, so Ask writes its
 instructions and Done when for its kind of work and puts what the request is about into the team
-(ADR 0097). Each agent's `part` says what this team needs from it, with Done when items of its own,
-which the agent reads under `## Your part in this team` and which come first in the Done when its
-check step checks. A `brief` given to `propose_team` is saved by Apply beside the team as a Brief
-note, written after the team file and joined to it with a second save. Saving a team keeps the
+and its project (ADR 0097). Each agent's `part` says what this team needs from it, with Done when
+items of its own, which the agent reads under `## Your part in this team` and which come first in
+the Done when its check step checks. `propose_team` takes the team's `project`: one of the
+person's by `{id}`, or a new one as `{name, about, folders}`, which Apply keeps before it saves the
+team; a new team given neither works in a new project of its own. Its first turn lists the
+person's projects, and in a project's room (`AskContext.project`) Ask is told the project's About,
+folders, notes and teams. A `brief` becomes a note in the team's project when Apply runs; for a
+team in no project, a Brief note beside it, written after the team file and joined to it with a
+second save. Saving a team keeps the
 folders and files it connected to a new agent as the team's (`specOf` in `myAgents.ts`): an agent
 reads something of its own only when its builder gives it.
 

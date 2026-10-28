@@ -31,6 +31,7 @@ function daemon(url: string, init?: RequestInit) {
   }
   if (url === '/api/jobs') return respond({ folder: '/teams/.jobs', jobs: [{ id: 'researcher', file: '.jobs/researcher.yaml', name: 'Researcher', instructions: 'Research.', version: 1 }], problems: [] })
   if (url.startsWith('/api/team?')) return respond({ path: 'sutd/gate.yaml', yaml: GATE, revision: 'r' })
+  if (url === '/api/team' && init?.method === 'PUT') return respond({ path: 'sutd/gate.yaml', yaml: '', revision: 'r2' })
   if (url === '/api/runs?preview=true') return respond([])
   return respond({ root: '/teams', files: ['sutd/gate.yaml'], teams: [{ path: 'sutd/gate.yaml', name: 'Research and design', agentCount: 1 }], trashed: ['sutd/old.yaml'] })
 }
@@ -74,22 +75,22 @@ describe('a project’s room (ADR 0097)', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: 'Add a note' }))
     fireEvent.change(screen.getByRole('textbox', { name: 'A note every agent here reads' }), { target: { value: 'Use signed tokens.' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Keep' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(screen.getByText('Use signed tokens.')).toBeInTheDocument())
     expect(screen.queryByRole('textbox', { name: 'A note every agent here reads' })).toBeNull()
   })
 
   it('takes a note off the wall, and puts the project away from its menu', async () => {
     render(<ProjectRoom id="sutd" />)
-    fireEvent.click(await screen.findByRole('button', { name: 'Take “Colin picked option B.” off the wall' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove “Colin picked option B.”' }))
     await waitFor(() => expect(project.notes).toEqual([]))
     fireEvent.click(screen.getByRole('button', { name: 'Project settings' }))
-    fireEvent.click(within(screen.getByRole('menu', { name: 'Project settings' })).getByRole('menuitem', { name: 'Put away' }))
+    fireEvent.click(within(screen.getByRole('menu', { name: 'Project settings' })).getByRole('menuitem', { name: 'Hide from Home' }))
     await waitFor(() => expect(project.putAway).toBe(true))
-    expect(await screen.findByText('Put away')).toBeInTheDocument()
+    expect(await screen.findByText('Hidden from Home')).toBeInTheDocument()
   })
 
-  it('opens Add an agent for the agent Home sent here, and a new team never takes a deleted team’s place', async () => {
+  it('adds the agent Home sent here to one of the project’s teams, and opens its workflow to connect it', async () => {
     window.location.search = '?add=researcher'
     render(<ProjectRoom id="sutd" />)
     const dialog = await screen.findByRole('dialog', { name: 'Add an agent' })
@@ -97,7 +98,12 @@ describe('a project’s room (ADR 0097)', () => {
     expect(within(dialog).getByRole('combobox', { name: 'It joins' })).toHaveValue('')
     fireEvent.change(within(dialog).getByRole('combobox', { name: 'It joins' }), { target: { value: 'sutd/gate.yaml' } })
     fireEvent.click(within(dialog).getByRole('button', { name: 'Add' }))
-    expect(assign).toHaveBeenCalledWith('/?path=sutd%2Fgate.yaml&view=agents')
+    await waitFor(() => expect(assign).toHaveBeenCalledWith('/?path=sutd%2Fgate.yaml'))
+    const put = fetchMock.mock.calls.find(([url, init]) => url === '/api/team' && init?.method === 'PUT')
+    const yaml = (JSON.parse(String(put?.[1]?.body)) as { yaml: string }).yaml
+    // The team keeps its own Researcher and gains the one added, under an id of its own.
+    expect(yaml).toContain('id: researcher\n')
+    expect(yaml).toMatch(/- id: researcher-2\n(?:\s+\w+: .*\n)*\s+from:\n\s+agent: researcher\n/)
   })
 
   it('says so when there is no such project', async () => {

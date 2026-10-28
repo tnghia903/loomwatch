@@ -48,6 +48,7 @@ describe('every team becomes a project of its own (ADR 0097)', () => {
     expect(projectIdFor('SUTD final project')).toBe('sutd-final-project')
     expect(projectIdFor('Gate', ['gate'])).toBe('gate-2')
     expect(projectIdFor('!!')).toBe('project')
+    expect(projectIdFor('Đà Nẵng trip')).toBe('da-nang-trip')
   })
 
   it('saves the project, then the team as working in it with its Brief moved, as the editor saves it', async () => {
@@ -66,11 +67,18 @@ describe('every team becomes a project of its own (ADR 0097)', () => {
     expect(yaml).toContain('gate.brief/writer.md')
   })
 
-  it('leaves a team that already works in a project as it is', async () => {
+  it('leaves a team that already works in a project as it is, and gives one whose project is gone its own', async () => {
     const { moveIntoProjects } = await import('./move')
-    client.fetchTeamFile.mockResolvedValue({ yaml: 'schemaVersion: 1\nid: gate\nname: Gate\nproject: sutd\nentrypoint: a\nagents: []\nedges: []\n', revision: 'r' })
+    client.fetchTeamFile.mockResolvedValue({ yaml: 'schemaVersion: 1\nid: gate\nname: Gate\nproject: gate\nentrypoint: a\nagents: []\nedges: []\n', revision: 'r' })
+    memory.fetchMemory.mockResolvedValue({ enabled: false, entries: [] })
     expect(await moveIntoProjects(['gate.yaml'])).toEqual([])
     expect(projects.saveProject).not.toHaveBeenCalled()
     expect(client.saveTeamFile).not.toHaveBeenCalled()
+
+    client.fetchTeamFile.mockResolvedValue({ yaml: 'schemaVersion: 1\nid: gate\nname: Gate\nproject: gone\nentrypoint: a\nagents: []\nedges: []\n', revision: 'r' })
+    expect(await moveIntoProjects(['gate.yaml'])).toEqual(['gate.yaml'])
+    expect(projects.saveProject).toHaveBeenCalledWith('gate-2', { name: 'Gate' })
+    const [, yaml] = client.saveTeamFile.mock.calls[0] as unknown as [string, string]
+    expect(yaml).toContain('project: gate-2')
   })
 })

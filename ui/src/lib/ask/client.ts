@@ -19,7 +19,9 @@ export interface ConversationInfo {
 
 /** Where the person is, sent with every message so the assistant never has to ask. */
 export interface AskContext {
-  view: 'home' | 'build' | 'run'
+  view: 'home' | 'build' | 'run' | 'project'
+  /** The project whose room the person is in (ADR 0097): a team Ask proposes there works in it. */
+  project?: string | null
   teamPath: string | null
   runId: string | null
 }
@@ -38,9 +40,20 @@ export interface Proposal {
   createdAt: string
   /** Each agent's name as the team is read, by id: one from My agents has none in the file. */
   agentNames?: Record<string, string>
-  /** What every agent of the team should know about the work (ADR 0097), saved beside the team
-      as a Brief note when the proposal is applied. */
+  /** What every agent of the team should know about the work (ADR 0097): kept as a note in the
+      team's project when the proposal is applied, or beside a team in none as a Brief note. */
   brief?: string
+  /** The project the team works in (ADR 0097): a new one Apply keeps before the team. */
+  project?: ProposedProject
+}
+
+/** A proposal's project: one of the person's, or a new one with its About and folders. */
+export interface ProposedProject {
+  id: string
+  name: string
+  isNew: boolean
+  about?: string
+  folders?: { name: string; path: string }[]
 }
 
 export type ProposalOutcome = 'applied' | 'discarded' | 'undone'

@@ -202,7 +202,7 @@ describe('Home, the studio (ADR 0097)', () => {
     }))
     renderHome()
     const problems = await screen.findByRole('list', { name: 'Files that can’t be opened' })
-    expect(problems).toHaveTextContent('broken can’t be opened: not valid YAML')
+    expect(problems).toHaveTextContent('broken can’t be opened: the file has a mistake in it')
     expect(problems).toHaveTextContent('notes can’t be opened: not a team file')
   })
 

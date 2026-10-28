@@ -10,7 +10,7 @@
 import builtInJobs from '../../../../schemas/built-in-jobs.json'
 import { ACTIVITY_KINDS, ReplyText } from '../watch/replyText'
 import { eventText, type RunEvent } from '../watch/events'
-import type { AskState, ProposalOutcome } from './client'
+import type { AskState, ProposalOutcome, ProposedProject } from './client'
 
 export type StepStatus = 'running' | 'done' | 'failed'
 
@@ -38,6 +38,8 @@ export interface ProposalCard {
   agentNames: Record<string, string>
   /** The team's Brief the proposal carries (ADR 0097), when it carries one. */
   brief?: string
+  /** The project the team works in, when the proposal names one. */
+  project?: ProposedProject
   outcome: ProposalOutcome | null
   /** A later proposal for the same file replaced this one. */
   superseded: boolean
@@ -175,6 +177,20 @@ function text(value: unknown): string {
   return typeof value === 'string' ? value : ''
 }
 
+/** `{ project }` when there is one, to spread into a card. */
+function withProject(project: ProposedProject | null): { project?: ProposedProject } {
+  return project ? { project } : {}
+}
+
+/** A recorded proposal's project (ADR 0097), when it names one with an id and a name. */
+function projectOf(value: unknown): ProposedProject | null {
+  if (!object(value) || !text(value.id) || !text(value.name)) return null
+  const folders = Array.isArray(value.folders)
+    ? value.folders.filter((folder): folder is { name: string; path: string } => object(folder) && Boolean(text(folder.path))).map((folder) => ({ name: text(folder.name), path: text(folder.path) }))
+    : []
+  return { id: text(value.id), name: text(value.name), isNew: value.isNew === true, ...(text(value.about) ? { about: text(value.about) } : {}), ...(folders.length ? { folders } : {}) }
+}
+
 /** What a failed call said, in one line. Tool results arrive as text or as `{ error }`. */
 function failureDetail(output: unknown): string | null {
   if (typeof output === 'string' && output.trim()) return shorten(output, 220)
@@ -237,7 +253,7 @@ export function projectAskThread(events: readonly RunEvent[]): AskThread {
           const card: ProposalCard = {
             kind: 'proposal', id: text(payload.proposalId), at: event.ts, file: text(payload.file), name: text(payload.name) || text(payload.file),
             isNew: payload.isNew === true, summary: text(payload.summary), yaml: text(payload.yaml), agentNames: names(payload.agentNames),
-            ...(text(payload.brief) ? { brief: text(payload.brief) } : {}), outcome: null, superseded: false,
+            ...(text(payload.brief) ? { brief: text(payload.brief) } : {}), ...withProject(projectOf(payload.project)), outcome: null, superseded: false,
           }
           for (const earlier of proposals.values()) if (earlier.file === card.file) earlier.superseded = true
           proposals.set(card.id, card)

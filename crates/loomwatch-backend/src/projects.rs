@@ -84,14 +84,14 @@ impl Project {
     /// A project with no name, an About or a note over its limit, or a folder that isn't named by
     /// its full path.
     pub fn checked(mut self) -> Result<Self, String> {
-        self.name = self.name.trim().to_owned();
+        trim(&mut self.name);
         if self.name.is_empty() {
             return Err("A project needs a name.".to_owned());
         }
         if self.name.chars().count() > 80 {
             return Err("A project's name is at most 80 characters.".to_owned());
         }
-        self.about = self.about.trim().to_owned();
+        trim(&mut self.about);
         let about = self.about.chars().count();
         if about > ABOUT_CHARS {
             return Err(format!(
@@ -100,8 +100,8 @@ impl Project {
             ));
         }
         for folder in &mut self.folders {
-            folder.name = folder.name.trim().to_owned();
-            folder.path = folder.path.trim().to_owned();
+            trim(&mut folder.name);
+            trim(&mut folder.path);
             if !(Path::new(&folder.path).is_absolute() || folder.path.starts_with("~/")) {
                 return Err(format!(
                     "The folder “{}” needs its full path, not {:?}.",
@@ -113,10 +113,11 @@ impl Project {
             }
         }
         let mut seen = std::collections::BTreeSet::new();
-        self.folders.retain(|folder| seen.insert(folder.path.clone()));
+        self.folders
+            .retain(|folder| seen.insert(folder.path.clone()));
         self.notes.retain(|note| !note.text.trim().is_empty());
         for note in &mut self.notes {
-            note.text = note.text.trim().to_owned();
+            trim(&mut note.text);
             if note.text.chars().count() > NOTE_CHARS {
                 return Err(format!(
                     "A note is at most {NOTE_CHARS} characters. Say it in a sentence or two."
@@ -130,11 +131,19 @@ impl Project {
     }
 }
 
+/// `text` without the white space around it, in place.
+fn trim(text: &mut String) {
+    text.truncate(text.trim_end().len());
+    let start = text.len() - text.trim_start().len();
+    text.drain(..start);
+}
+
 /// A folder's label from its path: its last name.
 fn label_of(path: &str) -> String {
-    Path::new(path)
-        .file_name()
-        .map_or_else(|| path.to_owned(), |name| name.to_string_lossy().into_owned())
+    Path::new(path).file_name().map_or_else(
+        || path.to_owned(),
+        |name| name.to_string_lossy().into_owned(),
+    )
 }
 
 /// A project id is its file name: lowercase letters, digits and single hyphens, as an agent's in
@@ -148,8 +157,8 @@ pub fn is_id(id: &str) -> bool {
 /// after it when one in `taken` has it.
 #[must_use]
 pub fn id_for(name: &str, taken: &[String]) -> String {
-    let mut base: String = name
-        .to_lowercase()
+    // Accents off and `đ` as `d`, as the chat's search reads words: "Đà Nẵng" is `da-nang`.
+    let mut base: String = crate::chat_find::fold(name)
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
         .collect::<String>()
@@ -159,10 +168,14 @@ pub fn id_for(name: &str, taken: &[String]) -> String {
         .join("-");
     base.truncate(56);
     let base = base.trim_end_matches('-').to_owned();
-    let base = if base.is_empty() { "project".to_owned() } else { base };
+    let base = if base.is_empty() {
+        "project".to_owned()
+    } else {
+        base
+    };
     let mut id = base.clone();
     let mut counter = 2;
-    while taken.iter().any(|taken| *taken == id) {
+    while taken.contains(&id) {
         id = format!("{base}-{counter}");
         counter += 1;
     }
@@ -182,7 +195,9 @@ pub fn file_of(teams_root: &Path, id: &str) -> PathBuf {
 /// A file that is there but doesn't read as a project: the message names it and says why.
 pub fn read(teams_root: &Path, id: &str) -> Result<Option<Project>, String> {
     if !is_id(id) {
-        return Err(format!("“{id}” isn't a project's name in the teams folder."));
+        return Err(format!(
+            "“{id}” isn't a project's name in the teams folder."
+        ));
     }
     let Ok(text) = std::fs::read_to_string(file_of(teams_root, id)) else {
         return Ok(None);
@@ -246,8 +261,8 @@ pub fn add_note(teams_root: &Path, id: &str, note: ProjectNote) -> Result<Projec
 #[must_use]
 pub fn missing(id: &str) -> String {
     format!(
-        "The project “{id}” isn't in LoomWatch any more, so this team can't run. Open the team \
-         and choose its project again."
+        "The project “{id}” isn't in LoomWatch any more, so this team can't run. Open \
+         LoomWatch's Home: it puts the team in a project of its own."
     )
 }
 
@@ -349,7 +364,11 @@ pub fn moved(state_dir: &Path, teams_root: &Path) -> bool {
     std::fs::read(mark_path(state_dir, teams_root))
         .ok()
         .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
-        .is_some_and(|record| record.get("movedAt").is_some_and(serde_json::Value::is_string))
+        .is_some_and(|record| {
+            record
+                .get("movedAt")
+                .is_some_and(serde_json::Value::is_string)
+        })
 }
 
 /// The app moved the teams of `teams_root` into projects: keep when, beside the backup's record.
@@ -385,7 +404,8 @@ mod tests {
     }
 
     fn folder() -> Folder {
-        let path = std::env::temp_dir().join(format!("loomwatch-projects-{}", uuid::Uuid::new_v4()));
+        let path =
+            std::env::temp_dir().join(format!("loomwatch-projects-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&path).expect("a folder");
         Folder(crate::platform::canonicalize(&path).expect("a canonical folder"))
     }
@@ -411,8 +431,16 @@ mod tests {
         assert!(root.0.join(".projects/sutd.yaml").is_file());
         assert_eq!(list(&root.0).keys().collect::<Vec<_>>(), ["sutd"]);
         std::fs::write(root.0.join(".projects/broken.yaml"), "name: [").unwrap();
-        assert!(read(&root.0, "broken").expect_err("says why").contains("broken.yaml"));
-        assert_eq!(list(&root.0).len(), 1, "a file that doesn't read isn't listed");
+        assert!(
+            read(&root.0, "broken")
+                .expect_err("says why")
+                .contains("broken.yaml")
+        );
+        assert_eq!(
+            list(&root.0).len(),
+            1,
+            "a file that doesn't read isn't listed"
+        );
         assert!(read(&root.0, "../escape").is_err(), "an id is a file name");
     }
 
@@ -423,13 +451,23 @@ mod tests {
         assert!(project.checked().is_err());
         let mut project = sutd();
         project.about = "x".repeat(ABOUT_CHARS + 1);
-        assert!(project.checked().expect_err("too long").contains("keep it to 4000"));
+        assert!(
+            project
+                .checked()
+                .expect_err("too long")
+                .contains("keep it to 4000")
+        );
         let mut project = sutd();
         project.folders.push(ProjectFolder {
             name: "Notes".into(),
             path: "notes".into(),
         });
-        assert!(project.checked().expect_err("relative").contains("full path"));
+        assert!(
+            project
+                .checked()
+                .expect_err("relative")
+                .contains("full path")
+        );
         let mut project = sutd();
         project.folders.push(project.folders[0].clone());
         project.folders.push(ProjectFolder {
@@ -445,7 +483,10 @@ mod tests {
         }
         let project = project.checked().expect("kept");
         assert_eq!(project.folders.len(), 2, "each folder once");
-        assert_eq!(project.folders[1].name, "Brand", "named after its last name");
+        assert_eq!(
+            project.folders[1].name, "Brand",
+            "named after its last name"
+        );
         assert_eq!(project.notes.len(), NOTES);
         assert_eq!(project.notes[0].text, "note 2", "the oldest go first");
     }
@@ -453,7 +494,10 @@ mod tests {
     #[test]
     fn a_new_project_takes_a_free_id_from_its_name() {
         assert_eq!(id_for("SUTD final project", &[]), "sutd-final-project");
-        assert_eq!(id_for("Client review!", &["client-review".into()]), "client-review-2");
+        assert_eq!(
+            id_for("Client review!", &["client-review".into()]),
+            "client-review-2"
+        );
         assert_eq!(id_for("  ", &[]), "project");
         assert!(is_id(&id_for("Đà Nẵng trip", &[])));
     }
@@ -523,19 +567,30 @@ mod tests {
             .find("### Notes kept in the project\nFrom the project SUTD final project\n- Colin picked option B.")
             .expect("its notes");
         let tone = packet.text.find("### Tone").expect("the team's own Brief");
-        assert!(about < notes && notes < tone, "the project first: {}", packet.text);
+        assert!(
+            about < notes && notes < tone,
+            "the project first: {}",
+            packet.text
+        );
         assert_eq!(crate::memory::notebook_scope(&team, &path), "project:sutd");
-        assert!(memory.inherited_teams.contains(&"gate".to_owned()), "earlier notes stay readable");
+        assert!(
+            memory.inherited_teams.contains(&"gate".to_owned()),
+            "earlier notes stay readable"
+        );
 
         // A team in no project keeps its own scope and gets nothing of any project.
-        let alone = crate::config::TeamConfig::parse_in(&yaml.replace("project: sutd\n", ""), &root.0)
-            .expect("reads");
+        let alone =
+            crate::config::TeamConfig::parse_in(&yaml.replace("project: sutd\n", ""), &root.0)
+                .expect("reads");
         assert_eq!(crate::memory::notebook_scope(&alone, &path), "gate");
         assert!(alone.agents[0].capabilities.is_empty());
 
         let gone = crate::config::TeamConfig::parse_in(&yaml.replace("sutd", "gone"), &root.0)
             .expect_err("a project that isn't there");
-        assert!(format!("{gone:#}").contains("The project “gone” isn't in LoomWatch any more"), "{gone:#}");
+        assert!(
+            format!("{gone:#}").contains("The project “gone” isn't in LoomWatch any more"),
+            "{gone:#}"
+        );
     }
 
     #[test]
@@ -561,8 +616,14 @@ mod tests {
         .unwrap();
         std::fs::write(root.0.join("blog.yaml"), "schemaVersion: 1\nname: Blog\n").unwrap();
         let teams = teams_of(&root.0);
-        assert_eq!(teams.get("sutd").map(Vec::as_slice), Some(&["gate.yaml".to_owned()][..]));
-        assert_eq!(teams.get("").map(Vec::as_slice), Some(&["blog.yaml".to_owned()][..]));
+        assert_eq!(
+            teams.get("sutd").map(Vec::as_slice),
+            Some(&["gate.yaml".to_owned()][..])
+        );
+        assert_eq!(
+            teams.get("").map(Vec::as_slice),
+            Some(&["blog.yaml".to_owned()][..])
+        );
     }
 
     #[test]

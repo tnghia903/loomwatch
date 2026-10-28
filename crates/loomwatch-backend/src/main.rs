@@ -380,16 +380,14 @@ async fn main() -> Result<()> {
             }
             // Projects hold the work (ADR 0097): before the app moves each team into a project of
             // its own, a copy of every team file is kept in the state folder, once.
-            if let Some(folder) =
-                loomwatch_backend::projects::back_up_once(&state_dir, &teams_root).with_context(
-                    || {
-                        format!(
-                            "failed to keep a copy of your teams in {} before moving them into \
+            if let Some(folder) = loomwatch_backend::projects::back_up_once(&state_dir, &teams_root)
+                .with_context(|| {
+                    format!(
+                        "failed to keep a copy of your teams in {} before moving them into \
                              projects",
-                            state_dir.display()
-                        )
-                    },
-                )?
+                        state_dir.display()
+                    )
+                })?
             {
                 println!(
                     "loomwatchd kept a copy of your teams in {} before moving them into projects",

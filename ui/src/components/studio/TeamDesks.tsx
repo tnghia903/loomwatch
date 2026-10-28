@@ -1,3 +1,4 @@
+import { PRESENCE_WORDS } from '../../lib/rail/presence'
 import { seatWords, shownSeats, type RoomTeam, type Seat } from '../../lib/projects/studio'
 import type { FigureOf } from '../../lib/projects/studioUi'
 import { FigureStill } from '../agents/FigureStill'
@@ -5,7 +6,7 @@ import { FigureStill } from '../agents/FigureStill'
 /** An agent's outline where it isn't now: its desk keeps its place in the row. */
 function Outline({ size }: { size: number }) {
   return (
-    <svg className="desk-outline" width={size} height={Math.round(size * 1.3)} viewBox="0 0 40 52" aria-hidden="true">
+    <svg className="desk-outline" width={Math.round(size * 0.77)} height={size} viewBox="0 0 40 52" aria-hidden="true">
       <circle cx="20" cy="13" r="9" />
       <path d="M6 50 C6 34 11 26 20 26 C29 26 34 34 34 50 Z" />
     </svg>
@@ -36,9 +37,11 @@ function Desk({ seat, figureOf, size, onAway }: { seat: Seat; figureOf: FigureOf
         ? <span className="desk-you" aria-hidden="true" />
         : seat.away
           ? <Outline size={size} />
-          : <span className="desk-figure" data-glow={seat.state}><FigureStill figure={figureOf(seat)} alt="" width={size} height={Math.round(size * 1.3)} loading="lazy" decoding="async" /></span>}
+          : <span className="desk-figure" data-glow={seat.state}><FigureStill figure={figureOf(seat)} alt="" width={size} height={size} decoding="async" /></span>}
       <span className="desk-top" aria-hidden="true" />
-      <span className={`desk-name ${seat.away ? '' : seat.state}`}>{label}</span>
+      <span className="desk-name">{label}</span>
+      {/* Never colour alone: a desk that isn't simply ready says how it is, or where its agent is. */}
+      {seat.kind === 'agent' && (seat.away ?? PRESENCE_WORDS[seat.state]) && <span className={`desk-state ${seat.away ? 'away' : seat.state}`}>{seat.away ?? PRESENCE_WORDS[seat.state]}</span>}
     </>
   )
   if (seat.away && onAway) {
@@ -51,11 +54,11 @@ function Desk({ seat, figureOf, size, onAway }: { seat: Seat; figureOf: FigureOf
  * A team's row of desks, in the order work moves, with arrows between them. A room card shows at
  * most four, then "+N"; the room itself shows them all.
  */
-export function TeamDesks({ team, figureOf, size = 34, all = false, onAway }: { team: RoomTeam; figureOf: FigureOf; size?: number; all?: boolean; onAway?: (seat: Seat) => void }) {
+export function TeamDesks({ team, figureOf, size = 44, all = false, onAway }: { team: RoomTeam; figureOf: FigureOf; size?: number; all?: boolean; onAway?: (seat: Seat) => void }) {
   const { shown, more } = all ? { shown: team.seats, more: 0 } : shownSeats(team.seats)
   const said = team.seats.map((seat) => seatWords(seat)).join(', then ')
   return (
-    <div className="team-desks" role="group" aria-label={`${team.name}: ${said || 'no agents yet'}`}>
+    <div className={`team-desks${all ? ' all' : ''}`} style={{ ['--fig' as string]: `${size}px` }} role="group" aria-label={`${team.name}: ${said || 'no agents yet'}`}>
       {shown.map((seat, index) => (
         <span key={seat.id} className="desk-slot">
           {index > 0 && <Onward />}

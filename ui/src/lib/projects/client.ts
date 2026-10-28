@@ -100,7 +100,9 @@ export async function addProjectNote(id: string, text: string): Promise<ProjectE
  * when one in `taken` has it. The twin of `projects::id_for`.
  */
 export function projectIdFor(name: string, taken: readonly string[] = []): string {
-  const words = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').split('-').filter(Boolean).join('-')
+  // Accents off and `đ` as `d`, as the daemon folds them: "Đà Nẵng" is `da-nang`.
+  const folded = name.toLowerCase().replace(/đ/g, 'd').normalize('NFD').replace(/\p{M}/gu, '')
+  const words = folded.replace(/[^a-z0-9]+/g, '-').split('-').filter(Boolean).join('-')
   const base = words.slice(0, 56).replace(/-+$/, '') || 'project'
   let id = base
   for (let counter = 2; taken.includes(id); counter += 1) id = `${base}-${counter}`

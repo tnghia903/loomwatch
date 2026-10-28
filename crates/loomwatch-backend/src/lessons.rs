@@ -1222,7 +1222,10 @@ pub fn compose(learning: &Learning, source: LessonSource, lessons: &[Lesson]) ->
             let _ = writeln!(text, "{}. {}", index + 1, one_line(&lesson.text));
         }
     }
-    let project = learning.project.as_ref().map(|project| project.name.as_str());
+    let project = learning
+        .project
+        .as_ref()
+        .map(|project| project.name.as_str());
     if source == LessonSource::Liked {
         ask_what_worked(&mut text, agent, project);
         return text;

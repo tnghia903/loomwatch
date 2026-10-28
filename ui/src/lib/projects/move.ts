@@ -98,7 +98,8 @@ export async function moveIntoProjects(paths: readonly string[]): Promise<string
       const file = await fetchTeamFile(path)
       const model = TeamFileModel.parse(file.yaml)
       const team = model.snapshot()
-      if (team.project) continue
+      // One in a project that is there stays; one whose project is gone gets one of its own.
+      if (team.project && taken.includes(team.project)) continue
       const memory = await fetchMemory(path).catch(() => null)
       // A Brief entry for some agents only stays the team's: an About is every agent's.
       const own = (memory?.entries ?? []).filter((entry) => !entry.appliesTo?.length)

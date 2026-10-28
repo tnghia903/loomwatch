@@ -936,7 +936,10 @@ fn project_entries(id: &str, project: &crate::projects::Project) -> Vec<BriefEnt
     };
     let mut entries = Vec::new();
     if !project.about.trim().is_empty() {
-        entries.push(entry(format!("About {}", project.name), project.about.trim().to_owned()));
+        entries.push(entry(
+            format!("About {}", project.name),
+            project.about.trim().to_owned(),
+        ));
     }
     if !project.notes.is_empty() {
         let notes = project
@@ -954,7 +957,12 @@ fn project_entries(id: &str, project: &crate::projects::Project) -> Vec<BriefEnt
 /// it (ADR 0097), or its own [`scope_id`] when it works in none.
 #[must_use]
 pub fn notebook_scope(team: &crate::config::TeamConfig, team_path: &Path) -> String {
-    match team.project.as_deref().map(str::trim).filter(|id| !id.is_empty()) {
+    match team
+        .project
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+    {
         Some(project) => format!("project:{project}"),
         None => scope_id(&team.id, team_path),
     }

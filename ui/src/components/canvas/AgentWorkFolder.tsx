@@ -56,12 +56,12 @@ export function AgentWorkFolder({ agent, readOnly = false, onChange, problem, te
   } else if (chosen) {
     title = chosen.name
     place = chosen.path
-    note = 'Its project: it starts here and may read the files in it. It changes files or runs commands here only if you allow it below. Folders and files connected to it are read only.'
+    note = 'Its folder: it starts here and may read the files in it. It changes files or runs commands here only if you allow it below. Folders and files connected to it are read only.'
     gist = 'Read only, unless allowed below.'
   } else {
     title = 'The team’s folder'
     place = teamFolder ?? 'Where the team file is saved'
-    note = 'It starts where the team file is saved and may read the files there, including your other teams. To have it work on a project, choose that project’s folder.'
+    note = 'It starts where the team file is saved and may read the files there, including your other teams. To have it work on your files, choose their folder.'
     gist = 'It can read your other teams here too.'
   }
   const canChoose = !readOnly

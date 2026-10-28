@@ -794,7 +794,9 @@ async fn get_projects(State(state): State<ApiState>) -> Result<Json<Value>, ApiE
         .collect();
     // A team that names a project with no file: listed apart, so it isn't lost.
     let missing: Vec<String> = teams.into_values().flatten().collect();
-    Ok(Json(json!({ "projects": projects, "loose": loose, "missing": missing })))
+    Ok(Json(
+        json!({ "projects": projects, "loose": loose, "missing": missing }),
+    ))
 }
 
 /// Keep project `id` as the body says, whole: a new project, or a change to one.
@@ -874,9 +876,13 @@ async fn get_projects_move(State(state): State<ApiState>) -> Result<Json<Value>,
     let Some((approvals, state_dir)) = approvals_and_state(&state) else {
         return Ok(Json(json!({ "moved": true, "teams": [] })));
     };
-    let loose = crate::projects::teams_of(&state.teams_root)
-        .remove("")
-        .unwrap_or_default();
+    // A team in no project, or in one whose file is gone: each moves into a project of its own.
+    let known = crate::projects::list(&state.teams_root);
+    let loose: Vec<String> = crate::projects::teams_of(&state.teams_root)
+        .into_iter()
+        .filter(|(project, _)| project.is_empty() || !known.contains_key(project))
+        .flat_map(|(_, teams)| teams)
+        .collect();
     let teams: Vec<Value> = loose
         .into_iter()
         .map(|path| {
@@ -2637,14 +2643,22 @@ mod tests {
             .expect("response");
         assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
         let refused = test_router(&root.0)
-            .oneshot(send("PUT", "/api/projects/x", r#"{"name":"X","folders":[{"name":"N","path":"notes"}]}"#))
+            .oneshot(send(
+                "PUT",
+                "/api/projects/x",
+                r#"{"name":"X","folders":[{"name":"N","path":"notes"}]}"#,
+            ))
             .await
             .expect("response");
         assert_eq!(refused.status(), StatusCode::UNPROCESSABLE_ENTITY);
 
         let noted = response_json(
             test_router(&root.0)
-                .oneshot(send("POST", "/api/projects/sutd/notes", r#"{"text":"Colin picked B."}"#))
+                .oneshot(send(
+                    "POST",
+                    "/api/projects/sutd/notes",
+                    r#"{"text":"Colin picked B."}"#,
+                ))
                 .await
                 .expect("response"),
         )
@@ -2679,7 +2693,11 @@ mod tests {
                 .expect("response"),
         )
         .await;
-        assert_eq!(teams["files"], json!(["blog.yaml", "gate.yaml"]), "a project is never a team");
+        assert_eq!(
+            teams["files"],
+            json!(["blog.yaml", "gate.yaml"]),
+            "a project is never a team"
+        );
 
         let memory = response_json(
             test_router(&root.0)

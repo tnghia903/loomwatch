@@ -62,6 +62,11 @@ You help by reading their teams and runs and by proposing changes, using your to
 
 Build from what the person already has. Before you propose a new team or a new agent, look once in the conversation at what fits it: `list_my_agents` for their own agents, `list_jobs` for LoomWatch's jobs, `list_skills`, `list_tools`, and `find_files` for any folder or file they mention. In your reply, say in a few words what you reused and what you connected, as the person knows them (your Researcher, a Writer, your Client notes folder), never by an id or a path, and without the word "job".
 
+Every team works in a project: its About, folders and notes are what every agent in it reads, and its teams share what they keep. Give `propose_team` the project the team works in:
+- `project: {id: <its id>}` for one of their projects: the one whose room they are in, or the one the work belongs to.
+- `project: {name, about, folders}` for work that belongs to none of them, or when they ask you to set up a project: a short name in their words; `about`, a few short lines of what the work is, who it is for and what they have decided so far, in their words; and `folders`, each folder `find_files` found for it, as `{name, path}`. The About is what every agent in the project reads, so the request's subject goes there, never into an agent.
+- When they ask you to set up a project, propose its first team the same way, and say in your reply, in a few words each, what each agent does, what each run can spend, and that nothing runs until they start it.
+
 Choose the team's shape from the work, not from how the request is worded:
 - One agent, for most requests. An agent working alone brings in copies of itself for the parts of a big task that can be done at once, so one agent is right for large work too.
 - A pipeline, when the work needs different jobs one after another, such as research, then writing, then slides. Each stage hands its reply to the next along `edges`, one stage at a time. Several stages can feed one stage that brings their work together; they still work in turn.
@@ -77,7 +82,7 @@ Make each agent from the best start:
 
 Every agent is saved to My agents and joins other teams as it is, so put what this request is about in the team, never in an agent:
 - Give each agent a `part`: `{text: <what this team needs from it>, doneWhen: [<what the person asked of its result>]}`. Put in `text` everything this request needs from that agent, specific to this request, as you would brief a colleague on their part: who it is for, which of the person's files and sources to use and which to leave out (plans are not what they sell; an old copy is not the current one), the length and format, what the person decided or will decide, such as a recommended pick to choose from, and, for a stage, what to hand on to the next one. A few short lines, never a copy of its instructions. A later stage receives the earlier stage's reply; the last stage's reply is the team's answer, so its part asks for the finished piece, not a review of it. The agent reads its part beside its instructions in every run of this team. Give one to an agent from My agents too: it is how that agent learns what this team needs.
-- Give `propose_team` a `brief` when the work has a subject every agent should know: what it is, who it is for, and the person's requirements and decisions so far, in their words, in a few short lines. It is saved beside the team as its Brief, and every agent reads it in every run. Leave it out when the request says it all, such as a weekly summary for the person.
+- When the team joins one of their projects and the request adds something every agent there should know that its About doesn't say yet (a decision, a name, a date), give `propose_team` a `brief`: a line or two, kept as a note in the project when they press Apply.
 
 Give each agent what its part needs, and nothing it doesn't: what an agent is given is read on every call it makes, and a source given to the wrong agent pulls it off its job.
 - A folder or file the work rests on (notes, data, a brief, past reports): find it with `find_files`, using the person's words, and give it as knowledge to each agent that reads it: `capabilities: [{kind: knowledge, name: Market research, path: '/Users/me/Documents/Market research'}]`. The agent gets a folder's listing and README, or a file's text, and may read anything in it without asking. Write the path exactly as `find_files` gives it, in single quotes. Never guess a path, and never ask the person for one: they may not know what a path is. If more than one could be it, ask which, by what each holds. If none, ask which folder it is in, such as Documents, Desktop or iCloud Drive, and look again with `find_files` and what they say (`~/Documents/Clients` for "the Clients folder in Documents"); or tell them they can add it themselves once the team is on the canvas: select the agent, then Folder under Given. If `find_files` says LoomWatch wasn't allowed to look somewhere, tell them how to allow it.
@@ -239,7 +244,18 @@ fn definitions() -> Vec<Value> {
                 "file": string("Where the team lives, relative to the teams folder, ending in .yaml. An existing file to change it, a new name to create a team."),
                 "yaml": string("The complete team file."),
                 "summary": string("One plain sentence saying what the proposal does, shown on the card."),
-                "brief": string("Optional. A few short lines every agent of the team should know about the work: what it is, who it is for, and the person's requirements and decisions so far. Saved beside the team as its Brief when they press Apply."),
+                "project": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "description": "The project the team works in: {id} for one of the person's projects, or {name, about, folders} for a new one, made when they press Apply. A new team given neither works in a new project of its own.",
+                    "properties": {
+                        "id": string("One of their projects, by its id from Projects in what the person has."),
+                        "name": string("A new project's name, a few words in the person's own."),
+                        "about": string("A new project's About: a few short lines of what the work is, who it is for and what they have decided so far. Every agent in the project reads it."),
+                        "folders": {"type": "array", "description": "A new project's folders, each as `find_files` gave it. Every agent in the project may read them.", "items": {"type": "object", "additionalProperties": false, "required": ["name", "path"], "properties": {"name": {"type": "string"}, "path": {"type": "string"}}}}
+                    }
+                },
+                "brief": string("Optional. A line or two every agent in the team's project should know that its About doesn't say yet: a decision, a name, a date. Kept as a note in the project when they press Apply."),
             }), &["file", "yaml", "summary"]),
             "annotations": {"readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false},
         }),
@@ -805,6 +821,7 @@ async fn propose_team(
     let summary = text(arguments, "summary").unwrap_or_else(|_| "A proposed team.".to_owned());
     let brief = proposed_brief(arguments)?;
     let path = proposal_path(control, &file)?;
+    let asked_project = asked_project(control, arguments)?;
     // An agent that points at one of My agents is filled in from it first, as a run reads it.
     let team = TeamConfig::parse_in(&yaml, &control.inner.teams_root).map_err(|error| {
         format!(
@@ -832,6 +849,11 @@ async fn propose_team(
     } else {
         yaml
     };
+    let project = project_of(control, asked_project, existing.is_none(), &team, &file);
+    let yaml = match &project {
+        Some(project) => with_project(&yaml, &project.id),
+        None => yaml,
+    };
     let id = format!("proposal-{}", uuid::Uuid::new_v4());
     let Caller::Conversation(source) = caller.clone();
     let proposal = Proposal {
@@ -848,13 +870,9 @@ async fn propose_team(
         base_revision: existing.as_deref().map(crate::api::revision),
         summary: summary.clone(),
         created_at: now(),
-        agent_names: team
-            .agents
-            .iter()
-            .filter(|agent| !agent.is_operator() && !agent.name.trim().is_empty())
-            .map(|agent| (agent.id.clone(), agent.name.clone()))
-            .collect(),
+        agent_names: agent_names(&team),
         brief: brief.clone(),
+        project: project.clone(),
     };
     control
         .record(
@@ -870,6 +888,7 @@ async fn propose_team(
                 "yaml": yaml,
                 "agentNames": proposal.agent_names,
                 "brief": brief,
+                "project": project,
             }),
         )
         .await;
@@ -889,6 +908,143 @@ async fn propose_team(
         "status": "waiting_for_the_person",
         "message": message,
     }))
+}
+
+/// The project a proposed team works in, as the panel shows it and Apply makes it (ADR 0097).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct ProposedProject {
+    pub(super) id: String,
+    pub(super) name: String,
+    /// A new project, which Apply keeps before the team; `false` for one the person has.
+    pub(super) is_new: bool,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub(super) about: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(super) folders: Vec<crate::projects::ProjectFolder>,
+}
+
+/// Each agent's name as the team is read, by id: one from My agents has none in its file (ADR 0096).
+fn agent_names(team: &TeamConfig) -> std::collections::BTreeMap<String, String> {
+    team.agents
+        .iter()
+        .filter(|agent| !agent.is_operator() && !agent.name.trim().is_empty())
+        .map(|agent| (agent.id.clone(), agent.name.clone()))
+        .collect()
+}
+
+/// The project a proposed team works in (ADR 0097): the one asked for, or, for a new team that
+/// names none, a new project of its own named after it, since every team works in one.
+fn project_of(
+    control: &Control,
+    asked: Option<ProposedProject>,
+    new_team: bool,
+    team: &TeamConfig,
+    file: &str,
+) -> Option<ProposedProject> {
+    if asked.is_some() || !new_team || team.project.is_some() {
+        return asked;
+    }
+    let name = if team.name.trim().is_empty() {
+        file.trim_end_matches(".yaml").to_owned()
+    } else {
+        team.name.clone()
+    };
+    Some(new_project_for(
+        &control.inner.teams_root,
+        crate::projects::Project {
+            name,
+            ..crate::projects::Project::default()
+        },
+    ))
+}
+
+/// A new project, under a free id from its name.
+fn new_project_for(teams_root: &Path, project: crate::projects::Project) -> ProposedProject {
+    let taken: Vec<String> = crate::projects::list(teams_root).into_keys().collect();
+    ProposedProject {
+        id: crate::projects::id_for(&project.name, &taken),
+        name: project.name,
+        is_new: true,
+        about: project.about,
+        folders: project.folders,
+    }
+}
+
+/// The project `propose_team` was given: one of the person's by `id`, or a new one with its name,
+/// About and folders, each folder there on this computer. `None` when it was given none.
+fn asked_project(control: &Control, arguments: &Value) -> Result<Option<ProposedProject>, String> {
+    let Some(asked) = arguments.get("project").filter(|value| !value.is_null()) else {
+        return Ok(None);
+    };
+    let root = &control.inner.teams_root;
+    if let Some(id) = asked
+        .get("id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+    {
+        let project = crate::projects::read(root, id)?.ok_or_else(|| {
+            format!(
+                "There is no project `{id}`. Use an id from Projects in what the person has, or give a new project's name, about and folders."
+            )
+        })?;
+        return Ok(Some(ProposedProject {
+            id: id.to_owned(),
+            name: project.name,
+            is_new: false,
+            about: String::new(),
+            folders: Vec::new(),
+        }));
+    }
+    let project: crate::projects::Project = serde_json::from_value(asked.clone()).map_err(|error| {
+        format!("`project` is {{id}} for one of their projects, or {{name, about, folders}} for a new one: {error}")
+    })?;
+    let project = project.checked()?;
+    let missing: Vec<&str> = project
+        .folders
+        .iter()
+        .filter(|folder| !crate::chosen_knowledge::resolve(root, Path::new(&folder.path)).exists())
+        .map(|folder| folder.path.as_str())
+        .collect();
+    if !missing.is_empty() {
+        return Err(format!(
+            "There is no folder or file at {} on this computer. Find it with `find_files` and propose again.",
+            missing.join(", ")
+        ));
+    }
+    Ok(Some(new_project_for(root, project)))
+}
+
+/// `yaml` working in project `id`: its `project:` line set, after its `name:` line when it has none.
+fn with_project(yaml: &str, id: &str) -> String {
+    let line = format!("project: {id}\n");
+    let mut out = String::with_capacity(yaml.len() + line.len());
+    let mut set = false;
+    for part in yaml.split_inclusive('\n') {
+        if part.starts_with("project:") {
+            if !set {
+                out.push_str(&line);
+                set = true;
+            }
+            continue;
+        }
+        out.push_str(part);
+        if !set && part.starts_with("name:") {
+            if !out.ends_with('\n') {
+                out.push('\n');
+            }
+            out.push_str(&line);
+            set = true;
+        }
+    }
+    if !set {
+        if !out.is_empty() && !out.ends_with('\n') {
+            out.push('\n');
+        }
+        out.push_str(&line);
+    }
+    out
 }
 
 /// At most this many characters in a proposal's Brief: a few lines every agent reads on every
@@ -1646,7 +1802,11 @@ mod tests {
                 "{} shows a done-when and a job's effort",
                 agent.id
             );
-            assert!(agent.part.is_some(), "{} shows its part in the team", agent.id);
+            assert!(
+                agent.part.is_some(),
+                "{} shows its part in the team",
+                agent.id
+            );
         }
     }
 
@@ -1681,17 +1841,37 @@ mod tests {
                 && mine.contains("never change one to suit this request"),
             "{mine}"
         );
-        assert!(rule("Otherwise write the `role` in three parts").contains("for the agent's kind of work, so it fits any team"));
+        assert!(
+            rule("Otherwise write the `role` in three parts")
+                .contains("for the agent's kind of work, so it fits any team")
+        );
         let part = rule("Give each agent a `part`");
         assert!(
-            part.contains("specific to this request") && part.contains("an agent from My agents too"),
+            part.contains("specific to this request")
+                && part.contains("an agent from My agents too"),
             "{part}"
         );
-        assert!(rule("Give `propose_team` a `brief`").contains("saved beside the team as its Brief"));
-        assert!(rule("Give each agent a `doneWhen`").contains("Put in its `part`'s `doneWhen` each thing the person asked"));
+        assert!(rule("give `propose_team` a `brief`").contains("kept as a note in the project"));
+        // ADR 0097: every team works in a project, and a new project's About holds the subject.
+        assert!(rule("`project: {id: <its id>}`").contains("the one whose room they are in"));
+        let new = rule("`project: {name, about, folders}`");
+        assert!(
+            new.contains("the request's subject goes there, never into an agent")
+                && new.contains("when they ask you to set up a project"),
+            "{new}"
+        );
+        assert!(
+            rule("When they ask you to set up a project, propose its first team")
+                .contains("nothing runs until they start it")
+        );
+        assert!(
+            rule("Give each agent a `doneWhen`")
+                .contains("Put in its `part`'s `doneWhen` each thing the person asked")
+        );
         assert!(rule("Name each teammate and what it does").contains("in the lead's `part`"));
 
-        let root = std::env::temp_dir().join(format!("loomwatch-ask-parts-{}", uuid::Uuid::new_v4()));
+        let root =
+            std::env::temp_dir().join(format!("loomwatch-ask-parts-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(root.join(".jobs")).expect("My agents");
         for id in ["research-lead", "analyst"] {
             std::fs::write(
@@ -1708,7 +1888,11 @@ mod tests {
         for team in teams {
             let team = team.expect("each example reads");
             for agent in team.agents.iter().filter(|agent| !agent.is_operator()) {
-                assert!(agent.part.is_some(), "{} says what this team needs from it", agent.id);
+                assert!(
+                    agent.part.is_some(),
+                    "{} says what this team needs from it",
+                    agent.id
+                );
                 for words in ["morning brief", "AI news", "client review", "this quarter"] {
                     assert!(
                         !agent.role.contains(words),
@@ -1725,7 +1909,10 @@ mod tests {
     #[test]
     fn a_proposals_brief_is_a_few_lines_or_nothing() {
         assert_eq!(super::proposed_brief(&serde_json::json!({})), Ok(None));
-        assert_eq!(super::proposed_brief(&serde_json::json!({"brief": "  "})), Ok(None));
+        assert_eq!(
+            super::proposed_brief(&serde_json::json!({"brief": "  "})),
+            Ok(None)
+        );
         assert_eq!(
             super::proposed_brief(&serde_json::json!({"brief": " Colin's SUTD final project. \n"})),
             Ok(Some("Colin's SUTD final project.".to_owned()))

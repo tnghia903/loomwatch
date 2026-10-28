@@ -1108,7 +1108,8 @@ async fn undo_into_a_full_list_makes_room_for_the_lesson_it_brings_back() {
 /// before; a lesson it marks so anyway is about the work.
 #[tokio::test]
 async fn a_lesson_about_the_project_is_kept_in_the_project_not_with_the_agent() {
-    let root = std::env::temp_dir().join(format!("loomwatch-learn-project-{}", uuid::Uuid::new_v4()));
+    let root =
+        std::env::temp_dir().join(format!("loomwatch-learn-project-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&root).unwrap();
     crate::projects::write(
         &root,
@@ -1132,7 +1133,9 @@ async fn a_lesson_about_the_project_is_kept_in_the_project_not_with_the_agent() 
     });
     let made = learner.learn(&inside).await.unwrap();
     assert_eq!(
-        made.iter().map(|lesson| lesson.text.as_str()).collect::<Vec<_>>(),
+        made.iter()
+            .map(|lesson| lesson.text.as_str())
+            .collect::<Vec<_>>(),
         ["When writing a digest, use three bullets."],
         "only the lesson about the work is the agent's"
     );

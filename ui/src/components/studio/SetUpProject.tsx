@@ -18,10 +18,12 @@ const EXAMPLES = ['A weekly news brief', 'Plan a trip', 'My thesis']
  * are somewhere, and Set up project, which has Ask draft the room for you to see before anything
  * runs. On an empty Home it stands alone; otherwise it opens from New project.
  */
-export function SetUpProject({ onSetUp, unavailable = null, onClose, initial = '' }: {
+export function SetUpProject({ onSetUp, unavailable = null, asking = false, onClose, initial = '' }: {
   onSetUp: (start: ProjectStart) => void
   /** Why Ask can't answer now, shown instead of the hint. */
   unavailable?: string | null
+  /** Ask's panel is open beside it, so it says where the answer comes. */
+  asking?: boolean
   /** Shown as a dialog, closed with this. */
   onClose?: () => void
   /** Words to start from: what was asked of Ask on Home (ADR 0097, ruling 6). */
@@ -57,7 +59,7 @@ export function SetUpProject({ onSetUp, unavailable = null, onClose, initial = '
           <button type="button" className="iconbtn" aria-label={`Take out ${folder.name}`} onClick={() => setFolder(null)}><X size={13} aria-hidden="true" /></button>
         </p>
       )}
-      <p className="set-up-hint">{unavailable ?? 'You see the team before anything runs.'}</p>
+      <p className="set-up-hint">{unavailable ?? (asking ? 'Ask answers beside this. You see the team before anything runs.' : 'You see the team before anything runs.')}</p>
       <div className="set-up-examples">
         {EXAMPLES.map((example) => <button key={example} type="button" className="chip" onClick={() => setWords(example)}>{example}</button>)}
       </div>

@@ -2557,12 +2557,12 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
       <Home
         notice={requestedPath && doc.saveState === 'error' ? `Couldn't open “${requestedPath}”. ${/no such file|not found/i.test(doc.saveError ?? '') ? 'It may have been moved, renamed or deleted — pick a team below.' : doc.saveError ?? ''}` : null}
         onPalette={() => setPaletteOpen(true)}
-        // Home's way into Ask is "Describe the job", so the header has no Ask button here, and the
-        // box steps aside while the panel is open: one place to type to Ask (ADR 0043).
-        topActions={needsYouTray()}
+        // Ask keeps the app's own button on Home (ADR 0097): it answers questions there, and Set up
+        // project asks it to set a project up, saying so while it is already at work.
+        topActions={<><AskButton ask={ask} onToggle={toggleAsk} />{needsYouTray()}</>}
         runs={needsYou.records}
         mark={needsYou.mark}
-        ask={ask.open ? undefined : { unavailable: ask.unavailable, onAsk: askFor }}
+        ask={{ unavailable: ask.unavailable, onAsk: askFor, open: ask.open }}
       >
         {paletteOpen && <CommandPalette actions={actions} interpret={interpret} fallback={askFallback} onClose={() => setPaletteOpen(false)} />}
         {openPathOpen && <OpenTeamSheet onClose={() => setOpenPathOpen(false)} />}

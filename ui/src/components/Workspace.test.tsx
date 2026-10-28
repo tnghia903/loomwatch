@@ -1895,15 +1895,15 @@ describe('a team whose way of paying isn’t connected', () => {
 
 // ADR 0043: Home's way into Ask is "Describe the job", so its header has no Ask button too.
 describe('Home', () => {
-  // ADR 0097: on Home, one control makes projects, and Ask sets each one up from your words.
-  it('asks through Set up project only, with no second Ask button in the header', async () => {
+  // ADR 0097: on Home, Set up project makes projects, and Ask keeps the app's own button.
+  it('sets projects up through Set up project, and keeps Ask’s own button in the header', async () => {
     const path = documentState.path
     documentState.path = ''
     try {
       renderWorkspace()
       expect(await screen.findByRole('heading', { name: 'What are you working on?' })).toBeInTheDocument()
       expect(screen.getByRole('button', { name: 'Set up project' })).toBeInTheDocument()
-      expect(screen.queryByRole('button', { name: /Ask LoomWatch/ })).not.toBeInTheDocument()
+      expect(within(screen.getByRole('banner')).getAllByRole('button', { name: /Ask LoomWatch/ })).toHaveLength(1)
     } finally {
       documentState.path = path
     }

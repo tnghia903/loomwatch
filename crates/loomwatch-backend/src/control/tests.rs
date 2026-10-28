@@ -548,7 +548,9 @@ async fn a_conversation_proposes_asks_before_running_and_drafts_a_review_note() 
     );
     assert!(phases(&events, "ask_run_request").is_empty());
 
-    // Applied (the panel saves with the editor's own PUT): now the assistant may only ask.
+    // Applied (the panel keeps its new project, then saves with the editor's own PUT): now the
+    // assistant may only ask.
+    apply_project(&fixture.root.0, proposal);
     std::fs::write(fixture.root.0.join("morning-chip-brief.yaml"), &yaml).expect("apply");
     fixture.say(&id, "run it").await;
     let events = fixture.events(&id).await;
@@ -948,7 +950,10 @@ async fn a_proposals_brief_is_kept_with_it_and_recorded() {
         .await;
     assert!(!failed, "{answer}");
     let answer: Value = serde_json::from_str(&answer).expect("json");
-    let id = answer["proposalId"].as_str().expect("a proposal id").to_owned();
+    let id = answer["proposalId"]
+        .as_str()
+        .expect("a proposal id")
+        .to_owned();
     let kept = serde_json::to_value(
         fixture
             .control
@@ -963,7 +968,10 @@ async fn a_proposals_brief_is_kept_with_it_and_recorded() {
     assert_eq!(kept["brief"], "Colin's SUTD final project.");
     let events = fixture.events(&conversation).await;
     let recorded = phases(&events, "ask_proposal");
-    assert_eq!(recorded.last().expect("recorded")["brief"], "Colin's SUTD final project.");
+    assert_eq!(
+        recorded.last().expect("recorded")["brief"],
+        "Colin's SUTD final project."
+    );
 
     let (answer, failed) = tools
         .call(
@@ -973,10 +981,196 @@ async fn a_proposals_brief_is_kept_with_it_and_recorded() {
         .await;
     assert!(!failed, "{answer}");
     let answer: Value = serde_json::from_str(&answer).expect("json");
-    let id = answer["proposalId"].as_str().expect("a proposal id").to_owned();
-    let kept = serde_json::to_value(fixture.control.inner.proposals.read().await.get(&id).expect("kept"))
-        .expect("json");
+    let id = answer["proposalId"]
+        .as_str()
+        .expect("a proposal id")
+        .to_owned();
+    let kept = serde_json::to_value(
+        fixture
+            .control
+            .inner
+            .proposals
+            .read()
+            .await
+            .get(&id)
+            .expect("kept"),
+    )
+    .expect("json");
     assert!(kept.get("brief").is_none(), "{kept}");
+}
+
+/// What Apply does with a proposal's new project before it saves the team (ADR 0097): keeps it.
+fn apply_project(root: &std::path::Path, proposal: &Value) {
+    let project = &proposal["project"];
+    if project["isNew"] == true {
+        crate::projects::write(
+            root,
+            project["id"].as_str().expect("an id"),
+            &crate::projects::Project {
+                name: project["name"].as_str().unwrap_or_default().to_owned(),
+                about: project["about"].as_str().unwrap_or_default().to_owned(),
+                ..crate::projects::Project::default()
+            },
+        )
+        .expect("the project is kept");
+    }
+}
+
+/// The proposal `propose_team` answered with, as the panel fetches it.
+async fn kept_proposal(control: &Control, answer: &str) -> Value {
+    let answer: Value = serde_json::from_str(answer).expect("json");
+    let id = answer["proposalId"].as_str().expect("a proposal id");
+    serde_json::to_value(control.inner.proposals.read().await.get(id).expect("kept")).expect("json")
+}
+
+/// ADR 0097: a team Ask proposes works in a project: one of the person's by id, a new one with its
+/// name, About and folders (made by Apply, so nothing is written yet), or, for a new team given
+/// none, a new project of its own. The proposal names it, and its file says `project:`.
+#[tokio::test]
+async fn a_proposed_team_works_in_a_project() {
+    let fixture = Fixture::start(None, None).await;
+    let tools = ControlTools::new(
+        fixture.control.clone(),
+        Caller::Conversation("ask-test".to_owned()),
+    );
+    let root = fixture.root.0.clone();
+    crate::projects::write(
+        &root,
+        "sutd",
+        &crate::projects::Project {
+            name: "SUTD final project".into(),
+            ..crate::projects::Project::default()
+        },
+    )
+    .expect("a project");
+    let folder = fixture.home.0.join("SUTD");
+    std::fs::create_dir_all(&folder).expect("a folder");
+    let yaml = "schemaVersion: 1\nid: gate\nname: Gate\nentrypoint: a\nagents:\n  - id: a\n    name: Researcher\n    role: Research.\n    model: anthropic/claude-sonnet-5.5\nedges: []\n";
+    let propose = |file: &str, project: Value| {
+        let mut arguments = json!({"file": file, "yaml": yaml, "summary": "A team."});
+        if !project.is_null() {
+            arguments["project"] = project;
+        }
+        arguments
+    };
+
+    // One of theirs, by id.
+    let (answer, failed) = tools
+        .call("propose_team", propose("gate.yaml", json!({"id": "sutd"})))
+        .await;
+    assert!(!failed, "{answer}");
+    let proposal = kept_proposal(&fixture.control, &answer).await;
+    assert_eq!(
+        proposal["project"],
+        json!({"id": "sutd", "name": "SUTD final project", "isNew": false})
+    );
+    assert!(
+        proposal["yaml"]
+            .as_str()
+            .unwrap()
+            .contains("name: Gate\nproject: sutd\n"),
+        "{proposal}"
+    );
+
+    // A new one, with its About and the folder found for it; nothing is written until Apply.
+    let (answer, failed) = tools
+        .call(
+            "propose_team",
+            propose("trip.yaml", json!({"name": "Đà Nẵng trip", "about": " A week in March for two. ", "folders": [{"name": "SUTD", "path": folder.display().to_string()}]})),
+        )
+        .await;
+    assert!(!failed, "{answer}");
+    let proposal = kept_proposal(&fixture.control, &answer).await;
+    assert_eq!(proposal["project"]["id"], "da-nang-trip");
+    assert_eq!(proposal["project"]["isNew"], true);
+    assert_eq!(proposal["project"]["about"], "A week in March for two.");
+    assert!(
+        proposal["yaml"]
+            .as_str()
+            .unwrap()
+            .contains("project: da-nang-trip\n")
+    );
+    assert!(
+        crate::projects::read(&root, "da-nang-trip")
+            .unwrap()
+            .is_none(),
+        "made by Apply, not here"
+    );
+
+    // A new team given none works in a new project of its own, named after it.
+    let (answer, failed) = tools
+        .call("propose_team", propose("blog.yaml", Value::Null))
+        .await;
+    assert!(!failed, "{answer}");
+    assert_eq!(
+        kept_proposal(&fixture.control, &answer).await["project"],
+        json!({"id": "gate", "name": "Gate", "isNew": true})
+    );
+
+    // Refused: a project that isn't there, and a folder that isn't on this computer.
+    let (message, failed) = tools
+        .call("propose_team", propose("gate.yaml", json!({"id": "gone"})))
+        .await;
+    assert!(
+        failed && message.contains("There is no project `gone`"),
+        "{message}"
+    );
+    let (message, failed) = tools
+        .call(
+            "propose_team",
+            propose(
+                "gate.yaml",
+                json!({"name": "X", "folders": [{"name": "N", "path": "/no/such/folder"}]}),
+            ),
+        )
+        .await;
+    assert!(failed && message.contains("/no/such/folder"), "{message}");
+}
+
+/// ADR 0097: in a project's room, Ask is told which project, what every agent there knows, and its
+/// teams; and its first turn lists the person's projects.
+#[tokio::test]
+async fn ask_in_a_room_knows_the_project() {
+    let fixture = Fixture::start(None, None).await;
+    let root = fixture.root.0.clone();
+    crate::projects::write(
+        &root,
+        "sutd",
+        &crate::projects::Project {
+            name: "SUTD final project".into(),
+            about: "Colin's gate.".into(),
+            notes: vec![crate::projects::ProjectNote {
+                text: "Colin picked B.".into(),
+                at: None,
+                by: None,
+            }],
+            ..crate::projects::Project::default()
+        },
+    )
+    .expect("a project");
+    std::fs::write(root.join("gate.yaml"), "schemaVersion: 1\nid: gate\nname: Gate\nproject: sutd\nentrypoint: a\nagents:\n  - id: a\n    name: A\n    role: R.\n    model: fake/offline\nedges: []\n").unwrap();
+    let context: super::AskContext =
+        serde_json::from_value(json!({"view": "project", "project": "sutd"})).expect("context");
+    let said = super::describe_context(&fixture.control, &context);
+    assert!(
+        said.starts_with("In the room of the project \"SUTD final project\" (id `sutd`)"),
+        "{said}"
+    );
+    assert!(
+        said.contains("give `propose_team` `project: {id: sutd}`"),
+        "{said}"
+    );
+    assert!(
+        said.contains("Its About:\nColin's gate.")
+            && said.contains("- Colin picked B.")
+            && said.contains("\"Gate\" (file `gate.yaml`)"),
+        "{said}"
+    );
+    let has = super::what_they_have(&fixture.control).await;
+    assert!(
+        has.contains("- Projects: SUTD final project (`sutd`).\n"),
+        "{has}"
+    );
 }
 
 /// Without the daemon's model list (no state folder set up), `list_models` says so rather than
@@ -1177,6 +1371,7 @@ async fn ask_builds_a_team_from_the_persons_own_agent_a_job_and_a_folder() {
     let proposals = phases(&events, "ask_proposal");
     assert_eq!(proposals.len(), 1, "{}", dump(&events));
     let yaml = proposals[0]["yaml"].as_str().expect("the proposed file");
+    apply_project(&fixture.root.0, proposals[0]);
     let team =
         crate::config::TeamConfig::parse_in(yaml, &fixture.root.0).expect("a team a run reads");
     let researcher = &team.agents[0];
@@ -1407,7 +1602,7 @@ async fn a_proposal_names_only_agents_places_and_tools_that_are_there() {
     let proposals = fixture.control.inner.proposals.read().await;
     let proposed = &proposals[answer["proposalId"].as_str().expect("an id")].yaml;
     assert!(
-        proposed.contains("name: Brief\nspend:\n  perRun: 1.00\n"),
+        proposed.contains("name: Brief\nproject: brief\nspend:\n  perRun: 1.00\n"),
         "{proposed}"
     );
     drop(proposals);

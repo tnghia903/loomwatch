@@ -147,13 +147,16 @@ struct RunRequest {
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AskContext {
-    /// `home`, `build` or `run`.
+    /// `home`, `build`, `run` or `project`.
     #[serde(default)]
     view: Option<String>,
     #[serde(default)]
     team_path: Option<String>,
     #[serde(default)]
     run_id: Option<String>,
+    /// The project whose room the person is in (ADR 0097).
+    #[serde(default)]
+    project: Option<String>,
 }
 
 struct Turn {
@@ -184,6 +187,9 @@ struct Proposal {
     /// beside the team as a Brief note: the request's details live in the team, not in an agent.
     #[serde(skip_serializing_if = "Option::is_none")]
     brief: Option<String>,
+    /// The project the team works in, and whether Apply makes it first (ADR 0097).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    project: Option<mcp::ProposedProject>,
 }
 
 impl Control {
@@ -648,10 +654,15 @@ async fn what_they_have(control: &Control) -> String {
             .into_iter()
             .map(|skill| skill.name)
             .collect::<Vec<_>>();
-        (teams, agents, skills)
+        let projects = crate::projects::list(&root)
+            .into_iter()
+            .filter(|(_, project)| !project.put_away)
+            .map(|(id, project)| format!("{} (`{id}`)", project.name))
+            .collect::<Vec<_>>();
+        (teams, agents, skills, projects)
     })
     .await;
-    let (teams, agents, skills) = on_disk.unwrap_or_default();
+    let (teams, agents, skills, projects) = on_disk.unwrap_or_default();
     let tools = mcp::connected_tool_names().await;
     let paying = crate::ai::installed()
         .map(crate::ai::Ai::connected_sources)
@@ -676,6 +687,7 @@ async fn what_they_have(control: &Control) -> String {
         format!("- {label}: {listed}.\n")
     };
     let mut has = String::from("## What the person has\n");
+    has.push_str(&line("Projects", &projects));
     has.push_str(&line("Teams", &teams));
     has.push_str(&line("My agents", &agents));
     has.push_str(&line("Skills", &skills));
@@ -722,12 +734,73 @@ fn describe_context(control: &Control, context: &AskContext) -> String {
             )
         })
     });
+    if let Some(room) = context
+        .project
+        .as_deref()
+        .and_then(|id| describe_room(&control.inner.teams_root, id))
+    {
+        return room;
+    }
     match (context.view.as_deref(), team, run) {
         (Some("run"), Some(team), Some(run)) => format!("Watching {run} of {team}."),
         (Some("run"), Some(team), None) => format!("On the Run view of {team}."),
         (_, Some(team), _) => format!("Building {team} on the canvas."),
         _ => "On Home, with no team open.".to_owned(),
     }
+}
+
+/// Where the person is when they ask in a project's room (ADR 0097): which project, what every
+/// agent in it knows, and its teams, so Ask answers from the room and proposes teams that work in it.
+fn describe_room(teams_root: &std::path::Path, id: &str) -> Option<String> {
+    use std::fmt::Write as _;
+    let project = crate::projects::read(teams_root, id).ok()??;
+    let teams = crate::projects::teams_of(teams_root)
+        .remove(id)
+        .unwrap_or_default()
+        .iter()
+        .map(|file| {
+            let name = crate::api::summarize_team_file(teams_root, file)
+                .name
+                .unwrap_or_else(|| file.clone());
+            format!("\"{name}\" (file `{file}`)")
+        })
+        .collect::<Vec<_>>();
+    let mut room = format!(
+        "In the room of the project \"{}\" (id `{id}`). A team you propose here works in this project: give `propose_team` `project: {{id: {id}}}`.\n",
+        project.name
+    );
+    let about = project.about.trim();
+    if !about.is_empty() {
+        let _ = write!(room, "Its About:\n{about}\n");
+    }
+    if !project.folders.is_empty() {
+        let folders = project
+            .folders
+            .iter()
+            .map(|folder| format!("{} (`{}`)", folder.name, folder.path))
+            .collect::<Vec<_>>();
+        let _ = writeln!(
+            room,
+            "Its folders, which every agent in it may read: {}.",
+            folders.join(", ")
+        );
+    }
+    if !project.notes.is_empty() {
+        room.push_str("Notes kept in it:\n");
+        for note in &project.notes {
+            let _ = writeln!(room, "- {}", note.text.trim());
+        }
+    }
+    let _ = write!(
+        room,
+        "Its teams: {}.",
+        if teams.is_empty() {
+            "none yet".to_owned()
+        } else {
+            teams.join(", ")
+        }
+    );
+    Some(room)
 }
 
 async fn conversation_status(

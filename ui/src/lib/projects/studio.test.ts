@@ -77,7 +77,7 @@ describe('the studio (ADR 0097)', () => {
     const [news, blog, empty] = roomsOf([project('n', ['s.yaml']), project('b', ['f.yaml']), project('e', [])], [scheduled, broken], [run('f.yaml', { status: 'failed', finishedAt: '2026-10-28T10:00:00Z' })], null)
     expect(news.line).toBe('Runs every day at 8:00 AM')
     expect(blog.state).toBe('failed')
-    expect(blog.line).toBe('Blog stopped')
+    expect(blog.line).toBe('Blog didn’t finish')
     expect(empty.line).toBe('No team yet')
   })
 

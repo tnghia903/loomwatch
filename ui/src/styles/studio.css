@@ -17,19 +17,31 @@
 .desk-figure[data-glow="failed"] { --glow: var(--color-alert); }
 .desk-figure[data-glow] { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 3px var(--glow)); }
 .desk-outline circle, .desk-outline path { fill: none; stroke: var(--color-ink-3); stroke-width: 1.5; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
-.desk-you { display: block; width: 28px; height: 28px; margin: 8px 0; border-radius: var(--r-full); border: 1.5px solid var(--color-ink-3); box-sizing: border-box; }
+.desk-you { display: block; width: calc(var(--fig, 44px) * .64); height: calc(var(--fig, 44px) * .64); margin: calc(var(--fig, 44px) * .18) 0; border-radius: var(--r-full); border: 1.5px solid var(--color-ink-3); box-sizing: border-box; }
 
-.team-desks { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 2px; min-width: 0; }
-.desk-slot { display: inline-flex; align-items: flex-end; }
+/* A room card's row stays one row: its desks narrow, and their names end in an ellipsis. */
+.team-desks { display: flex; align-items: flex-start; flex-wrap: nowrap; gap: 2px; min-width: 0; max-width: 100%; }
+.team-desks.all { flex-wrap: wrap; row-gap: var(--sp-4); }
+.desk-slot { display: inline-flex; align-items: flex-start; min-width: 0; flex: 0 1 auto; }
 .desk {
-  display: inline-flex; flex-direction: column; align-items: center; gap: 4px; width: 78px;
+  display: inline-flex; flex-direction: column; align-items: center; gap: 4px; flex: 0 1 78px; width: 78px; min-width: 52px;
   padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: center;
 }
 button.desk { cursor: pointer; border-radius: var(--r-sm); }
 button.desk:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
-.desk-top { display: block; width: 62px; height: 12px; border-radius: 3px; background: var(--color-hairline); }
+.desk-top { display: block; width: 80%; max-width: 62px; height: 12px; border-radius: 3px; background: var(--color-hairline); }
 .desk-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--color-ink-2); }
-.desk-onward { flex: none; margin-bottom: 48px; }
+.desk-state { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 14px; color: var(--color-ink-3); }
+.desk-state.waiting { color: var(--color-accent); }
+.desk-state.working { color: var(--color-live); }
+.desk-state.failed { color: var(--color-alert); }
+/* Each state has a pose as well as a colour, held still, as the crew rail's figures do. */
+.desk-figure[data-glow="waiting"] img { rotate: -8deg; }
+.desk-figure[data-glow="working"] img { translate: 0 -3px; }
+.desk-figure[data-glow="failed"] img { rotate: 8deg; translate: 0 3px; }
+.desk-figure[data-glow="failed"] { filter: saturate(.35) drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 3px var(--glow)); }
+/* Level with the middle of the figures, whatever words stand under each desk. */
+.desk-onward { flex: none; width: 16px; margin-top: calc(var(--fig, 44px) / 2 - 5px); }
 .desk-onward path { fill: none; stroke: var(--color-ink-3); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .desk-more { align-self: center; margin-left: var(--sp-2); font-size: 13px; color: var(--color-ink-3); }
 .desk-empty { color: var(--color-ink-3); font-size: 13px; }
@@ -58,7 +70,7 @@ button.desk:focus-visible { outline: 2px solid var(--color-accent); outline-offs
 .desk-chat-menu, .idle-agent-menu {
   position: absolute; z-index: 5; top: calc(100% + 6px); right: 0; min-width: 200px; max-height: 320px; overflow-y: auto;
   display: flex; flex-direction: column; padding: 6px; border: 1px solid var(--color-hairline); border-radius: var(--r-md);
-  background: var(--color-panel-solid); box-shadow: 0 2px 6px rgb(0 0 0 / .25), 0 24px 64px rgb(0 0 0 / .35);
+  background: var(--color-panel-solid); box-shadow: var(--e2-shadow); max-width: calc(100vw - 32px); box-sizing: border-box;
 }
 .desk-chat-menu a, .idle-agent-menu a, .idle-agent-menu button {
   display: flex; align-items: center; gap: var(--sp-2); min-height: 40px; padding: 0 var(--sp-3);
@@ -86,10 +98,15 @@ button.desk:focus-visible { outline: 2px solid var(--color-accent); outline-offs
 .project-mark[data-mark="butter"] { --mark: var(--color-fig-butter); }
 
 .room-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--sp-4); }
+/* The whole card opens the room: its name's button stretches over it, and an outline that says
+   where its agent is stays pressable above that. */
 .room-card {
-  display: flex; flex-direction: column; min-height: 228px; padding: 14px 16px; box-sizing: border-box;
+  position: relative; display: flex; flex-direction: column; min-height: 228px; padding: 14px 16px; box-sizing: border-box;
   border: 1px solid var(--color-hairline); border-radius: var(--r-lg); background: var(--color-panel-solid);
 }
+.room-card-name button::after { content: ''; position: absolute; inset: 0; border-radius: var(--r-lg); }
+.room-card:hover { border-color: var(--color-accent-dim); }
+.room-card .desk.away { position: relative; z-index: 1; }
 .room-card-name { margin: 0; }
 .room-card-name button {
   display: inline-flex; align-items: center; gap: var(--sp-2); min-height: 28px; max-width: 100%; padding: 0;
@@ -97,7 +114,7 @@ button.desk:focus-visible { outline: 2px solid var(--color-accent); outline-offs
 }
 .room-card-name button span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .room-card-name button:hover span:last-child { text-decoration: underline; text-underline-offset: 3px; }
-.room-card-floor { flex: 1; display: flex; align-items: flex-end; justify-content: center; padding: var(--sp-3) 0 6px; }
+.room-card-floor { flex: 1; display: flex; align-items: center; justify-content: center; padding: var(--sp-3) 0 6px; }
 .room-line { margin: 0; font-size: 13px; color: var(--color-ink-3); }
 .room-line.waiting { color: var(--color-accent); }
 .room-line.working { color: var(--color-live); }
@@ -110,6 +127,9 @@ button.desk:focus-visible { outline: 2px solid var(--color-accent); outline-offs
   color: var(--color-ink); font: inherit; text-align: left; cursor: pointer;
 }
 .room-tile-name { display: inline-flex; align-items: center; gap: var(--sp-2); font-weight: 600; }
+.room-tile.put-away { cursor: default; align-items: flex-start; }
+.room-tile.put-away button { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.room-tile.put-away button.room-tile-name { font-weight: 600; }
 .room-tile-when { font-size: 13px; color: var(--color-ink-3); }
 .room-new { align-items: center; color: var(--color-ink-2); border-style: dashed; min-height: 228px; font-weight: 500; }
 .room-tile:hover, .room-new:hover { border-color: var(--color-accent-dim); }
@@ -149,7 +169,7 @@ button.desk:focus-visible { outline: 2px solid var(--color-accent); outline-offs
 }
 .set-up-words { flex: 1 1 260px; display: flex; min-width: 0; }
 .set-up-words input { flex: 1; min-width: 0; height: 44px; padding: 0 var(--sp-2); border: 0; outline: 0; background: transparent; color: var(--color-ink); font: 400 15px var(--font-sans); }
-.set-up-row:focus-within { border-color: var(--color-accent-dim); }
+.set-up-row:focus-within { border-color: var(--color-accent-dim); outline: 2px solid var(--color-accent); outline-offset: 2px; }
 .set-up-folder { width: 44px; height: 44px; border: 1px solid var(--color-hairline); border-radius: 10px; }
 .set-up-row .btn { min-height: 44px; padding: 0 18px; }
 .set-up-chosen { display: inline-flex; align-items: center; gap: var(--sp-2); margin: 0; font-size: 13px; color: var(--color-ink-2); }
@@ -160,9 +180,16 @@ button.desk:focus-visible { outline: 2px solid var(--color-accent); outline-offs
   color: var(--color-ink-2); font: 500 13px var(--font-sans); cursor: pointer;
 }
 .set-up-examples button:hover { color: var(--color-ink); border-color: var(--color-accent-dim); }
-.set-up-backdrop { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: var(--sp-4); background: rgb(0 0 0 / .45); }
-.set-up-card.dialog { box-shadow: 0 2px 6px rgb(0 0 0 / .3), 0 24px 64px rgb(0 0 0 / .45); }
+.set-up-backdrop { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: var(--sp-4); background: color-mix(in srgb, var(--color-ground) 55%, transparent); }
+.set-up-card.dialog { box-shadow: var(--e2-shadow); }
 .set-up-close { position: absolute; top: var(--sp-3); right: var(--sp-3); }
+
+/* Phones: every control a finger presses is at least 44 px. */
+@media (max-width: 767px) {
+  .studio-view button, .room-team-name, .room-marks button, .desk-chat-menu a, .idle-agent-menu a, .idle-agent-menu button { min-height: 44px; }
+  .room-marks button { min-width: 44px; }
+  .room-card-name button { min-height: 44px; }
+}
 
 @media (max-width: 640px) {
   .your-desk { padding: var(--sp-4); }
@@ -198,8 +225,9 @@ button.desk:focus-visible { outline: 2px solid var(--color-accent); outline-offs
 /* Paper notes: the About and what is kept, on the paper colour the reader's paper uses. */
 .wall-paper {
   position: relative; display: flex; flex-direction: column; gap: 4px; width: 250px; padding: 12px 14px; box-sizing: border-box;
-  border: 0; border-radius: 4px; background: var(--color-paper); color: var(--color-ink); font: 400 13px/19px var(--font-sans);
-  text-align: left; box-shadow: 0 6px 14px rgb(0 0 0 / .25);
+  /* Paper is light in both themes, so its words are always the ink a light page takes. */
+  border: 1px solid var(--color-paper-rule); border-radius: 4px; background: var(--color-paper); color: var(--color-bubble-light-ink); font: 400 13px/19px var(--font-sans);
+  text-align: left; box-shadow: var(--e2-shadow);
 }
 button.wall-paper { cursor: pointer; }
 button.wall-paper:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
@@ -207,8 +235,12 @@ button.wall-paper:focus-visible { outline: 2px solid var(--color-accent); outlin
 .wall-paper.editing { width: min(420px, 100%); }
 .wall-paper-head { font: 600 11px/14px var(--font-sans); letter-spacing: .07em; text-transform: uppercase; }
 .wall-paper-text { white-space: pre-wrap; overflow-wrap: anywhere; }
-.wall-paper-by { font-size: 12px; color: var(--color-ink-3); }
-.wall-paper .iconbtn { position: absolute; top: 4px; right: 4px; }
+.wall-paper-by { font-size: 12px; color: var(--color-bubble-light-ink-2); }
+.wall-paper .iconbtn { position: absolute; top: 4px; right: 4px; color: var(--color-bubble-light-ink-2); }
+.wall-paper .iconbtn:hover { background: color-mix(in srgb, var(--color-paper-rule) 45%, transparent); color: var(--color-bubble-light-ink); }
+.wall-paper .btn:not(:disabled) { color: var(--color-bubble-light-ink); border-color: var(--color-paper-rule); background: transparent; }
+/* The app's gold ring is too faint on paper in dark mode: the light page's gold, the same in both. */
+.wall-paper :focus-visible { outline-color: var(--color-bubble-light-gold); }
 .wall-paper textarea { width: 100%; box-sizing: border-box; margin-top: 4px; padding: var(--sp-2); border: 1px solid var(--color-paper-rule); border-radius: var(--r-xs); background: transparent; color: inherit; font: inherit; resize: vertical; }
 .wall-paper-acts { display: flex; justify-content: flex-end; gap: var(--sp-2); margin-top: var(--sp-2); }
 .wall-error { margin: 0; font-size: 12px; color: var(--color-alert); }
@@ -219,14 +251,15 @@ button.wall-paper:focus-visible { outline: 2px solid var(--color-accent); outlin
 .wall-folder svg { color: var(--color-ink-3); }
 
 .room-floor { display: flex; flex-direction: column; gap: var(--sp-5); padding: var(--sp-2) 0; }
-.room-team { display: flex; flex-direction: column; gap: var(--sp-3); }
+/* A team's whole row opens it, as its name does. */
+.room-team { position: relative; display: flex; flex-direction: column; gap: var(--sp-3); }
+.room-team-name::after { content: ''; position: absolute; inset: 0; }
 .room-team-name { align-self: flex-start; display: inline-flex; align-items: baseline; gap: var(--sp-2); min-height: 28px; color: var(--color-ink); text-decoration: none; }
 .room-team-name b { font-weight: 600; }
 .room-team-name span { font-size: 13px; color: var(--color-ink-3); }
 .room-team-name:hover b { text-decoration: underline; text-underline-offset: 3px; }
-.room-team .desk { width: 92px; }
-.room-team .desk-top { width: 70px; height: 13px; }
-.room-team .desk-onward { margin-bottom: 52px; }
+.room-team .desk { width: 92px; flex-basis: 92px; }
+.room-team .desk-top { max-width: 70px; height: 13px; }
 .room-floor-acts { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 .room-floor-acts .btn { min-height: 44px; }
 
@@ -246,3 +279,6 @@ button.wall-paper:focus-visible { outline: 2px solid var(--color-accent); outlin
 }
 .studio-problems { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--color-ink-3); }
 .not-in-project .agents-know-you { flex-basis: 100%; }
+
+/* Ask in a project's room answers under LoomWatch's own mark, beside its title (ADR 0097). */
+.ask-head h2 { display: flex; align-items: center; gap: var(--sp-2); }

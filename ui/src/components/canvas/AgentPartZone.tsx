@@ -20,9 +20,9 @@ export function AgentPartZone({ part, readOnly = false, onChange, headClassName 
   const text = part?.text ?? ''
   const write = (next: AgentPart) => onChange(tidyPart(next))
   return (
-    <div className="agent-part" role="group" aria-label="Its part in this team">
+    <div className="agent-part" role="group" aria-label="What this team needs from it">
       <SectionHead
-        title="Its part in this team"
+        title="What this team needs from it"
         className={headClassName}
         explain="What this team needs from this agent. It reads this beside its instructions in this team only, and checks its result against these items as well as its own Done when."
       />
@@ -34,11 +34,11 @@ export function AgentPartZone({ part, readOnly = false, onChange, headClassName 
         maxLength={PART_CHARS}
         rows={Math.max(2, Math.ceil(text.length / 44))}
         readOnly={readOnly}
-        placeholder="What this team needs from it."
-        aria-label="What this team needs from it"
+        placeholder="Who it is for, which files to use, how long."
+        aria-label="What this team needs from it, in a line or two"
         onBlur={(event) => { if (event.target.value.trim() !== text) write({ ...part, text: event.target.value }) }}
       />
-      <DoneWhen label="Done when in this team" items={part?.doneWhen ?? []} readOnly={readOnly} onChange={(items) => write({ ...part, doneWhen: items })} />
+      <DoneWhen label="Done, in this team, when" items={part?.doneWhen ?? []} readOnly={readOnly} onChange={(items) => write({ ...part, doneWhen: items })} />
     </div>
   )
 }

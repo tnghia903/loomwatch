@@ -5,12 +5,19 @@ import type { Room, RoomTeam, Seat } from './studio'
 export const MARKS = ['sky', 'sage', 'rose', 'lilac', 'clay', 'oat', 'butter'] as const
 export type MarkColor = (typeof MARKS)[number]
 
+/** Each mark colour's name, as a person says it. */
+export const MARK_NAMES: Record<MarkColor, string> = { sky: 'Sky blue', sage: 'Sage green', rose: 'Rose', lilac: 'Lilac', clay: 'Clay', oat: 'Oat', butter: 'Butter yellow' }
+
+/** The colours picked for a project that chose none: never sky or butter, nearest the working blue
+    and the waiting gold, so a mark nobody chose never reads as a state. */
+const PICKED: readonly MarkColor[] = ['sage', 'lilac', 'oat', 'rose', 'clay']
+
 /** A project's mark colour: the one it chose, or one picked from its id. */
 export function markOf(id: string, mark?: string): MarkColor {
   if (mark && (MARKS as readonly string[]).includes(mark)) return mark as MarkColor
   let hash = 0
   for (const char of id) hash = (hash * 31 + char.charCodeAt(0)) >>> 0
-  return MARKS[hash % MARKS.length]
+  return PICKED[hash % PICKED.length]
 }
 
 /** The team a room card shows: the one waiting for you or working, else its first. */

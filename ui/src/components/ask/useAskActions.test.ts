@@ -16,6 +16,8 @@ const runs = vi.hoisted(() => ({ startRun: vi.fn(), newStartKey: () => 'start-ke
 vi.mock('../../lib/runs/client', () => runs)
 const memory = vi.hoisted(() => ({ fetchMemory: vi.fn(), writeMemoryFile: vi.fn(async () => ({})) }))
 vi.mock('../../lib/memory/client', async (importOriginal) => ({ ...(await importOriginal<typeof import('../../lib/memory/client')>()), ...memory }))
+const projects = vi.hoisted(() => ({ saveProject: vi.fn(async () => ({})), addProjectNote: vi.fn(async () => ({})), fetchProjects: vi.fn(async () => ({ projects: [], loose: [], missing: [] })), projectsChanged: vi.fn() }))
+vi.mock('../../lib/projects/client', async (importOriginal) => ({ ...(await importOriginal<typeof import('../../lib/projects/client')>()), ...projects }))
 
 const SAVED = 'schemaVersion: 1\nid: brief\nname: Brief\nentrypoint: a\nagents:\n  - { id: a, name: Collector, role: Collect, model: m, spawn: { cmd: c, args: [], env: {}, cwd: "." } }\nedges: []\n'
 const CHANGED = SAVED.replace('role: Collect,', 'role: Collect with links,') + ''
@@ -191,6 +193,29 @@ describe('useAskActions', () => {
     expect(result.current.actions.preview).toBeNull()
     expect(result.current.actions.marks.get('a')).toBe('settled')
     await waitFor(() => expect(client.reportProposalOutcome).toHaveBeenCalledWith('p1', 'applied'))
+  })
+
+  it('makes a proposal’s new project before it saves the team, and keeps its Brief as a note there (ADR 0097)', async () => {
+    projects.saveProject.mockClear()
+    projects.addProjectNote.mockClear()
+    client.fetchProposal.mockResolvedValue(proposal({ brief: 'Colin picked option B.', project: { id: 'sutd', name: 'SUTD final project', isNew: true, about: 'Colin’s gate.', folders: [{ name: 'SUTD', path: '/Users/colin/SUTD' }] } }))
+    const { result, spies } = setup()
+    await act(async () => { await result.current.actions.showProposal('p1') })
+    await act(async () => { await result.current.actions.applyProposal() })
+    expect(projects.saveProject).toHaveBeenCalledWith('sutd', { name: 'SUTD final project', about: 'Colin’s gate.', folders: [{ name: 'SUTD', path: '/Users/colin/SUTD' }] })
+    expect(projects.saveProject.mock.invocationCallOrder[0]).toBeLessThan(spies.save.mock.invocationCallOrder[0])
+    expect(projects.addProjectNote).toHaveBeenCalledWith('sutd', 'Colin picked option B.')
+    // Not a Brief note beside the team: the project holds what the work is about.
+    expect(memory.writeMemoryFile).not.toHaveBeenCalled()
+    expect(spies.save).toHaveBeenCalledTimes(1)
+
+    // A project that can't be kept leaves the proposal on the canvas, saying why, and saves nothing.
+    projects.saveProject.mockRejectedValueOnce(new Error('A project needs a name.'))
+    const again = setup()
+    await act(async () => { await again.result.current.actions.showProposal('p1') })
+    await act(async () => { await again.result.current.actions.applyProposal() })
+    expect(again.spies.save).not.toHaveBeenCalled()
+    expect(again.result.current.actions.preview?.error).toBe('Couldn’t set up the project. A project needs a name.')
   })
 
   it('keeps the proposal’s Brief when it is saved another way too (ADR 0097)', async () => {

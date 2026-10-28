@@ -189,7 +189,7 @@ export function roomLine(teams: readonly RoomTeam[], state: Presence): string {
   const team = teams.find((candidate) => candidate.state === state)
   if (state === 'waiting') return seat ? `${seat.name} is waiting for you` : `${team?.name ?? 'A team'} is waiting for you`
   if (state === 'working') return seat ? `${seat.name} is working` : `${team?.name ?? 'A team'} is working`
-  if (state === 'failed') return `${team?.name ?? 'A team'} stopped`
+  if (state === 'failed') return `${team?.name ?? 'A team'} didn’t finish`
   const scheduled = teams.find((candidate) => candidate.schedule)
   if (scheduled?.schedule) return `Runs ${scheduled.schedule.charAt(0).toLowerCase()}${scheduled.schedule.slice(1)}`
   return teams.length === 0 ? 'No team yet' : 'Ready'
@@ -250,7 +250,7 @@ export function deskItems(runs: readonly RunRecord[], shapes: readonly TeamShape
     if (waiting?.kind === 'question') add(waiting.node, seatOf(waiting.node, waiting.name), 'has a question for you', waiting.since)
     else if (waiting) add(waiting.node, seatOf(waiting.handoverFrom), 'brought work for you to check', waiting.since)
     for (const request of run.permissionRequests ?? []) add(request.id, seatOf(request.agent, request.name), 'asks you before it goes on', request.since)
-    for (const stop of run.spendStops ?? []) add(stop.id, seatOf(stop.agent, stop.name), 'reached what it may spend', stop.since)
+    for (const stop of run.spendStops ?? []) add(stop.id, seatOf(stop.agent, stop.name), 'reached its spending limit', stop.since)
   }
   return items.sort((left, right) => left.since.localeCompare(right.since)).map(({ since: _since, ...item }) => item)
 }

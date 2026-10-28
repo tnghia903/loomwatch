@@ -33,7 +33,7 @@ export interface HomeProps {
   /** What the header's mark says, from the same poll as the needs-you tray. */
   mark?: LoomMarkState
   /** Ask LoomWatch, which sets a project up from what you are working on (ADR 0097). */
-  ask?: { unavailable: string | null; onAsk: (text: string) => void }
+  ask?: { unavailable: string | null; onAsk: (text: string) => void; open?: boolean }
   children?: ReactNode
 }
 
@@ -124,6 +124,7 @@ export function Home({ notice = null, onPalette, topActions, runs = [], mark, as
         <Studio
           runs={runs}
           setUpUnavailable={ask ? ask.unavailable : 'Ask LoomWatch isn’t available here.'}
+          asking={ask?.open === true}
           onSetUp={(start) => ask?.onAsk(setUpRequest(start))}
         />
       </main>

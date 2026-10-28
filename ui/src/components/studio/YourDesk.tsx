@@ -43,7 +43,7 @@ export function YourDesk({ items, jobs, chats, figures }: {
           <>
             <span className="desk-crowd" aria-hidden="true">
               {standing.map((item) => (
-                <span key={item.key} className="desk-figure" data-glow="waiting"><FigureStill figure={figure(item)} alt="" width={38} height={49} decoding="async" /></span>
+                <span key={item.key} className="desk-figure" data-glow="waiting"><FigureStill figure={figure(item)} alt="" width={48} height={48} decoding="async" /></span>
               ))}
             </span>
             <span className="desk-says">
@@ -60,7 +60,7 @@ export function YourDesk({ items, jobs, chats, figures }: {
       <div className="desk-chat" ref={menu}>
         {chat && (
           <a className="desk-chat-open" href={`/agents/${encodeURIComponent(chat.id)}?view=chat`}>
-            <span className="desk-figure" data-glow="ready"><FigureStill figure={figureFor(chat.id, chat.figure)} alt="" width={28} height={36} decoding="async" /></span>
+            <span className="desk-figure" data-glow="ready"><FigureStill figure={figureFor(chat.id, chat.figure)} alt="" width={36} height={36} decoding="async" /></span>
             <span><b>{chat.name}</b><span className="desk-chat-says">Chat, no project</span></span>
           </a>
         )}

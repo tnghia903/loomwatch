@@ -49,6 +49,7 @@ function ProposalView({ card, actions }: { card: ProposalCard; actions: CardActi
         <span className="ask-card-file t-mono-sm" title={card.file}>{card.file}</span>
       </header>
       <strong className="ask-card-title">{card.name}</strong>
+      {card.project && <p className="ask-card-text">{card.project.isNew ? `New project: ${card.project.name}` : `In ${card.project.name}`}</p>}
       {card.summary && <p className="ask-card-text"><InlineMarkdown>{card.summary}</InlineMarkdown></p>}
       {lines.length > 0 && <ul className="ask-card-lines">{lines.map((line) => <li key={line}>{line}</li>)}</ul>}
       {settledText ? (

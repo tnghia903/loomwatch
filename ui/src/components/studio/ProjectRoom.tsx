@@ -7,19 +7,20 @@ import { addProjectNote, NOTE_CHARS, ABOUT_CHARS, projectsChanged, saveProject, 
 import { roomsOf } from '../../lib/projects/studio'
 import { useTeamShapes } from '../../lib/projects/useTeamShapes'
 import { fetchRuns, type RunRecord } from '../../lib/runs/client'
-import { fetchTeamsDiscovery, saveTeamFile } from '../../lib/team-file/client'
+import { fetchTeamFile, fetchTeamsDiscovery, saveTeamFile } from '../../lib/team-file/client'
 import { TeamFileModel } from '../../lib/team-file/document'
 import { teamOfMyAgents } from '../../lib/team-file/myAgents'
 import { agentsTeamYaml, uniqueTeamPath } from '../../lib/team-file/templates'
 import { teamHref } from '../../lib/team-file/teamHref'
-import { teamIdForPath } from '../../lib/team-file/useTeamDocument'
+import { hashTeamYaml, teamIdForPath } from '../../lib/team-file/useTeamDocument'
 import { useTeamList } from '../../lib/team-file/useTeamList'
 import { useTheme } from '../../lib/theme'
 import { FigureStill } from '../agents/FigureStill'
 import { FolderPicker } from '../canvas/FolderPicker'
 import { NewTeamDialog } from '../home/NewTeamDialog'
 import { SectionHead } from '../ui/SectionHead'
-import { MARKS, defaultFigureOf, markOf } from '../../lib/projects/studioUi'
+import { MARKS, MARK_NAMES, defaultFigureOf, markOf } from '../../lib/projects/studioUi'
+import { RoomAsk } from './RoomAsk'
 import { ProjectMark } from './RoomCard'
 import { TeamDesks } from './TeamDesks'
 
@@ -77,16 +78,31 @@ function AddAnAgent({ jobs, project, teams, initial, onClose }: { jobs: readonly
   const chosen = jobs.find((job) => job.id === agent) ?? null
   const add = async () => {
     if (!chosen || busy) return
-    if (where) {
-      // A team of the project: placed on its canvas, where its order is drawn.
-      window.location.assign(teamHref(where, 'agents'))
-      return
-    }
     setBusy(true)
     setError(null)
+    if (where) {
+      // One of the project's teams: it joins the team's file, and its workflow opens, where you
+      // connect it in the order work moves.
+      try {
+        const file = await fetchTeamFile(where)
+        const team = TeamFileModel.parse(file.yaml)
+        const taken = (team.snapshot().agents ?? []).map((agent) => agent.id)
+        const mine = (await fetchJobs())?.jobs ?? []
+        const [joining] = TeamFileModel.parse(await teamOfMyAgents(agentsTeamYaml([chosen], chosen.name, 'joining'), mine, saveJob)).snapshot().agents
+        let id = joining.id
+        for (let counter = 2; taken.includes(id); counter += 1) id = `${joining.id}-${counter}`
+        team.addAgent({ ...joining, id })
+        await saveTeamFile(where, team.toYaml(), file.revision ?? await hashTeamYaml(file.yaml))
+        window.location.assign(teamHref(where, 'workflow'))
+      } catch (caught) {
+        setBusy(false)
+        setError(caught instanceof Error ? caught.message : String(caught))
+      }
+      return
+    }
     try {
       const discovery = await fetchTeamsDiscovery()
-      const path = uniqueTeamPath(`${chosen.name} ${project.name}`, discovery.files)
+      const path = uniqueTeamPath(chosen.name, discovery.files)
       const written = agentsTeamYaml([chosen], chosen.name, teamIdForPath(path))
       const mine = (await fetchJobs())?.jobs ?? []
       const model = TeamFileModel.parse(await teamOfMyAgents(written, mine, saveJob))
@@ -121,7 +137,7 @@ function AddAnAgent({ jobs, project, teams, initial, onClose }: { jobs: readonly
             {teams.map((team) => <option key={team.path} value={team.path}>{team.name}</option>)}
           </select>
         </label>
-        {where && <p className="set-up-hint">The team opens, and you place it in the team’s order there.</p>}
+        {where && <p className="set-up-hint">It joins the team, whose workflow opens for you to connect it.</p>}
         {error && <p role="alert" className="wall-error">{error}</p>}
         <span className="wall-paper-acts">
           <button type="button" className="btn" onClick={onClose} disabled={busy}>Cancel</button>
@@ -195,20 +211,21 @@ export function ProjectRoom({ id }: { id: string }) {
             <button type="button" className="btn" onClick={() => setRenaming(false)}>Cancel</button>
           </form>
         ) : <h1>{project.name}</h1>}
-        {project.putAway && <span className="room-badge">Put away</span>}
+        {project.putAway && <span className="room-badge">Hidden from Home</span>}
+        <RoomAsk project={project.id} name={project.name} />
         <div className="room-menu" ref={menuRef}>
           <button type="button" className="iconbtn" aria-label="Project settings" aria-expanded={menu} aria-haspopup="menu" onClick={() => setMenu((value) => !value)}><MoreHorizontal size={16} aria-hidden="true" /></button>
           {menu && (
             <div className="idle-agent-menu room-menu-list" role="menu" aria-label="Project settings">
               <button type="button" role="menuitem" onClick={() => { setMenu(false); setRenaming(true) }}>Rename</button>
-              <span className="room-marks" role="group" aria-label="Its mark">
+              <span className="room-marks" role="group" aria-label="Colour">
                 {MARKS.map((mark) => (
-                  <button key={mark} type="button" role="menuitemradio" aria-checked={markOf(project.id, project.mark) === mark} aria-label={mark} title={mark} onClick={() => { setMenu(false); void keep({ mark }).catch(() => {}) }}>
+                  <button key={mark} type="button" role="menuitemradio" aria-checked={markOf(project.id, project.mark) === mark} aria-label={MARK_NAMES[mark]} title={MARK_NAMES[mark]} onClick={() => { setMenu(false); void keep({ mark }).catch(() => {}) }}>
                     <span className="project-mark" data-mark={mark} style={{ width: 16, height: 16 }} aria-hidden="true" />
                   </button>
                 ))}
               </span>
-              <button type="button" role="menuitem" onClick={() => { setMenu(false); void keep({ putAway: !project.putAway }).catch(() => {}) }}>{project.putAway ? 'Bring it back' : 'Put away'}</button>
+              <button type="button" role="menuitem" onClick={() => { setMenu(false); void keep({ putAway: !project.putAway }).catch(() => {}) }}>{project.putAway ? 'Show on Home' : 'Hide from Home'}</button>
             </div>
           )}
         </div>
@@ -231,14 +248,14 @@ export function ProjectRoom({ id }: { id: string }) {
               <span key={folder.path} className="wall-folder" title={folder.path}>
                 <Folder size={16} aria-hidden="true" />
                 <span>{folder.name}</span>
-                <button type="button" className="iconbtn" aria-label={`Take ${folder.name} off the wall`} onClick={() => void keep({ folders: (project.folders ?? []).filter((other) => other.path !== folder.path) }).catch(() => {})}><X size={13} aria-hidden="true" /></button>
+                <button type="button" className="iconbtn" aria-label={`Remove ${folder.name}`} onClick={() => void keep({ folders: (project.folders ?? []).filter((other) => other.path !== folder.path) }).catch(() => {})}><X size={13} aria-hidden="true" /></button>
               </span>
             ))}
             {(project.notes ?? []).map((kept, index) => (
               <span key={`${index}:${kept.text}`} className="wall-paper note">
                 <span className="wall-paper-text">{kept.text}</span>
                 {kept.by && <span className="wall-paper-by">From {kept.by}</span>}
-                <button type="button" className="iconbtn" aria-label={`Take “${kept.text}” off the wall`} onClick={() => void keep({ notes: (project.notes ?? []).filter((_, at) => at !== index) }).catch(() => {})}><X size={13} aria-hidden="true" /></button>
+                <button type="button" className="iconbtn" aria-label={`Remove “${kept.text}”`} onClick={() => void keep({ notes: (project.notes ?? []).filter((_, at) => at !== index) }).catch(() => {})}><X size={13} aria-hidden="true" /></button>
               </span>
             ))}
             {noting && (
@@ -246,7 +263,7 @@ export function ProjectRoom({ id }: { id: string }) {
                 <label><span className="visually-hidden">A note every agent here reads</span>
                   <textarea autoFocus value={note} maxLength={NOTE_CHARS} rows={3} placeholder="A decision, a name, a rule." onChange={(event) => setNote(event.target.value)} />
                 </label>
-                <span className="wall-paper-acts"><button type="button" className="btn" onClick={() => { setNote(''); setNoting(false) }}>Cancel</button><button type="submit" className="btn" disabled={!note.trim()}>Keep</button></span>
+                <span className="wall-paper-acts"><button type="button" className="btn" onClick={() => { setNote(''); setNoting(false) }}>Cancel</button><button type="submit" className="btn" disabled={!note.trim()}>Save</button></span>
               </form>
             )}
           </div>
@@ -257,7 +274,7 @@ export function ProjectRoom({ id }: { id: string }) {
           {room?.teams.map((team) => (
             <div key={team.path} className="room-team">
               <a className="room-team-name" href={teamHref(team.path, 'chat')}><b>{team.name}</b>{team.schedule && <span>{team.schedule}</span>}</a>
-              <TeamDesks team={team} figureOf={figureOf} size={38} all />
+              <TeamDesks team={team} figureOf={figureOf} size={56} all />
             </div>
           ))}
           {room && room.teams.length === 0 && <p className="studio-quiet">No team works here yet.</p>}
