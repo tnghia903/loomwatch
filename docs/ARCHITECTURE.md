@@ -438,6 +438,15 @@ work back. Ask's first turn also says whether this computer is a Mac, where an a
 in a sandbox: there Ask gives a maker or the Analyst the edits and commands switches, so a newcomer
 isn't asked to approve each program it runs; elsewhere they ask first.
 
+Every agent Ask makes is saved to My agents and joins other teams as it is, so Ask writes its
+instructions and Done when for its kind of work and puts what the request is about into the team
+(ADR 0097). Each agent's `part` says what this team needs from it, with Done when items of its own,
+which the agent reads under `## Your part in this team` and which come first in the Done when its
+check step checks. A `brief` given to `propose_team` is saved by Apply beside the team as a Brief
+note, written after the team file and joined to it with a second save. Saving a team keeps the
+folders and files it connected to a new agent as the team's (`specOf` in `myAgents.ts`): an agent
+reads something of its own only when its builder gives it.
+
 ---
 
 ## 3. Team Bus — delegation as protocol
@@ -655,7 +664,8 @@ at a little desk, whose workbench opens while it is pointed at. For the agent in
 
 ```
 Agent    { id, name, role, kind: harness|operator, spawn{cwd}, model,
-           allow{web,commands,edits}, from{agent}, status }
+           allow{web,commands,edits}, from{agent}, part{text,doneWhen}, status }
+           # part: what this team needs from the agent (ADR 0097), always the team's.
            # from: one of My agents (.jobs/<agent>.yaml, ADR 0094). The team file then holds only
            # the team's fields; name, role, model, skills, tools, reads, doneWhen and allow are
            # filled in from the agent's file when the team is read (my_agents.rs, myAgents.ts).

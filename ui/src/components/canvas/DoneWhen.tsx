@@ -10,6 +10,8 @@ export interface DoneWhenProps {
   readOnly?: boolean
   /** Every item that is written; blank ones never reach it. */
   onChange: (items: string[]) => void
+  /** The list's name, when it is not the agent's own: "Done when here" for its part in a team. */
+  label?: string
 }
 
 /**
@@ -19,7 +21,7 @@ export interface DoneWhenProps {
  * beside it, on the verdict, rather than in it. An item is written when the field is left, so a
  * half-typed or emptied line never lands in the team file; emptying one removes it.
  */
-export function DoneWhen({ items, readOnly = false, onChange }: DoneWhenProps) {
+export function DoneWhen({ items, readOnly = false, onChange, label = 'Done when' }: DoneWhenProps) {
   const [adding, setAdding] = useState('')
   const full = items.length >= DONE_WHEN_ITEMS
   const write = (index: number, text: string) => {
@@ -34,9 +36,9 @@ export function DoneWhen({ items, readOnly = false, onChange }: DoneWhenProps) {
     setAdding('')
   }
   return (
-    <div className="done-when" role="group" aria-label="Done when">
+    <div className="done-when" role="group" aria-label={label}>
       <div className="done-when-head">
-        <span className="t-micro">Done when</span>
+        <span className="t-micro">{label}</span>
         <span className="t-meta">{items.length ? 'It checks these before it replies, and says which it could not meet.' : 'Nothing set. Say what the finished result must have, and it checks before it replies.'}</span>
       </div>
       {items.length > 0 && (
@@ -50,7 +52,7 @@ export function DoneWhen({ items, readOnly = false, onChange }: DoneWhenProps) {
                 rows={Math.max(1, Math.ceil(item.length / 44))}
                 maxLength={DONE_WHEN_CHARS}
                 readOnly={readOnly}
-                aria-label={`Done when, item ${index + 1}`}
+                aria-label={`${label}, item ${index + 1}`}
                 onBlur={(event) => write(index, event.target.value.replace(/\s*\n\s*/g, ' '))}
                 onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur() } }}
               />
@@ -66,7 +68,7 @@ export function DoneWhen({ items, readOnly = false, onChange }: DoneWhenProps) {
             value={adding}
             maxLength={DONE_WHEN_CHARS}
             placeholder={items.length ? 'Add another' : 'e.g. Every claim links to its source'}
-            aria-label="Add to done when"
+            aria-label={`Add to ${label.toLowerCase()}`}
             onChange={(event) => setAdding(event.target.value)}
             onBlur={add}
           />

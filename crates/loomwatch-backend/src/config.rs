@@ -544,9 +544,15 @@ pub struct AgentConfig {
     /// Skills and tools the operator turned off for this agent (ADR 0060): its app would otherwise
     /// load them itself. Empty for an operator node.
     pub turned_off: Vec<TurnedOff>,
-    /// What the finished result must satisfy (ADR 0062), trimmed, blanks dropped. Rendered under
-    /// the role as `## Done when`. Empty for an operator node and for most hand-written agents.
+    /// What the finished result must satisfy (ADR 0062), trimmed, blanks dropped: the items of the
+    /// agent's part in this team first, then its own. Rendered under the role as `## Done when`,
+    /// and what a check step checks. Empty for an operator node and for most hand-written agents.
     pub done_when: Vec<String>,
+    /// What this team needs from the agent (`part.text`, ADR 0097), trimmed. The team's, never the
+    /// agent's: one of My agents keeps instructions for its kind of work, and each team says here
+    /// what it needs from it. Rendered as `## Your part in this team` after what the team knows.
+    /// `None` for an operator node and for an agent whose team gives it no part.
+    pub part: Option<String>,
     /// Set on a check step (ADR 0062): the agent whose work this one checks, its direct
     /// predecessor. It is handed that agent's work as written and its Done when, and when it is the
     /// last stage the checked agent's reply stays the team's answer.
@@ -694,6 +700,8 @@ struct RawAgent {
     #[serde(default)]
     done_when: Vec<String>,
     #[serde(default)]
+    part: Option<RawPart>,
+    #[serde(default)]
     checks: Option<String>,
     #[serde(default)]
     send_back_once: bool,
@@ -710,6 +718,21 @@ struct RawAgent {
     #[serde(default, rename = "status")]
     _status: Option<String>,
 }
+
+/// `part` (ADR 0097): what this team needs from the agent, and that part's own Done when items.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RawPart {
+    #[serde(default)]
+    text: Option<String>,
+    #[serde(default)]
+    done_when: Vec<String>,
+}
+
+/// At most this many characters in an agent's `part.text`: a line or two of what the team needs
+/// from it, not a second set of instructions (ADR 0097). The schema's limit, held for a hand-edited
+/// file too.
+pub const PART_CHARS: usize = 1000;
 
 /// `from: {agent}` (ADR 0071, 0094): the agent in My agents it is. A `version` an earlier
 /// `LoomWatch` wrote is ignored.
@@ -746,6 +769,7 @@ impl TryFrom<RawAgent> for AgentConfig {
                     ("allow", raw.allow.is_some()),
                     ("turnedOff", !raw.turned_off.is_empty()),
                     ("doneWhen", !raw.done_when.is_empty()),
+                    ("part", raw.part.is_some()),
                     ("checks", raw.checks.is_some()),
                     ("sendBackOnce", raw.send_back_once),
                     ("sendBack", raw.send_back.is_some()),
@@ -787,6 +811,7 @@ impl TryFrom<RawAgent> for AgentConfig {
                     allow: AgentAllow::default(),
                     turned_off: Vec::new(),
                     done_when: Vec::new(),
+                    part: None,
                     checks: None,
                     send_back: None,
                     spend: crate::spend::SpendConfig::default(),
@@ -803,7 +828,7 @@ impl TryFrom<RawAgent> for AgentConfig {
                 for entry in &raw.turned_off {
                     check_turned_off(&id, entry)?;
                 }
-                let done_when = done_when(&id, raw.done_when)?;
+                let (part, done_when) = part_and_done_when(&id, raw.part, raw.done_when)?;
                 let send_back = send_back(&id, raw.send_back, raw.send_back_once)?;
                 Ok(Self {
                     id,
@@ -820,6 +845,7 @@ impl TryFrom<RawAgent> for AgentConfig {
                     allow: raw.allow.unwrap_or_default(),
                     turned_off: raw.turned_off,
                     done_when,
+                    part,
                     checks: raw
                         .checks
                         .map(|checked| checked.trim().to_owned())
@@ -837,9 +863,39 @@ impl TryFrom<RawAgent> for AgentConfig {
     }
 }
 
-/// `doneWhen` as the prompt will state it: each item trimmed, blank ones dropped, within the
-/// schema's limits.
-fn done_when(id: &str, items: Vec<String>) -> Result<Vec<String>, String> {
+/// The agent's part in this team as the prompt will state it, and its Done when: the part's items
+/// first, as what this team asked of it, then the agent's own, each once (ADR 0097).
+fn part_and_done_when(
+    id: &str,
+    part: Option<RawPart>,
+    own: Vec<String>,
+) -> Result<(Option<String>, Vec<String>), String> {
+    let part = part.unwrap_or_default();
+    let text = part
+        .text
+        .map(|text| text.trim().to_owned())
+        .filter(|text| !text.is_empty());
+    if let Some(text) = &text {
+        let length = text.chars().count();
+        if length > PART_CHARS {
+            return Err(format!(
+                "agent {id:?} has a `part.text` of {length} characters; keep it to {PART_CHARS}, a \
+                 line or two of what this team needs from it."
+            ));
+        }
+    }
+    let mut items = done_when(id, "part.doneWhen", part.done_when)?;
+    for item in done_when(id, "doneWhen", own)? {
+        if !items.contains(&item) {
+            items.push(item);
+        }
+    }
+    Ok((text, items))
+}
+
+/// `doneWhen` (or `part.doneWhen`, the `field`) as the prompt will state it: each item trimmed,
+/// blank ones dropped, within the schema's limits.
+fn done_when(id: &str, field: &str, items: Vec<String>) -> Result<Vec<String>, String> {
     let items: Vec<String> = items
         .into_iter()
         .map(|item| item.trim().to_owned())
@@ -847,7 +903,7 @@ fn done_when(id: &str, items: Vec<String>) -> Result<Vec<String>, String> {
         .collect();
     if items.len() > DONE_WHEN_ITEMS {
         return Err(format!(
-            "agent {id:?} has {} `doneWhen` items; keep it to {DONE_WHEN_ITEMS}, the ones the \
+            "agent {id:?} has {} `{field}` items; keep it to {DONE_WHEN_ITEMS}, the ones the \
              result must meet.",
             items.len()
         ));
@@ -857,7 +913,7 @@ fn done_when(id: &str, items: Vec<String>) -> Result<Vec<String>, String> {
         .find(|item| item.chars().count() > DONE_WHEN_CHARS)
     {
         return Err(format!(
-            "agent {id:?} has a `doneWhen` item longer than {DONE_WHEN_CHARS} characters: {long:?}. \
+            "agent {id:?} has a `{field}` item longer than {DONE_WHEN_CHARS} characters: {long:?}. \
              Say it in one short sentence."
         ));
     }
@@ -1978,6 +2034,61 @@ mod tests {
             format!("{operator:#}").contains("no doneWhen"),
             "{operator:#}"
         );
+    }
+
+    /// ADR 0097: a team says what it needs from an agent in its `part`. The part's text is the
+    /// team's, its items come before the agent's own in the Done when, each once, and the limits
+    /// hold for a hand-edited file. A review stop has no part.
+    #[test]
+    fn a_part_is_the_teams_and_its_items_lead_the_done_when() {
+        let team = |fields: &str| {
+            TeamConfig::parse(&format!(
+                "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    model: test/model\n    role: Research.\n    doneWhen: ['Every claim has a link', 'Names its sources']\n{fields}edges: []\n"
+            ))
+        };
+        let parsed = team(
+            "    part:\n      text: '  Find two or three options for the SUTD gate.  '\n      doneWhen: ['Gives each option its trade-offs', 'Names its sources']\n",
+        )
+        .expect("valid");
+        let agent = &parsed.agents[0];
+        assert_eq!(
+            agent.part.as_deref(),
+            Some("Find two or three options for the SUTD gate.")
+        );
+        assert_eq!(
+            agent.done_when,
+            [
+                "Gives each option its trade-offs",
+                "Names its sources",
+                "Every claim has a link"
+            ],
+            "the part's items first, then the agent's own, each once"
+        );
+        assert_eq!(agent.role, "Research.", "the instructions stay the agent's");
+
+        let without = team("").expect("valid");
+        assert_eq!(without.agents[0].part, None);
+        assert_eq!(
+            without.agents[0].done_when,
+            ["Every claim has a link", "Names its sources"]
+        );
+
+        let six = team("    part:\n      doneWhen: [a, b, c, d, e, f]\n").expect_err("six items");
+        assert!(
+            format!("{six:#}").contains("6 `part.doneWhen` items"),
+            "{six:#}"
+        );
+        let essay = team(&format!("    part:\n      text: '{}'\n", "x".repeat(1001)))
+            .expect_err("a second set of instructions");
+        assert!(format!("{essay:#}").contains("keep it to 1000"), "{essay:#}");
+        let unknown = team("    part:\n      role: Something else.\n").expect_err("only text and doneWhen");
+        assert!(format!("{unknown:#}").contains("role"), "{unknown:#}");
+
+        let operator = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    model: test/model\n  - id: you\n    kind: operator\n    role: Check it.\n    part: {text: Approve it.}\nedges:\n  - {from: a, to: you, layer: configured, kind: sequence, ts: \"2026-10-28T00:00:00Z\"}\n",
+        )
+        .expect_err("a review stop is answered by the person");
+        assert!(format!("{operator:#}").contains("no part"), "{operator:#}");
     }
 
     /// A check step's `sendBack` says how many times the work may go back (1 to 3) and what happens

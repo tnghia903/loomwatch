@@ -68,6 +68,7 @@ pub fn copy_of(lead: &AgentConfig, number: usize) -> AgentConfig {
         name: name_of(shown(lead), number),
         allow_recruiting: false,
         done_when: Vec::new(),
+        part: None,
         checks: None,
         send_back: None,
         spend: crate::spend::SpendConfig::default(),

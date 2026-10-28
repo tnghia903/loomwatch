@@ -180,6 +180,10 @@ struct Proposal {
     /// Each agent's name as the team is read, by id: an agent that points at one of My agents has
     /// none in the file, and the card names it as My agents does (ADR 0096).
     agent_names: BTreeMap<String, String>,
+    /// What every agent of the team should know about the work (ADR 0097), which Apply saves
+    /// beside the team as a Brief note: the request's details live in the team, not in an agent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    brief: Option<String>,
 }
 
 impl Control {

@@ -2924,6 +2924,19 @@ pub(crate) fn compose_prompt(
             text: packet.text.clone(),
         });
     }
+    // What this team needs from the agent (ADR 0097): the team's standing words, after what the
+    // team knows and before anything this run hands it. Its items already lead the Done when.
+    if let Some(part) = &agent.part {
+        text.push_str("\n\n");
+        text.push_str(PART_HEADING);
+        text.push('\n');
+        text.push_str(part);
+        sections.push(PromptSection {
+            kind: PromptSectionKind::Part,
+            heading: PART_HEADING.to_owned(),
+            text: part.clone(),
+        });
+    }
     // Everything the agent is handed comes before what it is asked to do with it: long inputs
     // first, the request last. Anthropic's long-context guidance measured up to 30% better answers
     // with the query at the end, and a stage that read its task before a 20k-character handover
@@ -4638,6 +4651,8 @@ async fn ask_about_checks(
 }
 
 const DONE_WHEN_HEADING: &str = "## Done when";
+/// The heading of what a team needs from one of its agents (ADR 0097).
+const PART_HEADING: &str = "## Your part in this team";
 /// The heading an agent ends its reply with when it could not meet an item of its `doneWhen`.
 const NOT_MET_HEADING: &str = "## Not met";
 /// The heading work sent back by a check step ends with, for the findings it was kept against.
@@ -9028,6 +9043,47 @@ mod tests {
         );
     }
 
+    /// ADR 0097: what a team needs from an agent is read after what the team knows and before
+    /// anything the run hands it, its items lead the Done when, and a check step checks them too.
+    #[test]
+    fn a_teams_part_reaches_the_agent_and_its_check_step() {
+        let team = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: writer\nagents:\n  - id: writer\n    model: fake/offline\n    role: You write reports.\n    doneWhen: ['Every figure has a source']\n    part:\n      text: Write the SUTD gate report for the course staff.\n      doneWhen: ['Covers the three options Colin named']\n  - id: checker\n    model: fake/offline\n    role: You check.\n    checks: writer\nedges:\n  - {from: writer, to: checker, layer: configured, kind: sequence, ts: \"2026-10-28T00:00:00Z\"}\n",
+        )
+        .expect("the team reads");
+        let writer = &team.agents[0];
+        let packet = memory::ContextPacket {
+            agent_id: "writer".into(),
+            text: "## What the team knows\nThe gate opens at 8.".into(),
+            ..memory::ContextPacket::default()
+        };
+        let task = NodeTask {
+            stage_results: Some("the findings".into()),
+            ..NodeTask::goal("do the thing")
+        };
+        let composed = compose_prompt(writer, &packet, &task);
+        let kinds: Vec<_> = composed.sections.iter().map(|section| section.kind).collect();
+        let at = |kind| kinds.iter().position(|found| *found == kind).expect("a section");
+        assert!(at(memory::PromptSectionKind::Memory) < at(memory::PromptSectionKind::Part));
+        assert!(at(memory::PromptSectionKind::Part) < at(memory::PromptSectionKind::StageResults));
+        assert!(composed.text.contains(
+            "## What the team knows\nThe gate opens at 8.\n\n## Your part in this team\nWrite the \
+             SUTD gate report for the course staff.\n\n"
+        ));
+        assert!(composed.text.contains(
+            "Your result is finished when:\n- Covers the three options Colin named\n- Every figure \
+             has a source\n"
+        ));
+        assert_eq!(
+            &check_items(&team, "writer")[..2],
+            [
+                "Covers the three options Colin named",
+                "Every figure has a source"
+            ],
+            "the check step checks the part's items too"
+        );
+    }
+
     /// A check step's verdicts, settled as a first round: `(verdict, item, evidence)`.
     fn settled(reply: &str, expected: &[&str]) -> Vec<(&'static str, String, String)> {
         let expected: Vec<String> = expected.iter().map(|item| (*item).to_owned()).collect();
@@ -10067,6 +10123,7 @@ mod tests {
             allow: crate::config::AgentAllow::default(),
             turned_off: Vec::new(),
             done_when: Vec::new(),
+            part: None,
             checks: None,
             send_back: None,
             spend: crate::spend::SpendConfig::default(),
@@ -10098,6 +10155,7 @@ mod tests {
             allow: crate::config::AgentAllow::default(),
             turned_off: Vec::new(),
             done_when: Vec::new(),
+            part: None,
             checks: None,
             send_back: None,
             spend: crate::spend::SpendConfig::default(),

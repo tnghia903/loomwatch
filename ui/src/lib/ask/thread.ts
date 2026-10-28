@@ -36,6 +36,8 @@ export interface ProposalCard {
   yaml: string
   /** Each agent's name as the team is read, by id: one from My agents has none in the file. */
   agentNames: Record<string, string>
+  /** The team's Brief the proposal carries (ADR 0097), when it carries one. */
+  brief?: string
   outcome: ProposalOutcome | null
   /** A later proposal for the same file replaced this one. */
   superseded: boolean
@@ -235,7 +237,7 @@ export function projectAskThread(events: readonly RunEvent[]): AskThread {
           const card: ProposalCard = {
             kind: 'proposal', id: text(payload.proposalId), at: event.ts, file: text(payload.file), name: text(payload.name) || text(payload.file),
             isNew: payload.isNew === true, summary: text(payload.summary), yaml: text(payload.yaml), agentNames: names(payload.agentNames),
-            outcome: null, superseded: false,
+            ...(text(payload.brief) ? { brief: text(payload.brief) } : {}), outcome: null, superseded: false,
           }
           for (const earlier of proposals.values()) if (earlier.file === card.file) earlier.superseded = true
           proposals.set(card.id, card)

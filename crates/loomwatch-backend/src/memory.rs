@@ -451,6 +451,11 @@ pub enum PromptSectionKind {
     Tool,
     /// `## What the team knows` — the context packet.
     Memory,
+    /// `## Your part in this team` — what this team needs from the agent (ADR 0097): the team's
+    /// `part`, never the agent's own instructions. After what the team knows and before anything
+    /// the run hands it. Absent when the team gives it none. Added here and in
+    /// `ui/src/lib/watch/events.ts` in one change.
+    Part,
     /// `## Conversation so far` — the recent messages between the operator and this team: their
     /// requests, notes and decisions, and the team's answers (ADR 0051). Built when the run starts
     /// from the team's chat, so the same chat always gives the same section. Source material: old
@@ -3733,6 +3738,7 @@ mod tests {
             allow: crate::config::AgentAllow::default(),
             turned_off: Vec::new(),
             done_when: Vec::new(),
+            part: None,
             checks: None,
             send_back: None,
             spend: crate::spend::SpendConfig::default(),

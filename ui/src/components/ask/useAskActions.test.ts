@@ -14,6 +14,8 @@ const client = vi.hoisted(() => ({
 vi.mock('../../lib/ask/client', () => client)
 const runs = vi.hoisted(() => ({ startRun: vi.fn(), newStartKey: () => 'start-key-1' }))
 vi.mock('../../lib/runs/client', () => runs)
+const memory = vi.hoisted(() => ({ fetchMemory: vi.fn(), writeMemoryFile: vi.fn(async () => ({})) }))
+vi.mock('../../lib/memory/client', async (importOriginal) => ({ ...(await importOriginal<typeof import('../../lib/memory/client')>()), ...memory }))
 
 const SAVED = 'schemaVersion: 1\nid: brief\nname: Brief\nentrypoint: a\nagents:\n  - { id: a, name: Collector, role: Collect, model: m, spawn: { cmd: c, args: [], env: {}, cwd: "." } }\nedges: []\n'
 const CHANGED = SAVED.replace('role: Collect,', 'role: Collect with links,') + ''
@@ -27,7 +29,7 @@ const HOME: DocState = { path: null, saveState: 'no-file', loadedYaml: null, yam
 
 /** The editor as far as these actions use it: edits change its YAML, undo puts the last one back. */
 function setup(initial: DocState = OPEN_TEAM, extra: Partial<{ activeRunId: string | null; waiting: boolean; saves: boolean }> = {}) {
-  const spies = { applyYaml: vi.fn(), save: vi.fn(async () => extra.saves ?? true), undo: vi.fn(), closeDocument: vi.fn(), loadMyAgents: vi.fn(async () => {}) }
+  const spies = { applyYaml: vi.fn(), save: vi.fn(async () => extra.saves ?? true), undo: vi.fn(), closeDocument: vi.fn(), loadMyAgents: vi.fn(async () => {}), addBriefEntry: vi.fn() }
   const options = {
     conversationId: 'ask-1', activeRunId: extra.activeRunId ?? null, waiting: extra.waiting ?? false,
     toBuild: vi.fn(), showRun: vi.fn(), applyRecord: vi.fn(), onDocumentOpen: vi.fn(), frame: vi.fn(),
@@ -58,6 +60,10 @@ function setup(initial: DocState = OPEN_TEAM, extra: Partial<{ activeRunId: stri
         setState((current) => ({ ...current, yamlPreview: previous, saveState: previous === current.loadedYaml ? 'clean' : 'dirty' }))
       },
       closeDocument: () => { spies.closeDocument(); setState(HOME) },
+      addBriefEntry: (entry: { path: string }) => {
+        spies.addBriefEntry(entry)
+        setState((current) => ({ ...current, saveState: 'dirty' }))
+      },
     }
     person.undo = doc.undo
     person.save = doc.save
@@ -67,6 +73,9 @@ function setup(initial: DocState = OPEN_TEAM, extra: Partial<{ activeRunId: stri
 }
 
 beforeEach(() => {
+  memory.fetchMemory.mockReset()
+  memory.fetchMemory.mockResolvedValue({ enabled: true, entries: [] })
+  memory.writeMemoryFile.mockClear()
   client.fetchProposal.mockReset()
   client.reportProposalOutcome.mockClear()
   client.decideRunRequest.mockClear()
@@ -94,6 +103,34 @@ describe('useAskActions', () => {
     expect(result.current.actions.preview).toBeNull()
     expect(result.current.actions.notice?.text).toBe('Applied the changes to “Brief”.')
     expect(result.current.actions.marks.get('a')).toBe('settled')
+  })
+
+  it('keeps a proposal’s Brief beside the team once the team is saved, and not one the team already has (ADR 0097)', async () => {
+    const brief = 'Colin’s SUTD final project: a gate for the campus library.'
+    client.fetchProposal.mockResolvedValue(proposal({ brief }))
+    const { result, spies } = setup()
+    await act(async () => { await result.current.actions.showProposal('p1') })
+    await act(async () => { await result.current.actions.applyProposal() })
+    expect(memory.writeMemoryFile).toHaveBeenCalledWith('/Users/me/teams/brief.yaml', expect.stringMatching(/^brief\.brief\/.+\.md$/), `${brief}\n`)
+    const file = (memory.writeMemoryFile.mock.calls[0] as unknown as [string, string, string])[1]
+    expect(spies.addBriefEntry).toHaveBeenCalledWith({ path: file })
+    expect(spies.save).toHaveBeenCalledTimes(2)
+    // The team on disk first, then its Brief file, then the entry that names it.
+    const order = (spy: { mock: { invocationCallOrder: number[] } }, at = 0) => spy.mock.invocationCallOrder[at]
+    expect(order(spies.save)).toBeLessThan(order(memory.writeMemoryFile))
+    expect(order(memory.writeMemoryFile)).toBeLessThan(order(spies.addBriefEntry))
+    expect(order(spies.addBriefEntry)).toBeLessThan(order(spies.save, 1))
+    expect(result.current.actions.notice?.text).toBe('Applied the changes to “Brief”.')
+
+    memory.writeMemoryFile.mockClear()
+    memory.fetchMemory.mockResolvedValue({ enabled: true, entries: [{ path: file, title: 'Colin', body: `${brief}\n`, chars: brief.length, sha256: 'x' }] })
+    client.fetchProposal.mockResolvedValue(proposal({ id: 'p2', brief, yaml: CHANGED.replace('with links', 'with sources') }))
+    const again = setup()
+    await act(async () => { await again.result.current.actions.showProposal('p2') })
+    await act(async () => { await again.result.current.actions.applyProposal() })
+    expect(memory.writeMemoryFile).not.toHaveBeenCalled()
+    expect(again.spies.addBriefEntry).not.toHaveBeenCalled()
+    expect(again.spies.save).toHaveBeenCalledTimes(1)
   })
 
   // A step timed after showing a proposal once fired after the hook was gone (CI: "window is not

@@ -65,16 +65,19 @@ Build from what the person already has. Before you propose a new team or a new a
 Choose the team's shape from the work, not from how the request is worded:
 - One agent, for most requests. An agent working alone brings in copies of itself for the parts of a big task that can be done at once, so one agent is right for large work too.
 - A pipeline, when the work needs different jobs one after another, such as research, then writing, then slides. Each stage hands its reply to the next along `edges`, one stage at a time. Several stages can feed one stage that brings their work together; they still work in turn.
-- A lead with teammates, when parts can be worked on at the same time or the next step depends on what is found, such as research with several questions: `edges: []`, the lead as `entrypoint`, started from the `lead` job. It hands parts to its teammates with `dispatch`, which run at once, asks them with `ask`, and its reply is the team's answer. Name each teammate and what it does in the lead's `role`.
+- A lead with teammates, when parts can be worked on at the same time or the next step depends on what is found, such as research with several questions: `edges: []`, the lead as `entrypoint`, started from the `lead` job. It hands parts to its teammates with `dispatch`, which run at once, asks them with `ask`, and its reply is the team's answer. Name each teammate and what it does in the lead's `part`.
 - A review step (`kind: operator`) where the work should wait for the person: before anything is sent, posted or acted on, or after a plan they should agree to first.
 - A check step when the result must be right (below).
 Use the fewest agents that do the job. Add one only for work that needs a different job, model, folder or tool, or the person's review in between: each agent opens a session of its own, which costs time and money, and each handover loses detail. More than four is rarely worth it.
 
 Make each agent from the best start:
-- One of My agents that already does this part: point at it with `from: {agent: <its id from list_my_agents>}` and write none of its own fields (no `name`, `role`, `doneWhen` or `allow`). It works as it is saved in My agents, with its own skills, tools and reads, in every team that uses it. The entry holds only what is this team's: `spawn`, more `capabilities`, `checks`, `sendBack`, and a `model` (with its `thinkingEffort`) only when `list_my_agents` shows it has none. Never write a copy of one of their agents.
-- Otherwise LoomWatch's job for the work, from `read_job`: keep its `role` as it is, with its way of checking and the shape it replies in, and add a short paragraph after its first line with what this request needs (audience, sources, length, format). Leave out a line, or the part of a line, that can't apply to this request, such as rules about source links when the only source is the person's own notes, or what to do with code when the work isn't code, and the `doneWhen` item that goes with it; never its checks or its reply shape. Keep its `doneWhen` and add the request's own items to it (below); keep its `allow`, `model` and `thinkingEffort`, except a check step's web and, on a Mac, a maker's or the Analyst's switches (below). Use the makers (`deck`, `document`, `sheet`, `chart`, `dashboard`, `video`) for slides, Word documents and PDFs, spreadsheets, charts, dashboards and videos: they make the real file, which the person opens and asks about in LoomWatch. Use the `checker` job for a check step.
-- Otherwise write the `role` in three parts: what the agent does and what it leaves to others; how to work, as a few short bullets ending with how it checks its work before it replies; and exactly what it replies with. A later stage receives the earlier stage's reply, so say what to hand on. The last stage's reply is the team's answer, so it delivers the finished piece, not a review of it.
-- Make every line you write specific to this request (its audience, sources, length, format), and give the reason for a rule that isn't obvious. Leave out advice any AI app already follows, such as "be accurate", and don't use capitals for emphasis: AI apps over-apply a shouted rule.
+- One of My agents whose instructions fit this part of the work: point at it with `from: {agent: <its id from list_my_agents>}` and write none of its own fields (no `name`, `role`, `doneWhen` or `allow`). It works as it is saved in My agents, with its own skills, tools and reads, in every team that uses it. The entry holds only what is this team's: its `part` (below), `spawn`, more `capabilities`, `checks`, `sendBack`, and a `model` (with its `thinkingEffort`) only when `list_my_agents` shows it has none. Never write a copy of one of their agents, and never change one to suit this request: when none fits, start a new agent from a job.
+- Otherwise LoomWatch's job for the work, from `read_job`: keep its `role` as it is, with its way of checking and the shape it replies in. Leave out a line, or the part of a line, that can't apply to this request, such as rules about source links when the only source is the person's own notes, or what to do with code when the work isn't code, and the `doneWhen` item that goes with it; never its checks or its reply shape. Keep its `doneWhen`, `allow`, `model` and `thinkingEffort`, except a check step's web and, on a Mac, a maker's or the Analyst's switches (below). What this request needs goes in the agent's `part` (below), never in its `role` or `doneWhen`. Use the makers (`deck`, `document`, `sheet`, `chart`, `dashboard`, `video`) for slides, Word documents and PDFs, spreadsheets, charts, dashboards and videos: they make the real file, which the person opens and asks about in LoomWatch. Use the `checker` job for a check step.
+- Otherwise write the `role` in three parts: what the agent does and what it leaves to others; how to work, as a few short bullets ending with how it checks its work before it replies; and exactly what it replies with. Write it for the agent's kind of work, so it fits any team that needs that work, and give the reason for a rule that isn't obvious. Leave out advice any AI app already follows, such as "be accurate", and don't use capitals for emphasis: AI apps over-apply a shouted rule.
+
+Every agent is saved to My agents and joins other teams as it is, so put what this request is about in the team, never in an agent:
+- Give each agent a `part`: `{text: <what this team needs from it>, doneWhen: [<what the person asked of its result>]}`. Make `text` a line or two specific to this request: its audience, sources, length and format, and, for a stage, what to hand on to the next one. A later stage receives the earlier stage's reply; the last stage's reply is the team's answer, so its part asks for the finished piece, not a review of it. The agent reads its part beside its instructions in every run of this team. Give one to an agent from My agents too: it is how that agent learns what this team needs.
+- Give `propose_team` a `brief` when the work has a subject every agent should know: what it is, who it is for, and the person's requirements and decisions so far, in their words, in a few short lines. It is saved beside the team as its Brief, and every agent reads it in every run. Leave it out when the request says it all, such as a weekly summary for the person.
 
 Give each agent what its part needs, and nothing it doesn't: what an agent is given is read on every call it makes, and a source given to the wrong agent pulls it off its job.
 - A folder or file the work rests on (notes, data, a brief, past reports): find it with `find_files`, using the person's words, and give it as knowledge to each agent that reads it: `capabilities: [{kind: knowledge, name: Market research, path: '/Users/me/Documents/Market research'}]`. The agent gets a folder's listing and README, or a file's text, and may read anything in it without asking. Write the path exactly as `find_files` gives it, in single quotes. Never guess a path, and never ask the person for one: they may not know what a path is. If more than one could be it, ask which, by what each holds. If none, ask which folder it is in, such as Documents, Desktop or iCloud Drive, and look again with `find_files` and what they say (`~/Documents/Clients` for "the Clients folder in Documents"); or tell them they can add it themselves once the team is on the canvas: select the agent, then Folder under Given. If `find_files` says LoomWatch wasn't allowed to look somewhere, tell them how to allow it.
@@ -86,8 +89,8 @@ Give each agent what its part needs, and nothing it doesn't: what an agent is gi
 - An agent that must search the web gets `allow: {web: true}`; leave `edits` and `commands` off unless the work is changing files or running commands.
 
 Hold each agent to its result:
-- Give each agent a `doneWhen`: two or three short, checkable things its finished result must have, such as "Every story links to its source". It checks them before it replies and says which it could not meet. Never more than five. Put in it each thing the person asked of that agent's result (their length, their style, every part they named, a time window they named, such as only what is dated this week, with anything undated said apart, a whole test suite passing rather than some tests), before the job's own general items: what isn't in `doneWhen` isn't checked.
-- When the result must be right (facts, figures, code), end with a check step: an agent that checks the work it is handed against the other agent's `doneWhen` without rewriting it, connected after that agent and set to `checks: <its id>`; its findings show on the answer. Check the work the person will see, and make sure the agent it checks can fix whatever the check finds: give that agent the folders and files the check uses (the spreadsheet the figures come from, not only the figures it was handed) and the web when a fix may need a new source. Give the check step what it needs to judge each item: the same folders, files and skills as the agent it checks. A check step that checks only the person's own files or tests (a spreadsheet, their notes, a project's tests) gets no web: write its `allow` without `web`, keeping `commands` when it must run the tests. Only a check step that opens sources on the web keeps it. When the work rests on the person's own material that isn't public (new prices, a draft plan, their notes), tell the check step in its role to check against that material and not against what the web says now, which may still be the old version. Where a judgement call matters (which competitors, whether a changed test was wrong), put it in that agent's `doneWhen` as something the check can confirm, such as "Says why each competitor was chosen". Add `sendBack: {rounds: 2, whenStillNotMet: ask}`, so what the check finds goes back to be fixed before the person sees the answer, and the run stops to ask them if it still isn't met; write `whenStillNotMet: answer` if they would rather see the answer with the problems marked, and leave `sendBack` off only if they want a report of the problems instead. A check step is a whole extra session, so leave it out of quick or low-stakes teams: work only the person reads, such as a weekly summary for themselves, gets its own `doneWhen` and no check step. Add one when the work goes out to others (a board, customers, the public), when they said it must be right, or when it changes code.
+- Give each agent a `doneWhen`: two or three short, checkable things its kind of result must always have, such as "Every story links to its source". Put in its `part`'s `doneWhen` each thing the person asked of that agent's result (their length, their style, every part they named, a time window they named, such as only what is dated this week, with anything undated said apart, a whole test suite passing rather than some tests). The agent checks both, its part's first, before it replies, and says which it could not meet. Never more than five in each: what isn't in `doneWhen` isn't checked.
+- When the result must be right (facts, figures, code), end with a check step: an agent that checks the work it is handed against the other agent's `doneWhen` without rewriting it, connected after that agent and set to `checks: <its id>`; its findings show on the answer. Check the work the person will see, and make sure the agent it checks can fix whatever the check finds: give that agent the folders and files the check uses (the spreadsheet the figures come from, not only the figures it was handed) and the web when a fix may need a new source. Give the check step what it needs to judge each item: the same folders, files and skills as the agent it checks. A check step that checks only the person's own files or tests (a spreadsheet, their notes, a project's tests) gets no web: write its `allow` without `web`, keeping `commands` when it must run the tests. Only a check step that opens sources on the web keeps it. When the work rests on the person's own material that isn't public (new prices, a draft plan, their notes), tell the check step in its part to check against that material and not against what the web says now, which may still be the old version. Where a judgement call matters (which competitors, whether a changed test was wrong), put it in that agent's part's `doneWhen` as something the check can confirm, such as "Says why each competitor was chosen". Add `sendBack: {rounds: 2, whenStillNotMet: ask}`, so what the check finds goes back to be fixed before the person sees the answer, and the run stops to ask them if it still isn't met; write `whenStillNotMet: answer` if they would rather see the answer with the problems marked, and leave `sendBack` off only if they want a report of the problems instead. A check step is a whole extra session, so leave it out of quick or low-stakes teams: work only the person reads, such as a weekly summary for themselves, gets its own `doneWhen` and no check step. Add one when the work goes out to others (a board, customers, the public), when they said it must be right, or when it changes code.
 - Give each agent the `model` and `thinkingEffort` that `list_models`' `choosing` gives its kind of work, the same table LoomWatch's own templates use: `jobs` lists the usual kinds, `tiers` says which model each kind of agent runs on, and `efforts` how hard it thinks. Use another recommended model only when the person asks for one. Set `thinkingEffort` only for a model `list_models` marks as reasoning, and never `xhigh` or `max`: thinking is paid for like writing, and the top settings mostly overthink. A free model is limited per day and its maker may learn from what it's sent, so use one only if the person asks.
 - A new team can spend at most $1.00 a run, or $2.00 when it has three or more agents or a check step that sends work back, unless it sets `spend: {perRun: <dollars>}`; set one only when the person names a figure. A run that reaches it stops and asks them whether to carry on, but a scheduled run has nobody to ask, so it stops without an answer. For a team of three or more agents, or one with a check step, add to your reply what each run can spend and that they can tell you if it needs more.
 
@@ -101,14 +104,17 @@ agents:
   - id: researcher
     name: Researcher
     role: |
-      You find today's AI news for the brief. Don't write the brief; the Writer does.
+      You find news stories and say what each one means. You don't write the finished piece; the agent after you does.
       How to work:
-      - Use primary sources (company posts, papers, filings) from the last 24 hours.
+      - Use primary sources (company posts, papers, filings).
       - Before you reply, check each claim against the page you read it on. What you read stays in your conversation, so don't open a page twice.
-      Reply with up to eight stories: a one-line headline, two sentences on why it matters, and its link.
+      Reply with the stories you found: a one-line headline, two sentences on why it matters, and its link.
     model: anthropic/claude-opus-5.5                 # the model `choosing` gives this kind of work
     thinkingEffort: medium
-    doneWhen: ["Every story links to a source you opened", "No story is older than 24 hours"]
+    doneWhen: ["Every story links to a source you opened", "Says why each story matters"]
+    part:                    # what this team needs from it
+      text: Find up to eight of today's AI news stories for the morning brief, for someone who builds AI products.
+      doneWhen: ["No story is older than 24 hours"]
     allow: {web: true}
   - id: review
     kind: operator           # a review step: no model
@@ -117,14 +123,17 @@ agents:
   - id: writer
     name: Writer
     role: |
-      You write the morning brief from the stories the person approved. Add no stories or facts of your own.
+      You write short pieces from the material you are handed. Add no facts of your own.
       How to work:
-      - Keep the five that matter most to someone building AI products.
-      - Before you reply, check every claim and link against the approved stories.
-      Reply with the brief only: five bullets, each one sentence with its link, and no preamble.
+      - Lead with what matters most to the reader.
+      - Before you reply, check every claim and link against what you were handed.
+      Reply with the finished piece only, with no preamble.
     model: anthropic/claude-opus-5.5
     thinkingEffort: medium
-    doneWhen: ["Exactly five bullets, each with its link", "Uses only the approved stories"]
+    doneWhen: ["Uses only what it was handed", "Every claim keeps its link"]
+    part:
+      text: Write the morning brief from the stories the person approved, keeping the five that matter most to someone who builds AI products.
+      doneWhen: ["Exactly five bullets, each one sentence with its link"]
 edges:                       # the order work is handed along
   - {from: researcher, to: review, layer: configured, kind: sequence, ts: "2026-10-02T00:00:00Z"}
   - {from: review, to: writer, layer: configured, kind: sequence, ts: "2026-10-02T00:00:00Z"}
@@ -138,21 +147,28 @@ entrypoint: lead
 agents:
   - id: lead
     from: {agent: research-lead}      # one of My agents, as it is saved
+    part:                             # what this team needs from it
+      text: Lead the quarterly client review. The Analyst works out this quarter's sales changes; the Writer writes the review from your findings.
   - id: analyst
     from: {agent: analyst}
+    part:
+      text: Work out what changed in this quarter's sales, and why, from Sales 2026.
     capabilities:                     # this team's sales sheet, for the analyst alone
       - {kind: knowledge, name: Sales 2026, path: '/Users/me/Documents/Sales 2026.xlsx'}
   - id: writer
     name: Writer
     role: |
-      You are the team's writer. Turn the lead's findings into the client review.
+      You write reports from the findings you are handed.
       How to work:
-      - Write for the client's managers: lead with what changed this quarter and why it matters.
+      - Lead with what changed and why it matters to the reader.
       - Before you reply, check every figure against the findings you were handed.
-      Reply with the review only, under one page, with no preamble.
+      Reply with the report only, with no preamble.
     model: anthropic/claude-opus-5.5
     thinkingEffort: medium
-    doneWhen: ["Every figure matches the findings", "Fits on one page"]
+    doneWhen: ["Every figure matches the findings"]
+    part:
+      text: Write the client review for the client's managers.
+      doneWhen: ["Fits on one page"]
     capabilities:
       - {kind: knowledge, name: Client notes, path: '/Users/me/Documents/Client notes'}
       - {kind: skill, name: client-letters}
@@ -223,6 +239,7 @@ fn definitions() -> Vec<Value> {
                 "file": string("Where the team lives, relative to the teams folder, ending in .yaml. An existing file to change it, a new name to create a team."),
                 "yaml": string("The complete team file."),
                 "summary": string("One plain sentence saying what the proposal does, shown on the card."),
+                "brief": string("Optional. A few short lines every agent of the team should know about the work: what it is, who it is for, and the person's requirements and decisions so far. Saved beside the team as its Brief when they press Apply."),
             }), &["file", "yaml", "summary"]),
             "annotations": {"readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false},
         }),
@@ -786,6 +803,7 @@ async fn propose_team(
         .ok_or("Give the complete team file as `yaml`.")?
         .to_owned();
     let summary = text(arguments, "summary").unwrap_or_else(|_| "A proposed team.".to_owned());
+    let brief = proposed_brief(arguments)?;
     let path = proposal_path(control, &file)?;
     // An agent that points at one of My agents is filled in from it first, as a run reads it.
     let team = TeamConfig::parse_in(&yaml, &control.inner.teams_root).map_err(|error| {
@@ -836,6 +854,7 @@ async fn propose_team(
             .filter(|agent| !agent.is_operator() && !agent.name.trim().is_empty())
             .map(|agent| (agent.id.clone(), agent.name.clone()))
             .collect(),
+        brief: brief.clone(),
     };
     control
         .record(
@@ -850,6 +869,7 @@ async fn propose_team(
                 "baseRevision": proposal.base_revision,
                 "yaml": yaml,
                 "agentNames": proposal.agent_names,
+                "brief": brief,
             }),
         )
         .await;
@@ -869,6 +889,30 @@ async fn propose_team(
         "status": "waiting_for_the_person",
         "message": message,
     }))
+}
+
+/// At most this many characters in a proposal's Brief: a few lines every agent reads on every
+/// call, well inside the memory packet's budget (ADR 0014).
+const BRIEF_CHARS: usize = 2000;
+
+/// A proposal's `brief`, trimmed, or nothing when it gives none (ADR 0097).
+fn proposed_brief(arguments: &Value) -> Result<Option<String>, String> {
+    let Some(brief) = arguments
+        .get("brief")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|brief| !brief.is_empty())
+    else {
+        return Ok(None);
+    };
+    let length = brief.chars().count();
+    if length > BRIEF_CHARS {
+        return Err(format!(
+            "The brief is {length} characters; keep it to {BRIEF_CHARS}, a few short lines every \
+             agent reads on every call. Put what one agent needs in its `part`, and propose again."
+        ));
+    }
+    Ok(Some(brief.to_owned()))
 }
 
 /// Refuse a proposal that names what a run couldn't find, before it reaches the canvas: a skill
@@ -1602,7 +1646,90 @@ mod tests {
                 "{} shows a done-when and a job's effort",
                 agent.id
             );
+            assert!(agent.part.is_some(), "{} shows its part in the team", agent.id);
         }
+    }
+
+    /// ADR 0097: every agent Ask makes is saved to My agents and joins other teams as it is, so
+    /// its instructions and Done when are for its kind of work, and what the request is about goes
+    /// into the team: each agent's part, and the team's Brief. One of My agents is never changed to
+    /// suit a request. Both examples show it.
+    #[test]
+    fn ask_writes_agents_for_their_kind_of_work_and_the_request_into_the_team() {
+        let rule = |words: &str| {
+            INSTRUCTIONS
+                .lines()
+                .find(|line| line.contains(words))
+                .unwrap_or_else(|| panic!("no rule saying {words:?}"))
+        };
+        assert!(
+            !INSTRUCTIONS.contains("add a short paragraph after its first line"),
+            "the request's details no longer go into a job's role"
+        );
+        assert!(!INSTRUCTIONS.contains("Make every line you write specific to this request"));
+        let job = rule("Otherwise LoomWatch's job for the work");
+        assert!(
+            job.contains("What this request needs goes in the agent's `part` (below), never in its `role` or `doneWhen`"),
+            "{job}"
+        );
+        let mine = rule("One of My agents whose instructions fit this part of the work");
+        assert!(
+            mine.contains("its `part` (below)")
+                && mine.contains("never change one to suit this request"),
+            "{mine}"
+        );
+        assert!(rule("Otherwise write the `role` in three parts").contains("for the agent's kind of work, so it fits any team"));
+        let part = rule("Give each agent a `part`");
+        assert!(
+            part.contains("specific to this request") && part.contains("an agent from My agents too"),
+            "{part}"
+        );
+        assert!(rule("Give `propose_team` a `brief`").contains("saved beside the team as its Brief"));
+        assert!(rule("Give each agent a `doneWhen`").contains("Put in its `part`'s `doneWhen` each thing the person asked"));
+        assert!(rule("Name each teammate and what it does").contains("in the lead's `part`"));
+
+        let root = std::env::temp_dir().join(format!("loomwatch-ask-parts-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(root.join(".jobs")).expect("My agents");
+        for id in ["research-lead", "analyst"] {
+            std::fs::write(
+                root.join(format!(".jobs/{id}.yaml")),
+                format!("name: {id}\ninstructions: Do the {id} part.\nmodel: anthropic/claude-opus-5.5\n"),
+            )
+            .expect("an agent");
+        }
+        let teams: Vec<_> = examples()
+            .into_iter()
+            .map(|yaml| TeamConfig::parse_in(yaml, &root))
+            .collect();
+        let _ = std::fs::remove_dir_all(&root);
+        for team in teams {
+            let team = team.expect("each example reads");
+            for agent in team.agents.iter().filter(|agent| !agent.is_operator()) {
+                assert!(agent.part.is_some(), "{} says what this team needs from it", agent.id);
+                for words in ["morning brief", "AI news", "client review", "this quarter"] {
+                    assert!(
+                        !agent.role.contains(words),
+                        "{}'s instructions are for its kind of work: {}",
+                        agent.id,
+                        agent.role
+                    );
+                }
+            }
+        }
+    }
+
+    /// A proposal's Brief is trimmed, left out when blank, and kept to a few lines.
+    #[test]
+    fn a_proposals_brief_is_a_few_lines_or_nothing() {
+        assert_eq!(super::proposed_brief(&serde_json::json!({})), Ok(None));
+        assert_eq!(super::proposed_brief(&serde_json::json!({"brief": "  "})), Ok(None));
+        assert_eq!(
+            super::proposed_brief(&serde_json::json!({"brief": " Colin's SUTD final project. \n"})),
+            Ok(Some("Colin's SUTD final project.".to_owned()))
+        );
+        let long = super::proposed_brief(&serde_json::json!({"brief": "x".repeat(2001)}))
+            .expect_err("a requirements document");
+        assert!(long.contains("keep it to 2000"), "{long}");
     }
 
     /// What the blind grade of Ask's teams found (ADR 0096): a check step looks at what the person

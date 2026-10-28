@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import { isAbsolutePath, relativeUnder } from '../../lib/files/paths'
+import { baseName, isAbsolutePath, relativeUnder } from '../../lib/files/paths'
+import { briefFileNameFor, fetchMemory, writeMemoryFile } from '../../lib/memory/client'
 import { decideRunRequest, fetchProposal, reportProposalOutcome, type Proposal } from '../../lib/ask/client'
 import { proposalChanges, type ProposalChanges } from '../../lib/ask/proposal'
 import type { ProposalCard, ReviewNoteCard, RunRequestCard } from '../../lib/ask/thread'
@@ -87,7 +88,7 @@ export function useAskActions({ doc, conversationId, activeRunId, waiting, toBui
   /** A proposal the person took off the canvas with ⌘Z, to be recorded as discarded. */
   const [undone, setUndone] = useState<string | null>(null)
   /** A proposal the person saved without pressing Apply, to be recorded as applied. */
-  const [savedElsewhere, setSavedElsewhere] = useState<string | null>(null)
+  const [savedElsewhere, setSavedElsewhere] = useState<Proposal | null>(null)
   const frameRef = useRef(frame)
   // Undo runs after the render it caused, so it needs that render's document, not this one's.
   const docRef = useRef(doc)
@@ -186,7 +187,7 @@ export function useAskActions({ doc, conversationId, activeRunId, waiting, toBui
       present(await fetchProposal(id))
     } catch (caught) {
       if (recorded?.yaml) {
-        present({ id, source: '', file: recorded.file, name: recorded.name, isNew: recorded.isNew, yaml: recorded.yaml, baseRevision: null, summary: recorded.summary, createdAt: recorded.at, agentNames: recorded.agentNames })
+        present({ id, source: '', file: recorded.file, name: recorded.name, isNew: recorded.isNew, yaml: recorded.yaml, baseRevision: null, summary: recorded.summary, createdAt: recorded.at, agentNames: recorded.agentNames, ...(recorded.brief ? { brief: recorded.brief } : {}) })
         return
       }
       say({ text: caught instanceof Error ? caught.message : String(caught) })
@@ -229,13 +230,34 @@ export function useAskActions({ doc, conversationId, activeRunId, waiting, toBui
   }, [undone])
   // Saved another way — ⌘S, or the Save beside the team's name — is applying it all the same.
   if (preview && !preview.applying && (doc.saveState === 'saved' || doc.saveState === 'clean')) {
-    setSavedElsewhere(preview.proposal.id)
+    setSavedElsewhere(preview.proposal)
     setSettled(new Set([...preview.changes.added, ...preview.changes.changed]))
     setPreview(null)
   }
+  /**
+   * The proposal's Brief, kept beside the team once the team is on disk (ADR 0097): what a request
+   * is about belongs to the team, never to an agent every team shares. Written as a Brief note is,
+   * the file before the team file's entry, which a second save keeps. Returns whether the team
+   * gained an entry: none when the proposal carries no Brief, or the team's Brief already says it.
+   */
+  const keepBrief = useCallback(async (proposal: Proposal): Promise<boolean> => {
+    const brief = proposal.brief?.trim()
+    const current = docRef.current
+    if (!brief || !current.path) return false
+    const memory = await fetchMemory(current.path)
+    if (memory.entries.some((entry) => entry.body.trim() === brief)) return false
+    const file = briefFileNameFor(brief, memory.entries.map((entry) => entry.path), `${baseName(current.path).replace(/\.ya?ml$/i, '')}.brief`)
+    await writeMemoryFile(current.path, file, `${brief}\n`)
+    current.addBriefEntry({ path: file })
+    if (!(await current.save())) throw new Error('Its Brief is on the canvas. Press Save to keep it.')
+    return true
+  }, [])
+
   useEffect(() => {
-    if (savedElsewhere) void reportProposalOutcome(savedElsewhere, 'applied').catch(() => {})
-  }, [savedElsewhere])
+    if (!savedElsewhere) return
+    void reportProposalOutcome(savedElsewhere.id, 'applied').catch(() => {})
+    keepBrief(savedElsewhere).catch((caught: unknown) => say({ text: `Saved the team, but not its Brief. ${caught instanceof Error ? caught.message : String(caught)}` }))
+  }, [savedElsewhere, keepBrief, say])
 
   const applyProposal = useCallback(async () => {
     if (!preview || preview.applying) return
@@ -246,13 +268,26 @@ export function useAskActions({ doc, conversationId, activeRunId, waiting, toBui
       return
     }
     void reportProposalOutcome(preview.proposal.id, 'applied').catch(() => {})
+    let briefAdded = false
+    let briefProblem: string | null = null
+    try {
+      briefAdded = await keepBrief(preview.proposal)
+    } catch (caught) {
+      briefProblem = caught instanceof Error ? caught.message : String(caught)
+    }
     setSettled(new Set([...preview.changes.added, ...preview.changes.changed]))
     const name = preview.proposal.name || preview.proposal.file
     const isNew = preview.beforeYaml === null
     setPreview(null)
+    if (briefProblem) {
+      say({ text: `Saved “${name}”, but not its Brief. ${briefProblem}` })
+      return
+    }
     say({
       text: isNew ? `Saved “${name}”. Press Run team when you’re ready.` : `Applied the changes to “${name}”.`,
       undo: isNew ? undefined : () => {
+        // The Brief's entry was its own change after the proposal's: both go.
+        if (briefAdded) docRef.current.undo()
         docRef.current.undo()
         // The file is put back too: Undo here means "as it was before I applied".
         later(() => {
@@ -263,7 +298,7 @@ export function useAskActions({ doc, conversationId, activeRunId, waiting, toBui
         }, 50)
       },
     })
-  }, [preview, doc, say, later])
+  }, [preview, doc, say, later, keepBrief])
 
   const discardProposal = useCallback(() => {
     if (!preview) return

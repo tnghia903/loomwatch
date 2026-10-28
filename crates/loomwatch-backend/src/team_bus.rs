@@ -4034,6 +4034,7 @@ mod tests {
             allow: crate::config::AgentAllow::default(),
             turned_off: Vec::new(),
             done_when: Vec::new(),
+            part: None,
             checks: None,
             send_back: None,
             spend: crate::spend::SpendConfig::default(),
