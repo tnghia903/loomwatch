@@ -372,12 +372,12 @@ impl NotebookState {
             )
         })?;
         let roots = MemoryRoots::for_team(&resolved, Some(&self.teams_root));
-        let memory = TeamMemory::load(&roots, &resolved, config.memory.as_ref())
+        let memory = TeamMemory::load_for(&roots, &resolved, &config)
             .map_err(|error| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, error.message))?;
         Ok((
             archive,
             Scope {
-                team_id: crate::memory::scope_id(&config.id, &resolved),
+                team_id: crate::memory::notebook_scope(&config, &resolved),
                 enabled: memory.notebook_enabled,
                 keep: memory.keep_policy,
                 inherited_teams: memory.inherited_teams.clone(),

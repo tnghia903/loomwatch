@@ -129,6 +129,19 @@ describe('a new team is made of My agents', () => {
     expect(save).toHaveBeenCalledWith('writer', { name: 'Writer', instructions: 'Write the post.', model: 'fake/offline' })
     expect(written.agents).toEqual([{ id: 'researcher', from: { agent: 'researcher' } }, { id: 'writer', from: { agent: 'writer' } }])
   })
+
+  it('keeps the folder a new agent was given, and its part, in the team (ADR 0097)', async () => {
+    const yaml = 'schemaVersion: 1\nid: sutd\nname: SUTD final project\nentrypoint: researcher\nagents:\n  - id: researcher\n    name: Researcher\n    role: Find facts with sources.\n    model: fake/offline\n    doneWhen: [Every claim has a source]\n    part:\n      text: Find two or three options for the gate.\n      doneWhen: [Gives each option its trade-offs]\n    capabilities:\n      - {kind: knowledge, name: SUTD project, path: /Users/me/SUTD}\n      - {kind: skill, name: cite}\nedges: []\n'
+    const save = saving()
+    const written = TeamFileModel.parse(await teamOfMyAgents(yaml, [], save)).snapshot()
+    expect(save).toHaveBeenCalledWith('researcher', { name: 'Researcher', instructions: 'Find facts with sources.', model: 'fake/offline', skills: ['cite'], doneWhen: ['Every claim has a source'] })
+    expect(written.agents).toEqual([{
+      id: 'researcher',
+      part: { text: 'Find two or three options for the gate.', doneWhen: ['Gives each option its trade-offs'] },
+      capabilities: [{ kind: 'knowledge', name: 'SUTD project', path: '/Users/me/SUTD' }],
+      from: { agent: 'researcher' },
+    }])
+  })
 })
 
 describe('the move says which agents run differently', () => {

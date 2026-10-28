@@ -38,6 +38,7 @@ pub mod orientation;
 pub mod permissions;
 pub mod pinned;
 pub mod platform;
+pub mod projects;
 pub mod prompt_blocks;
 pub mod runs;
 pub mod schedule;
@@ -330,10 +331,10 @@ async fn run_loaded_team(
         }
     })
     .await?;
-    let memory = Arc::new(memory::TeamMemory::load(
+    let memory = Arc::new(memory::TeamMemory::load_for(
         &memory::MemoryRoots::for_team(team_path, teams_root),
         team_path,
-        team.memory.as_ref(),
+        team,
     )?);
     // Build every agent's packet now and throw the result away. An oversized pinned Brief must
     // refuse the *run*, not fail whichever stage happens to reach it — a scoped entry that only
@@ -2557,7 +2558,7 @@ impl NotebookSupply<'_> {
             return Ok(());
         };
         let selection = memory::NotebookSelection {
-            team_id: &memory::scope_id(&self.team.id, self.team_path),
+            team_id: &memory::notebook_scope(self.team, self.team_path),
             run_id,
             agent_id,
             lineage,
@@ -2922,6 +2923,19 @@ pub(crate) fn compose_prompt(
             kind: PromptSectionKind::Memory,
             heading: memory::TEAM_KNOWLEDGE_HEADING.to_owned(),
             text: packet.text.clone(),
+        });
+    }
+    // What this team needs from the agent (ADR 0097): the team's standing words, after what the
+    // team knows and before anything this run hands it. Its items already lead the Done when.
+    if let Some(part) = &agent.part {
+        text.push_str("\n\n");
+        text.push_str(PART_HEADING);
+        text.push('\n');
+        text.push_str(part);
+        sections.push(PromptSection {
+            kind: PromptSectionKind::Part,
+            heading: PART_HEADING.to_owned(),
+            text: part.clone(),
         });
     }
     // Everything the agent is handed comes before what it is asked to do with it: long inputs
@@ -4035,6 +4049,7 @@ fn learn_from_checks(
             said: String::new(),
             missed_items: fixed,
             steps: Vec::new(),
+            project: lessons::project_of(team, team_path),
         },
     });
 }
@@ -4638,6 +4653,8 @@ async fn ask_about_checks(
 }
 
 const DONE_WHEN_HEADING: &str = "## Done when";
+/// The heading of what a team needs from one of its agents (ADR 0097).
+const PART_HEADING: &str = "## Your part in this team";
 /// The heading an agent ends its reply with when it could not meet an item of its `doneWhen`.
 const NOT_MET_HEADING: &str = "## Not met";
 /// The heading work sent back by a check step ends with, for the findings it was kept against.
@@ -5274,6 +5291,8 @@ mod tests {
         )]);
 
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "pipeline-test-team".into(),
             name: "Pipeline test team".into(),
@@ -5402,6 +5421,8 @@ mod tests {
             always_allow: Vec::new(),
         }];
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "skill-team".into(),
             name: "Skill".into(),
@@ -5469,6 +5490,8 @@ mod tests {
         let mut agent = pipeline_agent("a", &script);
         agent.done_when = vec!["Every story has a link".into()];
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "done-when-team".into(),
             name: "Done when".into(),
@@ -5606,6 +5629,8 @@ mod tests {
 
     fn check_team(id: &str, agents: Vec<AgentConfig>, edges: &[(&str, &str)]) -> Arc<TeamConfig> {
         Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: id.into(),
             name: id.into(),
@@ -6384,6 +6409,8 @@ mod tests {
             crate::test_support::stand_in(turns).0
         };
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "notebook-checkpoints".into(),
             name: "Notebook checkpoints".into(),
@@ -6465,6 +6492,8 @@ mod tests {
             });
         }
         TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "shape".into(),
             name: "Shape".into(),
@@ -6674,6 +6703,8 @@ mod tests {
     #[test]
     fn a_helpers_long_reply_is_capped_in_the_turn_that_hands_it_back() {
         let team = TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "desk".into(),
             name: "Desk".into(),
@@ -6753,6 +6784,8 @@ mod tests {
         };
 
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "pipeline-diamond-team".into(),
             name: "Pipeline diamond team".into(),
@@ -7126,6 +7159,8 @@ mod tests {
             crate::engine::demo_model(crate::agent::Demo::failing_after(Vec::new(), refusal));
         let reader = never_prompted();
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "refused-pipeline".into(),
             name: "Refused pipeline".into(),
@@ -7196,6 +7231,8 @@ mod tests {
     async fn pipeline_mode_archives_every_node_under_a_pre_minted_session_id() -> Result<()> {
         let pool = crate::db::Db::temp().await;
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "pre-minted-pipeline".into(),
             name: "Pre-minted pipeline".into(),
@@ -7277,6 +7314,8 @@ mod tests {
     async fn team_mode_archives_under_a_pre_minted_session_id() -> Result<()> {
         let pool = crate::db::Db::temp().await;
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "pre-minted-team".into(),
             name: "Pre-minted team".into(),
@@ -7353,6 +7392,8 @@ mod tests {
             })
         }));
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "dispatching-team".into(),
             name: "Dispatching team".into(),
@@ -7633,6 +7674,8 @@ mod tests {
         });
         let model = crate::engine::demo_model(demo.clone());
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "bench-ada".into(),
             name: "Ada · chat".into(),
@@ -7776,6 +7819,8 @@ mod tests {
         );
         let model = crate::engine::demo_model(demo);
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "bench-ada".into(),
             name: "Ada · chat".into(),
@@ -7909,6 +7954,8 @@ mod tests {
             ))
         }));
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "looping-team".into(),
             name: "Looping team".into(),
@@ -8024,6 +8071,8 @@ mod tests {
         let mut worker = pipeline_agent("worker", &never_prompted());
         worker.spend.per_run = Some(0.003);
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "dispatching-team".into(),
             name: "Dispatching team".into(),
@@ -8098,6 +8147,7 @@ mod tests {
     /// "asked writer, which failed" and raised it for attention, over an answer the operator chose.
     /// It now comes back as the Writer stopping, saying why, and no model call is made for it.
     #[tokio::test]
+    #[allow(clippy::too_many_lines)]
     async fn a_helper_stopped_when_the_run_is_finished_at_its_spool_did_not_fail() -> Result<()> {
         let pool = crate::db::Db::temp().await;
         let lead = crate::engine::demo_model(crate::agent::Demo::responder(|_| {
@@ -8119,6 +8169,8 @@ mod tests {
             })
         }));
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "asking-team".into(),
             name: "Asking team".into(),
@@ -8204,6 +8256,8 @@ mod tests {
     async fn a_run_with_no_key_fails_and_its_pre_minted_session_says_why() -> Result<()> {
         let pool = crate::db::Db::temp().await;
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "broken".into(),
             name: "Broken harness".into(),
@@ -8288,6 +8342,8 @@ mod tests {
         ]);
 
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "brief-team".into(),
             name: "Brief team".into(),
@@ -8557,6 +8613,8 @@ mod tests {
         ]);
 
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "notebook-team".into(),
             name: "Notebook team".into(),
@@ -8725,6 +8783,8 @@ mod tests {
 
         let never = never_prompted();
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "oversize-team".into(),
             name: "Oversize team".into(),
@@ -9025,6 +9085,56 @@ mod tests {
                 memory::PromptSectionKind::Reading,
                 memory::PromptSectionKind::Task
             ]
+        );
+    }
+
+    /// ADR 0097: what a team needs from an agent is read after what the team knows and before
+    /// anything the run hands it, its items lead the Done when, and a check step checks them too.
+    #[test]
+    fn a_teams_part_reaches_the_agent_and_its_check_step() {
+        let team = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: writer\nagents:\n  - id: writer\n    model: fake/offline\n    role: You write reports.\n    doneWhen: ['Every figure has a source']\n    part:\n      text: Write the SUTD gate report for the course staff.\n      doneWhen: ['Covers the three options Colin named']\n  - id: checker\n    model: fake/offline\n    role: You check.\n    checks: writer\nedges:\n  - {from: writer, to: checker, layer: configured, kind: sequence, ts: \"2026-10-28T00:00:00Z\"}\n",
+        )
+        .expect("the team reads");
+        let writer = &team.agents[0];
+        let packet = memory::ContextPacket {
+            agent_id: "writer".into(),
+            text: "## What the team knows\nThe gate opens at 8.".into(),
+            ..memory::ContextPacket::default()
+        };
+        let task = NodeTask {
+            stage_results: Some("the findings".into()),
+            ..NodeTask::goal("do the thing")
+        };
+        let composed = compose_prompt(writer, &packet, &task);
+        let kinds: Vec<_> = composed
+            .sections
+            .iter()
+            .map(|section| section.kind)
+            .collect();
+        let at = |kind| {
+            kinds
+                .iter()
+                .position(|found| *found == kind)
+                .expect("a section")
+        };
+        assert!(at(memory::PromptSectionKind::Memory) < at(memory::PromptSectionKind::Part));
+        assert!(at(memory::PromptSectionKind::Part) < at(memory::PromptSectionKind::StageResults));
+        assert!(composed.text.contains(
+            "## What the team knows\nThe gate opens at 8.\n\n## Your part in this team\nWrite the \
+             SUTD gate report for the course staff.\n\n"
+        ));
+        assert!(composed.text.contains(
+            "Your result is finished when:\n- Covers the three options Colin named\n- Every figure \
+             has a source\n"
+        ));
+        assert_eq!(
+            &check_items(&team, "writer")[..2],
+            [
+                "Covers the three options Colin named",
+                "Every figure has a source"
+            ],
+            "the check step checks the part's items too"
         );
     }
 
@@ -9498,6 +9608,8 @@ mod tests {
 
     fn material_team(agents: Vec<AgentConfig>) -> TeamConfig {
         TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "material".into(),
             name: "Material".into(),
@@ -9781,6 +9893,8 @@ mod tests {
         const OUTPUT: &str = "the answer the followed run produced";
         let pool = crate::db::Db::temp().await;
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "follow-up-team".into(),
             name: "Follow-up team".into(),
@@ -9945,6 +10059,8 @@ mod tests {
     -> Result<()> {
         let pool = crate::db::Db::temp().await;
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "follow-failed-team".into(),
             name: "Follow a failed run".into(),
@@ -10067,6 +10183,7 @@ mod tests {
             allow: crate::config::AgentAllow::default(),
             turned_off: Vec::new(),
             done_when: Vec::new(),
+            part: None,
             checks: None,
             send_back: None,
             spend: crate::spend::SpendConfig::default(),
@@ -10098,6 +10215,7 @@ mod tests {
             allow: crate::config::AgentAllow::default(),
             turned_off: Vec::new(),
             done_when: Vec::new(),
+            part: None,
             checks: None,
             send_back: None,
             spend: crate::spend::SpendConfig::default(),
@@ -10115,6 +10233,8 @@ mod tests {
             ts: "2026-09-13T00:00:00Z".into(),
         };
         Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: id.into(),
             name: "Review stop".into(),
@@ -10962,6 +11082,8 @@ mod tests {
         ]);
         let (after, _) = stand_in(vec![turn(&[], "done")]);
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "asking".into(),
             name: "Asking team".into(),
@@ -11616,6 +11738,8 @@ mod tests {
         let mut lead = named("lead", "Lead", &model);
         let team_of = |lead: AgentConfig| {
             Arc::new(TeamConfig {
+                project: None,
+                project_file: None,
                 schema_version: 1,
                 id: "learning-lead".into(),
                 name: "Learning lead".into(),

@@ -2557,12 +2557,12 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
       <Home
         notice={requestedPath && doc.saveState === 'error' ? `Couldn't open “${requestedPath}”. ${/no such file|not found/i.test(doc.saveError ?? '') ? 'It may have been moved, renamed or deleted — pick a team below.' : doc.saveError ?? ''}` : null}
         onPalette={() => setPaletteOpen(true)}
-        // Home's way into Ask is "Describe the job", so the header has no Ask button here, and the
-        // box steps aside while the panel is open: one place to type to Ask (ADR 0043).
-        topActions={needsYouTray()}
+        // Ask keeps the app's own button on Home (ADR 0097): it answers questions there, and Set up
+        // project asks it to set a project up, saying so while it is already at work.
+        topActions={<><AskButton ask={ask} onToggle={toggleAsk} />{needsYouTray()}</>}
         runs={needsYou.records}
         mark={needsYou.mark}
-        ask={ask.open ? undefined : { unavailable: ask.unavailable, onAsk: askFor }}
+        ask={{ unavailable: ask.unavailable, onAsk: askFor, open: ask.open }}
       >
         {paletteOpen && <CommandPalette actions={actions} interpret={interpret} fallback={askFallback} onClose={() => setPaletteOpen(false)} />}
         {openPathOpen && <OpenTeamSheet onClose={() => setOpenPathOpen(false)} />}
@@ -2848,7 +2848,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
               doc.setAgentCapabilities(inspectedNode.id, [...(inspectedNode.data.agent.capabilities ?? []), ...added])
               setStatusAnnouncement(`${added.map((capability) => capability.name).join(', ')} ${added.length === 1 ? 'is' : 'are'} now supplied to ${inspectedNode.data.agent.name}. Save the team to keep this change.`)
             }}
-            onFieldBlur={(field) => doc.touchField(inspectedNode.id, field)} onRename={(field, value) => { retireFixHint(inspectedNode.id, field); doc.renameAgent(inspectedNode.id, field, value) }} onModelChange={(value, follow) => doc.applyAgentFields(inspectedNode.id, { model: value, followsSuggestion: follow ? true : undefined })} modelMove={modelFollowing.moves.get(inspectedNode.id) && { from: (modelFollowing.moves.get(inspectedNode.id) as ModelMove).from, onUndo: () => modelFollowing.undo(inspectedNode.id) }} onSpendChange={(perRun) => doc.updateAgentSpend(inspectedNode.id, perRun)} onThinkingEffortChange={(value) => doc.updateAgentThinkingEffort(inspectedNode.id, value)} onDoneWhenChange={(items) => doc.applyAgentFields(inspectedNode.id, { doneWhen: items.length ? items : undefined })} checkStep={checkStepFor(inspectedNode.data.agent)} suggestFor={{ agent: inspectedNode.data.agent, team: { agents: doc.nodes.map((node) => node.data.agent), responder: responderFromDoc } }}
+            onFieldBlur={(field) => doc.touchField(inspectedNode.id, field)} onRename={(field, value) => { retireFixHint(inspectedNode.id, field); doc.renameAgent(inspectedNode.id, field, value) }} onModelChange={(value, follow) => doc.applyAgentFields(inspectedNode.id, { model: value, followsSuggestion: follow ? true : undefined })} modelMove={modelFollowing.moves.get(inspectedNode.id) && { from: (modelFollowing.moves.get(inspectedNode.id) as ModelMove).from, onUndo: () => modelFollowing.undo(inspectedNode.id) }} onSpendChange={(perRun) => doc.updateAgentSpend(inspectedNode.id, perRun)} onThinkingEffortChange={(value) => doc.updateAgentThinkingEffort(inspectedNode.id, value)} onDoneWhenChange={(items) => doc.applyAgentFields(inspectedNode.id, { doneWhen: items.length ? items : undefined })} onPartChange={(part) => doc.applyAgentFields(inspectedNode.id, { part })} checkStep={checkStepFor(inspectedNode.data.agent)} suggestFor={{ agent: inspectedNode.data.agent, team: { agents: doc.nodes.map((node) => node.data.agent), responder: responderFromDoc } }}
             onCwdChange={(value) => doc.updateAgentCwd(inspectedNode.id, value)}
             onAllowRecruitingChange={(value) => doc.updateAgentAllowRecruiting(inspectedNode.id, value)} onAllowChange={(key, on) => doc.updateAgentAllow(inspectedNode.id, key, on)} onPromoteEntrypoint={() => doc.promoteEntrypoint(inspectedNode.id)} onDelete={() => requestNodeDelete([inspectedNode.id])}
             briefCount={memory?.entries.length ?? 0} teamDeliverAs={memory?.deliverAs}

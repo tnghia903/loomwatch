@@ -113,14 +113,15 @@ function toolsOf(agent: Pick<AgentConfig, 'capabilities'>): string[] {
   return unique((agent.capabilities ?? []).filter((capability) => capability.kind === 'tool').map((capability) => capability.name))
 }
 
-/** The agent's fields as a new agent in My agents is saved with them, from a team's entry. */
+/**
+ * The agent's fields as a new agent in My agents is saved with them, from a team's entry. A folder,
+ * file or page the team connected to it stays the team's (ADR 0097): an agent reads something of
+ * its own only when its builder gives it, so it fits any team. Its part in the team stays too.
+ */
 export function specOf(agent: AgentConfig): JobSpec {
   const skills = skillsOf(agent)
   const tools = toolsOf(agent)
   const toolAllow = toolAllowOf(agent)
-  const reads = (agent.capabilities ?? [])
-    .filter((capability) => capability.kind === 'knowledge')
-    .map((capability) => ({ name: capability.name, ...(capability.notion ? { notion: { page: capability.notion.page } } : { path: capability.path ?? '' }) }))
   const allow = onlyOn(agent.allow)
   return {
     name: agent.name,
@@ -130,7 +131,6 @@ export function specOf(agent: AgentConfig): JobSpec {
     ...(skills.length ? { skills } : {}),
     ...(tools.length ? { tools } : {}),
     ...(Object.keys(toolAllow).length ? { toolAllow } : {}),
-    ...(reads.length ? { reads } : {}),
     ...(agent.doneWhen?.length ? { doneWhen: [...agent.doneWhen] } : {}),
     ...(allow ? { allow } : {}),
     ...(agent.allowRecruiting === false ? { helpers: false as const } : {}),

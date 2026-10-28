@@ -567,6 +567,9 @@ select.input, .inspector-fields label > select { appearance: none; -webkit-appea
 /* CONTEXT (ADR 0034) — what one agent is given. Shared by the full inspector and the short Build
    panel, so it carries its own spacing and colours rather than inheriting either panel's. */
 .agent-context { display: flex; flex-direction: column; gap: var(--sp-3); color: var(--color-ink-2); }
+/* What this team needs from the agent (ADR 0097): a line or two, so a shorter box than the instructions. */
+.agent-part { display: flex; flex-direction: column; gap: var(--sp-2); }
+.agent-part > textarea.input { min-height: 56px; }
 .agent-context-place { display: flex; flex-direction: column; gap: 2px; align-items: flex-start; }
 .agent-context-place .t-body { color: var(--color-ink); }
 .agent-context-empty { color: var(--color-ink-3); }

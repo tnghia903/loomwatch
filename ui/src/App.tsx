@@ -19,6 +19,8 @@ import { connectedSources } from './lib/ai/sources'
 import { fetchCapabilities, SKILLS_CHANGED_EVENT, type CapabilityInventory } from './lib/library/client'
 import { useNeedsYou } from './lib/story/useNeedsYou'
 import { useMoveOntoMyAgents } from './lib/team-file/moveOntoMyAgents'
+import { useMoveIntoProjects } from './lib/projects/move'
+import { ProjectRoom } from './components/studio/ProjectRoom'
 import { useTeamPage } from './lib/team-file/teamPage'
 import { useTheme } from './lib/theme'
 
@@ -123,12 +125,19 @@ export default function App() {
   // The first open after every agent became one of My agents moves the teams there (ADR 0094).
   // Pages draw at once; only a move that is needed holds them, and they draw afresh after it.
   const move = useMoveOntoMyAgents()
+  // Then every team works in a project (ADR 0097): one in none becomes a project of its own.
+  const projects = useMoveIntoProjects(move === 'done')
   const { pathname, search } = window.location
-  const showsTeams = pathname === '/' || pathname === '/watch' || pathname === '/agents' || pathname.startsWith('/agents/')
+  const showsTeams = pathname === '/' || pathname === '/watch' || pathname === '/agents' || pathname.startsWith('/agents/') || pathname.startsWith('/projects/')
   if (move === 'moving' && showsTeams) {
     return <p className="t-meta" role="status" style={{ padding: 32, color: 'var(--color-ink-3)' }}>Adding your teams’ agents to My agents…</p>
   }
+  if (projects === 'moving' && showsTeams) {
+    return <p className="t-meta" role="status" style={{ padding: 32, color: 'var(--color-ink-3)' }}>Putting each team in a project…</p>
+  }
   if (pathname === '/agents' || pathname.startsWith('/agents/')) return <Agents />
+  // A project's room (ADR 0097): its wall, and its teams at their desks.
+  if (pathname.startsWith('/projects/')) return <ProjectRoom id={decodeURIComponent(pathname.slice('/projects/'.length))} />
   if (pathname === '/quests') return <Quests />
   if (pathname === '/skills') return <Skills />
   if (pathname === '/usage') {

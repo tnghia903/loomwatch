@@ -576,6 +576,12 @@ export type PromptSectionKind =
   | 'required_skill'
   | 'memory'
   /**
+   * `## Your part in this team` — what this team needs from the agent (ADR 0097), the team's own
+   * words beside the agent's instructions. Added here and in `memory::PromptSectionKind` in the
+   * same change.
+   */
+  | 'part'
+  /**
    * `## Conversation so far` — the recent messages between you and the team, from its chat (ADR
    * 0051): your requests, notes and decisions, and the team's answers. Handed to every agent a run
    * starts, above its task. Added here and in `memory::PromptSectionKind` in the same change.

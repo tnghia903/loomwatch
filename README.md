@@ -355,8 +355,9 @@ to the model you chose: at OpenAI, at Anthropic, or through OpenRouter.
 ## Teams you can build
 
 Every team below is made of agents you build in **My agents**, each starting from a job such as
-Researcher or Writer, on the model its kind of work suits. Start from **New team** with the agents
-you built, then add, connect and rename agents to match. To run a team on a schedule, ask
+Researcher or Writer, on the model its kind of work suits. Each team works in a project: start one
+with **Set up project** on Home, or **New team** in a project's room with the agents you built, then
+add, connect and rename agents to match. To run a team on a schedule, ask
 [Ask LoomWatch](#ask-loomwatch-to-set-up-a-team) to add one, or see [Routines](docs/WATCH.md#routines).
 
 | Team | The steps | Good for |
@@ -720,7 +721,8 @@ an agent, trying it on its own, putting it in a team and running it.
 
 A new install has no teams. Download the offline demo team,
 [examples/operator-stop.yaml](examples/operator-stop.yaml), into your teams folder
-(`~/LoomWatch/teams`), open LoomWatch and pick **Review stop demo** under **My team**. It is a
+(`~/LoomWatch/teams`), open LoomWatch, open the **Review stop demo** room under **Projects** on Home,
+and pick its team. It is a
 three-step workflow: **Researcher → You → Writer**. Its agents produce fixed responses so you can
 learn the interface without calling a model provider.
 
@@ -751,13 +753,16 @@ with what should change; under its new version, **Continue with the team** runs 
 1. Connect a way to pay for models, on Home or on **Connections…** (☰ menu): click
    **Continue with ChatGPT**, or paste a Claude API key or an OpenRouter key. LoomWatch checks each
    with its company. **Usage…** in the ☰ menu shows what LoomWatch has used on each.
-2. Click **Build an agent** on Home and start from a job, such as Researcher or Writer, or from
+2. Open **My agents** (☰ menu, or **Build an agent** on Home before you have one) and start from a job, such as Researcher or Writer, or from
    **Blank**. Give it a name, change its instructions, model and how hard it thinks to fit your work,
    pin up the skills it needs and hand it the keys it may use without asking. Pick it a face, then
    open its **Chat** tab and give it a real request: it runs on its model, and asks you before it
    uses a key it wasn't given. **Save to My agents** when it does the job.
-3. Click **New team**, give it a name and choose the agents it starts with. A team always starts
-   with at least one:
+3. Every team works in a project, a room on Home whose wall holds what every agent in it knows: its
+   About, its folders and the notes kept from earlier work. On Home, say what you are working on and
+   click **Set up project**: Ask sets up the project and its first team for you to check, and nothing
+   runs until you start it. To add a team yourself, open the project's room, click **New team**,
+   give it a name and choose the agents it starts with. A team always starts with at least one:
    - **My agents** — tick the agents you built; each joins as you last saved it (recommended once
      you have one).
    - **One assistant** — a single agent that does the whole task (recommended to begin with).
@@ -1131,7 +1136,7 @@ delete its folder from `.trash`.
 <details>
 <summary>Reusing an agent with My agents</summary>
 
-Build an agent in **My agents** (**Build an agent** on Home). It appears under **My agents** in
+Build an agent in **My agents** (☰ menu). It appears under **My agents** in
 every team's add panel, with its instructions, model, skills and what it may do without asking.
 
 Every agent a team has is one of My agents, and it is the same agent in every team it's in. A

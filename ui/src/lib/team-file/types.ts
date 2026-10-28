@@ -144,6 +144,15 @@ export interface SendBack {
   whenStillNotMet?: 'answer' | 'ask'
 }
 
+/**
+ * An agent's part in one team (ADR 0097): a line or two of what the team needs from it, and that
+ * part's own Done when items. At most 1000 characters and five items, as the schema says.
+ */
+export interface AgentPart {
+  text?: string
+  doneWhen?: string[]
+}
+
 export interface AgentConfig {
   id: string
   name: string
@@ -159,6 +168,10 @@ export interface AgentConfig {
   /** What the finished result must satisfy (ADR 0062): checked before it replies, and anything
       it could not meet is listed under "Not met". At most five short lines. */
   doneWhen?: string[]
+  /** What this team needs from it (ADR 0097): the team's, never the agent's, so it stays in the
+      team file when the agent is saved to My agents. Its items come first in the Done when a run
+      reads. */
+  part?: AgentPart
   /** Makes it a check step (ADR 0062): the agent whose work it checks, its direct predecessor. */
   checks?: string
   /** With `checks`: what happens when a check is not met. Read it through `sendBackOf`. */
@@ -234,6 +247,8 @@ export interface TeamDocument {
   schemaVersion: 1
   id: string
   name: string
+  /** The project this team works in (ADR 0097): `<teams root>/.projects/<id>.yaml`. */
+  project?: string
   entrypoint: string
   /** Optional explicit owner of the canonical team output. */
   responder?: string

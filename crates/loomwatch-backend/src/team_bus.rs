@@ -1442,9 +1442,10 @@ impl TeamBus {
             )
             .await?;
 
-        let execution = self
-            .execute_tool(&session, token, &event_log, name, &arguments)
-            .await;
+        // Boxed: every tool's work lives in this one future, which would otherwise put every
+        // caller over `clippy::large_futures` on Windows.
+        let execution =
+            Box::pin(self.execute_tool(&session, token, &event_log, name, &arguments)).await;
         let (status, raw_output, result) = match execution {
             Ok(output) if name == "ask" => ("completed", output.clone(), ask_success(&output)),
             Ok(output) => ("completed", output.clone(), tool_success(&output)),
@@ -1937,7 +1938,7 @@ impl TeamBus {
     /// which is the whole of the trust boundary for the memory tools.
     fn note_scope(&self, event_log: &EventLog) -> NoteScope {
         NoteScope::new(
-            crate::memory::scope_id(&self.state.team.id, &self.state.team_path),
+            crate::memory::notebook_scope(&self.state.team, &self.state.team_path),
             Some(event_log.session_id().to_owned()),
         )
         .with_inherited(self.state.memory.inherited_teams.clone())
@@ -2038,7 +2039,7 @@ impl TeamBus {
         let kind = NoteKind::parse(&required_string(arguments, "kind")?)
             .map_err(|error| anyhow::anyhow!("{error}"))?;
         let request = NoteWrite {
-            team_id: crate::memory::scope_id(&self.state.team.id, &self.state.team_path),
+            team_id: crate::memory::notebook_scope(&self.state.team, &self.state.team_path),
             run_id: event_log.session_id().to_owned(),
             // The author is the token's agent. An argument could not be trusted, and there is
             // deliberately no argument to distrust.
@@ -2555,7 +2556,7 @@ impl TeamBus {
         // An agent never names its own lineage, so it cannot widen it.
         if self.state.memory.notebook_enabled {
             let selection = NotebookSelection {
-                team_id: &crate::memory::scope_id(&self.state.team.id, &self.state.team_path),
+                team_id: &crate::memory::notebook_scope(&self.state.team, &self.state.team_path),
                 run_id: event_log.session_id(),
                 agent_id: &agent.id,
                 lineage: context.path.clone(),
@@ -3976,6 +3977,8 @@ mod tests {
     /// A team with no agents yet, for a test to fill in.
     fn team_of(id: &str, entrypoint: &str) -> TeamConfig {
         TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: id.into(),
             name: id.into(),
@@ -4034,6 +4037,7 @@ mod tests {
             allow: crate::config::AgentAllow::default(),
             turned_off: Vec::new(),
             done_when: Vec::new(),
+            part: None,
             checks: None,
             send_back: None,
             spend: crate::spend::SpendConfig::default(),
@@ -4100,6 +4104,8 @@ mod tests {
         let pool = crate::db::Db::temp().await;
         let worker = demo_model(Demo::responder(|_| Some(says("worker reply"))));
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "test-team".into(),
             name: "Test Team".into(),
@@ -4229,6 +4235,8 @@ mod tests {
     async fn delegation_guards_reject_before_spawning_and_archive_failures() -> Result<()> {
         let pool = crate::db::Db::temp().await;
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "guard-test-team".into(),
             name: "Guard test team".into(),
@@ -4323,6 +4331,8 @@ mod tests {
         let (worker, hold) = Demo::held(vec![says("one"), says("two")]);
         let worker = demo_model(worker);
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "fanout-test-team".into(),
             name: "Fan-out test team".into(),
@@ -4393,6 +4403,8 @@ mod tests {
         let mut locked = test_agent("locked", OFFLINE);
         locked.allow_recruiting = false;
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "pipeline-restriction-team".into(),
             name: "Pipeline restriction team".into(),
@@ -4495,6 +4507,8 @@ mod tests {
         let mut editor = test_agent("editor", OFFLINE);
         editor.allow_recruiting = false;
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "part-asked-team".into(),
             name: "Part asked team".into(),
@@ -4571,6 +4585,8 @@ mod tests {
     async fn archived_spend_neither_refuses_a_delegation_nor_raises_a_warning() -> Result<()> {
         let pool = crate::db::Db::temp().await;
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "warning-test-team".into(),
             name: "Warning test team".into(),
@@ -4647,6 +4663,8 @@ mod tests {
         let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "notebook-tools".into(),
             name: "Notebook tools".into(),
@@ -4811,6 +4829,8 @@ mod tests {
         let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
         let team = Arc::new(TeamConfig {
+            project: None,
+            project_file: None,
             schema_version: 1,
             id: "scoped-team".into(),
             name: "Scoped team".into(),

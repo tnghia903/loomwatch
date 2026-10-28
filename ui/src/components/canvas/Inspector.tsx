@@ -7,12 +7,13 @@ import { splitModelSelector } from '../../lib/models'
 import type { AgentUsage } from '../../lib/team-file/runLessons'
 import type { AgentPlace } from '../../lib/team-file/agentPlace'
 import type { ModelSuggestionInput } from '../../lib/team-file/modelSuggestion'
-import type { AllowSwitch, CapabilityRef, TurnedOff } from '../../lib/team-file/types'
+import type { AgentPart, AllowSwitch, CapabilityRef, TurnedOff } from '../../lib/team-file/types'
 import { holdsTeamFile } from '../../lib/team-file/workFolder'
 import type { AgentField, AgentFieldProblems } from '../../lib/team-file/validation'
 import { StatusGlyph } from '../ui/glyphs'
 import { AgentCheckup, type AgentCheckupProps } from './AgentCheckup'
 import { AgentContext } from './AgentContext'
+import { AgentPartZone } from './AgentPartZone'
 import { AgentPermissions } from './AgentPermissions'
 import { AgentSpendGuard } from './AgentSpendGuard'
 import { AgentUsageLine } from './AgentUsageLine'
@@ -47,6 +48,8 @@ export interface InspectorProps {
   onThinkingEffortChange?: (value: string | undefined) => void
   /** Write the agent's Done when list (ADR 0062); absent hides the list. */
   onDoneWhenChange?: (items: string[]) => void
+  /** Write what this team needs from it (ADR 0097), or take it out with `undefined`; absent hides it. */
+  onPartChange?: (part: AgentPart | undefined) => void
   /** Set on a check step (ADR 0062): whose work it checks, and its send-back switch. */
   checkStep?: Omit<CheckStepProps, 'readOnly'>
   /** This agent and its team: the model its job and place suit is listed first in the model picker. */
@@ -92,7 +95,7 @@ export interface InspectorProps {
 // it), WORKS IN and ALLOWED WITHOUT ASKING (where it works and what it may do there; ADR 0039
 // replaced PROCESS, whose command, arguments and environment stay in the team file).
 // No Apply button: every edit is immediate in memory; the disk write is ⌘S and only ⌘S.
-export function Inspector({ node, place, inheritedMemory = [], onRemoveCapability, teamPath, onAddKnowledge, onRename, onModelChange, modelMove, onSpendChange, onThinkingEffortChange, onDoneWhenChange, checkStep, suggestFor, onCwdChange, onAllowRecruitingChange, onAllowChange, onMemoryBriefChange, onDeliverAsChange, briefCount = 0, teamDeliverAs = 'native-file', onPromoteEntrypoint, onDelete, onClose, onFieldBlur, fixHint, onDismissFixHint, fieldProblems, readOnly = false, pipeline = false, checkup, usage, teamAutoMode = false, instructionUpdate, onTurnBackOn, appHas, onTurnOff }: InspectorProps) {
+export function Inspector({ node, place, inheritedMemory = [], onRemoveCapability, teamPath, onAddKnowledge, onRename, onModelChange, modelMove, onSpendChange, onThinkingEffortChange, onDoneWhenChange, onPartChange, checkStep, suggestFor, onCwdChange, onAllowRecruitingChange, onAllowChange, onMemoryBriefChange, onDeliverAsChange, briefCount = 0, teamDeliverAs = 'native-file', onPromoteEntrypoint, onDelete, onClose, onFieldBlur, fixHint, onDismissFixHint, fieldProblems, readOnly = false, pipeline = false, checkup, usage, teamAutoMode = false, instructionUpdate, onTurnBackOn, appHas, onTurnOff }: InspectorProps) {
   const roleField = useRef<HTMLTextAreaElement>(null)
   const { agent, runtime } = node.data
   const status = runtime?.status ?? agent.status ?? 'idle'
@@ -161,6 +164,12 @@ export function Inspector({ node, place, inheritedMemory = [], onRemoveCapabilit
         {usage && <AgentUsageLine usage={usage.agent} runs={usage.runs} alone={usage.alone} />}
         {onSpendChange && <AgentSpendGuard perRun={agent.spend?.perRun ?? null} readOnly={readOnly} onChange={onSpendChange} />}
       </div>
+
+      {onPartChange && (
+        <div className="zone">
+          <AgentPartZone part={agent.part} readOnly={readOnly} onChange={onPartChange} headClassName="zone-head t-micro" />
+        </div>
+      )}
 
       <div className="zone">
         <AgentContext

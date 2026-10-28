@@ -96,6 +96,9 @@ the team's:
 agents:
   - id: researcher
     from: { agent: researcher }
+    part:                            # what this team needs from it (ADR 0097)
+      text: Find two or three options for the campus gate, with their trade-offs.
+      doneWhen: [Names the option each source supports]
     spawn: { cwd: ../my-project }   # where it works in this team
     capabilities:                    # what this team connects to it beyond its own
       - { kind: knowledge, name: Notes, path: notes }
@@ -111,8 +114,8 @@ agents:
   team's), `doneWhen`, `allow` and `allowRecruiting`. A skill or tool the entry turns off is left
   out. A change saved to the agent reaches every team that uses it from that team's next run; a
   run's record keeps the agent as it ran.
-- **The team's own.** `spawn`, knowledge, skills and tools the team connects beyond the agent's own,
-  `memory`, `turnedOff`, `checks`, `sendBack`, `spend` and `learns` stay in the entry, and so does
+- **The team's own.** `part`, `spawn`, knowledge, skills and tools the team connects beyond the
+  agent's own, `memory`, `turnedOff`, `checks`, `sendBack`, `spend` and `learns` stay in the entry, and so does
   `model` (with `followsSuggestion`) when the agent names none. In the app, a skill or tool wired on
   a team's canvas is given in that team only, and taking one of the agent's own off it turns it off
   there; the agent's own skills and tools change on its workbench. Taking one of the agent's own
@@ -121,6 +124,8 @@ agents:
   `examples/` and hand-written files work; `from` then only names whose lessons it reads. The app
   makes it one of My agents the next time it saves the team: an agent with exactly the same setup
   is joined, and one whose name is taken gets the team's name after it (`Writer · Market brief`).
+  The folders, files and pages the team connected to it, and its `part`, stay in the team: an
+  agent reads something of its own only when its builder gives it, so it fits any team (ADR 0097).
   `from.version`, which an earlier LoomWatch wrote, is read and ignored.
 - **Read in its teams folder.** A pointer needs its teams folder: `loomwatchd run team.yaml` uses the
   nearest folder that holds `.jobs`, from the file's own folder upward, or the file's own folder
@@ -219,6 +224,12 @@ depend on the document as a whole:
   checks its result against them before it replies, fixes what it can, and lists any it could not
   meet under `## Not met`. A later stage and any check step read it with the work. No second turn
   is taken on the agent's own say-so: a check step with `sendBack` is what sends work back.
+- Optional `Agent.part` says what this team needs from the agent (ADR 0097): `text`, a line or two
+  (at most 1,000 characters), and `doneWhen`, up to five items of its own. It is the team's, never
+  the agent's: one of My agents keeps instructions and a Done when for its kind of work, and each
+  team says here what it needs from it. The agent reads `text` under `## Your part in this team`,
+  after what the team knows and before anything the run hands it, and the part's items come first
+  in its `## Done when`, so a check step checks them too. An item in both lists is stated once.
 - Optional `Agent.learns: false` stops an agent learning from the operator's feedback on its work
   (ADR 0078, [How agents learn](LEARNING.md)). It is on when absent: the operator's words about a
   finished answer, and a check step's item that was not met and then met after the send-back,
@@ -765,6 +776,53 @@ Every field is optional and the defaults above apply. Lower `asWrittenUpTo` for 
 a model without prompt caching; the cost of raising the other bounds is paid by every stage
 downstream.
 
+## Project
+
+`project` names the one project the team works in (ADR 0097), a file of its own in the teams
+folder, `<teams root>/.projects/<id>.yaml`:
+
+```yaml
+# .projects/sutd-final-project.yaml
+name: SUTD final project
+about: |                 # what it is, who it is for, the person's requirements and decisions
+  Colin's final project: a gate for the campus library, in two parts, ekis-gate and ekis-kb.
+folders:                 # every agent in the project may read these without asking
+  - { name: SUTD, path: /Users/colin/Documents/SUTD }
+notes:                   # kept from earlier work: the person's, and lessons about the project
+  - { text: Colin picked option B., at: 2026-10-27T09:00:00Z }
+  - { text: The course staff read every report., by: Researcher }
+mark: sky                # the colour of the small mark beside its name
+putAway: true            # optional: shown on Home with the others put away
+```
+
+```yaml
+# the team file
+project: sutd-final-project
+```
+
+- **Read with the team.** When a team is read in its teams folder, its project file is read too,
+  each time, so a change reaches every team of the project from its next run. Every agent of the
+  team is given the project's folders as a folder connected to it is (their listing, and reading
+  anything in them without asking), and reads the project's About and notes first under
+  `## What the team knows`, before the team's own Brief. A review stop reads nothing.
+- **One Notebook for the project.** The notes a team's agents keep are the project's: every team
+  in it reads them. Notes a team kept before it joined the project stay readable.
+- **Lessons about the project.** When the person's feedback teaches an agent something about the
+  project rather than about its kind of work, the learner keeps it as one of the project's notes,
+  by that agent, never in the agent's own lessons, which go with it to other work (ADR 0078).
+- **A project that is gone** stops the team with a message saying to choose its project again.
+  A team read on its own (`loomwatchd run team.yaml` with no teams folder) runs without it.
+- **Every team works in one.** The app moves each team that names no project into a project of its
+  own, named after it, the first time it opens after projects arrived (and any later team it
+  finds without one): the team's Brief becomes the About (one for some agents only stays the
+  team's), and every folder or file connected to its agents becomes one of the project's folders,
+  while the agents keep their own. The daemon keeps a copy of every team file in
+  `<state dir>/backups/<date>-before-projects-<key>/` before the first move. To put teams together
+  in one project afterwards, open a team's ⋯ in its project's room and choose the other project:
+  the team's `project` changes and nothing else does.
+- **Limits.** A name of at most 80 characters, an About of at most 4,000, each note at most 500
+  and 40 notes (the oldest goes first); folders by full path or from `~/`.
+
 ## Memory
 
 `memory` is what the team knows before a run starts. The Brief is Markdown beside this file, so it
@@ -876,7 +934,7 @@ the frame it was recorded from.
 
 A pipeline agent may declare `kind: operator` with `role` as its question and optional `name`
 (default `You`). It must omit `spawn`, `model`, `followsSuggestion`, `thinkingEffort`, `allow`, `turnedOff`,
-`doneWhen`, `checks`, `sendBack` and `sendBackOnce`. Operator nodes cannot be the entrypoint or appear in team
+`doneWhen`, `part`, `checks`, `sendBack` and `sendBackOnce`. Operator nodes cannot be the entrypoint or appear in team
 mode; consecutive stops are allowed. A pipeline with stops must be started from the app, so that
 someone can answer: `loomwatchd run` on the command line has nobody to ask, so its run fails when
 it reaches a stop.

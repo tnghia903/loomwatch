@@ -90,6 +90,12 @@ export class TeamFileModel {
     this.doc.set('id', id)
   }
 
+  /** The project this team works in (ADR 0097), or none with `null`. */
+  setProject(id: string | null): void {
+    if (id) this.doc.set('project', id)
+    else this.doc.delete('project')
+  }
+
   setEntrypoint(agentId: string): void {
     this.doc.set('entrypoint', agentId)
   }

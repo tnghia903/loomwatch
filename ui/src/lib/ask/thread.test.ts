@@ -105,6 +105,20 @@ describe('projectAskThread', () => {
     expect(cards.map((card) => card.kind === 'proposal' && card.agentNames)).toEqual([{ researcher: 'Researcher' }, {}])
   })
 
+  // ADR 0097: a recorded proposal keeps its project, so one shown after a restart still makes it.
+  it('keeps the project a proposal names, and the Brief it carries', () => {
+    seq = 0
+    const thread = projectAskThread([
+      status('ready'), status('working'),
+      meta('ask_message', { text: 'My SUTD project', context: { view: 'home', teamPath: null, runId: null } }),
+      meta('ask_proposal', { proposalId: 'p1', file: 'gate.yaml', name: 'Gate', isNew: true, summary: '', yaml: TEAM, brief: 'Colin picked B.', project: { id: 'sutd', name: 'SUTD final project', isNew: true, about: 'Colin’s gate.', folders: [{ name: 'SUTD', path: '/Users/colin/SUTD' }, { name: 'none' }] } }),
+      meta('ask_proposal', { proposalId: 'p2', file: 'other.yaml', name: 'Other', isNew: true, summary: '', yaml: TEAM, project: { id: '', name: 'Nameless' } }),
+    ])
+    const [first, second] = (thread.items[1] as AssistantTurn).cards
+    expect(first).toMatchObject({ brief: 'Colin picked B.', project: { id: 'sutd', name: 'SUTD final project', isNew: true, about: 'Colin’s gate.', folders: [{ name: 'SUTD', path: '/Users/colin/SUTD' }] } })
+    expect(second).not.toHaveProperty('project')
+  })
+
   it('keeps a failure the app never fixed, in the words it was told', () => {
     const events = proposeTurn()
     const lastDraft = events.map((event) => event.payload?.title).lastIndexOf('mcp__loomwatch__propose_team')

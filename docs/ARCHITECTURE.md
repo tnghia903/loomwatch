@@ -404,6 +404,27 @@ MCP settings is not delivered (`delivery::WiredTool`): LoomWatch's agents don't 
 other apps' settings, which hold those apps' credentials. The run records the tool as unavailable
 (`tools_unavailable`) and goes on without it.
 
+### Projects
+
+Projects hold the work, and My agents hold who does it (ADR 0097). A project is
+`<teams root>/.projects/<id>.yaml` (`projects.rs`): its name, an About, folders every agent in it
+may read, notes, the colour of its mark, and whether it is put away. A team names its project with
+`project: <id>`; `TeamConfig::parse_in` reads the file with the team and gives every agent its
+folders, `memory::TeamMemory::load_for` puts its About and notes first in the packet, and
+`memory::notebook_scope` makes the Notebook the project's. A lesson the learner marks as about the
+project becomes one of its notes. `GET /api/projects` lists each project with its teams' paths and
+the teams in none; `PUT /api/projects/{id}` keeps one whole and `POST /api/projects/{id}/notes`
+adds the person's note. The daemon keeps a copy of every team file once before the app moves each
+team into a project of its own (`/api/move-into-projects`), through its normal save. Moving a
+team to another project later is the same save, with only its `project` changed.
+
+In the app, Home is the studio (`components/studio/`, `lib/projects/studio.ts`): Your desk first,
+with whoever waits for the person (its Review opens the bell's tray), then a room per project with
+its busiest team's agents at their desks in the order work moves, then the person's agents in no
+project. An agent is drawn only where it is now: one waiting for the person is an outline in its
+rooms, one working elsewhere names that team. A project's room is `/projects/<id>`: its wall (About,
+folders, notes), its teams, Add an agent, New team, and Ask about the project.
+
 ### Ask LoomWatch
 
 Ask (`control/`) is the same agent, on the operator's key and the model they chose, but outside
@@ -437,6 +458,20 @@ saved team already names is let through. A check step that doesn't say how it se
 work back. Ask's first turn also says whether this computer is a Mac, where an agent's commands run
 in a sandbox: there Ask gives a maker or the Analyst the edits and commands switches, so a newcomer
 isn't asked to approve each program it runs; elsewhere they ask first.
+
+Every agent Ask makes is saved to My agents and joins other teams as it is, so Ask writes its
+instructions and Done when for its kind of work and puts what the request is about into the team
+and its project (ADR 0097). Each agent's `part` says what this team needs from it, with Done when
+items of its own, which the agent reads under `## Your part in this team` and which come first in
+the Done when its check step checks. `propose_team` takes the team's `project`: one of the
+person's by `{id}`, or a new one as `{name, about, folders}`, which Apply keeps before it saves the
+team; a new team given neither works in a new project of its own. Its first turn lists the
+person's projects, and in a project's room (`AskContext.project`) Ask is told the project's About,
+folders, notes and teams. A `brief` becomes a note in the team's project when Apply runs; for a
+team in no project, a Brief note beside it, written after the team file and joined to it with a
+second save. Saving a team keeps the
+folders and files it connected to a new agent as the team's (`specOf` in `myAgents.ts`): an agent
+reads something of its own only when its builder gives it.
 
 ---
 
@@ -655,7 +690,8 @@ at a little desk, whose workbench opens while it is pointed at. For the agent in
 
 ```
 Agent    { id, name, role, kind: harness|operator, spawn{cwd}, model,
-           allow{web,commands,edits}, from{agent}, status }
+           allow{web,commands,edits}, from{agent}, part{text,doneWhen}, status }
+           # part: what this team needs from the agent (ADR 0097), always the team's.
            # from: one of My agents (.jobs/<agent>.yaml, ADR 0094). The team file then holds only
            # the team's fields; name, role, model, skills, tools, reads, doneWhen and allow are
            # filled in from the agent's file when the team is read (my_agents.rs, myAgents.ts).
