@@ -7,6 +7,7 @@ import { ticketsFrom } from '../story/needsYou'
 import type { UsageReport } from '../usage/client'
 import { formatCost } from '../watch/usage'
 import { deskItems, type DeskItem, type SeatSpec, type TeamShape } from './studio'
+import { STATE_WORDS } from '../state/words'
 
 /**
  * What a project's room and Home show at a glance (ADR 0097): what needs you, who is working,
@@ -60,7 +61,7 @@ export function needsYou(runs: readonly RunRecord[], shapes: readonly TeamShape[
       const shape = shapes.find((candidate) => isOpenTeam(candidate.path, ticket.teamPath, root))
       const responder = run?.responder ?? ''
       const seat = shape?.seats.find((candidate) => candidate.id === responder) ?? shape?.seats.find((candidate) => candidate.kind === 'agent') ?? { kind: 'agent', id: responder, name: ticket.teamName }
-      return { key: ticket.id, kind: 'failed', runId: ticket.runId, teamPath: ticket.teamPath, teamName: shape?.name ?? ticket.teamName, seat, says: 'didn’t finish', reason: ticket.text, fix: problemAction(run?.error) }
+      return { key: ticket.id, kind: 'failed', runId: ticket.runId, teamPath: ticket.teamPath, teamName: shape?.name ?? ticket.teamName, seat, says: STATE_WORDS.failed, reason: ticket.text, fix: problemAction(run?.error) }
     })
   return [...waiting, ...stopped]
 }

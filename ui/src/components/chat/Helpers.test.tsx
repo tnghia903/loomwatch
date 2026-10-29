@@ -51,7 +51,7 @@ describe('an agent’s helpers on its piece of work (ADR 0079)', () => {
     show([helper(1, 'done'), helper(2, 'working'), helper(3, 'failed')], true, { onShow, onStop })
     fireEvent.click(screen.getByRole('button', { name: /Ada’s helper 1: Part 1, done, 3 steps\. Show what Ada asked it/ }))
     expect(onShow).toHaveBeenCalledWith('ada:call-1')
-    expect(screen.getByRole('button', { name: /Ada’s helper 3: Part 3, couldn’t finish/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Ada’s helper 3: Part 3, didn’t finish/ })).toBeInTheDocument()
     // Only a helper at work can be stopped.
     expect(screen.getAllByRole('button', { name: /^Stop / })).toHaveLength(1)
     fireEvent.click(screen.getByRole('button', { name: 'Stop Ada’s helper 2' }))

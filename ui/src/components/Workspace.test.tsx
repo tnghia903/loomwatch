@@ -630,7 +630,7 @@ describe('Workspace', () => {
     vi.stubGlobal('fetch', withStatus('failed'))
     renderWorkspace('run-1')
     // The failed run's record and its notes are both in before the strip's absence counts.
-    expect(await screen.findByRole('region', { name: 'Run receipt' })).toHaveTextContent('Failed')
+    expect(await screen.findByRole('region', { name: 'Run receipt' })).toHaveTextContent('Didn’t finish')
     await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([input]) => String(input).startsWith('/api/memory/notes'))).toBe(true))
     await act(async () => {})
     expect(screen.queryByTestId('review-strip')).not.toBeInTheDocument()

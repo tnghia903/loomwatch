@@ -163,10 +163,10 @@
 /* What an agent is doing glows round its figure's outline, with no dot or ring: green ready, gold
    waiting for you, blue at work (breathing where motion is welcome), red stopped by an error, or
    LoomWatch out of reach. On a piece's line only the figures doing something glow. */
-.tc-member { --glow: var(--color-ok); }
-.tc-member.waiting, .tc-replies-faces .chat-avatar.waiting { --glow: var(--color-accent); }
-.tc-member.working, .tc-replies-faces .chat-avatar.working { --glow: var(--color-live); }
-.tc-member:is(.failed, .away), .tc-replies-faces .chat-avatar.failed { --glow: var(--color-alert); }
+.tc-member { --glow: var(--glow-ready); }
+.tc-member.waiting, .tc-replies-faces .chat-avatar.waiting { --glow: var(--glow-waiting); }
+.tc-member.working, .tc-replies-faces .chat-avatar.working { --glow: var(--glow-working); }
+.tc-member:is(.failed, .away), .tc-replies-faces .chat-avatar.failed { --glow: var(--glow-failed); }
 .tc-member .chat-avatar-figure,
 .tc-replies-faces .chat-avatar:is(.waiting, .working, .failed) .chat-avatar-figure { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 2px var(--glow)); }
 .tc-member em { font-style: normal; font-size: 11.5px; color: var(--color-ink-3); }

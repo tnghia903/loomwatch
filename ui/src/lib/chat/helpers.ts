@@ -1,4 +1,5 @@
 import type { Evidence, RunEvent } from '../watch/events'
+import { STATE_WORDS } from '../state/words'
 
 /**
  * Helpers (ADR 0079): an agent working alone brings in copies of itself for the parts of a big
@@ -188,6 +189,6 @@ export function helpersLine(helpers: readonly HelperWork[]): string {
   const failed = helpers.filter((helper) => helper.state === 'failed').length
   const stopped = helpers.filter((helper) => helper.state === 'stopped').length
   if (working > 0) return `${count} · ${working} working`
-  const short = [failed > 0 ? `${failed} couldn’t finish` : '', stopped > 0 ? `${stopped} stopped` : ''].filter(Boolean)
+  const short = [failed > 0 ? `${failed} ${STATE_WORDS.failed}` : '', stopped > 0 ? `${stopped} stopped` : ''].filter(Boolean)
   return `${count} · ${short.length ? short.join(', ') : 'done'}`
 }

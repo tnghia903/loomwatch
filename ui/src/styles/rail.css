@@ -50,9 +50,9 @@
 
 /* What it is doing. */
 :is(.crew-rail-who, .crew-rail-hit) { --glow: transparent; }
-:is(.crew-rail-who, .crew-rail-hit).waiting { --glow: var(--color-accent); }
-:is(.crew-rail-who, .crew-rail-hit).working { --glow: var(--color-live); }
-:is(.crew-rail-who, .crew-rail-hit).failed { --glow: var(--color-alert); }
+:is(.crew-rail-who, .crew-rail-hit).waiting { --glow: var(--glow-waiting); }
+:is(.crew-rail-who, .crew-rail-hit).working { --glow: var(--glow-working); }
+:is(.crew-rail-who, .crew-rail-hit).failed { --glow: var(--glow-failed); }
 :is(.crew-rail-who, .crew-rail-hit):is(.waiting, .working, .failed) .crew-rail-art { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 2px var(--glow)); }
 /* 2: each state has a pose as well as a colour, held still: it leans in to ask you, stands up
    while it works, slumps when it failed. Motion only adds the working breath. */

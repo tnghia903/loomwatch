@@ -1,6 +1,7 @@
 import type { AgentRuntime } from '../runs/graph'
 import type { AgentConfig } from '../team-file/types'
 import { verbFor } from './teamSentence'
+import { stateLabel } from '../state/words'
 
 /**
  * Semantic zoom: how far the operator has leaned in decides what a card says.
@@ -49,7 +50,7 @@ export function storyLine(agent: Pick<AgentConfig, 'name' | 'role' | 'kind'>, ru
       case 'running': return runtime.task?.trim() ? capitalize(runtime.task.trim()) : 'Working…'
       case 'waiting': return agent.kind === 'operator' ? 'Waiting for your answer' : 'Waiting'
       case 'succeeded': return 'Done'
-      case 'failed': return 'Stopped with a problem'
+      case 'failed': return stateLabel('failed')
       case 'stopped': return 'Stopped'
       case 'unavailable': return 'Could not start'
       default: return 'Waiting its turn'

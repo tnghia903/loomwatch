@@ -26,6 +26,7 @@ import { useIsland, type Island as IslandState } from './useIsland'
 import { useRunLimit } from './useRunLimit'
 import { ISLAND_WAITS } from './waits'
 import { InlineMarkdown } from '../components/ui/Markdown'
+import { STATE_WORDS } from '../lib/state/words'
 
 /** Rows in the list before "N more teams in LoomWatch", as in the menu. */
 const LIST_ROWS = 5
@@ -398,7 +399,7 @@ function AskBody({ island, team, ticket, first }: { island: IslandState; team: T
 function resultWords(team: TeamNow): string {
   if (team.didNotStart) return `${team.teamName} didn’t start`
   if (team.chat && team.moment === 'fail') return `${team.agentName ?? team.teamName} didn’t answer`
-  if (team.moment === 'fail') return `${team.teamName} stopped`
+  if (team.moment === 'fail') return `${team.teamName} ${STATE_WORDS.failed}`
   if (team.pinned) return `${team.teamName} answered`
   if (team.chat) return `${team.agentName ?? 'The team'} answered in ${team.teamName}`
   return `${team.teamName} is done`
@@ -575,7 +576,7 @@ function PinnedRow({ island, work, crews, firstPermission, watching, foot, flyin
     </span>
   )
   if (watching) {
-    const doing = work?.moment === 'work' ? working(work, island.now) : work?.moment === 'done' ? `${pinned.name} answered` : work?.moment === 'fail' ? `${pinned.name} stopped` : `${pinned.name} just started`
+    const doing = work?.moment === 'work' ? working(work, island.now) : work?.moment === 'done' ? `${pinned.name} answered` : work?.moment === 'fail' ? `${pinned.name} ${STATE_WORDS.failed}` : `${pinned.name} just started`
     return (
       <div className="island-row island-pinned" data-moment={moment}>
         <span className="island-row-figures" aria-hidden="true">{figure}</span>

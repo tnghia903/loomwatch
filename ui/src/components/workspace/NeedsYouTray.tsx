@@ -8,6 +8,7 @@ import { historyRunUrl } from '../../lib/runs/history'
 import { ago, APPROVAL_TEXT, type Ticket } from '../../lib/story/needsYou'
 import { goToRun } from '../agents/route'
 import { InlineMarkdown } from '../ui/Markdown'
+import { stateLabel } from '../../lib/state/words'
 
 interface NeedsYouTrayProps {
   tickets: readonly Ticket[]
@@ -24,7 +25,7 @@ interface NeedsYouTrayProps {
   className?: string
 }
 
-const TAG: Record<Ticket['kind'], string> = { review: 'Review step', question: 'Question', permission: 'Permission', spend: 'Spending', failed: 'Stopped' }
+const TAG: Record<Ticket['kind'], string> = { review: 'Review step', question: 'Question', permission: 'Permission', spend: 'Spending', failed: stateLabel('failed') }
 /** A review's or a question's context is what an agent wrote, in Markdown; a permission's command is shown as it is. */
 const agentWrote = (ticket: Ticket) => ticket.kind === 'review' || ticket.kind === 'question'
 

@@ -1,18 +1,19 @@
 import { baseName, splitPath } from '../files/paths'
 import { isOpenTeam } from '../library/uses'
 import { isTerminalRun, type RunRecord } from '../runs/client'
+import { STATE_WORDS } from '../state/words'
 
 /**
  * What an agent or a team in the rail is doing, as its figure glows it (the team chat's colours):
- * waiting for you (gold), working (blue), failed (red), or ready, which does not glow.
+ * waiting for you (gold), working (blue), didn’t finish (red), or ready, which does not glow.
  */
 export type Presence = 'waiting' | 'working' | 'failed' | 'ready'
 
 /** The words for each, as the team chat says them; ready says nothing, it is how things rest. */
 export const PRESENCE_WORDS: Record<Presence, string | null> = {
-  waiting: 'waiting for you',
-  working: 'working',
-  failed: 'failed',
+  waiting: STATE_WORDS.waiting,
+  working: STATE_WORDS.working,
+  failed: STATE_WORDS.failed,
   ready: null,
 }
 

@@ -6,6 +6,7 @@ import { helpersLine, took, type HelperWork } from '../../lib/chat/helpers'
 import { useNow } from '../../lib/useNow'
 import { AvatarFace } from '../agents/AvatarFace'
 import { InlineMarkdown } from '../ui/Markdown'
+import { STATE_WORDS as WORDS } from '../../lib/state/words'
 
 /**
  * The helpers an agent brought in for a piece of work (ADR 0079), on the piece, under the line that
@@ -63,7 +64,7 @@ function HelperFace({ helper, hue, name, size = 22, numbered = true }: { helper:
   )
 }
 
-const STATE_WORDS: Record<HelperWork['state'], string> = { working: 'working', done: 'done', stopped: 'stopped', failed: 'couldn’t finish' }
+const STATE_WORDS: Record<HelperWork['state'], string> = { working: 'working', done: 'done', stopped: 'stopped', failed: WORDS.failed }
 
 function HelperRow({ helper, lead, hue, name, now, onShow, onStop }: { helper: HelperWork; lead: string; hue: number; name: string; now: number; onShow?: (messageId: string) => void; onStop?: (helperId: string) => Promise<void> }) {
   const [stopping, setStopping] = useState(false)

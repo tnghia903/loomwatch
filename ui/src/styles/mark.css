@@ -6,6 +6,6 @@
 .lw-mark[data-mouth='o'] .lw-mark-stitch { opacity: 0; }
 .lw-mark[data-mouth='o'] .lw-mark-o { opacity: 1; scale: 1; }
 .lw-mark[data-mouth='o'] .lw-mark-eyes { scale: 1 1.08; }
-.lw-mark[data-glow='live'] { --glow: var(--color-live); }
-.lw-mark[data-glow='you'] { --glow: var(--color-accent); }
+.lw-mark[data-glow='live'] { --glow: var(--glow-working); }
+.lw-mark[data-glow='you'] { --glow: var(--glow-waiting); }
 .lw-mark:is([data-glow='live'], [data-glow='you']) { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 3px var(--glow)); }

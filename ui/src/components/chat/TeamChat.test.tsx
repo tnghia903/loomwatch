@@ -950,7 +950,7 @@ describe('who is on the team', () => {
     page = [{ kind: 'work', run: stopped, request: message({}), notes: [] }]
     const first = renderChat()
     const list = await screen.findByRole('list', { name: 'Who is on the team' })
-    await waitFor(() => expect(memberRow('Researcher', list)).toHaveTextContent('Researcherfailed'))
+    await waitFor(() => expect(memberRow('Researcher', list)).toHaveTextContent('Researcherdidn’t finish'))
     expect(memberRow('Researcher', list)).toHaveClass('failed')
     expect(memberRow('Writer', list)).toHaveTextContent('Writerready')
     first.unmount()

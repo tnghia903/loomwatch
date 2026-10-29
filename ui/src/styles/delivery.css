@@ -574,10 +574,10 @@
 /* The figure alone, its state in its glow: blue working, gold waiting for you, green done, red failed. */
 .stage-figure { display: inline-flex; flex: none; transform-origin: 50% 90%; }
 .stage-figure .agent-portrait { margin: -4px -2px; }
-.stage-figure[data-glow="working"] { --glow: var(--color-live); }
-.stage-figure[data-glow="waiting"] { --glow: var(--color-accent); }
-.stage-figure[data-glow="done"] { --glow: var(--color-ok); }
-.stage-figure[data-glow="failed"] { --glow: var(--color-alert); }
+.stage-figure[data-glow="working"] { --glow: var(--glow-working); }
+.stage-figure[data-glow="waiting"] { --glow: var(--glow-waiting); }
+.stage-figure[data-glow="done"] { --glow: var(--glow-ready); }
+.stage-figure[data-glow="failed"] { --glow: var(--glow-failed); }
 .stage-figure[data-glow] { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 3px var(--glow)); }
 /* An agent with no figure wears its mark, which glows by itself: one glow, not two. */
 .stage-figure[data-glow]:has(.lw-mark) { filter: none; }

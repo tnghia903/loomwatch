@@ -11,10 +11,10 @@
 /* ---------- A figure at its desk, its state in its glow: one light per element ---------- */
 .desk-figure { display: inline-flex; flex: none; }
 .desk-figure img, .desk-figure .figure-still { display: block; }
-.desk-figure[data-glow="ready"] { --glow: var(--color-ok); }
-.desk-figure[data-glow="working"] { --glow: var(--color-live); }
-.desk-figure[data-glow="waiting"] { --glow: var(--color-accent); }
-.desk-figure[data-glow="failed"] { --glow: var(--color-alert); }
+.desk-figure[data-glow="ready"] { --glow: var(--glow-ready); }
+.desk-figure[data-glow="working"] { --glow: var(--glow-working); }
+.desk-figure[data-glow="waiting"] { --glow: var(--glow-waiting); }
+.desk-figure[data-glow="failed"] { --glow: var(--glow-failed); }
 .desk-figure[data-glow] { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 3px var(--glow)); }
 /* Somewhere else now: its own figure, faint and grey, with no glow, faded whole with what it wears. */
 .desk-figure.away { opacity: .55; filter: grayscale(1); }
