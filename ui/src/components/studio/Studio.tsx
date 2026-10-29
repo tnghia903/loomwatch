@@ -216,7 +216,10 @@ export function Studio({ runs, onSetUp, setUpUnavailable, asking = false, part =
     <FileReaderContext.Provider value={read}>
     <div className="studio">
       {part === 'all' && <div id="your-desk" className="studio-desk">
+        {/* The quiet desk (ADR 0101): the box first, then what needs you, stepped up. */}
+        {boxTeams.length > 0 && <WorkBox teams={boxTeams} primary={needs.length === 0} />}
         <GlanceTiles
+          stepUp
           label="Your desk"
           needs={needs}
           last={lastFinished(runs, root)}
@@ -235,7 +238,6 @@ export function Studio({ runs, onSetUp, setUpUnavailable, asking = false, part =
           onOpenRun={openRun}
           onMore={() => openNeedsYou()}
         />
-        {boxTeams.length > 0 && <WorkBox teams={boxTeams} primary={needs.length === 0} />}
       </div>}
       {part === 'all' && pickUp}
       <section className="studio-projects" aria-labelledby="studio-projects-title" data-tour="projects">

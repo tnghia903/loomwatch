@@ -7,7 +7,7 @@ import { readTourState, resetTourForTests } from '../../lib/tour/store'
 import { forgetYou } from '../../lib/you/client'
 import type { RunRecord } from '../../lib/runs/client'
 import { APPROVAL_TEXT } from '../../lib/story/needsYou'
-import { cascaded, goldFilled, isGoldFill } from '../../test/cascade'
+import { cascaded, goldFilled, isGoldFill, PHONE } from '../../test/cascade'
 import { figureFor, figureStill } from '../../lib/library/figures'
 import { Home } from './Home'
 
@@ -165,6 +165,24 @@ describe('Home, the studio (ADR 0097)', () => {
     expect(answered).toEqual([{ node: 'review', text: APPROVAL_TEXT }])
     expect(opened).toHaveBeenCalledTimes(1)
     window.removeEventListener('loomwatch:open-needs-you', opened)
+  })
+
+  // The quiet desk (ADR 0101): the box first, then what needs you across the row, its first item
+  // stepped up and drawn big. A room keeps its four tiles side by side.
+  it('leads with the box, and steps up the first thing that needs you across the row', async () => {
+    fetchMock.mockImplementation(studio)
+    render(<Home onPalette={vi.fn()} runs={[waitingOnTheResearcher]} />)
+    const desk = await screen.findByRole('group', { name: 'Your desk' })
+    const box = screen.getByRole('form', { name: 'Give work' })
+    expect(box.compareDocumentPosition(desk) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const needs = await within(desk).findByRole('region', { name: 'Needs you · 1' })
+    expect(cascaded(needs, 'grid-column')).toBe('1 / -1')
+    const first = within(needs).getAllByRole('listitem')[0]
+    expect(first).toHaveClass('glance-up')
+    expect(first.querySelector('.desk-figure img')).toHaveAttribute('width', '88')
+    expect(cascaded(desk, 'grid-template-columns', PHONE)).toBe('repeat(2, minmax(0, 1fr))')
+    // Its own class names only: a shared name once gave it a room card's desk width of 78 px.
+    expect(cascaded(desk, ['width', 'flex'])).toBeNull()
   })
 
   it('gives any team work from Home, its teams under their projects', async () => {

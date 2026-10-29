@@ -60,7 +60,7 @@ function ItemAction({ item, primary, busy, onApprove, onReview, onOpenRun }: { i
  * What needs you, each with the one press that answers it; or, with nothing waiting, the last work
  * that went well: who did it, drawn big, and what they were asked.
  */
-function NeedsTile({ needs, last, doneBy, figureOf, onApprove, onReview, onOpenRun, onMore }: Pick<GlanceProps, 'needs' | 'last' | 'doneBy' | 'figureOf' | 'onApprove' | 'onReview' | 'onOpenRun' | 'onMore'>) {
+function NeedsTile({ needs, last, doneBy, figureOf, onApprove, onReview, onOpenRun, onMore, stepUp = false }: Pick<GlanceProps, 'needs' | 'last' | 'doneBy' | 'figureOf' | 'onApprove' | 'onReview' | 'onOpenRun' | 'onMore' | 'stepUp'>) {
   const [all, setAll] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [said, setSaid] = useState('')
@@ -103,8 +103,9 @@ function NeedsTile({ needs, last, doneBy, figureOf, onApprove, onReview, onOpenR
       <h3 id="glance-needs" className="glance-label">Needs you · {needs.length}</h3>
       <ul className="glance-needs">
         {listed.map((item, index) => (
-          <li key={item.key}>
-            <span className="desk-figure" data-glow={item.kind}><FigureStill figure={figureOf(item.seat)} alt="" width={44} height={44} decoding="async" /></span>
+          // On Home the first steps up: the one that needs you most, drawn big, its line first.
+          <li key={item.key} className={stepUp && index === 0 ? 'glance-up' : undefined}>
+            <span className="desk-figure" data-glow={item.kind}><FigureStill figure={figureOf(item.seat)} alt="" width={stepUp && index === 0 ? 88 : 44} height={stepUp && index === 0 ? 88 : 44} decoding="async" /></span>
             <span className="glance-need-words">
               <span><NeedsShape kind={item.kind} />{item.seat.name} {item.says}</span>
               <small title={item.reason}>{item.reason ? `${item.teamName} · ${item.reason}` : item.teamName}</small>
@@ -292,6 +293,8 @@ export interface GlanceProps {
   onOpenRun: (run: Pick<RunRecord, 'runId' | 'teamPath'>) => void
   /** Show everything that needs you; without it the tile lists the rest itself. */
   onMore?: () => void
+  /** Home, the quiet desk (ADR 0101): what needs you spans the row, and its first item steps up. */
+  stepUp?: boolean
 }
 
 /**
@@ -304,7 +307,7 @@ export function GlanceTiles(props: GlanceProps) {
   const { label = 'At a glance', next, finishedToday, spend, cost, spenders, figureOf } = props
   const lines = cost ? costLines(cost) : null
   return (
-    <div className="glance" role="group" aria-label={label}>
+    <div className={`glance${props.stepUp ? ' glance-home' : ''}`} role="group" aria-label={label}>
       <NeedsTile {...props} />
 
       <WorkingTile {...props} />
