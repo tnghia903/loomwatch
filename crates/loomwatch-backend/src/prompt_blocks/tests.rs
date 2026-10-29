@@ -346,7 +346,7 @@ fn check_items(out: &mut String) {
         section(
             out,
             &format!("check items: {id}"),
-            &crate::check_items(&team, id).join("\n"),
+            &crate::check_items(&team, id, &[]).join("\n"),
         );
     }
 }

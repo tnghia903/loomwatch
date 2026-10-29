@@ -525,7 +525,7 @@ describe('a check step in the chat', () => {
     const stopped = (seconds: number, payload: Record<string, unknown>) =>
       event(seconds, 'checker', 'session_meta', { phase: 'check_stopped', checked: 'writer', ...payload }, loomwatch('check_stopped'))
     const revised = (seconds: number, text: string) => [say(seconds, 'writer', text), event(seconds + 1, 'writer', 'turn_end', { stopReason: 'end_turn' })]
-    const question = 'Writer’s work still misses 1 check: the last round fixed none of them. Approve it as it is, or send it back with what to change.'
+    const question = 'Writer’s work still misses 1 check: the last round fixed none of them. Approve it as it is, or send it back to try again.'
     const messages = projectRun([
       checked(1, 1, [linked, short('not_met', '412 words')]),
       sentBack(2, { round: 1, problems: '' }),
@@ -567,6 +567,19 @@ describe('a check step in the chat', () => {
       event(21, 'checker', 'session_meta', { phase: 'check_stopped', checked: 'writer', round: 2, sent: 1, reason: 'rounds', exit: 'answer' }, loomwatch('check_stopped')),
     ]).messages
     expect(messages[1].text).toBe('**Not met**\n- Under 300 words — 330 words\n\n_It stopped after sending the work back once, as often as it may. The answer shows with this marked._')
+  })
+
+  // ADR 0098: a message that named its tries is answered in tries, the first work one of them.
+  it('says a loop the message gave its tries stopped after as many as you asked for', () => {
+    seq = 0
+    const messages = projectRun([
+      checked(1, 1, [short('not_met', '412 words')]),
+      sentBack(2, { round: 1, problems: '' }),
+      say(10, 'writer', 'Second draft.'), event(11, 'writer', 'turn_end', { stopReason: 'end_turn' }),
+      checked(20, 2, [short('not_met', '330 words')]),
+      event(21, 'checker', 'session_meta', { phase: 'check_stopped', checked: 'writer', round: 2, sent: 1, reason: 'rounds', exit: 'ask', tries: true }, loomwatch('check_stopped')),
+    ]).messages
+    expect(messages[1].text).toBe('**Not met**\n- Under 300 words — 330 words\n\n_It stopped after 2 tries, as many as you asked for. It asks you what to do._')
   })
 })
 

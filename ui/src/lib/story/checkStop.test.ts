@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { CheckWait } from '../runs/client'
-import { checkStopLines, checkStopTitle } from './checkStop'
+import { checkStopLines, checkStopTip, checkStopTitle } from './checkStop'
 
 const names = new Map([['writer', 'Writer']])
 const name = (id: string) => names.get(id) ?? id
@@ -20,6 +20,21 @@ describe('checkStopTitle', () => {
     expect(checkStopTitle(stop({ reason: 'no_progress' }), name, 'Checker')).toBe('Writer’s work still misses 2 checks: the last round fixed none of them.')
     expect(checkStopTitle(stop({ reason: 'unchecked', rounds: 0 }), name, 'Checker')).toBe('Checker could not confirm 2 checks on Writer’s work.')
     expect(checkStopTitle(stop({ reason: 'not_open' }), name, 'Checker')).toBe('Writer’s work still misses 2 checks, and Writer has finished, so it can’t be sent back.')
+  })
+})
+
+// ADR 0098: a message that named its tries is answered in tries, the first work one of them.
+describe('checkStopTitle, for a message that named its tries', () => {
+  it('counts tries rather than times the work went back', () => {
+    expect(checkStopTitle(stop({ tries: true }), name, 'LoomWatch')).toBe('Writer’s work still misses 2 checks after 3 tries.')
+    expect(checkStopTitle(stop({ tries: true, rounds: 0 }), name, 'LoomWatch')).toBe('Writer’s work still misses 2 checks after 1 try.')
+    expect(checkStopTitle(stop({ tries: true, reason: 'no_progress', rounds: 1 }), name, 'LoomWatch')).toBe('Writer’s work still misses 2 checks after 2 tries: the last try fixed none of them.')
+  })
+})
+
+describe('checkStopTip', () => {
+  it('says sending it back needs no note', () => {
+    expect(checkStopTip(stop({}), name, 'LoomWatch')).toBe('Approve keeps the work as it is. Send back has Writer try again on what’s not met, and LoomWatch checks it again; a note in the box below says more.')
   })
 })
 

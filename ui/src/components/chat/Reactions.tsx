@@ -3,7 +3,9 @@ import { useEffect, useId, useRef, useState, type CSSProperties, type KeyboardEv
 
 import { useAppear } from '../../lib/chat/appear'
 import { chipsOf, chipWords, faceTells, PALETTE, TRAY_SAYS, type AgentReaction, type Chip, type Face } from '../../lib/chat/reactions'
+import { LOOMWATCH_CHECK_ID } from '../../lib/chat/helpers'
 import { AvatarFace } from '../agents/AvatarFace'
+import { LoomFace } from '../ui/glyphs'
 
 /**
  * The crew's face, the one LoomWatch's mark wears — two warp-thread eyes and a weft stitch for a
@@ -168,7 +170,8 @@ function Head({ id, hue, name }: { id: string; hue: number; name: string }) {
   const peeks = useAppear()
   return (
     <span className={`tc-react-head${peeks ? ' peeks' : ''}`}>
-      <AvatarFace id={id} hue={hue} size={16} fontSize={7} text={initials(name)} />
+      {/* LoomWatch's own check (ADR 0098) wears LoomWatch's face, not initials on a disc. */}
+      {id === LOOMWATCH_CHECK_ID ? <LoomFace size={16} /> : <AvatarFace id={id} hue={hue} size={16} fontSize={7} text={initials(name)} />}
     </span>
   )
 }

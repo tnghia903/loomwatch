@@ -2620,12 +2620,15 @@ impl TeamBus {
         let Some(place) = keep else {
             // Boxed: on Windows, where a child process takes more room, the session's future is
             // over Clippy's 16 KB `large_futures` limit, and everything that awaits it would be too.
+            // A helper's reply goes to the agent that asked, not to the person: its work is
+            // checked as part of that agent's answer (ADR 0098).
             return Box::pin(crate::run_answerable_session(
                 asked,
                 process,
                 &model,
                 &composed.text,
                 context,
+                None,
             ))
             .await;
         };

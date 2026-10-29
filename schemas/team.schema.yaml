@@ -127,7 +127,8 @@ $defs:
 
   Check:
     description: >-
-      What a check step (`checks:`) is shown besides the work it checks.
+      How work is checked: what a check step (`checks:`) is shown besides the work it checks, and
+      what a person's message says done looks like (`fromMessage`).
     type: object
     additionalProperties: false
     properties:
@@ -141,6 +142,48 @@ $defs:
         minimum: 0
         maximum: 24000
         default: 8000
+      fromMessage:
+        description: >-
+          What a person's message says done looks like (ADR 0098): "at most 250 words", "three
+          sections", "stop after 5 tries". One turn of the fast model reads it beside the work,
+          quoting the message and never adding, and the message shows what was read. The work is
+          checked against it before it becomes the answer: by the team's check step when that
+          checks the answering agent (its items come first), else by LoomWatch's own check, the
+          built-in Checker job on another maker's model where one is connected. Work that misses
+          goes back into the answering agent's open session. A routine's message is not read.
+        $ref: "#/$defs/FromMessage"
+
+  FromMessage:
+    type: object
+    additionalProperties: false
+    properties:
+      read:
+        description: >-
+          Read each message for what it says done looks like. Off, a message's words are never
+          turned into checks.
+        type: boolean
+        default: true
+      rounds:
+        description: >-
+          How many times the work may go back when the message names no number of tries.
+        type: integer
+        minimum: 1
+        maximum: 10
+        default: 2
+      maxRounds:
+        description: >-
+          The most times a message may send the work back, however many tries it asks for. A try
+          is the first work or one revision, so "5 tries" is four send-backs.
+        type: integer
+        minimum: 1
+        maximum: 10
+        default: 5
+      whenStillNotMet:
+        description: >-
+          After the last round: `ask` stops the run on a review of the work with its checks beside
+          it, `answer` shows the answer with what was not met marked.
+        enum: [answer, ask]
+        default: ask
 
   Stop:
     description: >-

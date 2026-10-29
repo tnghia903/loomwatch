@@ -13,6 +13,14 @@ import type { Evidence, RunEvent } from '../watch/events'
 
 export const HELPER_SEPARATOR = '~'
 
+/**
+ * LoomWatch's own check of an answer (ADR 0098): it checks the work against what the person's
+ * message said done looks like when no checker is on the team. No team file can give an agent this
+ * id, so it is told apart by its id alone, and named and drawn as LoomWatch.
+ */
+export const LOOMWATCH_CHECK_ID = 'loomwatch:check'
+export const LOOMWATCH_NAME = 'LoomWatch'
+
 /** Whose helper `id` is, and its number; `null` for an agent of the team or you. */
 export function helperOf(id: string): { lead: string; number: number } | null {
   const at = id.lastIndexOf(HELPER_SEPARATOR)
@@ -33,6 +41,7 @@ export function helperShortName(number: number): string {
 export function nameWithHelpers(names: ReadonlyMap<string, string>, id: string): string | null {
   const own = names.get(id)
   if (own) return own
+  if (id === LOOMWATCH_CHECK_ID) return LOOMWATCH_NAME
   const helper = helperOf(id)
   if (!helper) return null
   const lead = names.get(helper.lead) ?? helper.lead

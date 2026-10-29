@@ -66,6 +66,20 @@ says how long the answer took, what the agent did meanwhile, and leads to the re
 projection, and the timeline's **Read the message** in Details opens the piece's **Replies** and
 lands on that message, as a search result or a reply's quote of one does.
 
+When your message says what done looks like ("at most 250 words", "exactly three sections", "stop
+after 5 tries"), a few seconds after you send it **Done when** shows under it, with what LoomWatch
+read, in your own words, and "Up to N tries" when you named a number: the tries the run will use,
+the first work one of them (ADR 0098). The work is checked against them before it becomes the
+answer, by the team's check step when it checks the agent that answers, or else by LoomWatch
+itself, whose rounds show in the replies under LoomWatch's face alone, in the text colour. While
+the check can still change, each item has one mark that takes it off the check from the next round
+on; a dropped item stays, struck through, and the same mark puts it back. An item taken off is
+neither sent back nor counted in the answer's badge, even when it is taken off while the run waits
+at a stop. **Done when**'s tooltip says your message went as you wrote it and which model checks
+it, by whom. A read that failed says so in one quiet line; a message with nothing to check shows
+nothing. At a check's stop, **Send back** works with no note: the checks still open say what is
+wrong. `ui/src/lib/chat/doneWhen.ts` reads the run's `done_when` records.
+
 Who said what to whom is read from the record, not from the team file as it is now:
 
 | Recorded on | Field | Says |
@@ -284,6 +298,7 @@ always has its archive; a router built without one (tests) answers 503.
 | `GET /api/runs` | Every run since the daemon started, newest first; `?preview=true` cuts each `reply` to its first 400 characters, which is what the browser's lists read; `?finishedWithin=<seconds>` keeps the runs still under way and those that finished in that many seconds, which is what the Mac menu bar, the island at a MacBook's notch and the Windows notification-area menu read |
 | `GET /api/runs/{id}` | One run record, or 404 |
 | `GET /api/chat/answering` | The messages agents are answering in the team chat themselves, where no run starts (a greeting, or a quick question such as **Explain** on a part of a file), and those answered in the last hour, oldest first; `?finishedWithin=<seconds>` keeps the ones still being answered and those answered in that many seconds. Each answer is cut to its first 400 characters; an agent whose answer failed (out of credit, too slow) is listed under `answers.failed` with why, in a stopped run's words. Kept in memory for an hour; a restart clears it. The island at a MacBook's notch reads it beside `GET /api/runs` |
+| `POST /api/runs/{id}/done-when` | `{"item": 0, "checked": false}` takes item 0 of what the run's message said done looks like off the check, `true` puts it back (ADR 0098): 200 with the `done_when` record as it now stands; 409 when the run isn't checking its message, has no such item, or its check has ended |
 | `POST /api/runs/{id}/cancel` | Abort a live run: 200 with the record; 409 with the record when it already finished; 404 when unknown |
 | `GET /api/pinned-agent` | `{"agent": "<id>", "notchShown": true}`, the one of My agents pinned to the notch, which the Mac app's box (⌃⌥Space) opens with, or `{"agent": null, …}`; an agent taken out of My agents is no longer pinned. The box pins the agent it is switched to, and the first it sends to while none is pinned (`PUT /api/pinned-agent`). `notchShown` is `false` while Show at the notch is unticked in the Mac app's menu (it keeps `app-notch-off` in the state folder): the pin stays, but there is no island or ⌃⌥Space to reach the agent, so My agents says to turn it on. The island reads it beside `GET /api/runs`, and a message from its box goes into that agent's own chat through `POST /api/chat/messages` |
 | `PUT /api/pinned-agent` | Pin `{"agent": "<id>"}` in place of any other, or unpin with `{"agent": null}`; only from `LoomWatch`'s own page (`X-LoomWatch-Request: 1`, else 403), and 404 for an id that is not one of My agents. Answers as `GET` does. Only the agent is kept, in `pinned.json` in the state folder |
@@ -582,8 +597,9 @@ the last days: by source (with the last five hours and seven days), by day and b
 left of a plan or credit, so the Usage page shows LoomWatch's own count and links to each company
 for the rest. Its table names a helper after its agent ("Writer's helper 2"). Calls LoomWatch makes
 outside a team's run show as LoomWatch: "Working out what your messages need" (`reader`, which
-reads each chat message before the team starts on it) and "Learning from your feedback"
-(`learner`).
+reads each chat message before the team starts on it, and each message for what it says done looks
+like) and "Learning from your feedback" (`learner`). LoomWatch's own check of an answer runs inside
+the team's run, under the team's name, as LoomWatch (`loomwatch:check`).
 
 `model` is `chatgpt:<slug>` on the ChatGPT plan, `anthropic:<id>` on the Claude credit, or an
 OpenRouter id such as `anthropic/claude-opus-5.5`, and `thinkingEffort` its reasoning effort (an

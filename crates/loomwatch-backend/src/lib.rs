@@ -29,6 +29,7 @@ mod jobs;
 pub mod lessons;
 pub mod marketplace;
 pub mod memory;
+pub mod message_done;
 pub mod my_agents;
 pub mod notebook_api;
 pub mod notion;
@@ -214,6 +215,10 @@ pub struct RunLineage {
     /// Where a check step's missed-then-met items are learned from (ADR 0078). `None` on the CLI
     /// path and in a daemon with no model settings.
     pub learner: Option<lessons::Learner>,
+    /// What the operator's message says done looks like (ADR 0098), read while the run works and
+    /// held to before its work becomes the answer. `None` when nothing reads it: the CLI path, a
+    /// team that turned it off, a team on stand-in models, a daemon with no model settings.
+    pub asked: Option<message_done::MessageDone>,
 }
 
 /// A message from the team's work that the operator's message replies to (ADR 0051), as an agent
@@ -341,6 +346,11 @@ async fn run_loaded_team(
     // overflows for the third stage would otherwise burn two harnesses first.
     for agent in &team.agents {
         memory.packet_for(agent)?;
+    }
+    // What the message said done looks like shows under it in the chat as soon as it is read, and
+    // each time the person takes an item off or puts it back (ADR 0098).
+    if let (Some(asked), Some(log)) = (lineage.asked.as_ref(), event_log.as_ref()) {
+        asked.record_in(log.clone());
     }
     // Boxed, as `run_team_mode` boxes the session: on Windows either run's future is over Clippy's
     // 16 KB `large_futures` limit, and so would be everything that awaits this.
@@ -679,12 +689,21 @@ async fn run_team_mode(
             composed: Some(&composed),
             boundary: checkpoint_turn.as_ref(),
         },
+        // Its reply is the run's answer: held to what the message said done looks like (ADR 0098).
+        Some(AnswerToCheck {
+            request: prompt,
+            given: handed_material(team, &task, &BTreeMap::new(), &packet),
+        }),
     ))
     .await;
     let delegated = bus.wait_for_tasks().await;
     // Nothing can reach a teammate any more: each conversation kept open closes, and records it,
     // before the run's events are counted.
     let released = bus.release_teammates().await;
+    // Its last change is written before the run's events are counted (ADR 0098).
+    if let Some(asked) = &lineage.asked {
+        asked.close().await;
+    }
     let mut outcome = root?;
     delegated?;
     released?;
@@ -751,6 +770,10 @@ async fn run_pipeline_mode(
     ))
     .await;
     let delegated = bus.wait_for_tasks().await;
+    // Its last change is written before the run's events are counted (ADR 0098).
+    if let Some(asked) = &lineage.asked {
+        asked.close().await;
+    }
     let mut outcome = run?;
     delegated?;
     outcome.event_count = archive.verify_session(&outcome.session_id).await?;
@@ -931,16 +954,31 @@ async fn run_pipeline_nodes(
         } else {
             orientation::for_stage(team, agent, order, index, &responder)
         };
+        // ADR 0098: a check step on the work that is the run's answer holds it to what the
+        // operator's message said done looks like as well.
+        let asked = match agent.checks.as_deref() {
+            Some(checked) if checked == responder => asked_now(lineage).await,
+            _ => None,
+        };
+        let check_items_now = agent.checks.as_deref().map(|checked| {
+            check_items(
+                team,
+                checked,
+                asked.as_ref().map_or(&[][..], |asked| &asked.items),
+            )
+        });
         // A check step is handed the work it checks as written, and what that work must satisfy,
         // in place of a summary of it: a summary is exactly what a check cannot be made against.
         if let Some(checked) = agent.checks.as_deref()
             && let Some(work) = replies.get(checked)
+            && let Some(items) = &check_items_now
         {
             node_prompt.stage_results = Some(check_material(
                 team,
                 checked,
                 work,
                 given.get(checked).map(Vec::as_slice),
+                items,
             ));
             node_prompt.stage_results_from = vec![checked.to_owned()];
         }
@@ -997,8 +1035,18 @@ async fn run_pipeline_nodes(
             .await
             .with_context(|| format!("pipeline node {} failed", agent.id))?;
 
+        // ADR 0098: a check step holding the answer to the message sends it back as the message
+        // and `fromMessage` say, even when the step itself sends nothing back.
+        let going_back = match &asked {
+            Some(asked) => Some(send_back_with_message(
+                agent.send_back,
+                team.conversation.check.from_message,
+                asked.tries,
+            )),
+            None => agent.send_back,
+        };
         // A check step that may send the work back keeps the stage it checks open until it has.
-        let sends_back = agent.send_back.is_some() && agent.checks.is_some();
+        let sends_back = going_back.is_some() && agent.checks.is_some();
         if !sends_back {
             to_ask.remove(agent_id);
             release_answered(team, bus, &mut held, &to_ask, &mut outcome).await?;
@@ -1038,24 +1086,75 @@ async fn run_pipeline_nodes(
             .deliver_notes(&mut session, shared_log.as_ref(), reply)
             .await?;
         drop(work);
+        let truly_last = index + 1 == order.len();
+        // A one-agent turn stops here, but still writes its handover when the pipeline goes on
+        // after it: "Continue with the team" hands that to the next stage (ADR 0051).
+        let last = truly_last || stop_index == Some(index);
+        // ADR 0098: the last stage's reply is the answer, and no check step checks it, so
+        // `LoomWatch` holds it to what the message said done looks like while it is still open.
+        if last
+            && agent.checks.is_none()
+            && *agent_id == responder
+            && let Some(message) = asked_now(lineage).await
+        {
+            let given = handed_material(team, &node_prompt, &handovers, &packet);
+            (session, reply) = Box::pin(check_the_answer(
+                AnswerCheck {
+                    asked: AskedQuestion {
+                        team,
+                        agent,
+                        archive,
+                        bus,
+                        shared_log: shared_log.as_ref(),
+                        lineage,
+                        team_path,
+                        exit_timeout,
+                        spec: &spec,
+                    },
+                    bus: Some(&connection),
+                    request: prompt,
+                    given,
+                    message,
+                },
+                session,
+                reply,
+            ))
+            .await?;
+        }
         let mut checked_items = None;
         if let Some(checked) = agent.checks.as_deref() {
+            let step = CheckStep {
+                team,
+                checker: agent,
+                checked,
+                author: Author::Bus(bus),
+                items: check_items_now.clone().unwrap_or_default(),
+                send_back: going_back,
+                asked: asked.as_ref().and(lineage.asked.as_ref()),
+                counts_tries: asked.as_ref().is_some_and(|asked| asked.tries.is_some()),
+                answer_file: None,
+                log: shared_log.as_ref(),
+                desk: lineage.operator.as_ref(),
+            };
+            if asked.is_some()
+                && let (Some(done), Some(send_back)) = (&lineage.asked, going_back)
+            {
+                done.set_rounds(send_back.rounds);
+            }
             // Boxed: its rounds and its stop would otherwise sit inside this loop's future.
             let outcome = Box::pin(run_checks(
-                CheckStep {
-                    team,
-                    checker: agent,
-                    checked,
-                    bus,
-                    log: shared_log.as_ref(),
-                    desk: lineage.operator.as_ref(),
-                },
+                &step,
                 &mut session,
                 reply,
                 &mut replies,
                 &mut handovers,
             ))
             .await?;
+            if asked.is_some()
+                && let Some(done) = &lineage.asked
+            {
+                done.end();
+            }
             learn_from_checks(
                 lineage.learner.as_ref(),
                 team,
@@ -1086,10 +1185,6 @@ async fn run_pipeline_nodes(
         } = session;
 
         first_executed = false;
-        let truly_last = index + 1 == order.len();
-        // A one-agent turn stops here, but still writes its handover when the pipeline goes on
-        // after it: "Continue with the team" hands that to the next stage (ADR 0051).
-        let last = truly_last || stop_index == Some(index);
         replies.insert(agent_id.clone(), reply.clone());
         // Its work is done: from here an `ask` reaches it only while it is kept open below.
         bus.finished(agent_id);
@@ -1193,6 +1288,7 @@ async fn run_pipeline_nodes(
 }
 
 /// What the stage that asked a question needs to park and come back.
+#[derive(Clone, Copy)]
 pub(crate) struct AskedQuestion<'a> {
     pub(crate) team: &'a TeamConfig,
     pub(crate) agent: &'a config::AgentConfig,
@@ -1205,20 +1301,47 @@ pub(crate) struct AskedQuestion<'a> {
     pub(crate) spec: &'a ProcessSpec,
 }
 
+/// A reply that is the run's answer, to be held to what the operator's message said done looks like
+/// (ADR 0098): what was asked, and what the answering agent was given.
+pub(crate) struct AnswerToCheck<'a> {
+    pub(crate) request: &'a str,
+    pub(crate) given: Vec<GivenPart>,
+}
+
 /// Team-mode and delegated conversations use the same nonblocking question rendezvous as stages.
+/// A conversation whose reply is the run's answer passes `check`, and its reply is checked while
+/// its session is still open to take the work back (ADR 0098).
 pub(crate) async fn run_answerable_session(
     asked: AskedQuestion<'_>,
     mut process: AgentRun,
     model: &str,
     prompt: &str,
     mut context: TeamSessionContext<'_>,
+    check: Option<AnswerToCheck<'_>>,
 ) -> Result<SessionOutcome> {
     if asked.lineage.operator.is_none() {
         return process
             .run_session_with_bus(&asked.agent.id, model, prompt, context)
             .await;
     }
-    let (mut session, reply) = open_and_work(asked, process, model, prompt, &mut context).await?;
+    let (mut session, mut reply) =
+        open_and_work(asked, process, model, prompt, &mut context).await?;
+    if let Some(check) = check
+        && let Some(message) = asked_now(asked.lineage).await
+    {
+        (session, reply) = Box::pin(check_the_answer(
+            AnswerCheck {
+                asked,
+                bus: context.bus,
+                request: check.request,
+                given: check.given,
+                message,
+            },
+            session,
+            reply,
+        ))
+        .await?;
+    }
     if let Some(boundary) = context.boundary {
         let answer = session
             .process
@@ -1871,6 +1994,9 @@ fn operator_answer_raw(asked_by: &str, send_back: Option<&str>) -> serde_json::V
 
 /// The display name of a node, falling back to its id.
 fn display_name(team: &TeamConfig, id: &str) -> String {
+    if id == message_done::CHECKER_ID {
+        return message_done::CHECKER_NAME.to_owned();
+    }
     helpers::name_on(team, id).unwrap_or_else(|| id.to_owned())
 }
 
@@ -3305,19 +3431,38 @@ fn fit_given(parts: &[GivenPart], budget: usize) -> Vec<(String, String)> {
         .collect()
 }
 
-/// What the checked agent's work is checked against, in the order a check step numbers them: its
-/// Done when (the request, when it has none), then [`CONTRADICTION_ITEM`].
-fn check_items(team: &TeamConfig, checked: &str) -> Vec<String> {
-    let mut items = team
+/// What the checked agent's work is checked against, in the order a check step numbers them: what
+/// the operator's message said done looks like (ADR 0098), its own Done when, the request (when it
+/// has no Done when, or the message said something), then [`CONTRADICTION_ITEM`].
+///
+/// The message's items come first: they are the person's words for this request, and an item of
+/// the agent's that conflicts with them does not apply to it. The request stays an item beside
+/// them, so a condition the read missed is still checked as part of it.
+fn check_items(team: &TeamConfig, checked: &str, asked: &[String]) -> Vec<String> {
+    let own = team
         .agents
         .iter()
         .find(|agent| agent.id == checked)
         .map(|agent| agent.done_when.clone())
         .unwrap_or_default();
-    if items.is_empty() {
+    let mut items = asked.to_vec();
+    if own.is_empty() || !asked.is_empty() {
+        items.extend(own);
         items.push(CHECK_REQUEST.text().to_owned());
+    } else {
+        items.extend(own);
     }
     items.push(CONTRADICTION_ITEM.text().to_owned());
+    items.dedup();
+    items
+}
+
+/// What `LoomWatch`'s own check of an answer holds it to (ADR 0098): what the operator's message
+/// said done looks like, then the request. No more: the team has no check step, so nobody chose a
+/// check of its facts or of the agent's own Done when, which the agent checks itself.
+fn answer_check_items(asked: &[String]) -> Vec<String> {
+    let mut items = asked.to_vec();
+    items.push(CHECK_REQUEST.text().to_owned());
     items
 }
 
@@ -3333,6 +3478,7 @@ fn check_material(
     checked: &str,
     work: &str,
     given: Option<&[GivenPart]>,
+    items: &[String],
 ) -> String {
     use std::fmt::Write as _;
     let name = display_name(team, checked);
@@ -3360,8 +3506,21 @@ fn check_material(
         );
     }
     let _ = writeln!(text, "### What {name}'s work must satisfy");
-    for (index, item) in check_items(team, checked).iter().enumerate() {
+    for (index, item) in items.iter().enumerate() {
         let _ = writeln!(text, "{}. {item}", index + 1);
+    }
+    // ADR 0098: "at most 250 words" read by eye passed at 259 and 266 words on the quality bench.
+    // A verdict on a number without one is held to Not sure (`CheckReading::settle`).
+    if items
+        .iter()
+        .any(|item| item.chars().any(|c| c.is_ascii_digit()))
+    {
+        let _ = write!(
+            text,
+            "\nAn item with a number is Met only on what you measured: count it, or run what \
+             measures it, and give the number you got as its evidence. A number judged by eye is \
+             Not sure.\n"
+        );
     }
     // A Done when is written once for every task its agent gets. Read word for word, "each source
     // link beside its claim" is Not met on a rewrite of a notice that came with no link, and a
@@ -3399,6 +3558,8 @@ pub(crate) struct CheckItem {
 const NOT_CHECKED: &str = "Not checked";
 /// The evidence on an item a check step marked Met without saying what it saw.
 const MET_WITHOUT_EVIDENCE: &str = "Marked Met without evidence";
+/// The evidence on an item with a number a check step marked Met without giving one (ADR 0098).
+const MET_WITHOUT_MEASURING: &str = "Marked Met without a measurement";
 /// What the evidence on an item that cannot apply to the work starts with.
 const DOES_NOT_APPLY: &str = "Does not apply";
 /// The evidence on an item a check step said does not apply without saying why.
@@ -3437,16 +3598,40 @@ impl CheckReading {
             .into_iter()
             .zip(expected)
             .enumerate()
-            .map(|(index, (listed, item))| {
-                listed.unwrap_or_else(|| match earlier.and_then(|earlier| earlier.get(index)) {
+            .map(|(index, (listed, item))| match listed {
+                Some(listed) => measured(listed, item),
+                None => match earlier.and_then(|earlier| earlier.get(index)) {
                     Some(before) if before.verdict == "met" => before.clone(),
                     Some(_) => unchecked(item, &format!("{NOT_CHECKED} again")),
                     None => unchecked(item, NOT_CHECKED),
-                })
+                },
             })
             .collect();
         items.extend(self.extra);
         items
+    }
+}
+
+/// A verdict on an item with a number in digits, held to a measurement (ADR 0098): Met with
+/// evidence that gives no number is Not sure. "At most 250 words" judged by eye passed at 259 and
+/// 266 words on the quality bench. A count in words ("names the three tools") is met by naming
+/// them, so it is left to the check; an item that does not apply needs only its reason.
+fn measured(verdict: CheckItem, item: &str) -> CheckItem {
+    let unmeasured = verdict.verdict == "met"
+        && item.chars().any(|c| c.is_ascii_digit())
+        && !message_done::has_number(&verdict.evidence)
+        && !verdict
+            .evidence
+            .get(..DOES_NOT_APPLY.len())
+            .is_some_and(|head| head.eq_ignore_ascii_case(DOES_NOT_APPLY));
+    if unmeasured {
+        CheckItem {
+            verdict: "not_sure",
+            evidence: MET_WITHOUT_MEASURING.to_owned(),
+            ..verdict
+        }
+    } else {
+        verdict
     }
 }
 
@@ -4059,10 +4244,64 @@ struct CheckStep<'a> {
     team: &'a TeamConfig,
     checker: &'a config::AgentConfig,
     checked: &'a str,
-    bus: &'a TeamBus,
+    /// Where the work goes back to.
+    author: Author<'a>,
+    /// What the work is checked against, in the order the checker numbers them.
+    items: Vec<String>,
+    /// How many times the work may go back, and what happens then. `None` sends nothing back.
+    send_back: Option<config::SendBack>,
+    /// What the operator's message said done looks like (ADR 0098): its items may be taken off
+    /// while the check runs.
+    asked: Option<&'a message_done::MessageDone>,
+    /// The message named a number of tries, so the stop counts tries as the person did.
+    counts_tries: bool,
+    /// The file the checker measures the work in (ADR 0098), rewritten with each revision.
+    answer_file: Option<&'a Path>,
     log: Option<&'a EventLog>,
     /// Where a check step that stops to ask parks the run. `None` on a run nobody can answer.
     desk: Option<&'a operator::OperatorDesk>,
+}
+
+/// Where work a check sends back goes to be revised.
+enum Author<'a> {
+    /// The checked stage, kept open on the Team Bus until its check step has done.
+    Bus(&'a TeamBus),
+    /// The session of the agent whose reply is the answer, held open by `LoomWatch`'s own check
+    /// of it (ADR 0098). Boxed: it holds the session, and the other is one reference.
+    Open(Box<OpenAuthor<'a>>),
+}
+
+/// The answering agent's session while `LoomWatch` checks its reply.
+struct OpenAuthor<'a> {
+    asked: AskedQuestion<'a>,
+    session: tokio::sync::Mutex<Option<StageSession>>,
+    bus: Option<&'a TeamBusConnection>,
+}
+
+impl Author<'_> {
+    /// The checked agent's revision on `prompt`, or `None` when it is no longer open to take it.
+    async fn revise(&self, checked: &str, prompt: &str) -> Result<Option<String>> {
+        match self {
+            Self::Bus(bus) => bus.turn_live(checked, prompt).await,
+            Self::Open(open) => {
+                let mut slot = open.session.lock().await;
+                let Some(session) = slot.take() else {
+                    return Ok(None);
+                };
+                let (session, reply) =
+                    Box::pin(work_round(open.asked, session, prompt, open.bus)).await?;
+                *slot = Some(session);
+                Ok(Some(reply))
+            }
+        }
+    }
+
+    async fn is_live(&self, checked: &str) -> bool {
+        match self {
+            Self::Bus(bus) => bus.is_live(checked).await,
+            Self::Open(open) => open.session.lock().await.is_some(),
+        }
+    }
 }
 
 impl CheckStep<'_> {
@@ -4090,17 +4329,18 @@ impl CheckStep<'_> {
     }
 
     async fn stopped(&self, checks: &Checks, end: CheckEnd, exit: &str) -> Result<()> {
-        self.note(
-            "check_stopped",
-            json!({
-                "checked": self.checked,
-                "round": checks.round,
-                "sent": checks.sent,
-                "reason": end.as_str(),
-                "exit": exit,
-            }),
-        )
-        .await
+        let mut stopped = json!({
+            "checked": self.checked,
+            "round": checks.round,
+            "sent": checks.sent,
+            "reason": end.as_str(),
+            "exit": exit,
+        });
+        // The chat counts tries, as the person's message did, rather than times sent back.
+        if self.counts_tries {
+            stopped["tries"] = json!(true);
+        }
+        self.note("check_stopped", stopped).await
     }
 }
 
@@ -4140,6 +4380,7 @@ fn is_checker_gap(item: &CheckItem) -> bool {
     item.verdict == "not_sure"
         && (item.evidence == UNREADABLE
             || item.evidence == MET_WITHOUT_EVIDENCE
+            || item.evidence == MET_WITHOUT_MEASURING
             || item.evidence == DOES_NOT_APPLY_WITHOUT_WHY
             || item.evidence.starts_with(NOT_CHECKED))
 }
@@ -4204,6 +4445,15 @@ impl Checks {
         }
     }
 
+    /// Leave out the message's items the person took off the check while it ran (ADR 0098): they
+    /// are neither sent back nor waited on.
+    fn without_taken_off(&mut self, asked: Option<&message_done::MessageDone>) {
+        let off = asked.map(message_done::MessageDone::taken_off);
+        if let Some(off) = off.filter(|off| !off.is_empty()) {
+            self.items.retain(|item| !off.contains(&item.item));
+        }
+    }
+
     /// What is open that the checked agent can fix: everything but the check step's own gaps.
     fn findings(&self) -> Vec<CheckItem> {
         self.open()
@@ -4237,7 +4487,7 @@ impl Checks {
         // Recorded before the turn it starts, so the turn the checked agent ends next is its answer
         // to these findings, however many rounds there are.
         step.note("check_sent_back", sent).await?;
-        let Some(revised) = step.bus.turn_live(step.checked, &turn.prompt).await? else {
+        let Some(revised) = step.author.revise(step.checked, &turn.prompt).await? else {
             step.note(
                 "check_send_back_skipped",
                 json!({"to": step.checked, "round": round}),
@@ -4246,6 +4496,11 @@ impl Checks {
             return Ok(None);
         };
         self.sent = round;
+        if let Some(file) = step.answer_file {
+            std::fs::write(file, &revised).with_context(|| {
+                format!("could not write the revised work to {}", file.display())
+            })?;
+        }
         replies.insert(step.checked.to_owned(), revised.clone());
         if handovers.contains_key(step.checked) {
             handovers.insert(step.checked.to_owned(), revised.clone());
@@ -4297,13 +4552,13 @@ impl Checks {
 /// When checks are still not met after that, `whenStillNotMet` decides: the answer is shown with
 /// them marked, or the run stops and asks the operator ([`ask_about_checks`]).
 async fn run_checks(
-    step: CheckStep<'_>,
+    step: &CheckStep<'_>,
     session: &mut StageSession,
     reply: String,
     replies: &mut BTreeMap<String, String>,
     handovers: &mut BTreeMap<String, String>,
 ) -> Result<Checked> {
-    let expected = check_items(step.team, step.checked);
+    let expected = step.items.clone();
     let reading = read_checks(&reply, &expected);
     let readable = reading.readable;
     let items = reading.settle(&expected, None);
@@ -4315,11 +4570,12 @@ async fn run_checks(
         round: 1,
         sent: 0,
     };
-    let Some(send_back) = step.checker.send_back else {
+    let Some(send_back) = step.send_back else {
         return Ok(checks.done(None));
     };
     let checker = display_name(step.team, &step.checker.id);
     let end = loop {
+        checks.without_taken_off(step.asked);
         if checks.all_met() {
             break CheckEnd::AllMet;
         }
@@ -4342,10 +4598,11 @@ async fn run_checks(
             direction: None,
             last: checks.sent + 1 == send_back.rounds,
         };
-        match checks
-            .another_round(&step, session, turn, replies, handovers)
-            .await?
-        {
+        let fixed = checks
+            .another_round(step, session, turn, replies, handovers)
+            .await?;
+        checks.without_taken_off(step.asked);
+        match fixed {
             None => break CheckEnd::NotOpen,
             Some(false) if !checks.all_met() => break CheckEnd::NoProgress,
             Some(_) => {}
@@ -4358,7 +4615,230 @@ async fn run_checks(
     if !ask {
         return Ok(checks.done(None));
     }
-    ask_about_checks(&step, session, checks, end, replies, handovers).await
+    ask_about_checks(step, session, checks, end, replies, handovers).await
+}
+
+/// How long a check waits for the read of the operator's message (ADR 0098). The read started
+/// with the run, so by the time any work is done it has almost always finished.
+const ASKED_WAIT: Duration = Duration::from_secs(60);
+/// The file `LoomWatch`'s own check finds the work in, to count and measure it.
+const ANSWER_FILE: &str = "answer.md";
+
+/// What the operator's message said done looks like (ADR 0098), once read, less what the person
+/// took off. `None` when there is nothing to check.
+async fn asked_now(lineage: &RunLineage) -> Option<message_done::Asked> {
+    let done = lineage.asked.as_ref()?;
+    let tries = done.read(ASKED_WAIT).await?.tries;
+    let items = done.checked_items();
+    (!items.is_empty()).then_some(message_done::Asked { items, tries })
+}
+
+/// How a check sends the work back when the operator's message said what done looks like (ADR
+/// 0098): as many times as the message's tries allow, else as the check step says, else as the
+/// team's `fromMessage` says; and after the last round, what the check step says, else what
+/// `fromMessage` says.
+fn send_back_with_message(
+    own: Option<config::SendBack>,
+    from: config::FromMessage,
+    tries: Option<u32>,
+) -> config::SendBack {
+    let message = from.send_back(tries);
+    match own {
+        None => message,
+        Some(own) if tries.is_none() => own,
+        Some(own) => config::SendBack {
+            rounds: message.rounds,
+            when_still_not_met: own.when_still_not_met,
+        },
+    }
+}
+
+/// The answering agent's open session, its reply, and what `LoomWatch`'s own check of it needs.
+struct AnswerCheck<'a> {
+    /// The answering agent's own: its team, its run, its process spec.
+    asked: AskedQuestion<'a>,
+    bus: Option<&'a TeamBusConnection>,
+    /// What the operator asked.
+    request: &'a str,
+    /// What the answering agent was given, for the check to trace the work to.
+    given: Vec<GivenPart>,
+    /// What the message said done looks like.
+    message: message_done::Asked,
+}
+
+/// `LoomWatch`'s own check of the answer (ADR 0098), when the operator's message said what done
+/// looks like and no check step of the team checks the work that answers it: one agent, a team
+/// with no fixed order, a pipeline whose last stage is not checked.
+///
+/// The built-in Checker job checks the reply against the message's items and the request, on
+/// another maker's model where it can, measuring in a folder of its own with the work as a file.
+/// What is not met goes back into the answering agent's still-open session, round after round,
+/// as a check step sends it back; then the work is the answer, or the run stops and asks.
+///
+/// A checker that cannot start leaves the answer as it was: the person's run is not failed by a
+/// check nobody built into the team.
+#[allow(clippy::too_many_lines)]
+async fn check_the_answer(
+    check: AnswerCheck<'_>,
+    session: StageSession,
+    reply: String,
+) -> Result<(StageSession, String)> {
+    let AskedQuestion {
+        team,
+        agent,
+        archive,
+        shared_log,
+        lineage,
+        team_path,
+        ..
+    } = check.asked;
+    let Some(done) = lineage.asked.as_ref() else {
+        return Ok((session, reply));
+    };
+    let send_back = team
+        .conversation
+        .check
+        .from_message
+        .send_back(check.message.tries);
+    done.set_rounds(send_back.rounds);
+    let items = answer_check_items(&check.message.items);
+    let folder = std::env::temp_dir().join(format!("loomwatch-check-{}", uuid::Uuid::new_v4()));
+    let answer_file = folder.join(ANSWER_FILE);
+    let (role, _, _) = crate::control::checker_job();
+    let (model, effort) = done.checker_model(&agent.model);
+    let checker = config::AgentConfig::checker(
+        message_done::CHECKER_ID,
+        message_done::CHECKER_NAME,
+        role,
+        model,
+        effort,
+    );
+    let material = format!(
+        "{}\nThe work is also in the file `{ANSWER_FILE}` in your folder, to count and measure.\n",
+        check_material(team, &agent.id, &reply, Some(&check.given), &items)
+    );
+    let task = NodeTask {
+        place: Some(format!(
+            "{} {}",
+            orientation::CHECK.fill(&[("checked", &display_name(team, &agent.id))]),
+            orientation::CHECK_BLOCK.text()
+        )),
+        stage_results: Some(material),
+        stage_results_from: vec![agent.id.clone()],
+        ..NodeTask::goal(check.request)
+    };
+    // Composed and recorded as a check step's is, so the chat shows the work handed to it as a
+    // handover from the agent that wrote it.
+    let packet = memory::ContextPacket::default();
+    let composed = compose_prompt(&checker, &packet, &task);
+    let policy = permissions::PermissionPolicy::new(
+        config::AgentAllow::default(),
+        &folder,
+        [
+            check.asked.spec.cwd.clone(),
+            crate::chat_files::folder(team_path),
+        ],
+        Vec::<String>::new(),
+    );
+    let spec = ProcessSpec {
+        cwd: folder.clone(),
+        permissions: Some(policy),
+        asker: permissions::PermissionAsker::for_run(
+            lineage.operator.as_ref(),
+            shared_log.map(EventLog::session_id),
+            &checker,
+        )
+        .map(permissions::PermissionAsker::reading_only),
+        ..crate::control::ask_spec(folder.clone())
+    };
+    let mut context = TeamSessionContext {
+        archive,
+        bus: None,
+        event_log: shared_log.cloned(),
+        packet: Some(&packet),
+        composed: Some(&composed),
+        boundary: None,
+    };
+    let opened = async {
+        std::fs::create_dir_all(&folder)?;
+        std::fs::write(&answer_file, &reply)?;
+        let mut process = AgentRun::spawn(&spec)?;
+        let selector = checker.model_selector();
+        let mut recorder = process
+            .open_live(&checker.id, &selector, &mut context)
+            .await?;
+        let first = process.prompt_turn(&mut recorder, &composed.text).await?;
+        anyhow::Ok((StageSession { process, recorder }, first))
+    }
+    .await;
+    let (mut checker_session, first) = match opened {
+        Ok(opened) => opened,
+        Err(error) => {
+            eprintln!("warning: LoomWatch could not check the answer: {error:#}");
+            let _ = std::fs::remove_dir_all(&folder);
+            done.end();
+            return Ok((session, reply));
+        }
+    };
+    done.set_checker(&checker.model, &agent.model);
+    let mut replies = BTreeMap::from([(agent.id.clone(), reply)]);
+    let mut handovers = BTreeMap::new();
+    let step = CheckStep {
+        team,
+        checker: &checker,
+        checked: &agent.id,
+        author: Author::Open(Box::new(OpenAuthor {
+            asked: check.asked,
+            session: tokio::sync::Mutex::new(Some(session)),
+            bus: check.bus,
+        })),
+        items,
+        send_back: Some(send_back),
+        asked: Some(done),
+        counts_tries: check.message.tries.is_some(),
+        answer_file: Some(&answer_file),
+        log: shared_log,
+        desk: lineage.operator.as_ref(),
+    };
+    let rounds = Box::pin(run_checks(
+        &step,
+        &mut checker_session,
+        first,
+        &mut replies,
+        &mut handovers,
+    ))
+    .await;
+    done.end();
+    let _ = std::fs::remove_dir_all(&folder);
+    let outcome = rounds?;
+    let StageSession {
+        process: mut checker_process,
+        recorder: mut checker_recorder,
+    } = checker_session;
+    checker_process
+        .finish_live(&mut checker_recorder, outcome.reply.clone(), &context)
+        .await?;
+    let work = replies.remove(&agent.id).unwrap_or_default();
+    learn_from_checks(
+        lineage.learner.as_ref(),
+        team,
+        team_path,
+        &agent.id,
+        &outcome,
+        CheckedWork {
+            request: check.request,
+            work: &work,
+            run_id: shared_log.map(EventLog::session_id),
+        },
+    );
+    let Author::Open(open) = step.author else {
+        unreachable!("LoomWatch's own check sends work back to the open session it was given");
+    };
+    let session = open
+        .session
+        .into_inner()
+        .context("the answering agent's session closed while LoomWatch checked its work")?;
+    Ok((session, work))
 }
 
 /// How what a check step found goes back to the agent whose work it checked.
@@ -4435,13 +4915,27 @@ fn direction_prompt(checker: &str, note: &str, open: &[CheckItem]) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n");
+    // Sent back with no note: the checks still open are what to fix.
+    let sent = if note.trim().is_empty() {
+        "sent it back to try again on the checks still open.".to_owned()
+    } else {
+        format!(
+            "sent it back with this. This is direction: act on it, and where it conflicts with \
+             anything you were told earlier, it wins.\n\n{}",
+            note.trim()
+        )
+    };
+    // ADR 0098: the person may have taken every open check off; then only their note goes.
+    let open = if open.is_empty() {
+        String::new()
+    } else {
+        format!("\n\nThe checks still open were:\n\n{open}")
+    };
     format!(
         "## Direction from you\nThe person running this team read {checker}'s checks of your work \
-         and sent it back with this. This is direction: act on it, and where it conflicts with \
-         anything you were told earlier, it wins.\n\n{note}\n\nThe checks still open were:\n\n\
-         {open}\n\nReply with the complete revised work, not only what changed. If you kept \
-         something a check questioned, end your reply with a `{NOT_CHANGED_HEADING}` section that \
-         lists each one, one line each, saying why."
+         and {sent}{open}\n\nReply with the complete revised work, not only what changed. If you \
+         kept something a check questioned, end your reply with a `{NOT_CHANGED_HEADING}` section \
+         that lists each one, one line each, saying why."
     )
 }
 
@@ -4526,23 +5020,39 @@ async fn ask_about_checks(
     };
     let run_id = log.session_id().to_owned();
     loop {
+        // What the person took off the check while it waited is not asked about (ADR 0098).
+        checks.without_taken_off(step.asked);
+        if checks.all_met() {
+            step.stopped(&checks, CheckEnd::AllMet, "ask").await?;
+            return Ok(checks.done(None));
+        }
         let open = checks.open();
-        let live = end != CheckEnd::NotOpen && step.bus.is_live(step.checked).await;
+        let live = end != CheckEnd::NotOpen && step.author.is_live(step.checked).await;
         let met = checks.items.len() - open.len();
         let misses = if open.len() == 1 {
             "1 check".to_owned()
         } else {
             format!("{} checks", open.len())
         };
-        let after = match (end, checks.sent) {
-            (CheckEnd::NoProgress, _) => " (the last round fixed none of them)".to_owned(),
-            (_, 0) => String::new(),
-            (_, 1) => " after going back once".to_owned(),
-            (_, sent) => format!(" after going back {sent} times"),
+        // A message that named its tries is answered in tries: the first work is one.
+        let after = match (end, checks.sent, step.counts_tries) {
+            (CheckEnd::NoProgress, sent, true) => {
+                format!(
+                    " after {} tries (the last try fixed none of them)",
+                    sent + 1
+                )
+            }
+            (CheckEnd::NoProgress, _, false) => " (the last round fixed none of them)".to_owned(),
+            (_, 0, true) => " after 1 try".to_owned(),
+            (_, sent, true) => format!(" after {} tries", sent + 1),
+            (_, 0, false) => String::new(),
+            (_, 1, false) => " after going back once".to_owned(),
+            (_, sent, false) => format!(" after going back {sent} times"),
         };
+        // Sending it back needs no note: the checks already say what is wrong.
         let question = format!(
             "{author}'s work still misses {misses}{after}. Approve it as it is, or send it back \
-             with what to change."
+             to try again."
         );
         let check = operator::CheckWait {
             checked: step.checked.to_owned(),
@@ -4558,6 +5068,7 @@ async fn ask_about_checks(
                 .collect(),
             met,
             problems: cap_head_text(check_problems(&checks.reply), PROBLEMS_CHARS),
+            tries: step.counts_tries,
         };
         let tier = if live {
             operator::ParkTier::Reloadable
@@ -4630,7 +5141,34 @@ async fn ask_about_checks(
                 step.checked
             );
         }
-        let findings: Vec<CheckItem> = open.into_iter().cloned().collect();
+        // What the person took off while the stop waited does not go back with their note (ADR
+        // 0098). With nothing still checked open, their note alone goes to the agent, and its
+        // revision is the work: there is nothing left to check it against.
+        checks.without_taken_off(step.asked);
+        let findings: Vec<CheckItem> = checks.open().into_iter().cloned().collect();
+        if findings.is_empty() {
+            if !answer.text.trim().is_empty()
+                && let Some(revised) = step
+                    .author
+                    .revise(
+                        step.checked,
+                        &direction_prompt(&checker, &answer.text, &findings),
+                    )
+                    .await?
+            {
+                if let Some(file) = step.answer_file {
+                    std::fs::write(file, &revised).with_context(|| {
+                        format!("could not write the revised work to {}", file.display())
+                    })?;
+                }
+                if handovers.contains_key(step.checked) {
+                    handovers.insert(step.checked.to_owned(), revised.clone());
+                }
+                replies.insert(step.checked.to_owned(), revised);
+            }
+            step.stopped(&checks, CheckEnd::AllMet, "ask").await?;
+            return Ok(checks.done(None));
+        }
         let turn = SendBackTurn {
             prompt: direction_prompt(&checker, &answer.text, &findings),
             findings,
@@ -9129,7 +9667,7 @@ mod tests {
              has a source\n"
         ));
         assert_eq!(
-            &check_items(&team, "writer")[..2],
+            &check_items(&team, "writer", &[])[..2],
             [
                 "Covers the three options Colin named",
                 "Every figure has a source"
@@ -9660,6 +10198,7 @@ mod tests {
             "writer",
             "The piece.",
             Some(&given(&[("From Researcher", &research)])),
+            &check_items(&team, "writer", &[]),
         );
         let at = |fragment: &str| {
             text.find(fragment)
@@ -9698,7 +10237,13 @@ mod tests {
         // against the request.
         let mut bare = team.clone();
         bare.agents[0].done_when.clear();
-        let text = check_material(&bare, "writer", "The piece.", Some(&[]));
+        let text = check_material(
+            &bare,
+            "writer",
+            "The piece.",
+            Some(&[]),
+            &check_items(&bare, "writer", &[]),
+        );
         assert!(
             text.contains("Only the request: nothing was handed to Writer."),
             "{text}"
@@ -9723,7 +10268,13 @@ mod tests {
             ("From Pricing", &long("Pricing")),
             ("Direction from the operator", "Keep it under 300 words."),
         ]);
-        let text = check_material(&team, "writer", "The piece.", Some(&parts));
+        let text = check_material(
+            &team,
+            "writer",
+            "The piece.",
+            Some(&parts),
+            &check_items(&team, "writer", &[]),
+        );
         for kept in [
             "Market begins.",
             "Market ends.",
@@ -9740,7 +10291,13 @@ mod tests {
         );
         // None of it, when the team says so: the checker then checks what it needs itself.
         team.conversation.check.given_chars = 0;
-        let text = check_material(&team, "writer", "The piece.", Some(&parts));
+        let text = check_material(
+            &team,
+            "writer",
+            "The piece.",
+            Some(&parts),
+            &check_items(&team, "writer", &[]),
+        );
         assert!(!text.contains("### What Writer was given"), "{text}");
         assert!(!text.contains("Trace each claim"), "{text}");
         assert!(!text.contains("Market begins."), "{text}");
@@ -9936,6 +10493,7 @@ mod tests {
         let lineage = RunLineage {
             operator: None,
             learner: None,
+            asked: None,
             conversation: None,
             reply: None,
             only: None,
@@ -10108,6 +10666,7 @@ mod tests {
             &RunLineage {
                 operator: None,
                 learner: None,
+                asked: None,
                 conversation: None,
                 reply: None,
                 only: None,
@@ -11901,7 +12460,7 @@ mod tests {
         assert_eq!(
             waiting.question,
             "Writer's work still misses 1 check after going back 2 times. Approve it as it is, \
-             or send it back with what to change."
+             or send it back to try again."
         );
         assert_eq!(
             waiting.check,
@@ -11916,6 +12475,7 @@ mod tests {
                 }],
                 met: 2,
                 problems: PROBLEM.into(),
+                tries: false,
             })
         );
         let events = archive.load_verified_session(&run_id).await?;
@@ -12384,4 +12944,8 @@ mod tests {
         assert_eq!(outcome.reply, "published");
         Ok(())
     }
+
+    /// ADR 0098: what the operator's message says done looks like, checked before the work becomes the
+    /// answer.
+    mod done_when;
 }

@@ -165,6 +165,10 @@ pub struct CheckWait {
     /// The check step's own account of the problems, when it wrote one.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub problems: String,
+    /// The person's message named its tries (ADR 0098), so the stop counts tries, the first work
+    /// one of them, rather than times the work went back.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub tries: bool,
 }
 
 /// One check of a [`CheckWait`].

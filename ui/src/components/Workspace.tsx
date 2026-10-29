@@ -2304,7 +2304,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     try { setNotificationsOn((await Notification.requestPermission()) === 'granted') } catch { setNotificationsOn(false) }
   }, [notificationsOn, setStartError])
 
-  const statusById = useMemo(() => new Map(projection.agents.map((agent) => [agent.id, `${nodeNames.get(agent.id) ?? agent.id}: ${agent.taskState.toLowerCase()}`])), [projection.agents, nodeNames])
+  const statusById = useMemo(() => new Map(projection.agents.map((agent) => [agent.id, `${nameWithHelpers(nodeNames, agent.id) ?? agent.id}: ${agent.taskState.toLowerCase()}`])), [projection.agents, nodeNames])
   const priorStatuses = useRef<Map<string, string> | null>(null)
   useEffect(() => {
     const previous = priorStatuses.current

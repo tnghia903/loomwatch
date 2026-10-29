@@ -162,6 +162,21 @@ export function LoomMark({ size = 28, state = 'ready' }: { size?: number; state?
 }
 
 /**
+ * LoomWatch's face alone, in the text colour: the eyes and stitch of its mark with no tile and no
+ * ring. Where LoomWatch itself speaks in the chat it wears this (ADR 0098), as every agent there is
+ * its figure alone, and gold stays for what needs you. It never moves.
+ */
+export function LoomFace({ size = 28 }: { size?: number }) {
+  return (
+    <svg className="lw-face" width={size} height={size} viewBox="116 120 280 280" aria-hidden="true" style={{ flex: 'none' }}>
+      <rect x="152" y="146" width="70" height="150" rx="35" fill="currentColor" />
+      <rect x="290" y="146" width="70" height="150" rx="35" fill="currentColor" />
+      <path d="M222 354Q256 382 290 354" fill="none" stroke="currentColor" strokeWidth="40" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+/**
  * The name, drawn with the mark's thread: lowercase round-capped strokes in the text colour, and the
  * t's crossbar in gold, the weft again (docs/assets/brand/wordmark-*.svg). Below 32 px the thread is a
  * little heavier so it does not go thin.

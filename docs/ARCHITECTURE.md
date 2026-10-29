@@ -555,6 +555,25 @@ Which mode applies is decided by whether the user drew edges between nodes.
 Drawn edges fix the macro sequence, but an agent may still recruit helpers within its own step,
 with a per-node lock available to forbid it.
 
+**What the message says done looks like (ADR 0098)** is checked in both modes, as a bounded loop
+on the agent whose reply is the answer, never as an edge. `runs::execute` starts the read
+(`message_done::read`, one turn of the fast model) beside the run and hands the run a
+`MessageDone` on its `RunLineage`; the API's `POST /api/runs/{id}/done-when` changes the same one.
+Only the run's own task writes to its archive, so `MessageDone::record_in` writes each change as a
+`done_when` event from the run's `EventLog`, and `close` writes the last before the run's events
+are counted.
+
+- **A check step on the answering agent** gets the message's items first in `check_items`, and
+  `send_back_with_message` decides its rounds. It sends back through the Team Bus
+  (`Author::Bus`), as every check step does.
+- **Anywhere else** — team mode's root (`run_answerable_session`, between `open_and_work` and
+  `finish_live`) or a pipeline's unchecked last stage — `check_the_answer` starts LoomWatch's own
+  checker (`AgentConfig::checker`, the built-in Checker job) in a folder of its own with the work
+  as `answer.md`, under a `PermissionAsker::reading_only`. Its rounds are `run_checks`'s, sending
+  back into the answering agent's open session through `work_round` (`Author::Open`).
+- **A number in digits is measured**: `CheckReading::settle` holds Met without a number in its
+  evidence to Not sure (`measured`), for every check.
+
 ---
 
 ## 5. Canvas, configuration and the web UI

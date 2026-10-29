@@ -181,7 +181,7 @@ fn reply_of(turn: Option<Result<String, String>>) -> Reply {
 }
 
 /// One turn with no tools, recorded as a session of its own: its reply, or why it failed.
-async fn one_turn(
+pub(crate) async fn one_turn(
     archive: &EventArchive,
     teams_root: &Path,
     agent_id: &str,
@@ -237,7 +237,7 @@ fn failure_words(error: &anyhow::Error) -> String {
 }
 
 /// A model that never calls a real one: the offline demo, or a test's scripted `demo/…` stand-in.
-fn stand_in(model: &str) -> bool {
+pub(crate) fn stand_in(model: &str) -> bool {
     let model = ModelRef::parse(model);
     model.id == OFFLINE_MODEL || model.id.starts_with("demo/")
 }

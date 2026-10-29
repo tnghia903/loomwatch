@@ -288,6 +288,15 @@ impl Control {
     }
 }
 
+/// The built-in Checker job (ADR 0096): its instructions, and the model and thinking effort it runs
+/// on — another maker's model where the person's sources have one. `LoomWatch`'s own check of an
+/// answer is this job (ADR 0098).
+pub(crate) fn checker_job() -> (String, String, String) {
+    let job = jobs::named("checker").expect("schemas/built-in-jobs.json has the checker job");
+    let (model, effort) = job.model();
+    (job.role(), model, effort)
+}
+
 /// The model `tier` runs on, paid by a connected plan that offers it, else `OpenRouter` (ADR 0073,
 /// `ModelTiers::model_on`); `OpenRouter`'s when nothing says.
 pub(crate) fn tier_model(tier: &str) -> String {

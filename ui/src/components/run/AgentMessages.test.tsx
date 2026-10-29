@@ -389,6 +389,18 @@ describe('a check step in the chat', () => {
     expect(screen.getByText(notice('Editor checked Writer’s revised work: all 2 met')).closest('li')).toHaveClass('chat-notice')
   })
 
+  // ADR 0098: LoomWatch's own check, when no checker is on the team, speaks as LoomWatch under its
+  // own mark, never as its id on a disc of initials.
+  it('shows LoomWatch’s own check as LoomWatch, under its face', () => {
+    setup([message({ ...sentBack, from: 'loomwatch:check' })])
+    const back = msg(/LoomWatch to Writer: sent back/)
+    expect(within(back).getByRole('img', { name: 'LoomWatch' })).toHaveAttribute('title', 'LoomWatch checks the work itself when no checker is on the team.')
+    // Its face alone, as every sender in the chat is: not the app's tile.
+    expect(within(back).getByRole('img', { name: 'LoomWatch' }).querySelector('svg.lw-face')).not.toBeNull()
+    expect(within(back).queryByText('Lo')).toBeNull()
+    expect(screen.queryByText(/loomwatch:check/)).toBeNull()
+  })
+
   it('quotes the work each round checked: the handover first, then the revision', () => {
     const work = message({ id: 'handover:e5', kind: 'handover', to: 'editor', text: '### Work from Writer\n\nFirst draft.', handedBy: { from: ['writer'], via: [] }, seq: 5, offsetMs: 30_000, ts: at(30) })
     const stillLong = message({ ...allMetAgain, text: 'Still long.', check: { round: 2, items: items(['met', 'not_met']), readable: true, sentBack: false, problems: 'Still long.' } })
