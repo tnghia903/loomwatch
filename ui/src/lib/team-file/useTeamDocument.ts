@@ -2,15 +2,16 @@ import { applyEdgeChanges, applyNodeChanges } from '@xyflow/react'
 import { MarkerType, type Connection, type Edge, type EdgeChange, type NodeChange } from '@xyflow/react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import { baseName, isAbsolutePath, joinUnderRoot, safeFileStem, splitPath } from '../files/paths'
+import { baseName, dirName, isAbsolutePath, isWindowsPath, joinUnderRoot, relativeUnder, safeFileStem, splitPath } from '../files/paths'
 import type { AgentNode } from '../library/nodeFromDrop'
 import { nodeFromDrop } from '../library/nodeFromDrop'
 import { fetchJobs, saveJob, type SavedJob } from '../library/jobs'
-import { fetchConfigSchema, fetchTeamFile, fetchTeamsDiscovery, saveTeamFile, TeamFileApiError } from './client'
+import { fetchConfigSchema, fetchTeamFile, fetchTeamsDiscovery, renameTeamFile, saveTeamFile, TeamFileApiError } from './client'
 import { TeamFileModel, TeamFileParseError } from './document'
 import { diskYamlOf, filledAgent, fillModel, pointerEntry, settleAgents, writeEntry, type FilledAgents } from './myAgents'
 import { type EdgeRefusal, validateConfiguredEdge } from './edgeRules'
 import { holdPage } from './inPlace'
+import { TEAM_MOVED, type TeamMoved } from './teamMoved'
 import { autoLayout, offsetCollision, seededLayout } from './layout'
 import { pipelineOrder, type PipelineStep } from './pipelineOrder'
 import type { AgentAllow, AgentConfig, AllowSwitch, BriefEntryConfig, CapabilityRef, DeliverConfig, EdgeConfig, PermissionMode, ScheduleConfig, SpawnConfig, TeamDocument, TurnedOff } from './types'
@@ -156,6 +157,26 @@ export function slugifyTeamName(name: string): string {
  */
 export function teamIdForPath(path: string): string {
   return slugifyTeamName(baseName(path).replace(/\.ya?ml$/i, ''))
+}
+
+/** What a team file's `id` may be (`schemas/team.schema.yaml`, Identifier). */
+const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/
+
+/**
+ * The file a team not saved yet at `path` is saved as once it is named `stem`: beside `path`, with
+ * the next number when a team, or a deleted team whose history is kept, has that name.
+ */
+async function freeTeamPath(path: string, stem: string): Promise<string> {
+  const discovery = await fetchTeamsDiscovery()
+  const taken = new Set([...discovery.files, ...(discovery.trashed ?? [])].map((file) => file.toLowerCase()))
+  const folder = dirName(path)
+  const extension = /\.yml$/i.test(path) ? 'yml' : 'yaml'
+  for (let number = 1; ; number += 1) {
+    const file = `${number === 1 ? stem : `${stem}-${number}`}.${extension}`
+    const candidate = folder ? `${folder.replace(/[\\/]+$/, '')}${isWindowsPath(path) ? '\\' : '/'}${file}` : file
+    const listed = isAbsolutePath(candidate) ? relativeUnder(discovery.root, candidate) ?? candidate : candidate
+    if (!taken.has(listed.toLowerCase())) return candidate
+  }
 }
 
 function edgeFromConfig(edge: EdgeConfig): ConfiguredEdge {
@@ -1078,14 +1099,74 @@ export function useTeamDocument() {
     markDirty()
   }, [markDirty, captureHistory])
 
-  /** The team's display name. Its file and id stay as they are: runs and notes are filed under them. */
-  const renameTeam = useCallback((name: string) => {
+  /**
+   * Rename the team, and its file to match (ADR 0099): "Kyoto week" is `kyoto-week.yaml`. A saved
+   * team is renamed on disk at once, with the files kept beside it and its history, and opens again
+   * at its new path; its id stays, since its notes are filed under it. A team not saved yet only
+   * changes its name and the file it will be saved as. Returns why it was not renamed, or null.
+   */
+  const renameTeam = useCallback(async (name: string): Promise<string | null> => {
     const trimmed = name.trim()
-    if (!trimmed || !modelRef.current || trimmed === modelRef.current.snapshot().name) return
-    captureHistory()
-    modelRef.current.setName(trimmed)
-    markDirty()
-  }, [markDirty, captureHistory])
+    const model = modelRef.current
+    if (!trimmed || !model || !path) return null
+    const stem = slugifyTeamName(trimmed)
+    // The same name again still brings a file named before (`old-project.yaml` for
+    // "Research team") in line with it.
+    if (trimmed === model.snapshot().name && (isNewRef.current || baseName(path).replace(/\.ya?ml$/i, '') === stem)) return null
+    if (isNewRef.current) {
+      let next: string
+      try {
+        next = await freeTeamPath(path, stem)
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error)
+      }
+      captureHistory()
+      model.setName(trimmed)
+      model.setId(teamIdForPath(next))
+      setPath(next)
+      markDirty()
+      return null
+    }
+    const loadedRevision = loadedRevisionRef.current
+    if (!loadedRevision || (saveState !== 'clean' && saveState !== 'saved')) return 'Save or discard your changes first.'
+    try {
+      const disk = await fetchTeamFile(path)
+      const renamed = TeamFileModel.parse(disk.yaml)
+      renamed.setName(trimmed)
+      if (!renamed.snapshot().id) {
+        // Filed under its file's name until now, which becomes its id so its notes stay with it.
+        const filedAs = baseName(path).replace(/\.ya?ml$/i, '')
+        if (!IDENTIFIER.test(filedAs)) {
+          captureHistory()
+          model.setName(trimmed)
+          markDirty()
+          return null
+        }
+        renamed.setId(filedAs)
+      }
+      const moved = await renameTeamFile(path, stem, renamed.toYaml(), loadedRevision)
+      const root = teamsRoot ?? (await fetchTeamsDiscovery()).root
+      const next = absoluteTeamPath(root, moved.path)
+      window.dispatchEvent(new CustomEvent<TeamMoved>(TEAM_MOVED, { detail: { from: path, to: next } }))
+      setPath(next)
+      await applyDiskYaml(moved.yaml, undefined, moved.revision)
+      const address = new URL(window.location.href)
+      if (address.searchParams.has('path')) {
+        address.searchParams.set('path', next)
+        window.history.replaceState(window.history.state, '', address)
+      }
+      return null
+    } catch (error) {
+      // A refusal says what to do (the team is working, say); anything else is LoomWatch's own
+      // trouble, and the daemon put everything back.
+      if (error instanceof TeamFileApiError && error.status === 409) return error.message
+      if (error instanceof TeamFileApiError && error.status === 412) {
+        void checkDiskRevision()
+        return 'This team’s file changed outside LoomWatch, so it was read again. Rename it again.'
+      }
+      return 'LoomWatch couldn’t rename this team, so nothing changed. Try again.'
+    }
+  }, [path, saveState, teamsRoot, markDirty, captureHistory, applyDiskYaml, checkDiskRevision])
 
   const updateAgentModel = useCallback(
     (id: string, value: string) => {

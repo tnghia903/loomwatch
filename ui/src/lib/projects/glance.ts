@@ -1,12 +1,14 @@
 import { extensionOf } from '../files/fileRefs'
+import { baseName } from '../files/paths'
 import { readerFormat } from '../files/reader'
 import { isOpenTeam } from '../library/uses'
+import { benchChatId } from '../rail/presence'
 import { isTerminalRun, type RunRecord, type ScheduleEntry } from '../runs/client'
 import { problemAction, type ProblemAction } from '../runs/errors'
 import { ticketsFrom } from '../story/needsYou'
 import type { UsageReport } from '../usage/client'
 import { formatCost } from '../watch/usage'
-import { deskItems, type DeskItem, type SeatSpec, type TeamShape } from './studio'
+import { deskItems, type DeskItem, type RoomTeam, type Seat, type SeatSpec, type TeamShape } from './studio'
 
 /**
  * What a project's room and Home show at a glance (ADR 0097): what needs you, who is working,
@@ -65,14 +67,72 @@ export function needsYou(runs: readonly RunRecord[], shapes: readonly TeamShape[
   return [...waiting, ...stopped]
 }
 
-/** An agent at work now, and in which team. */
+/** An agent at work now, on what, and in which team. */
 export interface AtWork {
   key: string
   runId: string
   teamPath: string
   teamName: string
   seat: SeatSpec
+  /** The work it was given, in the words it was given in. */
+  prompt: string
   since: string
+}
+
+/** The desk a run's agent `id` sits at; in an agent's own chat, that agent, so it wears its figure. */
+function seatIn(shape: TeamShape | undefined, run: Pick<RunRecord, 'teamPath' | 'agentNames'>, id: string): SeatSpec {
+  const seat = shape?.seats.find((candidate) => candidate.id === id)
+  if (seat) return seat
+  const chat = benchChatId(run.teamPath)
+  return { kind: 'agent', id, name: run.agentNames?.[id] ?? id, ...(chat ? { agent: chat } : {}) }
+}
+
+/** Who gave a piece of work's answer, as its team's desk is, and where the work was given. */
+export interface DoneBy {
+  seat: SeatSpec
+  place: string
+}
+
+export function doneByOf(shapes: readonly TeamShape[], root: string | null): (run: Pick<RunRecord, 'teamPath' | 'teamName' | 'responder' | 'agentNames'>) => DoneBy {
+  return (run) => {
+    const shape = shapes.find((candidate) => isOpenTeam(candidate.path, run.teamPath, root))
+    return { seat: seatIn(shape, run, run.responder), place: benchChatId(run.teamPath) ? 'your chat' : shape?.name ?? placeOf(run) }
+  }
+}
+
+/** Where a piece of work was given, as a person says it: its team, or "your chat" with one agent. */
+export function placeOf(run: Pick<RunRecord, 'teamPath' | 'teamName'>): string {
+  if (benchChatId(run.teamPath)) return 'your chat'
+  return run.teamName ?? baseName(run.teamPath).replace(/\.ya?ml$/i, '')
+}
+
+/**
+ * When work began, as a person reads a clock: "just started", "started 4 min ago", "started 1 h 5
+ * min ago". Never "4 min" alone, which could be read as the time left.
+ */
+export function elapsedWords(since: string, now: number): string {
+  const minutes = Math.floor((now - Date.parse(since)) / 60_000)
+  if (!Number.isFinite(minutes) || minutes < 1) return 'just started'
+  if (minutes < 60) return `started ${minutes} min ago`
+  const rest = minutes % 60
+  return `started ${Math.floor(minutes / 60)} h${rest ? ` ${rest} min` : ''} ago`
+}
+
+/**
+ * The agents at the teams' desks, each once, as each is now: one of My agents at desks in two
+ * teams is drawn where it is lit, not where it is away.
+ */
+export function crewOf(teams: readonly Pick<RoomTeam, 'path' | 'seats'>[]): Seat[] {
+  const crew = new Map<string, Seat>()
+  for (const team of teams) {
+    for (const seat of team.seats) {
+      if (seat.kind !== 'agent') continue
+      const key = seat.agent ?? `${team.path}\n${seat.id}`
+      const held = crew.get(key)
+      if (!held || (held.away && !seat.away)) crew.set(key, seat)
+    }
+  }
+  return [...crew.values()]
 }
 
 /** Who is working now, longest at it first: the agents in a turn of work, or a run's first agent while it starts. */
@@ -89,7 +149,8 @@ export function workingNow(runs: readonly RunRecord[], shapes: readonly TeamShap
         runId: run.runId,
         teamPath: run.teamPath,
         teamName,
-        seat: shape?.seats.find((seat) => seat.id === id) ?? { kind: 'agent', id, name: run.agentNames?.[id] ?? id },
+        seat: seatIn(shape, run, id),
+        prompt: run.prompt,
         since: run.startedAt ?? run.createdAt,
       }))
     })
@@ -168,6 +229,44 @@ export function costWords(cost: MonthCost): string {
   if (dollars && cost.plan) return `${dollars} + ChatGPT plan`
   if (cost.plan) return 'ChatGPT plan'
   return dollars ?? '$0'
+}
+
+/** A month's cost as the tile says it: the dollars, then "+ ChatGPT plan" under them when a plan paid for some. */
+export function costLines(cost: MonthCost): { main: string; plan: string | null } {
+  const [main, plan] = costWords(cost).split(' + ')
+  return { main, plan: plan ? `+ ${plan}` : null }
+}
+
+/** One agent's part of this month's dollars. */
+export interface Spender {
+  key: string
+  seat: SeatSpec
+  usd: number
+  /** Some of it was worked out from list prices. */
+  estimated: boolean
+}
+
+/**
+ * Who this month's dollars went to, the costliest first, from the usage report: each agent of the
+ * teams named (`null`: every team) once, whatever it ran through and in however many teams. Ask,
+ * LoomWatch's own reading of messages (in no team), and work a plan paid for are nobody's part here.
+ * An agent's own chat is found by its name among My agents, since the report names a team only by
+ * its name.
+ */
+export function monthSpenders(report: UsageReport | null, teams: readonly string[] | null, shapes: readonly TeamShape[], jobs: readonly { id: string; name: string }[]): Spender[] {
+  if (!report) return []
+  const parts = new Map<string, Spender>()
+  for (const tally of report.agents) {
+    if (tally.ask || !tally.team || tally.costUsd <= 0 || (teams && !teams.includes(tally.team))) continue
+    const name = tally.agentName ?? tally.agentId
+    const shape = shapes.find((candidate) => candidate.name === tally.team)
+    const job = shape ? undefined : jobs.find((candidate) => candidate.name === name)
+    const seat: SeatSpec = shape?.seats.find((candidate) => candidate.id === tally.agentId) ?? { kind: 'agent', id: tally.agentId, name, ...(job ? { agent: job.id } : {}) }
+    const key = seat.agent ?? `${tally.team ?? ''}\n${seat.id}`
+    const held = parts.get(key)
+    parts.set(key, { key, seat: held?.seat ?? seat, usd: (held?.usd ?? 0) + tally.costUsd, estimated: Boolean(held?.estimated) || tally.costEstimated })
+  }
+  return [...parts.values()].sort((left, right) => right.usd - left.usd)
 }
 
 /** Whether a file the agents made is worth showing as made: what a person reads, not code or a log. */

@@ -50,6 +50,7 @@ pub mod skills_store;
 pub mod spa;
 pub mod spend;
 mod team_bus;
+mod team_rename;
 pub mod team_requests;
 pub mod updates;
 pub mod wardrobe;

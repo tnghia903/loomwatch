@@ -8,6 +8,7 @@ import { readTourState, resetTourForTests } from '../../lib/tour/store'
 import { forgetYou } from '../../lib/you/client'
 import type { RunRecord } from '../../lib/runs/client'
 import { cascaded, goldFilled, isGoldFill } from '../../test/cascade'
+import { figureFor, figureStill } from '../../lib/library/figures'
 import { Home } from './Home'
 
 let assign: ReturnType<typeof vi.fn>
@@ -182,6 +183,115 @@ describe('Home, the studio (ADR 0097)', () => {
     const month = await screen.findByRole('region', { name: 'This month' })
     expect(month).toHaveTextContent('at least $0.25')
     expect(month).toHaveTextContent('2 pieces of work')
+  })
+
+  it('draws who did what on Your desk: the last work’s agent, the agents ready, today’s work by who did it, and whose the month’s dollars were', async () => {
+    const tally = (source: string, costUsd: number, calls = 1, costEstimated = false) => ({ source, calls, inputTokens: 0, cachedTokens: 0, outputTokens: 0, costUsd, costEstimated })
+    const usage = {
+      since: '2026-10-01',
+      days: [],
+      sources: [{ source: 'openrouter', total: tally('openrouter', 1.3) }, { source: 'anthropic', total: tally('anthropic', 0.2, 1, true) }, { source: 'chatgpt', total: tally('chatgpt', 0, 4) }],
+      agents: [
+        { ...tally('openrouter', 1), team: 'Blog', ask: false, agentId: 'writer', agentName: 'Writer', runs: 2 },
+        { ...tally('openrouter', 0.25), team: 'Research and design', ask: false, agentId: 'designer', agentName: 'Designer', runs: 1 },
+        { ...tally('anthropic', 0.2, 1, true), team: 'Research and design', ask: false, agentId: 'designer', agentName: 'Designer', runs: 1 },
+        { ...tally('openrouter', 0.05), ask: true, agentId: 'ask', runs: 1 },
+        { ...tally('chatgpt', 0, 4), team: 'Research and design', ask: false, agentId: 'researcher', agentName: 'Researcher', runs: 1 },
+      ],
+    }
+    fetchMock.mockImplementation((url: string) => (url.startsWith('/api/usage') ? respond(usage) : studio(url)))
+    const today = (hour: number) => new Date(new Date().setHours(hour, 0, 0, 0)).toISOString()
+    render(<Home onPalette={vi.fn()} runs={[
+      run('sutd/gate.yaml', { runId: 'gates', status: 'succeeded', prompt: 'Draw three gates.', responder: 'designer', createdAt: today(0), finishedAt: today(0) }),
+      run('blog.yaml', { runId: 'when', status: 'succeeded', prompt: 'When is the mid-term presentation?', responder: 'writer', createdAt: today(0), finishedAt: new Date().toISOString() }),
+    ]} />)
+    const desk = await screen.findByRole('group', { name: 'Your desk' })
+
+    // The last work: what it was asked, which opens it, and who did it, where.
+    const last = within(desk).getByRole('region', { name: /^Last finished/ })
+    expect(last).toHaveTextContent('Writer answered · Blog')
+    // Drawn as itself: the figure the writer wears.
+    expect(last.querySelector('img')).toHaveAttribute('src', figureStill(figureFor('writer', undefined)))
+    fireEvent.click(within(last).getByRole('button', { name: 'Open Writer’s work: When is the mid-term presentation?' }))
+    expect(assign).toHaveBeenLastCalledWith('/?path=blog.yaml&run=when')
+
+    // Nobody works: the agents of every team, each once, lit as each is, and how many are free.
+    const working = within(desk).getByRole('region', { name: 'Working now' })
+    await waitFor(() => expect(within(working).getAllByRole('img').map((img) => img.getAttribute('alt'))).toEqual(['Writer', 'Researcher', 'Designer']))
+    expect(working).toHaveTextContent('Nobody is working · all 3 ready')
+    // The words before the figures: figures lit under "Working now" would read as agents at work.
+    const words = within(working).getByText(/Nobody is working/)
+    expect(words.compareDocumentPosition(within(working).getByRole('list', { name: 'Agents' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+    // Today's work, each piece as the agent who answered it, newest first, each one press from it.
+    const finished = within(desk).getByRole('region', { name: 'Finished today' })
+    expect(within(finished).getByRole('list', { name: 'Today’s finished work' })).toBeInTheDocument()
+    const pieces = within(finished).getAllByRole('button')
+    expect(pieces.map((piece) => piece.getAttribute('aria-label'))).toEqual(['Open Writer’s work: When is the mid-term presentation?', 'Open Designer’s work: Draw three gates.'])
+    fireEvent.click(pieces[1])
+    expect(assign).toHaveBeenLastCalledWith('/?path=sutd%2Fgate.yaml&run=gates')
+
+    // This month: the dollars, the plan on a line of its own, and whose they were, costliest first.
+    // Ask's calls are nobody's, and work the plan paid for is no one's dollars.
+    const month = within(desk).getByRole('region', { name: 'This month' })
+    await waitFor(() => expect(within(month).getByText('≈ $1.50')).toBeInTheDocument())
+    expect(within(month).getByText('+ ChatGPT plan')).toBeInTheDocument()
+    const spent = within(month).getByRole('list', { name: 'Who spent it' })
+    // The rest (here Ask's) is everything else, not other agents.
+    expect(within(spent).getAllByRole('listitem').map((part) => part.textContent)).toEqual(['$1.00', '≈ $0.45', 'Everything else $0.05'])
+    expect(within(spent).getAllByRole('img').map((img) => img.getAttribute('alt'))).toEqual(['Writer', 'Designer'])
+    // The bar is split in shares of the whole, so it is always full, never a limit half used.
+    const parts = [...month.querySelectorAll<HTMLElement>('.glance-split span')]
+    expect(parts.reduce((sum, part) => sum + Number(part.style.flexGrow), 0)).toBeCloseTo(1)
+    expect(parts.at(-1)).toHaveAttribute('title', 'Everything else · $0.05')
+  })
+
+  it('says what each agent at work was given, the longest at it drawn first, with its team and how long', async () => {
+    fetchMock.mockImplementation(studio)
+    // Half a minute clear of the minute's turn: the shared clock may read up to a second behind.
+    const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString()
+    render(<Home onPalette={vi.fn()} runs={[
+      run('sutd/gate.yaml', { runId: 'gates', prompt: 'Find three gate designs.', working: ['researcher'], startedAt: ago(1.5) }),
+      run('blog.yaml', { runId: 'post', prompt: 'Write the launch post.', responder: 'writer', working: ['writer'], startedAt: ago(4.5) }),
+    ]} />)
+    const working = await screen.findByRole('region', { name: 'Working now · 2' })
+    const buttons = within(working).getAllByRole('button')
+    expect(buttons).toHaveLength(2)
+    const [lead, next] = buttons
+    expect(lead).toHaveAccessibleName('Writer is working on “Write the launch post.”, in Blog. Open it')
+    expect(lead).toHaveTextContent('Write the launch post.')
+    // When it began, never a bare "4 min", which could be read as the time left.
+    expect(lead).toHaveTextContent('Writer · Blog · started 4 min ago')
+    expect(next).toHaveTextContent('Researcher · Research and design · started 1 min ago')
+    // While someone works, the tile is about them: the agents standing ready aren't drawn.
+    expect(working.querySelectorAll('img')).toHaveLength(2)
+    expect(within(working).queryByRole('list')).toBeNull()
+    fireEvent.click(next)
+    expect(assign).toHaveBeenLastCalledWith('/?path=sutd%2Fgate.yaml&run=gates')
+  })
+
+  it('never says nobody works while an agent works in a run that waits for you, and draws each as it is', async () => {
+    fetchMock.mockImplementation(studio)
+    render(<Home onPalette={vi.fn()} runs={[{ ...waitingOnTheResearcher, working: ['designer'] }]} />)
+    const working = await screen.findByRole('region', { name: 'Working now' })
+    const crew = await within(working).findByRole('list', { name: 'Agents' })
+    const drawn = () => within(crew).getAllByRole('img').map((img) => `${img.getAttribute('alt')}: ${img.closest('.desk-figure')?.getAttribute('data-glow')}`).sort()
+    await waitFor(() => expect(drawn()).toEqual(['Designer is working: working', 'Researcher is waiting for you: waiting', 'Writer: ready']))
+    // Named, and drawn first with whoever waits for you.
+    expect(working).toHaveTextContent('Designer is working · 1 ready')
+    expect(working).not.toHaveTextContent('Nobody is working')
+    expect(within(crew).getAllByRole('img').map((img) => img.getAttribute('alt'))).toEqual(['Researcher is waiting for you', 'Designer is working', 'Writer'])
+  })
+
+  it('leaves the agents of a project hidden from Home out of who is ready', async () => {
+    fetchMock.mockImplementation((url: string) => studio(url).then(async (response) => {
+      if (url !== '/api/projects') return response
+      const body = (await response.json()) as { projects: { id: string }[] }
+      return respond({ ...body, projects: body.projects.map((entry) => (entry.id === 'sutd' ? { ...entry, putAway: true } : entry)) })
+    }))
+    renderHome()
+    const working = await screen.findByRole('region', { name: 'Working now' })
+    await waitFor(() => expect(within(working).getAllByRole('img').map((img) => img.getAttribute('alt'))).toEqual(['Writer']))
   })
 
   it('lists each team in its room with what it is doing, and opens its chat from its name', async () => {

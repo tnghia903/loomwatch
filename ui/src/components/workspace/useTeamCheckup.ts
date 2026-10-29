@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { modelEfforts } from '../../lib/ai/efforts'
 import { useAiStatus } from '../../lib/ai/useKeyStatus'
@@ -6,6 +6,7 @@ import { useModels } from '../../lib/ai/useModels'
 import { appendToRole, checkup, fixFields, type CheckupFinding, type CheckupInput } from '../../lib/team-file/checkup'
 import { mergeFindings, runLessons, teamUsage, type LessonRun, type TeamUsage } from '../../lib/team-file/runLessons'
 import type { AllowSwitch } from '../../lib/team-file/types'
+import { TEAM_MOVED, type TeamMoved } from '../../lib/team-file/teamMoved'
 import type { useTeamDocument } from '../../lib/team-file/useTeamDocument'
 
 type TeamDocumentController = ReturnType<typeof useTeamDocument>
@@ -55,6 +56,21 @@ export interface TeamCheckup {
 export function useTeamCheckup(doc: TeamDocumentController, responder: string | null, announce: (text: string) => void, lessons: readonly LessonRun[] = []): TeamCheckup {
   const teamKey = doc.path ?? ''
   const [hidden, setHidden] = useState(readHidden)
+  // A renamed team's file moved, and what it hid goes with it (ADR 0099).
+  useEffect(() => {
+    const moved = (event: Event) => {
+      const { from, to } = (event as CustomEvent<TeamMoved>).detail
+      setHidden((current) => {
+        if (!current[from]) return current
+        const { [from]: kept, ...rest } = current
+        const next = { ...rest, [to]: kept }
+        writeHidden(next)
+        return next
+      })
+    }
+    window.addEventListener(TEAM_MOVED, moved)
+    return () => window.removeEventListener(TEAM_MOVED, moved)
+  }, [])
   const agents = useMemo(() => doc.nodes.map((node) => node.data.agent), [doc.nodes])
   const usage = useMemo(() => teamUsage(lessons, agents), [lessons, agents])
   // The efforts each model takes, so the overthinking card judges the effort it runs at.

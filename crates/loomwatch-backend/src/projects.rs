@@ -435,6 +435,34 @@ pub fn leave_out(state_dir: &Path, teams_root: &Path, teams: &[String]) -> std::
     )
 }
 
+/// A team left in no project that was renamed (ADR 0099) stays left out under its new path.
+///
+/// # Errors
+///
+/// When the mark can't be written.
+pub fn follow_rename(
+    state_dir: &Path,
+    teams_root: &Path,
+    from: &str,
+    to: &str,
+) -> std::io::Result<()> {
+    let kept = left_out(state_dir, teams_root);
+    if !kept.iter().any(|team| team == from) {
+        return Ok(());
+    }
+    let path = mark_path(state_dir, teams_root);
+    let mut record = mark_record(&path);
+    record["leftOut"] = serde_json::json!(
+        kept.into_iter()
+            .map(|team| if team == from { to.to_owned() } else { team })
+            .collect::<Vec<_>>()
+    );
+    crate::approvals::write_private(
+        &path,
+        &serde_json::to_vec_pretty(&record).map_err(std::io::Error::other)?,
+    )
+}
+
 /// `text`, a team file in project `id`, with the top-level `project: <id>` line taken out, so the
 /// team works in no project. Nothing else in the file changes, comments included. `None` when the
 /// file names the project some other way than one such line (written by hand): such a file is left
@@ -782,6 +810,13 @@ mod tests {
             ["gate.yaml", "blog.yaml", "notes/trip.yaml"]
         );
         assert!(moved(&state.0, &root.0), "the move stays recorded");
+        follow_rename(&state.0, &root.0, "blog.yaml", "weekly-posts.yaml").unwrap();
+        follow_rename(&state.0, &root.0, "other.yaml", "elsewhere.yaml").unwrap();
+        assert_eq!(
+            left_out(&state.0, &root.0),
+            ["gate.yaml", "weekly-posts.yaml", "notes/trip.yaml"],
+            "a renamed team stays left out; one never left out stays out of the list"
+        );
     }
 
     #[test]

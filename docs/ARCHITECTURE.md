@@ -323,6 +323,15 @@ which is what makes a run replayable. How it stays fast as history grows:
   refused are left out, the same rule as the app's `filesWritten`, at most 100 per run. The run
   list sends it as `made`, so Home and a project's room show what the agents made without
   replaying any run. Runs recorded before it get theirs once, in the background, after a start.
+- **A renamed team's history.** Rename moves the team file to the new name
+  (`POST /api/team/rename`, `team_rename.rs`, ADR 0099), with `<team>.brief/`, `<team>.layout.json`
+  and `<team>.files/`, and changes those names inside the file. One transaction files its `runs`,
+  `chat_messages` and `work_passages` under the new path, gives rows filed by `path:<file>` the
+  team's id, and names the files sent in the chat and the files its runs made in `<team>.files/`
+  where they are now. The id never changes (one is written in for a team without it), so notes,
+  lessons and the workspace, filed by id, stay put. The approval moves with the file only for the
+  text that was approved, so a move never approves a team. It is refused while a run is live or a
+  routine waits to try again, and the files go back when the history can't move.
 - **Search** in the Notebook is SQLite FTS5 with English stemming.
 - **Finding in a team's chat** (`chat_find.rs`, ADR 0081) searches every request, answer, note and
   line of the agents' talk (handovers, check verdicts, questions, Team Bus messages), cut into
@@ -427,7 +436,8 @@ team to another project later is the same save, with only its `project` changed.
 Deleting a project (ADR 0100), from the "…" on its card on Home or in its room:
 `DELETE /api/projects/{id}` takes the `project:` line out of each of its teams' files, all of them
 or none (`projects::without_project`), keeps an approved team approved, adds those teams to the
-`leftOut` list beside the move's record so the app never moves them into a project of their own,
+`leftOut` list beside the move's record (renaming a team carries its entry to the new path) so the
+app never moves them into a project of their own,
 and moves the project's file to `.projects/.removed/`. Those teams stand on Home as cards of their
 own, whose "…" moves one into a project or deletes it. A removed project's id stays taken (`projects::removed_ids`, listed by `GET /api/projects` as
 `removed`): its notebook and Ask chat are kept under it.
@@ -448,9 +458,17 @@ try again and that wasn't dismissed. Each has the one press that answers it: Rev
 check, Answer for a question, a permission or a limit (on Home both open the bell's tray at that
 item; in a room, the work itself); for stopped work, the fix LoomWatch knows for why it stopped
 (`problemAction`, such as adding credits), or See why, which opens it in its chat. With nothing
-waiting it shows the last work that went well. Then Working now; Next on a schedule in a room,
-Finished today on Home; and This month, from the usage report (ADR 0073) so a ChatGPT plan is said as
-a plan and a list-price estimate with "≈". Under the tiles a box gives a team work as its chat's box
+waiting it shows the last work that went well: the agent who answered it, drawn big, and what it
+was asked. Then Working now: the longest at work drawn big with what it was given, its team and how
+long it has been at it, the next two under it; while nobody works, the agents of the teams shown
+(`crewOf`, each once), each lit as it is now. Next on a schedule in a room, Finished today on Home,
+each piece of today's work as the agent who answered it, one press from it. And This month, from the
+usage report (ADR 0073) so a ChatGPT plan is said as a plan and a list-price estimate with "≈",
+with the dollars split by agent (`monthSpenders`): a bar in shares of the whole, each part keyed
+under it, the three costliest by their figures, then everything else. Ask and LoomWatch's own
+reading of messages belong to no team, so to no agent's part.
+Only Working now lights its figures: elsewhere a figure says who did the work, not what it is doing
+now. Under the tiles a box gives a team work as its chat's box
 does (`WorkBox`, `POST /api/chat/messages` to the team with `work`), named for the team it goes to,
 with "To" when there is more than one. The first thing to do is the screen's one gold fill: the
 first item's answer, or Start while nothing waits.

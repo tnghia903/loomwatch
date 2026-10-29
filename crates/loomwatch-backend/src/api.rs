@@ -1,5 +1,6 @@
 //! REST surface consumed by the `LoomWatch` web UI.
 
+use std::collections::BTreeSet;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -205,6 +206,7 @@ pub fn router_with_archive(
         .route("/api/capabilities/{id}", get(get_capability_details))
         .route("/api/teams", get(get_teams))
         .route("/api/team", get(get_team).put(put_team).delete(delete_team))
+        .route("/api/team/rename", axum::routing::post(post_team_rename))
         .route("/api/instructions", get(get_instructions))
         .route("/api/team/layout", get(get_layout).put(put_layout))
         .route("/api/memory", get(get_memory))
@@ -1492,6 +1494,360 @@ async fn delete_team(
         )
     })?;
     Ok(Json(deleted))
+}
+
+/// What `POST /api/team/rename` is sent.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct TeamRename {
+    /// The team file as the app opened it.
+    path: PathBuf,
+    /// The new name as a file name, without its extension (`kyoto-week`). The next free one after
+    /// it (`kyoto-week-2`) is used when it is taken.
+    stem: String,
+    /// The team file's text with its new name. Its `id` stays the one the team is filed under.
+    yaml: String,
+}
+
+/// Rename a team and its file to match (ADR 0099): `trip.yaml` renamed "Kyoto week" becomes
+/// `kyoto-week.yaml`, with its Brief, layout and added files moved beside it, their names in the
+/// file changed with them, and its run history, chat and approval filed under the new path
+/// (`team_rename.rs`). Sent with `If-Match` of the text that was renamed, like a save. A name
+/// whose file is the one the team already has is saved in place, as `PUT /api/team` would.
+///
+/// Refused (409) while a run of the team has not finished, or its routine waits to try a run
+/// again: both find the team by its path. Refused (422) when the text changes the team's `id`,
+/// which its notes, lessons and workspace are filed by.
+async fn post_team_rename(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Json(rename): Json<TeamRename>,
+) -> Result<Response, ApiError> {
+    let renamed = TeamConfig::parse_in(&rename.yaml, &state.teams_root)
+        .map_err(|error| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, error.to_string()))?;
+    if !is_file_stem(&rename.stem) {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            format!("“{}” can't be a team file's name.", rename.stem),
+        ));
+    }
+    // The paths the history already files something under: a renamed team never takes one.
+    let mut filed = state.runs.team_paths();
+    if let Some(db) = state.runs.database() {
+        filed.extend(
+            crate::team_rename::filed_team_paths(&db)
+                .await
+                .map_err(|error| {
+                    ApiError::new(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("couldn't read the run history: {error}"),
+                    )
+                })?,
+        );
+    }
+    let moved = {
+        let _write = state.writes.lock().map_err(|_| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "team write lock unavailable".into(),
+            )
+        })?;
+        move_team_file(&state, &headers, &rename, &renamed, &filed)?
+    };
+    let Some(moved) = moved else {
+        let team_file = TeamFile {
+            path: rename.path,
+            yaml: rename.yaml,
+        };
+        write_team_file(&state, &headers, &team_file)?;
+        return Ok(team_response(&team_file));
+    };
+    if let Some(db) = state.runs.database()
+        && let Err(error) = crate::team_rename::refile_history(&db, &moved.refile).await
+    {
+        let _write = state.writes.lock();
+        moved.undo();
+        return Err(ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("couldn't move the team's history, so its file stayed as it was: {error}"),
+        ));
+    }
+    state.runs.refile_team(&moved.refile);
+    if let Some(approvals) = state.runs.approvals()
+        && let Err(error) = approvals.move_team(
+            &moved.refile.from,
+            &moved.refile.to,
+            &moved.was,
+            &crate::approvals::revision(moved.yaml.as_bytes()),
+        )
+    {
+        // Safe as it fails: the team at its new path is not approved, and asks before it runs.
+        eprintln!(
+            "warning: {} moved to {}, but its approval did not: {error}",
+            moved.refile.from, moved.refile.to
+        );
+    }
+    // A team left in no project by deleting its project stays so under its new name (ADR 0100).
+    if let Some((_, state_dir)) = approvals_and_state(&state) {
+        let _write = state.writes.lock();
+        if let Err(error) = crate::projects::follow_rename(
+            &state_dir,
+            &state.teams_root,
+            &moved.refile.from,
+            &moved.refile.to,
+        ) {
+            eprintln!(
+                "warning: {} moved to {}, but may be put in a project of its own: {error}",
+                moved.refile.from, moved.refile.to
+            );
+        }
+    }
+    Ok(team_response(&TeamFile {
+        path: PathBuf::from(&moved.refile.to),
+        yaml: moved.yaml,
+    }))
+}
+
+/// A name a team file can take: letters, digits, `.`, `_` and `-`, starting with a letter or
+/// digit, and not a name Windows keeps for itself.
+fn is_file_stem(stem: &str) -> bool {
+    stem.len() <= 120
+        && stem
+            .chars()
+            .next()
+            .is_some_and(|first| first.is_ascii_alphanumeric())
+        && stem
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || "._-".contains(character))
+        && !crate::platform::is_reserved_name(stem)
+}
+
+/// A team file Rename moved, and how to put it back.
+struct MovedTeam {
+    refile: crate::team_rename::Refile,
+    /// The text now in the new file.
+    yaml: String,
+    /// The revision of the text it was renamed from.
+    was: String,
+    old_file: PathBuf,
+    old_bytes: Vec<u8>,
+    new_file: PathBuf,
+    /// The folders and layout moved with it, from and to.
+    sidecars: Vec<(PathBuf, PathBuf)>,
+}
+
+impl MovedTeam {
+    /// Put everything back where it was, as far as the disk lets it.
+    fn undo(&self) {
+        let _ = atomic_write(&self.old_file, &self.old_bytes, true);
+        let _ = fs::remove_file(&self.new_file);
+        undo_moves(&self.sidecars);
+    }
+}
+
+fn undo_moves(moved: &[(PathBuf, PathBuf)]) {
+    for (from, to) in moved.iter().rev() {
+        let _ = fs::rename(to, from);
+    }
+}
+
+/// The file part of `POST /api/team/rename`, under the write lock: check it may move, pick the
+/// new name, and move the file with what is kept beside it. `None` when the new name's file is
+/// the one the team already has.
+fn move_team_file(
+    state: &ApiState,
+    headers: &HeaderMap,
+    rename: &TeamRename,
+    renamed: &TeamConfig,
+    filed: &BTreeSet<String>,
+) -> Result<Option<MovedTeam>, ApiError> {
+    let refuse = |message: String| ApiError::new(StatusCode::CONFLICT, message);
+    let server_error = |message: String| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, message);
+    let team = resolve_existing_team_path(&state.teams_root, &rename.path)?;
+    let requested = rooted_candidate(&state.teams_root, &rename.path);
+    if fs::symlink_metadata(&requested).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
+        return Err(refuse(format!(
+            "{} is a link to another file, so LoomWatch can't move it. Rename the link in your \
+             teams folder instead.",
+            rename.path.display()
+        )));
+    }
+    let relative = listed_team_path(&state.teams_root, &team).ok_or_else(|| {
+        ApiError::new(
+            StatusCode::NOT_FOUND,
+            format!("{} is not in your teams list.", rename.path.display()),
+        )
+    })?;
+    check_precondition(headers, &team)?;
+    let old_bytes = fs::read(&team).map_err(|error| server_error(error.to_string()))?;
+    let before = TeamConfig::parse_in(&String::from_utf8_lossy(&old_bytes), &state.teams_root)
+        .map_err(|error| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, error.to_string()))?;
+    // Notes, lessons, the workspace and the teams that read this one's memory find it by this.
+    let filed_as = crate::memory::scope_id(&before.id, &team);
+    if renamed.id != filed_as {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!(
+                "A rename keeps the team's id, {filed_as}: its notes and lessons are kept under it."
+            ),
+        ));
+    }
+    refuse_while_in_use(&state.runs, &relative, &team).map_err(refuse)?;
+    let (Some(folder), Some(old_stem), Some(extension)) = (
+        team.parent(),
+        team.file_stem().and_then(|stem| stem.to_str()),
+        team.extension().and_then(|extension| extension.to_str()),
+    ) else {
+        return Err(server_error(format!("{} has no file name", team.display())));
+    };
+    let trashed: BTreeSet<String> = trashed_team_paths(&state.teams_root).into_iter().collect();
+    let target = (1..=100)
+        .map(|attempt| {
+            let stem = if attempt == 1 {
+                rename.stem.clone()
+            } else {
+                format!("{}-{attempt}", rename.stem)
+            };
+            folder.join(format!("{stem}.{extension}"))
+        })
+        .find(|candidate| {
+            is_same_file_name(candidate, &team)
+                || is_free_team_file(&state.teams_root, candidate, &trashed, filed)
+        })
+        .ok_or_else(|| refuse("Too many teams already have this name. Try another.".to_owned()))?;
+    if is_same_file_name(&target, &team) {
+        return Ok(None);
+    }
+    let (Some(new_stem), Some(to)) = (
+        target.file_stem().and_then(|stem| stem.to_str()),
+        normalized_relative_path(&state.teams_root, &target),
+    ) else {
+        return Err(server_error(format!(
+            "{} has no file name",
+            target.display()
+        )));
+    };
+    let yaml = crate::team_rename::rename_own_folders(&rename.yaml, folder, old_stem, new_stem);
+    let sidecars = move_files(&team, &target, &yaml)
+        .map_err(|error| server_error(format!("{error}; nothing was moved")))?;
+    Ok(Some(MovedTeam {
+        refile: crate::team_rename::Refile {
+            key: renamed.chat_key(&to),
+            from: relative,
+            to,
+            files_from: crate::chosen_knowledge::files_folder(&team),
+            files_to: crate::chosen_knowledge::files_folder(&target),
+        },
+        yaml,
+        was: crate::approvals::revision(&old_bytes),
+        old_file: team,
+        old_bytes,
+        new_file: target,
+        sidecars,
+    }))
+}
+
+/// Why the team at `relative` can't move now, if it can't: a run or a schedule's next try that
+/// finds it by its path, or a file of the same name beside it that shares its folders.
+fn refuse_while_in_use(
+    runs: &crate::runs::RunRegistry,
+    relative: &str,
+    team: &Path,
+) -> Result<(), String> {
+    if runs.live_run_for(relative).is_some() {
+        return Err(
+            "This team is working right now. Stop the work or wait for it to finish, \
+                    then rename the team."
+                .to_owned(),
+        );
+    }
+    if runs.waits_to_try_again(relative) {
+        return Err(
+            "This team is trying its last work again soon. Rename it after that.".to_owned(),
+        );
+    }
+    // `trip.yaml` and `trip.yml` side by side share `trip.brief/` and the rest.
+    match ["yaml", "yml"]
+        .iter()
+        .map(|extension| team.with_extension(extension))
+        .find(|sibling| sibling != team && sibling.is_file())
+    {
+        Some(sibling) => Err(format!(
+            "{}, another team file with the same name, shares this team's files. Delete one of \
+             the two teams, then rename the other.",
+            sibling.file_name().unwrap_or_default().to_string_lossy()
+        )),
+        None => Ok(()),
+    }
+}
+
+/// Move the team file at `team` to `target` with the text `yaml`, its Brief, layout and added
+/// files with it, by renaming only, as the trash does. Returns what moved beside the file; when
+/// one move fails, the ones made are undone.
+fn move_files(team: &Path, target: &Path, yaml: &str) -> Result<Vec<(PathBuf, PathBuf)>, String> {
+    let mut sidecars = Vec::new();
+    for (from, to) in [
+        (team.with_extension("brief"), target.with_extension("brief")),
+        (layout_path(team), layout_path(target)),
+        (
+            crate::chosen_knowledge::files_folder(team),
+            crate::chosen_knowledge::files_folder(target),
+        ),
+    ] {
+        if fs::symlink_metadata(&from).is_err() {
+            continue;
+        }
+        if let Err(error) = fs::rename(&from, &to) {
+            undo_moves(&sidecars);
+            return Err(format!("couldn't move {}: {error}", from.display()));
+        }
+        sidecars.push((from, to));
+    }
+    if let Err(error) = atomic_write(target, yaml.as_bytes(), true) {
+        undo_moves(&sidecars);
+        return Err(format!("couldn't write {}: {error}", target.display()));
+    }
+    if let Err(error) = fs::remove_file(team) {
+        let _ = fs::remove_file(target);
+        undo_moves(&sidecars);
+        return Err(format!("couldn't move {}: {error}", team.display()));
+    }
+    Ok(sidecars)
+}
+
+/// Whether `candidate` names the file `team` is, as a disk that ignores case sees it.
+fn is_same_file_name(candidate: &Path, team: &Path) -> bool {
+    candidate.parent() == team.parent()
+        && candidate
+            .file_name()
+            .and_then(|name| name.to_str())
+            .zip(team.file_name().and_then(|name| name.to_str()))
+            .is_some_and(|(candidate, team)| candidate.eq_ignore_ascii_case(team))
+}
+
+/// Whether a team may move to `candidate`: nothing is there or beside it under its name, it is
+/// not a deleted team's name, and no history is filed under it. Each would give the moved team
+/// another team's files, or another team's past.
+fn is_free_team_file(
+    teams_root: &Path,
+    candidate: &Path,
+    trashed: &BTreeSet<String>,
+    filed: &BTreeSet<String>,
+) -> bool {
+    let beside = [
+        candidate.with_extension("yaml"),
+        candidate.with_extension("yml"),
+        candidate.with_extension("brief"),
+        layout_path(candidate),
+        crate::chosen_knowledge::files_folder(candidate),
+    ];
+    !beside.iter().any(|path| fs::symlink_metadata(path).is_ok())
+        && ["yaml", "yml"]
+            .iter()
+            .filter_map(|extension| {
+                normalized_relative_path(teams_root, &candidate.with_extension(extension))
+            })
+            .all(|path| !trashed.contains(&path) && !filed.contains(&path))
 }
 
 /// `team` (canonical) as `GET /api/teams` lists it, or `None` when the list never would: not a
@@ -4723,5 +5079,751 @@ mod tests {
             ]
         );
         assert_eq!(trashed_team_paths(&root), ["trip.yaml"]);
+    }
+
+    // ADR 0099: Rename moves the team's file.
+
+    /// Trip planner with a Brief note and a file added to its lead, both named by its file's name.
+    const TRIP_WITH_FOLDERS: &str = "schemaVersion: 1\nid: trip\nname: Trip planner\nentrypoint: a\nmemory:\n  brief:\n    - path: trip.brief/style.md\nagents:\n  - id: a\n    role: Plan the trip. The map is in trip.files/map.pdf.\n    spawn:\n      cmd: opencode\n      cwd: .\n    model: test/model\n";
+
+    async fn rename_request(
+        router: Router,
+        path: &str,
+        stem: &str,
+        yaml: &str,
+        renamed_from: Option<&str>,
+    ) -> Response {
+        let mut request = Request::builder()
+            .method("POST")
+            .uri("/api/team/rename")
+            .header(header::HOST, "localhost")
+            .header(header::CONTENT_TYPE, "application/json");
+        if let Some(text) = renamed_from {
+            request = request.header(
+                header::IF_MATCH,
+                format!("\"{}\"", revision(text.as_bytes())),
+            );
+        }
+        router
+            .oneshot(
+                request
+                    .body(Body::from(
+                        serde_json::to_vec(&json!({ "path": path, "stem": stem, "yaml": yaml }))
+                            .expect("JSON"),
+                    ))
+                    .expect("request"),
+            )
+            .await
+            .expect("response")
+    }
+
+    /// A registry with a database of its own, and approvals that take every team now in `root` as
+    /// approved, as the first start does.
+    async fn durable_runs(
+        root: &Path,
+        state: &Path,
+    ) -> (
+        crate::runs::RunRegistry,
+        crate::db::Db,
+        Arc<crate::approvals::TeamApprovals>,
+    ) {
+        let db = crate::db::Db::temp().await;
+        let runs = crate::runs::RunRegistry::durable(crate::runs::RunStore::new(db.clone()));
+        let approvals = Arc::new(
+            crate::approvals::TeamApprovals::open(
+                state,
+                &crate::platform::canonicalize(root).expect("root"),
+            )
+            .expect("approvals"),
+        );
+        runs.set_approvals(approvals.clone());
+        (runs, db, approvals)
+    }
+
+    async fn finished_run(runs: &crate::runs::RunRegistry, path: &str, yaml: &str) -> String {
+        finished_run_that_made(runs, path, yaml, None).await
+    }
+
+    async fn finished_run_that_made(
+        runs: &crate::runs::RunRegistry,
+        path: &str,
+        yaml: &str,
+        made: Option<Vec<String>>,
+    ) -> String {
+        let team = TeamConfig::parse(yaml).expect("team parses");
+        let mut record = crate::runs::RunRecord::queued(
+            path.to_owned(),
+            "Plan a week in Kyoto".to_owned(),
+            &team,
+            crate::runs::RunTrigger::Manual,
+        )
+        .expect("run record");
+        record.status = crate::runs::RunStatus::Succeeded;
+        record.made = made;
+        let run_id = record.run_id.clone();
+        runs.insert(record);
+        runs.persist(&run_id).await.expect("run kept");
+        run_id
+    }
+
+    async fn rows(db: &crate::db::Db, sql: &str) -> Vec<(String, String)> {
+        sqlx::query_as(sql)
+            .fetch_all(db.reader())
+            .await
+            .expect("rows")
+    }
+
+    /// The file takes the new name, and everything the team keeps beside it or files under its
+    /// path goes with it: its Brief, layout and added files, their names inside the file, its run
+    /// history, chat, the chat's search and the files sent in it, and its approval. Other teams
+    /// stay as they are.
+    #[tokio::test]
+    #[allow(clippy::too_many_lines)]
+    async fn rename_moves_the_team_with_everything_kept_beside_it_and_filed_under_it() {
+        let root = TempDirectory::new();
+        let state = TempDirectory::new();
+        fs::write(root.0.join("trip.yaml"), TRIP_WITH_FOLDERS).expect("write team");
+        fs::write(root.0.join("trip.layout.json"), "{}").expect("write layout");
+        fs::create_dir(root.0.join("trip.brief")).expect("Brief folder");
+        fs::write(root.0.join("trip.brief/style.md"), "# Style\n").expect("Brief note");
+        fs::create_dir_all(root.0.join("trip.files/chat")).expect("files folder");
+        fs::write(root.0.join("trip.files/chat/photo.png"), "png").expect("chat file");
+        fs::write(root.0.join("other.yaml"), VALID_TEAM).expect("write other team");
+        let (runs, db, approvals) = durable_runs(&root.0, &state.0).await;
+        let canonical = crate::platform::canonicalize(&root.0).expect("root");
+        let photo = canonical.join("trip.files").join("chat").join("photo.png");
+        let elsewhere = canonical.join("notes.md").to_string_lossy().into_owned();
+        let trip_run = finished_run_that_made(
+            &runs,
+            "trip.yaml",
+            TRIP_WITH_FOLDERS,
+            Some(vec![
+                photo.to_string_lossy().into_owned(),
+                elsewhere.clone(),
+            ]),
+        )
+        .await;
+        let other_run = finished_run(&runs, "other.yaml", VALID_TEAM).await;
+        let sent = json!([{ "name": "photo.png", "path": photo, "bytes": 3, "picture": true }]);
+        sqlx::query(
+            "INSERT INTO chat_messages (id, team_key, team_path, text, created_at, route, files)
+             VALUES ('m1', 'trip', 'trip.yaml', 'Use this photo', '2026-10-29T00:00:00Z', 'team', $1),
+                    ('m2', 'path:other.yaml', 'other.yaml', 'Hello', '2026-10-29T00:00:00Z', 'team_note', NULL)",
+        )
+        .bind(sent.to_string())
+        .execute(db.writer())
+        .await
+        .expect("chat rows");
+        sqlx::query(
+            "INSERT INTO work_passages (piece, kind, team_key, team_path, piece_at, target, who, said_at, part, text)
+             VALUES ('m1', 'note', 'trip', 'trip.yaml', '2026-10-29T00:00:00Z', 'request', NULL, '2026-10-29T00:00:00Z', 0, 'Use this photo')",
+        )
+        .execute(db.writer())
+        .await
+        .expect("search row");
+
+        let renamed = TRIP_WITH_FOLDERS.replace("name: Trip planner", "name: Kyoto week");
+        let response = rename_request(
+            router_with_runs(&root.0, runs.clone()),
+            "trip.yaml",
+            "kyoto-week",
+            &renamed,
+            Some(TRIP_WITH_FOLDERS),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
+        let written = renamed
+            .replace("trip.brief/style.md", "kyoto-week.brief/style.md")
+            .replace("trip.files/map.pdf", "kyoto-week.files/map.pdf");
+        assert_eq!(body["path"], "kyoto-week.yaml");
+        assert_eq!(body["yaml"], written);
+        assert_eq!(body["revision"], revision(written.as_bytes()));
+
+        assert_eq!(
+            fs::read_to_string(root.0.join("kyoto-week.yaml")).expect("moved team"),
+            written
+        );
+        assert_eq!(
+            fs::read_to_string(root.0.join("kyoto-week.brief/style.md")).expect("moved Brief"),
+            "# Style\n"
+        );
+        assert!(root.0.join("kyoto-week.layout.json").is_file());
+        assert!(root.0.join("kyoto-week.files/chat/photo.png").is_file());
+        for gone in ["trip.yaml", "trip.layout.json", "trip.brief", "trip.files"] {
+            assert!(
+                fs::symlink_metadata(root.0.join(gone)).is_err(),
+                "{gone} is still there"
+            );
+        }
+        assert_eq!(
+            fs::read_to_string(root.0.join("other.yaml")).expect("other team"),
+            VALID_TEAM
+        );
+
+        assert_eq!(
+            rows(&db, "SELECT run_id, team_path FROM runs ORDER BY team_path").await,
+            [
+                (trip_run.clone(), "kyoto-week.yaml".to_owned()),
+                (other_run.clone(), "other.yaml".to_owned())
+            ]
+        );
+        assert_eq!(
+            runs.get(&trip_run).expect("held run").team_path,
+            "kyoto-week.yaml"
+        );
+        assert_eq!(
+            runs.get(&other_run).expect("held run").team_path,
+            "other.yaml"
+        );
+        assert_eq!(
+            rows(&db, "SELECT id, team_path FROM chat_messages ORDER BY id").await,
+            [
+                ("m1".to_owned(), "kyoto-week.yaml".to_owned()),
+                ("m2".to_owned(), "other.yaml".to_owned())
+            ]
+        );
+        let (files,): (String,) = sqlx::query_as("SELECT files FROM chat_messages WHERE id = 'm1'")
+            .fetch_one(db.reader())
+            .await
+            .expect("files");
+        let files: Value = serde_json::from_str(&files).expect("files JSON");
+        let moved_photo = canonical
+            .join("kyoto-week.files")
+            .join("chat")
+            .join("photo.png");
+        assert_eq!(files[0]["path"], json!(moved_photo));
+        assert!(moved_photo.is_file());
+        // A file a run made in the team's folder is named where it is now, in the history and in
+        // the record held for it; one made elsewhere stays as it was.
+        let made = vec![moved_photo.to_string_lossy().into_owned(), elsewhere];
+        let (stored,): (String,) = sqlx::query_as("SELECT made FROM runs WHERE run_id = $1")
+            .bind(&trip_run)
+            .fetch_one(db.reader())
+            .await
+            .expect("made");
+        assert_eq!(
+            serde_json::from_str::<Vec<String>>(&stored).expect("made JSON"),
+            made
+        );
+        assert_eq!(runs.get(&trip_run).expect("held run").made, Some(made));
+        assert_eq!(
+            rows(&db, "SELECT piece, team_path FROM work_passages").await,
+            [("m1".to_owned(), "kyoto-week.yaml".to_owned())]
+        );
+
+        assert!(approvals.is_approved("kyoto-week.yaml", &revision(written.as_bytes())));
+        assert!(!approvals.is_approved("trip.yaml", &revision(TRIP_WITH_FOLDERS.as_bytes())));
+        let listing = test_router(&root.0)
+            .oneshot(
+                Request::builder()
+                    .uri("/api/teams")
+                    .header(header::HOST, "localhost")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(
+            response_json(listing).await["files"],
+            json!(["kyoto-week.yaml", "other.yaml"])
+        );
+    }
+
+    /// A move never approves a team: one that came from outside and was never reviewed is still
+    /// waiting for its review at its new name.
+    #[tokio::test]
+    async fn rename_leaves_a_team_nobody_approved_unapproved() {
+        let root = TempDirectory::new();
+        let state = TempDirectory::new();
+        let (runs, _db, approvals) = durable_runs(&root.0, &state.0).await;
+        fs::write(root.0.join("trip.yaml"), TRIP_TEAM).expect("a team that came from outside");
+        let renamed = TRIP_TEAM.replace("name: Trip planner", "name: Kyoto week");
+        let response = rename_request(
+            router_with_runs(&root.0, runs),
+            "trip.yaml",
+            "kyoto-week",
+            &renamed,
+            Some(TRIP_TEAM),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(root.0.join("kyoto-week.yaml").is_file());
+        assert!(!approvals.is_approved("kyoto-week.yaml", &revision(renamed.as_bytes())));
+    }
+
+    /// ADR 0100: a team left in no project by deleting its project stays so after a rename, and is
+    /// never moved into a project of its own under its new name.
+    #[tokio::test]
+    async fn rename_keeps_a_team_left_in_no_project_out_of_the_move() {
+        let root = TempDirectory::new();
+        let state = TempDirectory::new();
+        crate::projects::write(
+            &root.0,
+            "sutd",
+            &crate::projects::Project {
+                name: "SUTD".into(),
+                ..crate::projects::Project::default()
+            },
+        )
+        .unwrap();
+        let team = TRIP_TEAM.replace("entrypoint: a\n", "project: sutd\nentrypoint: a\n");
+        fs::write(root.0.join("trip.yaml"), &team).expect("write team");
+        let (runs, _db, _approvals) = durable_runs(&root.0, &state.0).await;
+        crate::projects::record_moved(&state.0, &root.0).unwrap();
+        let deleted = router_with_runs(&root.0, runs.clone())
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/api/projects/sutd")
+                    .header(header::HOST, "localhost")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(deleted.status(), StatusCode::OK);
+        let now = fs::read_to_string(root.0.join("trip.yaml")).expect("read team");
+        let renamed = now.replace("name: Trip planner", "name: Kyoto week");
+        let response = rename_request(
+            router_with_runs(&root.0, runs.clone()),
+            "trip.yaml",
+            "kyoto-week",
+            &renamed,
+            Some(&now),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let status = response_json(
+            router_with_runs(&root.0, runs)
+                .oneshot(
+                    Request::builder()
+                        .uri("/api/move-into-projects")
+                        .header(header::HOST, "localhost")
+                        .body(Body::empty())
+                        .expect("request"),
+                )
+                .await
+                .expect("response"),
+        )
+        .await;
+        assert_eq!(status["teams"], json!([]), "{status}");
+    }
+
+    /// The run and the schedule's next try find the team by its path, so the file stays where it
+    /// is while either still needs it.
+    #[tokio::test]
+    async fn rename_waits_while_the_team_works_or_its_schedule_will_try_again() {
+        let root = TempDirectory::new();
+        fs::write(root.0.join("trip.yaml"), TRIP_TEAM).expect("write team");
+        let team = TeamConfig::parse(TRIP_TEAM).expect("team parses");
+        let renamed = TRIP_TEAM.replace("name: Trip planner", "name: Kyoto week");
+        let runs = crate::runs::RunRegistry::default();
+        let live = crate::runs::RunRecord::queued(
+            "trip.yaml".to_owned(),
+            "Plan a week in Kyoto".to_owned(),
+            &team,
+            crate::runs::RunTrigger::Manual,
+        )
+        .expect("run record");
+        runs.insert(live.clone());
+        let refused = rename_request(
+            router_with_runs(&root.0, runs.clone()),
+            "trip.yaml",
+            "kyoto-week",
+            &renamed,
+            Some(TRIP_TEAM),
+        )
+        .await;
+        assert_eq!(refused.status(), StatusCode::CONFLICT);
+        assert!(error_text(refused).await.contains("working right now"));
+        assert!(root.0.join("trip.yaml").is_file());
+
+        assert!(matches!(
+            runs.cancel(&live.run_id),
+            crate::runs::CancelOutcome::Cancelled(_)
+        ));
+        assert!(runs.set_next_try(&live.run_id, Some("2026-10-29T10:00:00Z".to_owned())));
+        let refused = rename_request(
+            router_with_runs(&root.0, runs.clone()),
+            "trip.yaml",
+            "kyoto-week",
+            &renamed,
+            Some(TRIP_TEAM),
+        )
+        .await;
+        assert_eq!(refused.status(), StatusCode::CONFLICT);
+        assert!(
+            error_text(refused)
+                .await
+                .contains("trying its last work again")
+        );
+        assert!(root.0.join("trip.yaml").is_file());
+
+        assert!(runs.set_next_try(&live.run_id, None));
+        // Another team's schedule waiting to try again holds only that team.
+        let mut elsewhere = crate::runs::RunRecord::queued(
+            "other.yaml".to_owned(),
+            "Write the weekly post".to_owned(),
+            &team,
+            crate::runs::RunTrigger::Schedule,
+        )
+        .expect("run record");
+        elsewhere.status = crate::runs::RunStatus::Failed;
+        elsewhere.next_try_at = Some("2026-10-29T10:00:00Z".to_owned());
+        runs.insert(elsewhere);
+        let response = rename_request(
+            router_with_runs(&root.0, runs),
+            "trip.yaml",
+            "kyoto-week",
+            &renamed,
+            Some(TRIP_TEAM),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(root.0.join("kyoto-week.yaml").is_file());
+    }
+
+    /// A taken name gets the next number. Taken means a team's file with either ending, a Brief,
+    /// layout or files left under the name, a deleted team's name, or history filed under it, held
+    /// by the daemon, kept in the database, or only a chat message: each would hand the team
+    /// another's files or past.
+    #[tokio::test]
+    async fn rename_takes_the_next_name_nothing_else_has() {
+        let root = TempDirectory::new();
+        let state = TempDirectory::new();
+        fs::write(root.0.join("trip.yaml"), TRIP_TEAM).expect("write team");
+        fs::write(root.0.join("kyoto-week.yaml"), VALID_TEAM).expect("a team with the name");
+        fs::create_dir(root.0.join("kyoto-week-2.files")).expect("files left under a name");
+        fs::write(root.0.join("kyoto-week-3.yml"), VALID_TEAM).expect("a team, the other ending");
+        fs::create_dir(root.0.join("kyoto-week-4.brief")).expect("a Brief left under a name");
+        fs::write(root.0.join("kyoto-week-5.layout.json"), "{}").expect("a layout left");
+        fs::write(root.0.join("kyoto-week-6.yaml"), VALID_TEAM).expect("a team to delete");
+        let deleted = delete_request(test_router(&root.0), "kyoto-week-6.yaml").await;
+        assert_eq!(deleted.status(), StatusCode::OK);
+        let (runs, db, _approvals) = durable_runs(&root.0, &state.0).await;
+        let team = TeamConfig::parse(VALID_TEAM).expect("team parses");
+        let held = crate::runs::RunRecord::queued(
+            "kyoto-week-7.yaml".to_owned(),
+            "Plan".to_owned(),
+            &team,
+            crate::runs::RunTrigger::Manual,
+        )
+        .expect("run record");
+        runs.insert(held);
+        let other_daemon =
+            crate::runs::RunRegistry::durable(crate::runs::RunStore::new(db.clone()));
+        finished_run(&other_daemon, "kyoto-week-8.yaml", VALID_TEAM).await;
+        sqlx::query(
+            "INSERT INTO chat_messages (id, team_key, team_path, text, created_at, route)
+             VALUES ('m9', 'path:kyoto-week-9.yaml', 'kyoto-week-9.yaml', 'Hello', '2026-10-29T00:00:00Z', 'team_note')",
+        )
+        .execute(db.writer())
+        .await
+        .expect("a chat with no work");
+
+        let renamed = TRIP_TEAM.replace("name: Trip planner", "name: Kyoto week");
+        let response = rename_request(
+            router_with_runs(&root.0, runs),
+            "trip.yaml",
+            "kyoto-week",
+            &renamed,
+            Some(TRIP_TEAM),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response_json(response).await["path"], "kyoto-week-10.yaml");
+        assert_eq!(
+            fs::read_to_string(root.0.join("kyoto-week-10.yaml")).expect("moved team"),
+            renamed
+        );
+        assert_eq!(
+            fs::read_to_string(root.0.join("kyoto-week.yaml")).expect("other team"),
+            VALID_TEAM
+        );
+    }
+
+    /// A name that differs only in capitals is the same file on a Mac: it is saved in place, on
+    /// every computer.
+    #[tokio::test]
+    async fn rename_to_the_same_name_in_other_capitals_saves_in_place() {
+        let root = TempDirectory::new();
+        fs::write(root.0.join("Trip.yaml"), TRIP_TEAM).expect("write team");
+        let renamed = TRIP_TEAM.replace("name: Trip planner", "name: Trip");
+        let response = rename_request(
+            test_router(&root.0),
+            "Trip.yaml",
+            "trip",
+            &renamed,
+            Some(TRIP_TEAM),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response_json(response).await["path"], "Trip.yaml");
+        assert_eq!(
+            fs::read_to_string(root.0.join("Trip.yaml")).expect("team"),
+            renamed
+        );
+    }
+
+    /// A team approved before its file was changed outside `LoomWatch` is not approved as it is
+    /// now: the rename carries the approval only of the text that was approved.
+    #[tokio::test]
+    async fn rename_does_not_approve_a_file_changed_since_it_was_approved() {
+        let root = TempDirectory::new();
+        let state = TempDirectory::new();
+        fs::write(root.0.join("trip.yaml"), TRIP_TEAM).expect("the team as approved");
+        let (runs, _db, approvals) = durable_runs(&root.0, &state.0).await;
+        assert!(approvals.is_approved("trip.yaml", &revision(TRIP_TEAM.as_bytes())));
+        let changed = TRIP_TEAM.replace("limitUsd: 1", "limitUsd: 50");
+        fs::write(root.0.join("trip.yaml"), &changed).expect("changed outside LoomWatch");
+        let renamed = changed.replace("name: Trip planner", "name: Kyoto week");
+        let response = rename_request(
+            router_with_runs(&root.0, runs),
+            "trip.yaml",
+            "kyoto-week",
+            &renamed,
+            Some(&changed),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(root.0.join("kyoto-week.yaml").is_file());
+        assert!(!approvals.is_approved("kyoto-week.yaml", &revision(renamed.as_bytes())));
+    }
+
+    /// When the new name's file is the one the team has, the name is saved in place.
+    #[tokio::test]
+    async fn rename_to_the_name_the_file_already_has_saves_in_place() {
+        let root = TempDirectory::new();
+        fs::write(root.0.join("trip.yaml"), TRIP_TEAM).expect("write team");
+        let renamed = TRIP_TEAM.replace("name: Trip planner", "name: Trip");
+        let response = rename_request(
+            test_router(&root.0),
+            "trip.yaml",
+            "trip",
+            &renamed,
+            Some(TRIP_TEAM),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response_json(response).await["path"], "trip.yaml");
+        assert_eq!(
+            fs::read_to_string(root.0.join("trip.yaml")).expect("team"),
+            renamed
+        );
+    }
+
+    /// The team's notes, lessons and workspace are filed by its id, so a rename that changes it is
+    /// refused, as is one of a file that changed since it was read. Nothing moves either way.
+    #[tokio::test]
+    async fn rename_refuses_a_new_id_or_a_file_that_changed() {
+        let root = TempDirectory::new();
+        fs::write(root.0.join("trip.yaml"), TRIP_TEAM).expect("write team");
+        let new_id = TRIP_TEAM
+            .replace("name: Trip planner", "name: Kyoto week")
+            .replace("id: trip", "id: kyoto-week");
+        let refused = rename_request(
+            test_router(&root.0),
+            "trip.yaml",
+            "kyoto-week",
+            &new_id,
+            Some(TRIP_TEAM),
+        )
+        .await;
+        assert_eq!(refused.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(error_text(refused).await.contains("keeps the team's id"));
+
+        let renamed = TRIP_TEAM.replace("name: Trip planner", "name: Kyoto week");
+        let stale = rename_request(
+            test_router(&root.0),
+            "trip.yaml",
+            "kyoto-week",
+            &renamed,
+            Some(VALID_TEAM),
+        )
+        .await;
+        assert_eq!(stale.status(), StatusCode::PRECONDITION_FAILED);
+        assert_eq!(
+            fs::read_to_string(root.0.join("trip.yaml")).expect("team"),
+            TRIP_TEAM
+        );
+        assert!(!root.0.join("kyoto-week.yaml").exists());
+    }
+
+    /// A team file with no `id` is filed by its file name. Rename writes that name in as its id,
+    /// and its chat, filed by its path until now, is found by the id.
+    #[tokio::test]
+    async fn rename_gives_a_team_without_an_id_the_one_it_was_filed_under() {
+        let root = TempDirectory::new();
+        let state = TempDirectory::new();
+        let plain = "schemaVersion: 1\nname: Notes\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: opencode\n      cwd: .\n    model: test/model\n";
+        fs::write(root.0.join("notes.yaml"), plain).expect("write team");
+        let (runs, db, _approvals) = durable_runs(&root.0, &state.0).await;
+        let run = finished_run(&runs, "notes.yaml", plain).await;
+        // Runs from before the key was kept: an empty key held and stored, and one stored as NULL.
+        let team = TeamConfig::parse(plain).expect("team parses");
+        let mut keyless = crate::runs::RunRecord::queued(
+            "notes.yaml".to_owned(),
+            "Sum up the meeting".to_owned(),
+            &team,
+            crate::runs::RunTrigger::Manual,
+        )
+        .expect("run record");
+        keyless.status = crate::runs::RunStatus::Succeeded;
+        keyless.team_key = String::new();
+        let keyless_run = keyless.run_id.clone();
+        runs.insert(keyless);
+        runs.persist(&keyless_run).await.expect("run kept");
+        let other_daemon =
+            crate::runs::RunRegistry::durable(crate::runs::RunStore::new(db.clone()));
+        let stored_run = finished_run(&other_daemon, "notes.yaml", plain).await;
+        sqlx::query("UPDATE runs SET team_key = NULL WHERE run_id = $1")
+            .bind(&stored_run)
+            .execute(db.writer())
+            .await
+            .expect("a run stored with no key");
+        sqlx::query(
+            "INSERT INTO chat_messages (id, team_key, team_path, text, created_at, route)
+             VALUES ('m1', 'path:notes.yaml', 'notes.yaml', 'Hello', '2026-10-29T00:00:00Z', 'team_note')",
+        )
+        .execute(db.writer())
+        .await
+        .expect("chat row");
+        sqlx::query(
+            "INSERT INTO work_passages (piece, kind, team_key, team_path, piece_at, target, who, said_at, part, text)
+             VALUES ('m1', 'note', 'path:notes.yaml', 'notes.yaml', '2026-10-29T00:00:00Z', 'request', NULL, '2026-10-29T00:00:00Z', 0, 'Hello')",
+        )
+        .execute(db.writer())
+        .await
+        .expect("search row");
+        sqlx::query(
+            "INSERT INTO chat_reactions (team_key, anchor, target, face, created_at)
+             VALUES ('path:notes.yaml', 'r1', 'answer', 'thumbs-up', '2026-10-29T00:00:00Z')",
+        )
+        .execute(db.writer())
+        .await
+        .expect("reaction");
+
+        let without = plain.replace("name: Notes", "name: Meeting notes");
+        let refused = rename_request(
+            router_with_runs(&root.0, runs.clone()),
+            "notes.yaml",
+            "meeting-notes",
+            &without,
+            Some(plain),
+        )
+        .await;
+        assert_eq!(refused.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+        let with_id = without.replace("schemaVersion: 1\n", "schemaVersion: 1\nid: notes\n");
+        let response = rename_request(
+            router_with_runs(&root.0, runs.clone()),
+            "notes.yaml",
+            "meeting-notes",
+            &with_id,
+            Some(plain),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            rows(&db, "SELECT team_key, team_path FROM chat_messages").await,
+            [("notes".to_owned(), "meeting-notes.yaml".to_owned())]
+        );
+        assert_eq!(
+            rows(&db, "SELECT DISTINCT team_key, team_path FROM runs").await,
+            [("notes".to_owned(), "meeting-notes.yaml".to_owned())]
+        );
+        assert_eq!(runs.get(&run).expect("held run").team_key, "notes");
+        assert_eq!(runs.get(&keyless_run).expect("held run").team_key, "notes");
+        assert_eq!(
+            rows(&db, "SELECT team_key, team_path FROM work_passages").await,
+            [("notes".to_owned(), "meeting-notes.yaml".to_owned())]
+        );
+        assert_eq!(
+            rows(&db, "SELECT team_key, anchor FROM chat_reactions").await,
+            [("notes".to_owned(), "r1".to_owned())]
+        );
+    }
+
+    /// `trip.yaml` and `trip.yml` side by side share `trip.brief/` and the rest, so one can't take
+    /// them to a new name without the other.
+    #[tokio::test]
+    async fn rename_leaves_a_team_whose_folders_another_file_shares() {
+        let root = TempDirectory::new();
+        fs::write(root.0.join("trip.yaml"), TRIP_TEAM).expect("write team");
+        fs::write(root.0.join("trip.yml"), VALID_TEAM).expect("write its namesake");
+        let renamed = TRIP_TEAM.replace("name: Trip planner", "name: Kyoto week");
+        let refused = rename_request(
+            test_router(&root.0),
+            "trip.yaml",
+            "kyoto-week",
+            &renamed,
+            Some(TRIP_TEAM),
+        )
+        .await;
+        assert_eq!(refused.status(), StatusCode::CONFLICT);
+        assert!(error_text(refused).await.contains("trip.yml"));
+        assert_eq!(
+            fs::read_to_string(root.0.join("trip.yaml")).expect("team"),
+            TRIP_TEAM
+        );
+        assert!(!root.0.join("kyoto-week.yaml").exists());
+
+        let other = VALID_TEAM.replace(
+            "schemaVersion: 1\n",
+            "schemaVersion: 1\nid: trip\nname: Other\n",
+        );
+        fs::write(root.0.join("trip.yml"), &other).expect("rewrite its namesake");
+        let refused = rename_request(
+            test_router(&root.0),
+            "trip.yml",
+            "kyoto-week",
+            &other.replace("name: Other", "name: Kyoto week"),
+            Some(&other),
+        )
+        .await;
+        assert_eq!(refused.status(), StatusCode::CONFLICT);
+        assert!(error_text(refused).await.contains("trip.yaml"));
+        assert!(root.0.join("trip.yml").is_file());
+    }
+
+    /// When the history cannot be filed under the new name, the files go back where they were, so
+    /// the team never ends up with its file in one place and its past in another.
+    #[tokio::test]
+    async fn rename_puts_the_files_back_when_the_history_cannot_move() {
+        let root = TempDirectory::new();
+        let state = TempDirectory::new();
+        fs::write(root.0.join("trip.yaml"), TRIP_WITH_FOLDERS).expect("write team");
+        fs::create_dir(root.0.join("trip.brief")).expect("Brief folder");
+        fs::write(root.0.join("trip.brief/style.md"), "# Style\n").expect("Brief note");
+        let (runs, db, _approvals) = durable_runs(&root.0, &state.0).await;
+        let run = finished_run(&runs, "trip.yaml", TRIP_WITH_FOLDERS).await;
+        sqlx::query("DROP TABLE chat_reactions")
+            .execute(db.writer())
+            .await
+            .expect("break the history");
+
+        let renamed = TRIP_WITH_FOLDERS.replace("name: Trip planner", "name: Kyoto week");
+        let response = rename_request(
+            router_with_runs(&root.0, runs.clone()),
+            "trip.yaml",
+            "kyoto-week",
+            &renamed,
+            Some(TRIP_WITH_FOLDERS),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            fs::read_to_string(root.0.join("trip.yaml")).expect("team back"),
+            TRIP_WITH_FOLDERS
+        );
+        assert!(root.0.join("trip.brief/style.md").is_file());
+        assert!(!root.0.join("kyoto-week.yaml").exists());
+        assert!(!root.0.join("kyoto-week.brief").exists());
+        assert_eq!(
+            rows(&db, "SELECT run_id, team_path FROM runs").await,
+            [(run.clone(), "trip.yaml".to_owned())]
+        );
+        assert_eq!(runs.get(&run).expect("held run").team_path, "trip.yaml");
     }
 }

@@ -104,7 +104,7 @@ describe('moving between teams in place', () => {
     const page = renderHook(() => useTeamPage())
     const doc = renderHook(() => useTeamDocument())
     await waitFor(() => expect(doc.result.current.saveState).toBe('clean'))
-    act(() => doc.result.current.renameTeam('Demo (draft)'))
+    act(() => doc.result.current.renameAgent('planner', 'name', 'Planner (draft)'))
     act(() => goToTeam('/?path=trip.yaml'))
     expect(assign).toHaveBeenCalledWith('/?path=trip.yaml')
     expect(page.result.current.key).toBe(0)

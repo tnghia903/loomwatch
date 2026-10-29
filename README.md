@@ -1145,6 +1145,18 @@ move it into another project or delete it. The project's file, with its About an
 </details>
 
 <details>
+<summary>Renaming a team</summary>
+
+To rename a team, click its name at the top of its page and choose **Rename**. Its file takes the
+new name too: a team renamed "Kyoto week" is saved as `kyoto-week.yaml` in the same folder, or as
+`kyoto-week-2.yaml` when another team, or a deleted one, has that name. Its notes folder
+(`<team>.brief`), its layout and the files added to it (`<team>.files`) move with it, and its run
+history, chat and Notebook notes stay with it. Save or discard your changes first. LoomWatch waits
+while the team is working, or while its schedule is about to try its last work again.
+
+</details>
+
+<details>
 <summary>Reusing an agent with My agents</summary>
 
 Build an agent in **My agents** (☰ menu). It appears under **My agents** in

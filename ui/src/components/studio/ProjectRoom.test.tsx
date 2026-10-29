@@ -286,6 +286,32 @@ describe('a project’s room (ADR 0097)', () => {
       expect(chip).toHaveFocus()
     })
 
+    it('draws its own agents and whose its dollars were, and who did its last work', async () => {
+      twoTeams([record({ runId: 'done', teamPath: 'sutd/blog.yaml', responder: 'writer', prompt: 'Write the launch post.' })])
+      const tally = (costUsd: number) => ({ calls: 1, inputTokens: 0, cachedTokens: 0, outputTokens: 0, costUsd, costEstimated: false })
+      const usage = {
+        since: '2026-10-01', days: [], sources: [{ source: 'openrouter', total: tally(1.5) }],
+        agents: [
+          { ...tally(0.5), team: 'Blog', ask: false, agentId: 'writer', agentName: 'Writer', source: 'openrouter', runs: 1 },
+          { ...tally(1), team: 'Another project’s team', ask: false, agentId: 'scout', agentName: 'Scout', source: 'openrouter', runs: 1 },
+        ],
+      }
+      const room = fetchMock.getMockImplementation() as (url: string, init?: RequestInit) => Promise<Response>
+      fetchMock.mockImplementation((url: string, init?: RequestInit) => (url.startsWith('/api/usage') ? respond(usage) : room(url, init)))
+      render(<ProjectRoom id="sutd" />)
+      expect(await screen.findByRole('region', { name: /^Last finished/ })).toHaveTextContent('Writer answered · Blog')
+      // Nobody works: this room's agents, not every team's.
+      const working = screen.getByRole('region', { name: 'Working now' })
+      expect(within(working).getAllByRole('img').map((img) => img.getAttribute('alt')).sort()).toEqual(['Researcher', 'Writer'])
+      // Its dollars, and only its own agents' parts of them.
+      const month = screen.getByRole('region', { name: 'This month' })
+      const spent = await within(month).findByRole('list', { name: 'Who spent it' })
+      expect(within(spent).getAllByRole('img').map((img) => img.getAttribute('alt'))).toEqual(['Writer'])
+      expect(spent).toHaveTextContent('$0.5')
+      // One part says nothing its figure doesn't: no bar.
+      expect(month.querySelector('.glance-split')).toBeNull()
+    })
+
     it('says who is working, what runs next and what this month cost', async () => {
       twoTeams(
         [record({ runId: 'a', teamPath: 'sutd/blog.yaml', status: 'running', finishedAt: null, working: ['writer'], startedAt: new Date().toISOString(), responder: 'writer' }), record({ runId: 'b', spend: { spentUsd: 0.4 } }), record({ runId: 'c', spend: { spentUsd: 0.12 } })],
