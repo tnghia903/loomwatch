@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 
 import { DocumentSwitcher, type DocumentSwitcherProps } from './DocumentSwitcher'
@@ -18,8 +18,8 @@ function renderSwitcher(overrides: Partial<DocumentSwitcherProps> = {}) {
 }
 
 // There was no way to rename a team short of editing its YAML.
-it('renames the open team from its menu', () => {
-  const onRename = vi.fn()
+it('renames the open team from its menu', async () => {
+  const onRename = vi.fn(async () => null)
   renderSwitcher({ onRename })
   fireEvent.click(screen.getByRole('button', { name: /open team menu/ }))
   fireEvent.click(screen.getByRole('button', { name: 'Rename' }))
@@ -29,7 +29,51 @@ it('renames the open team from its menu', () => {
   fireEvent.change(field, { target: { value: 'Japan trip' } })
   fireEvent.click(within(form).getByRole('button', { name: 'Rename' }))
   expect(onRename).toHaveBeenCalledWith('Japan trip')
-  expect(screen.queryByRole('form', { name: 'Rename team' })).not.toBeInTheDocument()
+  await waitFor(() => expect(screen.queryByRole('form', { name: 'Rename team' })).not.toBeInTheDocument())
+})
+
+// ADR 0099: the file moves with the name, so a refusal (the team is working, say) is said where
+// the name was typed, and the name stays there to try again.
+it('says why a rename was refused and keeps the new name to try again', async () => {
+  const onRename = vi.fn(async () => 'This team is working right now. Stop the work or wait for it to finish, then rename the team.')
+  renderSwitcher({ onRename })
+  fireEvent.click(screen.getByRole('button', { name: /open team menu/ }))
+  fireEvent.click(screen.getByRole('button', { name: 'Rename' }))
+  const form = screen.getByRole('form', { name: 'Rename team' })
+  fireEvent.change(within(form).getByLabelText('Team name'), { target: { value: 'Japan trip' } })
+  fireEvent.click(within(form).getByRole('button', { name: 'Rename' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent('This team is working right now.')
+  const field = within(screen.getByRole('form', { name: 'Rename team' })).getByLabelText('Team name')
+  expect(field).toHaveValue('Japan trip')
+  expect(field).toHaveAccessibleDescription(/This team is working right now\./)
+  expect(field).toBeInvalid()
+})
+
+// The file moves while the button waits, so a second press can't start a second move.
+it('keeps Rename pressed until the file has moved', async () => {
+  let moved: (refused: string | null) => void = () => {}
+  const onRename = vi.fn(() => new Promise<string | null>((resolve) => { moved = resolve }))
+  renderSwitcher({ onRename })
+  fireEvent.click(screen.getByRole('button', { name: /open team menu/ }))
+  fireEvent.click(screen.getByRole('button', { name: 'Rename' }))
+  const form = screen.getByRole('form', { name: 'Rename team' })
+  fireEvent.change(within(form).getByLabelText('Team name'), { target: { value: 'Japan trip' } })
+  fireEvent.click(within(form).getByRole('button', { name: 'Rename' }))
+  expect(within(form).getByRole('button', { name: 'Rename' })).toBeDisabled()
+  moved(null)
+  await waitFor(() => expect(screen.queryByRole('form', { name: 'Rename team' })).not.toBeInTheDocument())
+})
+
+// A saved team's file moves at once, so changes not saved come first; a team never saved has no
+// file yet and can be renamed with its changes.
+it('waits for changes to be saved before renaming a saved team', () => {
+  renderSwitcher({ onRename: vi.fn(), saveState: 'dirty' })
+  fireEvent.click(screen.getByRole('button', { name: /open team menu/ }))
+  expect(screen.getByRole('button', { name: 'Rename' })).toBeDisabled()
+  cleanup()
+  renderSwitcher({ onRename: vi.fn(), saveState: 'new' })
+  fireEvent.click(screen.getByRole('button', { name: /open team menu/ }))
+  expect(screen.getByRole('button', { name: 'Rename' })).toBeEnabled()
 })
 
 it('offers no rename where the team cannot be edited', () => {

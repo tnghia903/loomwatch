@@ -217,6 +217,41 @@ impl TeamApprovals {
         })
     }
 
+    /// Carry the approval of the team file at `from` to `to`, where Rename moved it. When `was`,
+    /// the revision it had, was the approved one, `now` (its text with the new name) is approved
+    /// the same way, as a save in the editor would be. Otherwise the team stays unapproved: a move
+    /// never approves a team. Whatever `to` held before, from a team that once had that name, goes.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the record cannot be written; nothing changes then.
+    pub fn move_team(&self, from: &str, to: &str, was: &str, now_revision: &str) -> io::Result<()> {
+        let mut record = self.record.lock().unwrap_or_else(PoisonError::into_inner);
+        let earlier = record.teams.remove(from);
+        let displaced = record.teams.remove(to);
+        if let Some(approved) = &earlier {
+            let carried = if approved.revision == was {
+                Approved {
+                    revision: now_revision.to_owned(),
+                    how: approved.how,
+                    at: now(),
+                }
+            } else {
+                approved.clone()
+            };
+            record.teams.insert(to.to_owned(), carried);
+        }
+        write_record(&self.path, &record).inspect_err(|_| {
+            record.teams.remove(to);
+            if let Some(earlier) = earlier {
+                record.teams.insert(from.to_owned(), earlier);
+            }
+            if let Some(displaced) = displaced {
+                record.teams.insert(to.to_owned(), displaced);
+            }
+        })
+    }
+
     /// Where the record is kept.
     #[must_use]
     pub fn path(&self) -> &Path {

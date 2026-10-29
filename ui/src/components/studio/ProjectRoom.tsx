@@ -5,7 +5,7 @@ import { FileReaderContext, type FileToRead } from '../../lib/files/reader'
 import { figureFor, type FigureChoice } from '../../lib/library/figures'
 import { fetchJobs, saveJob, type SavedJob } from '../../lib/library/jobs'
 import { addProjectNote, NOTE_CHARS, ABOUT_CHARS, projectsChanged, saveProject, useProjects, type Project, type ProjectEntry } from '../../lib/projects/client'
-import { lastFinished, madeHere, monthCost, monthSpend, needsYou, nextWork, workingNow, type MadeFile } from '../../lib/projects/glance'
+import { crewOf, doneByOf, lastFinished, madeHere, monthCost, monthSpend, monthSpenders, needsYou, nextWork, workingNow, type MadeFile } from '../../lib/projects/glance'
 import { useMonthUsage } from '../../lib/projects/useMonthUsage'
 import { approveRun, loadDismissed } from '../../lib/story/useNeedsYou'
 import { inOpenedOrder, roomsOf } from '../../lib/projects/studio'
@@ -327,9 +327,12 @@ export function ProjectRoom({ id }: { id: string }) {
               needs={needs}
               last={lastFinished(all, root, scope)}
               working={working}
+              crew={crewOf(room?.teams ?? [])}
               next={nextWork(schedules ?? [], root, scope)}
               spend={monthSpend(all, root, scope)}
               cost={monthCost(usage, teams.map((team) => team.name))}
+              spenders={monthSpenders(usage, teams.map((team) => team.name), shown, jobs)}
+              doneBy={doneByOf(shown, root)}
               figureOf={figureOf}
               onApprove={(item) => approveRun(item.runId).then((done) => { if (done) readRuns(); else openRun(item); return done })}
               onReview={openRun}

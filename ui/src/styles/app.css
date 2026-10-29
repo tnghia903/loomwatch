@@ -773,6 +773,8 @@ button.thread-node:hover svg, button.thread-node:focus-visible svg { color: var(
 .pop-foot .path { color: var(--color-ink-3); overflow-wrap: anywhere; }
 .pop-foot .acts { display: flex; flex-wrap: wrap; gap: var(--sp-4); }
 .pop-note { color: var(--color-ink-3); }
+/* Why a rename was refused: the message the menu is showing, so it reads above the path and note. */
+.pop-foot .pop-refused { margin: 0; color: var(--color-ink); }
 .pop-empty { padding: var(--sp-3) var(--sp-4); color: var(--color-ink-3); }
 .pop-inline { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); color: var(--color-ink-2); }
 .pop-inline .btn { height: 24px; }

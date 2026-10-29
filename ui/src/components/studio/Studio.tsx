@@ -5,7 +5,7 @@ import { FileReaderContext, type FileToRead } from '../../lib/files/reader'
 import { figureFor, type FigureChoice } from '../../lib/library/figures'
 import type { SavedJob } from '../../lib/library/jobs'
 import { useProjects, type ProjectEntry } from '../../lib/projects/client'
-import { costWords, finishedToday, lastFinished, madeHere, monthCost, monthSpend, needsYou, workingNow } from '../../lib/projects/glance'
+import { costWords, doneByOf, crewOf, finishedToday, lastFinished, madeHere, monthCost, monthSpend, monthSpenders, needsYou, workingNow } from '../../lib/projects/glance'
 import { roomsOf, studioLayout, type Room } from '../../lib/projects/studio'
 import { useMonthUsage } from '../../lib/projects/useMonthUsage'
 import { approveRun, loadDismissed } from '../../lib/story/useNeedsYou'
@@ -134,6 +134,9 @@ export function Studio({ runs, onSetUp, setUpUnavailable, asking = false, part =
   // By the bell's rules, so the two always count alike: the failures dismissed there left out.
   const needs = useMemo(() => needsYou(runs, teamShapes, root, null, loadDismissed()), [runs, teamShapes, root])
   const working = useMemo(() => workingNow(runs, teamShapes, root), [runs, teamShapes, root])
+  const doneBy = useMemo(() => doneByOf(teamShapes, root), [teamShapes, root])
+  // The agents in the projects Home shows, each once, as each is now.
+  const crew = useMemo(() => crewOf((rooms ?? []).filter((room) => !room.putAway).flatMap((room) => room.teams)), [rooms])
   const made = useMemo(() => madeHere(runs, root), [runs, root])
   const usage = useMonthUsage()
   const [reading, setReading] = useState<FileToRead | null>(null)
@@ -218,9 +221,12 @@ export function Studio({ runs, onSetUp, setUpUnavailable, asking = false, part =
           needs={needs}
           last={lastFinished(runs, root)}
           working={working}
+          crew={crew}
           finishedToday={finishedToday(runs, root)}
           spend={monthSpend(runs, root)}
           cost={monthCost(usage, null)}
+          spenders={monthSpenders(usage, null, teamShapes, jobs)}
+          doneBy={doneBy}
           figureOf={figureOf}
           // Approve is one press here; reading the work first opens the bell's tray at that item,
           // where each thing waiting is answered in turn (ADR 0043); "Show N more" opens it at the first.
