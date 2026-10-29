@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { cascaded } from '../../test/cascade'
 import { ProjectRoom } from './ProjectRoom'
 
 let fetchMock: ReturnType<typeof vi.fn>
@@ -307,11 +308,20 @@ describe('a project’s room (ADR 0097)', () => {
         record({ runId: 'old', finishedAt: '2026-10-27T09:00:00Z', made: ['/teams/sources.csv', '/teams/build.py'] }),
         record({ runId: 'new', teamPath: 'sutd/blog.yaml', responder: 'writer', finishedAt: '2026-10-28T09:00:00Z', made: ['/teams/launch post.md'] }),
       ])
+      fetchMock.mockImplementation(((next) => (url: string, init?: RequestInit) => {
+        if (!url.startsWith('/api/files/stat')) return next(url, init)
+        const path = new URL(url, 'http://x').searchParams.get('path')!
+        return respond({ path, name: path.split('/').at(-1), exists: true, isDir: false, sizeBytes: 12, modifiedAt: null, kind: 'document', folder: '/teams', openable: true })
+      })(fetchMock.getMockImplementation() as typeof daemon))
       render(<ProjectRoom id="sutd" />)
       const made = await screen.findByRole('region', { name: 'Made here' })
       const names = () => [...made.querySelectorAll('.file-chip-name')].map((name) => name.textContent)
       // Code isn't something made to read: it stays in the chat.
       expect(names()).toEqual(['launch post.md', 'sources.csv'])
+      // In a list a file is a plain card: its kind a hairline, not the gold line of a file an answer names.
+      const chip = made.querySelector('.file-chip')!
+      await waitFor(() => expect(chip).not.toHaveClass('muted'))
+      expect(cascaded(chip.querySelector('.file-chip-ext')!, 'box-shadow')).toBe('inset 0 0 0 1px var(--color-hairline)')
       fireEvent.click(within(made).getByRole('button', { name: 'Research and design' }))
       expect(names()).toEqual(['sources.csv'])
       expect(within(made).getByRole('button', { name: 'Research and design' })).toHaveAttribute('aria-pressed', 'true')

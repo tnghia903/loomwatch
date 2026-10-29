@@ -668,7 +668,7 @@ span.story-schedule { cursor: default; }
 
 .file-sheet {
   position: relative; flex: none; width: 60px; height: 76px; border-radius: 4px 14px 4px 4px;
-  background: var(--color-paper); color: var(--color-accent);
+  background: var(--color-paper); color: var(--color-paper-gold);
   box-shadow: 0 1px 0 var(--color-hairline), 0 6px 16px color-mix(in srgb, var(--color-black) 22%, transparent);
   transform: rotate(-2.5deg); transition: transform .18s ease;
 }
@@ -677,15 +677,17 @@ span.story-schedule { cursor: default; }
   background: linear-gradient(225deg, transparent 50%, var(--color-paper-rule) 50%);
 }
 .file-card.ready:hover .file-sheet { transform: rotate(0deg) translateY(-2px); }
-.file-sheet-icon { position: absolute; top: 9px; left: 8px; display: inline-flex; color: var(--color-accent-fill); }
+.file-sheet-icon { position: absolute; top: 9px; left: 8px; display: inline-flex; color: var(--color-paper-gold); }
 .file-sheet-rules { position: absolute; top: 29px; left: 8px; right: 9px; display: flex; flex-direction: column; gap: 5px; }
 .file-sheet-rules i { display: block; height: 2.5px; border-radius: 2px; background: var(--color-paper-rule); }
 .file-sheet-rules i:nth-child(2) { width: 82%; }
 .file-sheet-rules i:nth-child(4) { width: 58%; }
+/* A paper label, not a gold fill: every file card has one, and the screen's one fill is for what to
+   do now. */
 .file-sheet-ext {
   position: absolute; left: -5px; bottom: 8px; padding: 2px 6px; border-radius: 3px;
-  background: var(--color-accent-fill); color: var(--color-accent-on-fill);
-  font: 700 9.5px/1.2 var(--font-mono); letter-spacing: .06em;
+  background: var(--color-paper); box-shadow: inset 0 0 0 1px var(--color-paper-gold); color: var(--color-paper-ink);
+  font: 500 9.5px/1.2 var(--font-mono); letter-spacing: .06em;
 }
 .file-card.muted .file-sheet { filter: grayscale(1); opacity: .55; box-shadow: none; }
 
@@ -759,9 +761,12 @@ span.story-schedule { cursor: default; }
 }
 .file-chip svg { flex: none; color: var(--color-accent); }
 .file-chip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Its kind is a line, never a fill: an answer names many files, and a gold fill on each would leave
+   no one fill for the thing to do now (DESIGN_LANGUAGE §8). */
 .file-chip-ext {
-  flex: none; padding: 1px 5px; border-radius: 4px; background: var(--color-accent-fill); color: var(--color-accent-on-fill);
-  font: 700 0.72em/1.4 var(--font-mono); letter-spacing: .05em;
+  flex: none; padding: 1px 5px; border-radius: 4px; background: none;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 40%, var(--color-hairline));
+  color: var(--color-ink-2); font: 500 max(10px, 0.72em)/1.4 var(--font-mono); letter-spacing: .05em;
 }
 .file-chip:hover:not(:disabled) { border-color: var(--color-accent); background: color-mix(in srgb, var(--color-accent-fill) 22%, var(--color-accent-tint)); }
 .file-chip:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
@@ -794,6 +799,6 @@ span.story-schedule { cursor: default; }
 .file-chip:disabled { cursor: default; }
 .file-chip.muted { border-color: var(--color-hairline); background: transparent; color: var(--color-ink-3); }
 .file-chip.muted svg { color: var(--color-ink-3); }
-.file-chip.muted .file-chip-ext { background: var(--color-hairline); color: var(--color-ink-3); }
+.file-chip.muted .file-chip-ext { box-shadow: inset 0 0 0 1px var(--color-hairline); color: var(--color-ink-3); }
 .file-chip-said { margin-left: 6px; font-size: 0.86em; color: var(--color-ink-3); }
 .file-chip-said:empty { display: none; }
