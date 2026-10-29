@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { parse } from 'yaml'
 
 import { fetchTeamFile, fetchTeamsDiscovery, teamDisplayName, teamPathUnderRoot, teamSummaries } from '../team-file/client'
+import { TeamFileModel } from '../team-file/document'
+import { takeAgentOff } from '../team-file/takeOff'
 import type { AgentConfig, TeamDocument } from '../team-file/types'
 import { JOBS_CHANGED_EVENT } from './jobs'
 import type { LibrarySource } from './types'
@@ -16,6 +18,17 @@ export interface AgentUse {
   agentName: string
   /** The team runs on a schedule, where anything it would ask you is declined. */
   scheduled: boolean
+  /** What taking it off this team does beyond closing its place in the line (ADR 0100): only an
+      agent that starts the team changes more. */
+  takeOff?: { startsInstead?: TeamCard; withoutCheck?: boolean; empty?: boolean; chooseStart?: TeamCard[] }
+}
+
+/** An agent card in a team, as a person is told about it: its name in the team file, or the one of
+    My agents it is (`agent`), whose name is in My agents. */
+export interface TeamCard {
+  id: string
+  name: string
+  agent?: string
 }
 
 /**
@@ -76,10 +89,17 @@ export async function findTeamAgents(): Promise<{ uses: AgentUse[]; own: TeamOwn
     try { doc = parse(file.yaml) as Partial<TeamDocument> } catch { continue }
     const scheduled = Boolean(doc?.schedule?.cron) && doc?.schedule?.enabled !== false
     const teamName = doc?.name?.trim() || teamDisplayName(team)
+    const cardsById = new Map((doc?.agents ?? []).map((agent) => [agent?.id, agent]))
     for (const agent of doc?.agents ?? []) {
       if (!agent?.id || agent.kind === 'operator') continue
       if (agent.from?.agent) {
-        uses.push({ agent: agent.from.agent, teamPath: team.path, teamName, agentId: agent.id, agentName: agent.name?.trim() || agent.from.agent, scheduled })
+        let takeOff: AgentUse['takeOff']
+        if (doc?.entrypoint === agent.id) {
+          const outcome = takeAgentOff(TeamFileModel.parse(file.yaml), [agent.id])
+          const card = (id: string): TeamCard => { const found = cardsById.get(id); return { id, name: found?.name?.trim() || id, ...(found?.from?.agent ? { agent: found.from.agent } : {}) } }
+          takeOff = { ...(outcome.startsInstead ? { startsInstead: card(outcome.startsInstead) } : {}), ...(outcome.stopsGone.length ? { withoutCheck: true } : {}), ...(outcome.empty ? { empty: true } : {}), ...(outcome.chooseStart ? { chooseStart: outcome.chooseStart.map(card) } : {}) }
+        }
+        uses.push({ agent: agent.from.agent, teamPath: team.path, teamName, agentId: agent.id, agentName: agent.name?.trim() || agent.from.agent, scheduled, ...(takeOff ? { takeOff } : {}) })
       } else {
         own.push({ teamPath: team.path, teamName, agentId: agent.id, agentName: agent.name?.trim() || agent.id, agent })
       }

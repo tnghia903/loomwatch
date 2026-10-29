@@ -1100,6 +1100,7 @@ host paths such as `/Users/name/project` do not exist inside the Linux container
 | Team definitions and canvas layouts | `~/LoomWatch/teams`; Compose-only deployments use `LOOMWATCH_TEAMS_DIR` |
 | Brief files | Paths configured by the team, usually beside its YAML file |
 | Deleted teams | `.trash` inside your teams folder, one folder per deleted team |
+| Projects | `.projects` inside your teams folder, one `<project>.yaml` each. Deleted projects move to `.projects/.removed`; their teams stay, in no project |
 | My agents | `.jobs` inside your teams folder, one `<agent>.yaml` per agent. Removed agents move to `.jobs/.removed`, and the one-agent teams that an agent's **Chat** runs are in `.jobs/.bench`. Earlier versions an older LoomWatch kept are left in `.jobs/.versions/<agent>/` |
 | Files you add to an agent (**File** under **Given**) | `<team>.files/` beside the team file |
 | Agents' working folders, and Ask's | `.loomwatch/` inside your teams folder |
@@ -1120,7 +1121,7 @@ Windows, the program is `%LOCALAPPDATA%\Programs\LoomWatch\bin\loomwatchd.exe`).
 > `loomwatch-home` volume, including the run history and Notebook entries.
 
 <details>
-<summary>Deleting and restoring a team</summary>
+<summary>Deleting and restoring a team or a project</summary>
 
 To delete a team, open it from its project's room, click its name at the top and choose **Delete
 team…**.
@@ -1133,6 +1134,13 @@ in the trash. To restore it, move everything in that folder except `deleted.json
 folder where `path` in `deleted.json` says the team file was. `<team>.files` must go back too, or
 its agents lose the files added to them. In Finder, press <kbd>⌘</kbd><kbd>⇧</kbd><kbd>.</kbd> to show hidden folders. To remove a team for good,
 delete its folder from `.trash`.
+
+To delete a project, open the **⋯** on its card on Home, or in its room, and choose **Delete
+project…**. Its teams stay on Home as cards of their own: only the `project:` line leaves each
+team's file, and your own folders stay where they are. A team's card then has its own **⋯**, to
+move it into another project or delete it. The project's file, with its About and notes, moves to
+`.projects/.removed` inside your teams folder. To bring a project back, move its file from
+`.projects/.removed` back into `.projects`; its teams don't go back into it with it.
 
 </details>
 
@@ -1153,8 +1161,14 @@ An agent you add to a team from a ready-made team, or build in a team, joins My 
 save the team: one with exactly the same setup as an agent already there joins that one, and one
 whose name is taken gets its team's name after it, as in **Writer · Market brief**.
 
-To remove an agent from My agents, take it off the teams that use it first. An agent is one small
-file, so you can share it by copying it into another teams folder's `.jobs`. An agent file that
+To remove an agent from My agents, open the **⋯** on its card in My agents, or its name at the top
+of its page, and choose **Remove from My agents…**. It comes off the teams that use it in the same
+step, and each team closes up around it: whoever handed it work hands that work to the agent after
+it, and when it started a team, the agent after it starts. A review stop that only checked its work
+goes with it, and a team left with no agent is deleted, as **Delete team…** deletes one. The
+confirmation names each team and what changes there, and when it started a team and handed work to
+more than one agent, it asks you which of them starts instead. Removed agents move to
+`.jobs/.removed`. An agent is one small file, so you can share it by copying it into another teams folder's `.jobs`. An agent file that
 appears there, or changes there, outside LoomWatch is shown for your review before a team that
 uses it runs, as a team file is.
 

@@ -224,7 +224,8 @@
 .lw-deleteteam p { margin: 0; font-size: 14px; line-height: 1.5; color: var(--color-ink-2); overflow-wrap: anywhere; }
 .lw-deleteteam .dt-alert { color: var(--color-alert); }
 .lw-deleteteam .dt-acts { display: flex; justify-content: flex-end; gap: var(--sp-2); margin-top: var(--sp-2); }
-.lw-deleteteam .btn-danger-fill { background: var(--color-alert); color: var(--color-white); border-color: transparent; }
+.lw-deleteteam .btn-danger-fill { background: var(--color-alert-fill); color: var(--color-alert-on-fill); border-color: transparent; }
+.lw-deleteteam form { display: flex; flex-direction: column; gap: var(--sp-3); }
 .lw-deleteteam .btn-danger-fill:disabled { opacity: .45; cursor: not-allowed; }
 /* ADR 0048: what a team from outside LoomWatch runs, before its first run. */
 .lw-teamreview { width: min(560px, calc(100vw - 32px)); }
@@ -238,3 +239,7 @@
 .lw-teamreview code { font-size: 12.5px; overflow-wrap: anywhere; }
 /* The switcher's footer links, "Delete team…" included, read as unavailable when they are. */
 .pop-foot .link:disabled { color: var(--color-ink-3); cursor: not-allowed; text-decoration: none; }
+/* Removing one of My agents (ADR 0100): who starts a team it started, when several could. */
+.lw-deleteteam .ra-choose { display: flex; flex-direction: column; gap: var(--sp-2); }
+.lw-deleteteam .ra-choices { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.lw-deleteteam .ra-choices .btn[aria-pressed="true"] { border-color: var(--color-accent); box-shadow: inset 0 0 0 1px var(--color-accent); }

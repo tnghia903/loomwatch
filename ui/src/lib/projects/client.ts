@@ -47,6 +47,8 @@ export interface ProjectList {
   loose: string[]
   /** Teams that name a project with no file. */
   missing: string[]
+  /** Deleted projects' ids, which a new project never takes: their notebooks are kept under them. */
+  removed: string[]
 }
 
 /** The schema's limits, as the daemon holds them (`projects::ABOUT_CHARS`, `NOTE_CHARS`). */
@@ -63,6 +65,12 @@ async function failure(response: Response): Promise<Error> {
   }
 }
 
+/** The project without the fields the list adds, as `PUT /api/projects/{id}` takes it. */
+export function projectFile(project: ProjectEntry): Project {
+  const { id: _id, teams: _teams, ...file } = project
+  return file
+}
+
 /** Every project with its teams, or `null` from a LoomWatch before projects. */
 export async function fetchProjects(): Promise<ProjectList | null> {
   const response = await daemonFetch('/api/projects', { cache: 'no-store' })
@@ -70,7 +78,19 @@ export async function fetchProjects(): Promise<ProjectList | null> {
   if (!response.ok) throw await failure(response)
   const body = (await response.json()) as Partial<ProjectList>
   // Anything but a list of projects is a LoomWatch from before them.
-  return Array.isArray(body.projects) ? { projects: body.projects, loose: body.loose ?? [], missing: body.missing ?? [] } : null
+  return Array.isArray(body.projects) ? { projects: body.projects, loose: body.loose ?? [], missing: body.missing ?? [], removed: body.removed ?? [] } : null
+}
+
+/**
+ * Delete project `id` (ADR 0100): its teams stay, in no project, and its file moves to a hidden
+ * folder. Returns the teams it had.
+ */
+export async function deleteProject(id: string): Promise<string[]> {
+  const response = await daemonFetch(`/api/projects/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  if (!response.ok) throw await failure(response)
+  const body = (await response.json()) as { teams?: string[] }
+  projectsChanged()
+  return body.teams ?? []
 }
 
 /** Keep project `id` as `project` says, whole. */
@@ -123,7 +143,7 @@ export function useProjects(): { list: ProjectList | null; error: string | null;
   useEffect(() => {
     let live = true
     fetchProjects().then(
-      (next) => { if (live) { setList(next ?? { projects: [], loose: [], missing: [] }); setError(null) } },
+      (next) => { if (live) { setList(next ?? { projects: [], loose: [], missing: [], removed: [] }); setError(null) } },
       (caught: unknown) => { if (live) setError(caught instanceof Error ? caught.message : String(caught)) },
     )
     return () => { live = false }

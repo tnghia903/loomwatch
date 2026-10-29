@@ -4,15 +4,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FileReaderContext, type FileToRead } from '../../lib/files/reader'
 import { figureFor, type FigureChoice } from '../../lib/library/figures'
 import { fetchJobs, saveJob, type SavedJob } from '../../lib/library/jobs'
-import { addProjectNote, NOTE_CHARS, ABOUT_CHARS, projectsChanged, saveProject, useProjects, type Project, type ProjectEntry } from '../../lib/projects/client'
+import { addProjectNote, NOTE_CHARS, ABOUT_CHARS, projectFile, projectsChanged, saveProject, useProjects, type Project, type ProjectEntry } from '../../lib/projects/client'
 import { lastFinished, madeHere, monthCost, monthSpend, needsYou, nextWork, workingNow, type MadeFile } from '../../lib/projects/glance'
 import { useMonthUsage } from '../../lib/projects/useMonthUsage'
 import { loadDismissed } from '../../lib/story/useNeedsYou'
+import { moveTeam } from '../../lib/projects/move'
 import { inOpenedOrder, roomsOf } from '../../lib/projects/studio'
 import { useTeamShapes } from '../../lib/projects/useTeamShapes'
 import { historyRunUrl } from '../../lib/runs/history'
 import { fetchRuns, useSchedules, type RunRecord } from '../../lib/runs/client'
-import { fetchTeamFile, fetchTeamsDiscovery, saveTeamFile } from '../../lib/team-file/client'
+import { fetchTeamFile, fetchTeamsDiscovery, saveTeamFile, teamDisplayName } from '../../lib/team-file/client'
 import { TeamFileModel } from '../../lib/team-file/document'
 import { teamOfMyAgents } from '../../lib/team-file/myAgents'
 import { agentsTeamYaml, uniqueTeamPath } from '../../lib/team-file/templates'
@@ -27,6 +28,7 @@ import { NewTeamDialog } from '../home/NewTeamDialog'
 import { SectionHead } from '../ui/SectionHead'
 import { MARKS, MARK_NAMES, defaultFigureOf, markOf, roomHref } from '../../lib/projects/studioUi'
 import { GlanceTiles } from './GlanceTiles'
+import { DeleteProjectDialog } from './DeleteProjectDialog'
 import { MadeHere } from './MadeHere'
 import { ReaderSheet } from './ReaderSheet'
 import { RoomAsk } from './RoomAsk'
@@ -54,12 +56,6 @@ function useRuns(): [RunRecord[] | null, () => void] {
 /** Open a run where it was given: its team's chat, at that piece of work. */
 const openRun = (run: Pick<RunRecord, 'runId' | 'teamPath'>) => goToRun(historyRunUrl({ id: run.runId, teamPath: run.teamPath }))
 
-/** The project without the fields the list adds, as `PUT /api/projects/{id}` takes it. */
-function fileOf(project: ProjectEntry): Project {
-  const { id: _id, teams: _teams, ...file } = project
-  return file
-}
-
 /** The About on the wall: a paper note, written in place. */
 function About({ project, onSave }: { project: ProjectEntry; onSave: (about: string) => Promise<void> }) {
   const [editing, setEditing] = useState(false)
@@ -82,15 +78,6 @@ function About({ project, onSave }: { project: ProjectEntry; onSave: (about: str
       <span className="wall-paper-text">{project.about?.trim() || 'Say what this project is, who it is for, and what you have decided.'}</span>
     </button>
   )
-}
-
-/** A team moved into another project (ADR 0097, ruling 1): its file names that project, saved as the editor saves it. */
-async function moveTeam(path: string, project: string): Promise<void> {
-  const file = await fetchTeamFile(path)
-  const team = TeamFileModel.parse(file.yaml)
-  team.setProject(project)
-  await saveTeamFile(path, team.toYaml(), file.revision ?? await hashTeamYaml(file.yaml))
-  projectsChanged()
 }
 
 /** A team's way into another of your projects, from its row in the room. */
@@ -221,6 +208,7 @@ export function ProjectRoom({ id }: { id: string }) {
   const [picking, setPicking] = useState(false)
   const [menu, setMenu] = useState(false)
   const [renaming, setRenaming] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [newTeam, setNewTeam] = useState(false)
   const [adding, setAdding] = useState<string | null | false>(() => new URLSearchParams(window.location.search).get('add') ?? false)
   const [problem, setProblem] = useState<string | null>(null)
@@ -247,7 +235,7 @@ export function ProjectRoom({ id }: { id: string }) {
     if (!project) return
     setProblem(null)
     try {
-      await saveProject(project.id, { ...fileOf(project), ...change })
+      await saveProject(project.id, { ...projectFile(project), ...change })
       reload()
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : String(caught)
@@ -312,6 +300,8 @@ export function ProjectRoom({ id }: { id: string }) {
                 ))}
               </span>
               <button type="button" role="menuitem" onClick={() => { setMenu(false); void keep({ putAway: !project.putAway }).catch(() => {}) }}>{project.putAway ? 'Show on Home' : 'Hide from Home'}</button>
+              <span className="menu-rule" role="separator" />
+              <button type="button" role="menuitem" className="menu-alert" onClick={() => { setMenu(false); setDeleting(true) }}>Delete project…</button>
             </div>
           )}
         </div>
@@ -421,6 +411,8 @@ export function ProjectRoom({ id }: { id: string }) {
         />
       )}
       {adding !== false && <AddAnAgent jobs={jobs} project={project} teams={teams} initial={adding} onClose={() => { setAdding(false); reload() }} />}
+      {/* Every team it has, named, even before the room has read them all. */}
+      {deleting && <DeleteProjectDialog project={project} teams={project.teams.map((path) => teams.find((team) => team.path === path)?.name ?? (listed ?? []).find((team) => team.path === path)?.name ?? teamDisplayName({ path }))} onDeleted={() => window.location.assign('/')} onClose={() => setDeleting(false)} />}
       {newTeam && (
         <NewTeamDialog
           existingPaths={[...(listed ?? []).map((team) => team.path), ...trashed]}

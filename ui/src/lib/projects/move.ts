@@ -91,7 +91,10 @@ export function projectFromTeam(
  */
 export async function moveIntoProjects(paths: readonly string[]): Promise<string[]> {
   const root = (await fetchTeamsDiscovery()).root
-  const taken = ((await fetchProjects())?.projects ?? []).map((project) => project.id)
+  const list = await fetchProjects()
+  const there = (list?.projects ?? []).map((project) => project.id)
+  // A deleted project's id stays taken: its notebook is kept under it (ADR 0100).
+  const taken = [...there, ...(list?.removed ?? [])]
   const moved: string[] = []
   for (const path of paths) {
     try {
@@ -99,7 +102,7 @@ export async function moveIntoProjects(paths: readonly string[]): Promise<string
       const model = TeamFileModel.parse(file.yaml)
       const team = model.snapshot()
       // One in a project that is there stays; one whose project is gone gets one of its own.
-      if (team.project && taken.includes(team.project)) continue
+      if (team.project && there.includes(team.project)) continue
       const memory = await fetchMemory(path).catch(() => null)
       // A Brief entry for some agents only stays the team's: an About is every agent's.
       const own = (memory?.entries ?? []).filter((entry) => !entry.appliesTo?.length)
@@ -117,4 +120,13 @@ export async function moveIntoProjects(paths: readonly string[]): Promise<string
     }
   }
   return moved
+}
+
+/** A team moved into another project (ADR 0097, ruling 1): its file names that project, saved as the editor saves it. */
+export async function moveTeam(path: string, project: string): Promise<void> {
+  const file = await fetchTeamFile(path)
+  const team = TeamFileModel.parse(file.yaml)
+  team.setProject(project)
+  await saveTeamFile(path, team.toYaml(), file.revision ?? await hashTeamYaml(file.yaml))
+  projectsChanged()
 }

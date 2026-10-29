@@ -858,6 +858,10 @@ project: sutd-final-project
   project rather than about its kind of work, the learner keeps it as one of the project's notes,
   by that agent, never in the agent's own lessons, which go with it to other work (ADR 0078).
 - **A project that is gone** stops the team with a message saying to choose its project again.
+- **Deleting a project** (ADR 0100, Delete project… in its "…") leaves its teams in no project:
+  each file loses only its `project:` line, and LoomWatch doesn't move them into a project of
+  their own. The project's file moves to `.projects/.removed/`, and a new project never takes its
+  id.
   A team read on its own (`loomwatchd run team.yaml` with no teams folder) runs without it.
 - **Every team works in one.** The app moves each team that names no project into a project of its
   own, named after it, the first time it opens after projects arrived (and any later team it

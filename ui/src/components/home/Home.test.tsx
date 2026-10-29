@@ -25,7 +25,8 @@ beforeEach(() => {
   forgetKeyStatus()
   forgetYou()
 })
-afterEach(() => { cleanup(); vi.unstubAllGlobals() })
+// A failed List test must not leave the rest of the file looking at the list.
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); localStorage.removeItem('loomwatch:studio-view') })
 
 function renderHome() {
   render(<Home onPalette={vi.fn()} />)
@@ -244,13 +245,89 @@ describe('Home, the studio (ADR 0097)', () => {
     await screen.findAllByRole('article')
     fireEvent.click(screen.getByRole('button', { name: 'List' }))
     const list = screen.getByRole('list', { name: 'Projects' })
-    expect(within(list).getAllByRole('button').map((button) => button.textContent)).toEqual([
+    expect(within(list).getAllByRole('button').map((button) => button.textContent || button.getAttribute('aria-label'))).toEqual([
       'SUTD final projectResearcher is waiting for youResearch and design',
+      'Project settings for SUTD final project',
       'BlogReadyBlog',
+      'Project settings for Blog',
       'New project',
     ])
     fireEvent.click(screen.getByRole('button', { name: 'Rooms' }))
     localStorage.removeItem('loomwatch:studio-view')
+  })
+
+  // ADR 0100: a project's "…" on its card deletes it without opening it; its team stays, in no project.
+  it('deletes a project from its card’s menu, after saying its team stays', async () => {
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => (init?.method === 'DELETE' ? respond({ id: 'blog', teams: ['blog.yaml'] }) : studio(url)))
+    render(<Home onPalette={vi.fn()} runs={[waitingOnTheResearcher]} />)
+    const blog = (await screen.findAllByRole('article')).find((room) => within(room).queryByRole('heading', { name: 'Blog' }))
+    fireEvent.click(within(blog as HTMLElement).getByRole('button', { name: 'Project settings for Blog' }))
+    fireEvent.click(within(screen.getByRole('menu', { name: 'Project settings for Blog' })).getByRole('menuitem', { name: 'Delete project…' }))
+    const dialog = screen.getByRole('alertdialog', { name: 'Delete the project “Blog”?' })
+    expect(dialog).toHaveTextContent('Its team, Blog, stays on Home as a card of its own.')
+    expect(fetchMock.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === 'DELETE')).toBe(false)
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete project' }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    expect(fetchMock).toHaveBeenCalledWith('/api/projects/blog', expect.objectContaining({ method: 'DELETE' }))
+    expect(assign).not.toHaveBeenCalled()
+  })
+
+  it('renames and hides a project from its card’s menu, without opening it', async () => {
+    const puts: { url: string; body: Record<string, unknown> }[] = []
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (init?.method === 'PUT') { puts.push({ url, body: JSON.parse(String(init.body)) as Record<string, unknown> }); return respond({ id: 'blog', name: 'Blog', teams: ['blog.yaml'] }) }
+      return studio(url)
+    })
+    render(<Home onPalette={vi.fn()} runs={[]} />)
+    const blog = (await screen.findAllByRole('article')).find((room) => within(room).queryByRole('heading', { name: 'Blog' })) as HTMLElement
+    fireEvent.click(within(blog).getByRole('button', { name: 'Project settings for Blog' }))
+    fireEvent.click(within(screen.getByRole('menu', { name: 'Project settings for Blog' })).getByRole('menuitem', { name: 'Rename…' }))
+    const rename = screen.getByRole('dialog', { name: 'Rename project' })
+    fireEvent.change(within(rename).getByRole('textbox', { name: 'Project name' }), { target: { value: 'Blog posts' } })
+    fireEvent.click(within(rename).getByRole('button', { name: 'Rename' }))
+    await waitFor(() => expect(puts).toEqual([{ url: '/api/projects/blog', body: { name: 'Blog posts' } }]))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Rename project' })).toBeNull())
+    fireEvent.click(within(blog).getByRole('button', { name: 'Project settings for Blog' }))
+    fireEvent.click(within(screen.getByRole('menu', { name: 'Project settings for Blog' })).getByRole('menuitem', { name: 'Hide from Home' }))
+    await waitFor(() => expect(puts[1]).toEqual({ url: '/api/projects/blog', body: { name: 'Blog', putAway: true } }))
+  })
+
+  it('puts the same "…" on the small tiles Home folds quiet projects into', async () => {
+    const many = Array.from({ length: 7 }, (_, at) => ({ id: `p${at + 1}`, name: `Project ${at + 1}`, teams: [] }))
+    fetchMock.mockImplementation((url: string) => (url === '/api/projects' ? respond({ projects: many, loose: [], missing: [], removed: [] }) : studio(url)))
+    render(<Home onPalette={vi.fn()} runs={[]} />)
+    expect(await screen.findAllByRole('article')).toHaveLength(1)
+    for (const project of many) expect(screen.getByRole('button', { name: `Project settings for ${project.name}` })).toBeInTheDocument()
+  })
+
+  // ADR 0100: a team left in no project stands as its own card, under its team name; its "…" moves
+  // it into a project or deletes it.
+  it('shows a team in no project under its own name, and moves it into a project or deletes it from its card', async () => {
+    const calls: string[] = []
+    let saved = ''
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (init?.method && init.method !== 'GET') calls.push(`${init.method} ${url}`)
+      if (url === '/api/projects') return respond({ projects: [{ id: 'sutd', name: 'SUTD final project', teams: ['sutd/gate.yaml'] }], loose: ['blog.yaml'], missing: [], removed: ['blog'] })
+      if (url === '/api/team' && init?.method === 'PUT') { saved = (JSON.parse(String(init.body)) as { yaml: string }).yaml; return respond({ path: 'blog.yaml', yaml: saved, revision: 'r2' }) }
+      if (url === '/api/runs') return respond([])
+      if (url.startsWith('/api/team?') && init?.method === 'DELETE') return respond({ path: 'blog.yaml', trash: '.trash/blog', moved: ['blog.yaml'] })
+      // Its name, not its file's.
+      if (url === '/api/teams') return respond({ root: '/teams', files: ['blog.yaml', 'sutd/gate.yaml'], teams: [{ path: 'blog.yaml', name: 'Weekly posts', agentCount: 1 }, { path: 'sutd/gate.yaml', name: 'Research and design', agentCount: 3 }] })
+      return studio(url)
+    })
+    render(<Home onPalette={vi.fn()} runs={[]} />)
+    const blog = (await screen.findByRole('heading', { name: 'Weekly posts' })).closest('article') as HTMLElement
+    expect(within(blog).queryByRole('button', { name: /Project settings/ })).toBeNull()
+    fireEvent.click(within(blog).getByRole('button', { name: 'Team settings for Weekly posts' }))
+    fireEvent.click(within(screen.getByRole('menu', { name: 'Team settings for Weekly posts' })).getByRole('menuitem', { name: 'Move to a project' }))
+    fireEvent.click(within(screen.getByRole('menu', { name: 'Team settings for Weekly posts' })).getByRole('menuitem', { name: 'SUTD final project' }))
+    await waitFor(() => expect(calls).toEqual(['PUT /api/team']))
+    expect(saved).toContain('project: sutd')
+    fireEvent.click(within(blog).getByRole('button', { name: 'Team settings for Weekly posts' }))
+    // The menu opens at its top again.
+    fireEvent.click(within(screen.getByRole('menu', { name: 'Team settings for Weekly posts' })).getByRole('menuitem', { name: 'Delete team…' }))
+    fireEvent.click(within(screen.getByRole('alertdialog', { name: 'Delete “Weekly posts”?' })).getByRole('button', { name: 'Delete team' }))
+    await waitFor(() => expect(calls).toEqual(['PUT /api/team', 'DELETE /api/team?path=blog.yaml']))
   })
 
   it('says a file cannot be opened, so none goes missing from Home', async () => {

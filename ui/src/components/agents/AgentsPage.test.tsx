@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { parse } from 'yaml'
 
 import { forgetYou } from '../../lib/you/client'
 import { AgentsPage } from './AgentsPage'
@@ -68,5 +69,62 @@ describe('What your agents know about you', () => {
     page()
     expect(await screen.findByRole('link', { name: 'Tell them about you' })).toHaveAttribute('href', '/you')
     expect(screen.getByText(/Your agents don’t know you yet/)).toBeInTheDocument()
+  })
+})
+
+// ADR 0100: each card in My agents has a "…" that removes the agent, off the teams it is in too.
+describe('Removing an agent from its card', () => {
+  const BLOG = 'schemaVersion: 1\nid: blog\nname: Blog\nentrypoint: writer\nagents:\n  - id: writer\n    name: Writer\n    from: {agent: writer, version: 1}\n    model: fake/offline\n    role: Write.\n  - id: editor\n    from: {agent: editor, version: 1}\n    model: fake/offline\n    role: Edit.\nedges:\n  - {from: writer, to: editor}\n'
+  const calls: string[] = []
+  let saved = ''
+  let team = BLOG
+  beforeEach(() => {
+    calls.length = 0
+    team = BLOG
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (init?.method && init.method !== 'GET') calls.push(`${init.method} ${url}`)
+      if (url === '/api/jobs') return new Response(JSON.stringify({ folder: '.jobs', jobs: [{ id: 'writer', file: '.jobs/writer.yaml', name: 'Writer', instructions: 'Write.', model: 'fake/offline' }, { id: 'editor', file: '.jobs/editor.yaml', name: 'Editor', instructions: 'Edit.', model: 'fake/offline' }], problems: [] }), { status: 200 })
+      if (url === '/api/teams') return new Response(JSON.stringify({ root: '/teams', files: ['blog.yaml'], teams: [{ path: 'blog.yaml', name: 'Blog', agentCount: 2 }] }), { status: 200 })
+      if (url.startsWith('/api/team?')) return new Response(JSON.stringify({ path: 'blog.yaml', yaml: team, revision: 'r1' }), { status: 200 })
+      if (url === '/api/team' && init?.method === 'PUT') { saved = (JSON.parse(String(init.body)) as { yaml: string }).yaml; return new Response(JSON.stringify({ path: 'blog.yaml', yaml: saved, revision: 'r2' }), { status: 200 }) }
+      if (url === '/api/jobs/writer' && init?.method === 'DELETE') return new Response(JSON.stringify({ id: 'writer' }), { status: 200 })
+      return new Response('{}', { status: 404 })
+    }))
+  })
+
+  it('says which teams it comes off, and takes it off them before it goes', async () => {
+    window.history.replaceState({}, '', '/agents')
+    page()
+    fireEvent.click(await screen.findByRole('button', { name: 'More for Writer' }, { timeout: 3000 }))
+    fireEvent.click(within(screen.getByRole('menu', { name: 'Writer' })).getByRole('menuitem', { name: 'Remove from My agents…' }))
+    const dialog = await screen.findByRole('alertdialog', { name: 'Remove “Writer” from My agents?' })
+    expect(await within(dialog).findByText('It leaves Blog too.')).toBeInTheDocument()
+    // The one it handed work to starts the team in its place, called by its name in My agents.
+    expect(within(dialog).getByText('In Blog, Editor starts the work instead.')).toBeInTheDocument()
+    expect(calls).toEqual([])
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove' }))
+    await vi.waitFor(() => expect(calls).toEqual(['PUT /api/team', 'DELETE /api/jobs/writer']))
+    expect(saved).not.toContain('id: writer')
+    expect(saved).toContain('entrypoint: editor')
+  })
+
+  it('asks who starts a team it started and handed work to more than one, and starts it with the one picked', async () => {
+    team = `${BLOG}  - {from: writer, to: proofer}\n`.replace('agents:\n', 'agents:\n  - id: proofer\n    name: Proofer\n    model: fake/offline\n    role: Proof.\n')
+    window.history.replaceState({}, '', '/agents')
+    page()
+    fireEvent.click(await screen.findByRole('button', { name: 'More for Writer' }, { timeout: 3000 }))
+    fireEvent.click(within(screen.getByRole('menu', { name: 'Writer' })).getByRole('menuitem', { name: 'Remove from My agents…' }))
+    const dialog = await screen.findByRole('alertdialog', { name: 'Remove “Writer” from My agents?' })
+    const who = await within(dialog).findByRole('group', { name: 'Who starts Blog instead?' })
+    expect(who).toHaveTextContent('Blog starts with Writer. Who starts it instead?')
+    expect(within(dialog).getByRole('button', { name: 'Remove' })).toBeDisabled()
+    fireEvent.click(within(who).getByRole('button', { name: 'Proofer' }))
+    expect(within(who).getByRole('button', { name: 'Proofer' })).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove' }))
+    await vi.waitFor(() => expect(calls).toEqual(['PUT /api/team', 'DELETE /api/jobs/writer']))
+    const after = parse(saved) as { entrypoint: string; edges: { from: string; to: string }[] }
+    expect(after.entrypoint).toBe('proofer')
+    expect(after.edges.map((edge) => `${edge.from}>${edge.to}`)).toEqual(['proofer>editor'])
   })
 })

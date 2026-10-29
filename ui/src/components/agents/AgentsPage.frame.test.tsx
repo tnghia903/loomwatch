@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { SavedJob } from '../../lib/library/jobs'
 import { forgetYou } from '../../lib/you/client'
-import { goldFilled, heightOf, isGoldFill, PHONE } from '../../test/cascade'
+import { cascaded, goldFilled, heightOf, isGoldFill, PHONE } from '../../test/cascade'
 import type { AgentFigureProps } from './AgentFigure'
 import { AgentsPage } from './AgentsPage'
 
@@ -86,9 +86,19 @@ describe('An agent’s page in the team page’s frame', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Writer, Saved, open agent menu$/ }))
     fireEvent.click(within(screen.getByRole('dialog', { name: 'Agent menu' })).getByRole('button', { name: 'Remove from My agents…' }))
     expect(calls).toEqual([])
-    await act(async () => { fireEvent.click(within(screen.getByRole('alertdialog', { name: 'Remove from My agents' })).getByRole('button', { name: 'Remove' })) })
+    await act(async () => { fireEvent.click(within(screen.getByRole('alertdialog', { name: 'Remove “Writer” from My agents?' })).getByRole('button', { name: 'Remove' })) })
     expect(calls).toEqual(['DELETE /api/jobs/writer'])
     expect(window.location.pathname).toBe('/agents')
+  })
+
+  // ADR 0100: its menu holds Remove, so its arrow shows where a team's chip drops its own for room.
+  it('shows the arrow on its name at every width', async () => {
+    window.history.replaceState({}, '', '/agents/writer')
+    page()
+    const open = await screen.findByRole('button', { name: /^Writer, Saved, open agent menu$/ }, { timeout: 5000 })
+    const arrow = open.querySelector('.chev') as HTMLElement
+    expect(arrow.closest('.workspace-chrome')).not.toBeNull()
+    expect(cascaded(arrow, 'display', { width: 1024 })).toBe('grid')
   })
 
   it('keeps the rail as it is while the agent beside it changes', async () => {

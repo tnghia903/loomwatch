@@ -1,4 +1,4 @@
-import { Fragment } from 'react'
+import { Fragment, type ReactNode } from 'react'
 
 import { otherTeams, type Room, type RoomTeam } from '../../lib/projects/studio'
 import { markOf, type FigureOf } from '../../lib/projects/studioUi'
@@ -60,10 +60,12 @@ function StateShape({ state }: { state: RoomTeam['state'] }) {
  * made here, one press from being read, and what this month cost. The rest of the card opens the
  * room.
  */
-export function RoomCard({ room, figureOf, onOpen, newest = null, spend = null }: {
+export function RoomCard({ room, figureOf, onOpen, newest = null, spend = null, menu = null }: {
   room: Room
   figureOf: FigureOf
   onOpen: () => void
+  /** Its "…", above the card's link: what is done to the project itself. */
+  menu?: ReactNode
   /** The newest file the agents here made. */
   newest?: string | null
   /** What this month cost here, in words. */
@@ -80,6 +82,7 @@ export function RoomCard({ room, figureOf, onOpen, newest = null, spend = null }
           </button>
         </h3>
         {room.teams.length > 1 && <span className="room-card-count">{room.teams.length} teams</span>}
+        {menu}
       </div>
       {room.teams.length === 0 ? <p className="desk-empty">No team yet</p> : (
         <ul className="room-card-teams" aria-label={`${room.name}’s teams`}>

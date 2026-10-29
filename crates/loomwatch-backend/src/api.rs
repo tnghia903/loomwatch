@@ -226,7 +226,10 @@ pub fn router_with_archive(
         // Projects hold the work (ADR 0097): each one, its teams, and the one-time move of every
         // team into a project of its own, which the app makes.
         .route("/api/projects", get(get_projects))
-        .route("/api/projects/{id}", axum::routing::put(put_project))
+        .route(
+            "/api/projects/{id}",
+            axum::routing::put(put_project).delete(delete_project),
+        )
         .route("/api/projects/{id}/notes", axum::routing::post(post_project_note))
         .route(
             "/api/move-into-projects",
@@ -775,10 +778,11 @@ struct ProjectView {
 /// Every project, with its teams, and the teams that work in none yet (ADR 0097).
 async fn get_projects(State(state): State<ApiState>) -> Result<Json<Value>, ApiError> {
     let teams_root = state.teams_root.clone();
-    let (projects, mut teams) = tokio::task::spawn_blocking(move || {
+    let (projects, mut teams, removed) = tokio::task::spawn_blocking(move || {
         (
             crate::projects::list(&teams_root),
             crate::projects::teams_of(&teams_root),
+            crate::projects::removed_ids(&teams_root),
         )
     })
     .await
@@ -794,8 +798,9 @@ async fn get_projects(State(state): State<ApiState>) -> Result<Json<Value>, ApiE
         .collect();
     // A team that names a project with no file: listed apart, so it isn't lost.
     let missing: Vec<String> = teams.into_values().flatten().collect();
+    // A deleted project's id, which a new project never takes (ADR 0100).
     Ok(Json(
-        json!({ "projects": projects, "loose": loose, "missing": missing }),
+        json!({ "projects": projects, "loose": loose, "missing": missing, "removed": removed }),
     ))
 }
 
@@ -832,6 +837,88 @@ async fn put_project(
         .remove(&id)
         .unwrap_or_default();
     Ok(Json(ProjectView { id, project, teams }))
+}
+
+/// Delete project `id` (ADR 0100): its teams stay where they are, in no project, and the app leaves
+/// them so. Every team's file loses its `project:` line before anything changes, or nothing does;
+/// a team the person approved stays approved, as this is `LoomWatch`'s own change. The project's
+/// file moves to `.projects/.removed/`.
+async fn delete_project(
+    State(state): State<ApiState>,
+    AxumPath(id): AxumPath<String>,
+) -> Result<Json<Value>, ApiError> {
+    let failed = |error: io::Error| {
+        eprintln!("warning: could not delete project {id}: {error}");
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "LoomWatch couldn’t delete the project. Check that your teams folder can be changed, \
+             then try again."
+                .into(),
+        )
+    };
+    if !crate::projects::is_id(&id) || !crate::projects::file_of(&state.teams_root, &id).is_file() {
+        return Err(ApiError::new(
+            StatusCode::NOT_FOUND,
+            "This project was already deleted.".into(),
+        ));
+    }
+    let _write = state.writes.lock().map_err(|_| {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "team write lock unavailable".into(),
+        )
+    })?;
+    let teams = crate::projects::teams_of(&state.teams_root)
+        .remove(&id)
+        .unwrap_or_default();
+    let mut changes = Vec::with_capacity(teams.len());
+    for team in &teams {
+        let path = state.teams_root.join(team);
+        let before = fs::read_to_string(&path).map_err(failed)?;
+        let after = crate::projects::without_project(&before, &id).ok_or_else(|| {
+            // Called by its name, as the app shows it, not by its file.
+            let name = serde_yaml::from_str::<serde_yaml::Value>(&before)
+                .ok()
+                .and_then(|team| {
+                    team.get("name")
+                        .and_then(serde_yaml::Value::as_str)
+                        .map(str::to_owned)
+                })
+                .unwrap_or_else(|| team.clone());
+            ApiError::new(
+                StatusCode::CONFLICT,
+                format!(
+                    "{name}’s file was changed by hand, so LoomWatch can’t take it out of this \
+                     project. Move {name} to another project, then delete this one."
+                ),
+            )
+        })?;
+        changes.push((team, path, before, after));
+    }
+    // Kept first: a team in no project that isn't left out is moved into a project of its own the
+    // next time the app opens.
+    if let Some((_, state_dir)) = approvals_and_state(&state) {
+        crate::projects::leave_out(&state_dir, &state.teams_root, &teams).map_err(failed)?;
+    }
+    for (team, path, before, after) in &changes {
+        atomic_write(path, after.as_bytes(), false).map_err(failed)?;
+        if let Some(approvals) = state.runs.approvals()
+            && approvals.is_approved(team, &crate::approvals::revision(before.as_bytes()))
+            && let Err(error) = approvals.approve(
+                team,
+                &crate::approvals::revision(after.as_bytes()),
+                crate::approvals::Approval::Saved,
+            )
+        {
+            eprintln!("warning: could not keep {team} approved after its project went: {error}");
+        }
+    }
+    let moved = crate::projects::move_to_removed(&state.teams_root, &id).map_err(failed)?;
+    Ok(Json(json!({
+        "id": id,
+        "teams": teams,
+        "movedTo": moved.strip_prefix(&state.teams_root).unwrap_or(&moved),
+    })))
 }
 
 #[derive(Debug, Deserialize)]
@@ -876,12 +963,15 @@ async fn get_projects_move(State(state): State<ApiState>) -> Result<Json<Value>,
     let Some((approvals, state_dir)) = approvals_and_state(&state) else {
         return Ok(Json(json!({ "moved": true, "teams": [] })));
     };
-    // A team in no project, or in one whose file is gone: each moves into a project of its own.
+    // A team in no project, or in one whose file is gone: each moves into a project of its own,
+    // except one the person left in none by deleting its project (ADR 0100).
     let known = crate::projects::list(&state.teams_root);
+    let left_out = crate::projects::left_out(&state_dir, &state.teams_root);
     let loose: Vec<String> = crate::projects::teams_of(&state.teams_root)
         .into_iter()
         .filter(|(project, _)| project.is_empty() || !known.contains_key(project))
         .flat_map(|(_, teams)| teams)
+        .filter(|team| !left_out.contains(team))
         .collect();
     let teams: Vec<Value> = loose
         .into_iter()
@@ -971,14 +1061,9 @@ async fn delete_job(
         return Err(ApiError::new(
             StatusCode::CONFLICT,
             format!(
-                "{name} is in {}. In {} Workflow, select {name}, press Delete and save. Then \
-                 remove it here.",
+                "{name} is still in {}. Remove it from its card in My agents, where it comes off \
+                 its teams too.",
                 crate::my_agents::listed(&using),
-                if using.len() == 1 {
-                    "that team’s"
-                } else {
-                    "each one’s"
-                }
             ),
         ));
     }
@@ -2710,6 +2795,173 @@ mod tests {
         assert_eq!(memory["project"][1]["body"], "- Colin picked B.");
     }
 
+    /// ADR 0100: deleting a project leaves its teams, in no project, each file changed only by its
+    /// `project:` line; the project's file moves to `.projects/.removed/`. A team that names it some
+    /// other way stops the delete before anything changes.
+    #[tokio::test]
+    async fn deleting_a_project_leaves_its_teams_in_no_project() {
+        let root = TempDirectory::new();
+        let send = |method: &str, uri: &str, body: &str| {
+            Request::builder()
+                .method(method)
+                .uri(uri)
+                .header(header::HOST, "localhost")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_owned()))
+                .expect("request")
+        };
+        let team = |project: &str| {
+            format!(
+                "schemaVersion: 1\n# Mine.\nid: gate\nname: Gate\n{project}entrypoint: a\nagents:\n  - id: a\n    model: fake/offline\n    role: Research.\nedges: []\n"
+            )
+        };
+        for (id, name) in [("sutd", "SUTD"), ("blog", "Blog")] {
+            let response = test_router(&root.0)
+                .oneshot(send(
+                    "PUT",
+                    &format!("/api/projects/{id}"),
+                    &format!(r#"{{"name":"{name}"}}"#),
+                ))
+                .await
+                .expect("response");
+            assert_eq!(response.status(), StatusCode::OK);
+        }
+        fs::write(root.0.join("gate.yaml"), team("project: sutd\n")).unwrap();
+        fs::write(root.0.join("post.yaml"), team("project: blog\n")).unwrap();
+        fs::write(root.0.join("zodd.yaml"), team("project: >-\n  blog\n")).unwrap();
+
+        let refused = test_router(&root.0)
+            .oneshot(send("DELETE", "/api/projects/blog", ""))
+            .await
+            .expect("response");
+        assert_eq!(refused.status(), StatusCode::CONFLICT);
+        let body = response_json(refused).await;
+        assert!(
+            body["error"]
+                .as_str()
+                .unwrap()
+                .contains("Gate’s file was changed by hand"),
+            "{body}"
+        );
+        assert_eq!(
+            fs::read_to_string(root.0.join("post.yaml")).unwrap(),
+            team("project: blog\n"),
+            "nothing changes unless every team can"
+        );
+        assert!(root.0.join(".projects/blog.yaml").is_file());
+
+        let deleted = test_router(&root.0)
+            .oneshot(send("DELETE", "/api/projects/sutd", ""))
+            .await
+            .expect("response");
+        assert_eq!(deleted.status(), StatusCode::OK);
+        let body = response_json(deleted).await;
+        assert_eq!(body["teams"], json!(["gate.yaml"]));
+        assert_eq!(
+            fs::read_to_string(root.0.join("gate.yaml")).unwrap(),
+            team(""),
+            "only the project line goes"
+        );
+        assert!(root.0.join(".projects/.removed/sutd.yaml").is_file());
+        let list = response_json(
+            test_router(&root.0)
+                .oneshot(send("GET", "/api/projects", ""))
+                .await
+                .expect("response"),
+        )
+        .await;
+        assert_eq!(list["projects"].as_array().map(Vec::len), Some(1));
+        assert_eq!(list["projects"][0]["id"], "blog");
+        assert_eq!(list["loose"], json!(["gate.yaml"]));
+        assert_eq!(list["removed"], json!(["sutd"]), "its id stays taken");
+
+        let gone = test_router(&root.0)
+            .oneshot(send("DELETE", "/api/projects/sutd", ""))
+            .await
+            .expect("response");
+        assert_eq!(gone.status(), StatusCode::NOT_FOUND);
+    }
+
+    /// ADR 0100: a team left in no project by deleting its project stays approved, and the app is
+    /// never asked to move it into a project of its own, as it is a team found in none.
+    #[tokio::test]
+    async fn a_deleted_projects_team_stays_approved_and_out_of_the_move() {
+        let root = TempDirectory::new();
+        let state_dir = TempDirectory::new();
+        let team = |project: &str| {
+            format!(
+                "schemaVersion: 1\nid: t\nname: T\n{project}entrypoint: a\nagents:\n  - id: a\n    model: fake/offline\n    role: Research.\nedges: []\n"
+            )
+        };
+        crate::projects::write(
+            &root.0,
+            "sutd",
+            &crate::projects::Project {
+                name: "SUTD".into(),
+                ..crate::projects::Project::default()
+            },
+        )
+        .unwrap();
+        fs::write(root.0.join("gate.yaml"), team("project: sutd\n")).unwrap();
+        let runs = crate::runs::RunRegistry::default();
+        // Opened with the team already there: it is approved as it is.
+        let approvals = std::sync::Arc::new(
+            crate::approvals::TeamApprovals::open(&state_dir.0, &root.0).expect("approvals"),
+        );
+        runs.set_approvals(approvals.clone());
+        crate::projects::record_moved(&state_dir.0, &root.0).unwrap();
+        // Added after LoomWatch first opened the folder, and never reviewed.
+        fs::write(root.0.join("held.yaml"), team("project: sutd\n")).unwrap();
+        fs::write(root.0.join("loose.yaml"), team("")).unwrap();
+        approvals
+            .approve(
+                "loose.yaml",
+                &crate::approvals::revision(team("").as_bytes()),
+                crate::approvals::Approval::Saved,
+            )
+            .unwrap();
+        let send = |method: &str, uri: &str| {
+            Request::builder()
+                .method(method)
+                .uri(uri)
+                .header(header::HOST, "localhost")
+                .body(Body::empty())
+                .expect("request")
+        };
+
+        let deleted = router_with_runs(&root.0, runs.clone())
+            .oneshot(send("DELETE", "/api/projects/sutd"))
+            .await
+            .expect("response");
+        assert_eq!(deleted.status(), StatusCode::OK);
+        assert!(
+            approvals.is_approved(
+                "gate.yaml",
+                &crate::approvals::revision(&fs::read(root.0.join("gate.yaml")).unwrap())
+            ),
+            "LoomWatch's own change keeps the team approved"
+        );
+        assert!(
+            !approvals.is_approved(
+                "held.yaml",
+                &crate::approvals::revision(&fs::read(root.0.join("held.yaml")).unwrap())
+            ),
+            "and never approves one nobody approved"
+        );
+        let status = response_json(
+            router_with_runs(&root.0, runs)
+                .oneshot(send("GET", "/api/move-into-projects"))
+                .await
+                .expect("response"),
+        )
+        .await;
+        assert_eq!(
+            status["teams"],
+            json!([{"path": "loose.yaml", "approved": true}]),
+            "a team found in no project still moves; the one left there doesn't"
+        );
+    }
+
     /// A saved job round-trips through the API: created once, refused a second create so the UI
     /// can ask before replacing it, listed, removed, and kept out of the team list throughout.
     // One test on purpose: each step reads the state the previous one left on disk.
@@ -2809,8 +3061,8 @@ mod tests {
             refused["error"]
                 .as_str()
                 .is_some_and(|error| error.contains(
-                    "Release notes is in Launch notes. In that team’s Workflow, select Release \
-                     notes, press Delete and save. Then remove it here."
+                    "Release notes is still in Launch notes. Remove it from its card in My \
+                     agents, where it comes off its teams too."
                 )),
             "{refused}"
         );

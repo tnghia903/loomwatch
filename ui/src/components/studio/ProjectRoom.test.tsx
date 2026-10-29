@@ -26,6 +26,7 @@ function daemon(url: string, init?: RequestInit) {
     project = { ...kept, ...(JSON.parse(String(init.body)) as object), teams: project.teams } as typeof project
     return respond(project)
   }
+  if (url === '/api/projects/sutd' && init?.method === 'DELETE') return respond({ id: 'sutd', teams: project.teams, movedTo: '.projects/.removed/sutd.yaml' })
   if (url === '/api/projects/sutd/notes' && init?.method === 'POST') {
     project = { ...project, notes: [...project.notes, { text: (JSON.parse(String(init.body)) as { text: string }).text, by: undefined as unknown as string }] }
     return respond(project)
@@ -162,6 +163,24 @@ describe('a project’s room (ADR 0097)', () => {
     fireEvent.click(within(screen.getByRole('menu', { name: 'Project settings' })).getByRole('menuitem', { name: 'Hide from Home' }))
     await waitFor(() => expect(project.putAway).toBe(true))
     expect(await screen.findByText('Hidden from Home')).toBeInTheDocument()
+  })
+
+  // ADR 0100: the project's own "…" deletes it; its team stays, in no project, and Home opens.
+  it('deletes the project from its menu, after saying its team stays', async () => {
+    render(<ProjectRoom id="sutd" />)
+    await screen.findByRole('link', { name: /Research and design/ })
+    fireEvent.click(screen.getByRole('button', { name: 'Project settings' }))
+    fireEvent.click(within(screen.getByRole('menu', { name: 'Project settings' })).getByRole('menuitem', { name: 'Delete project…' }))
+    const dialog = screen.getByRole('alertdialog', { name: 'Delete the project “SUTD final project”?' })
+    expect(dialog).toHaveTextContent('Its team, Research and design, stays on Home as a card of its own.')
+    // The red that reads in both themes (contrast.test.ts holds the tokens to it).
+    const confirm = within(dialog).getByRole('button', { name: 'Delete project' })
+    expect(cascaded(confirm, ['background', 'background-color'])).toBe('var(--color-alert-fill)')
+    expect(cascaded(confirm, 'color')).toBe('var(--color-alert-on-fill)')
+    expect(fetchMock.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === 'DELETE')).toBe(false)
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete project' }))
+    await waitFor(() => expect(assign).toHaveBeenCalledWith('/'))
+    expect(fetchMock).toHaveBeenCalledWith('/api/projects/sutd', expect.objectContaining({ method: 'DELETE' }))
   })
 
   it('adds the agent Home sent here to one of the project’s teams, and opens its workflow to connect it', async () => {

@@ -1,14 +1,14 @@
-import { useMemo, useRef, useState, type ReactNode } from 'react'
-import { Moon, Plus, Sun, UserRound } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { MoreHorizontal, Moon, Plus, Sun, UserRound } from 'lucide-react'
 
 import { modelNameFromId } from '../../lib/ai/modelIds'
 import type { DetectedCapability } from '../../lib/library/client'
 import { draftFromJob } from '../../lib/library/draft'
 import { figureFor } from '../../lib/library/figures'
-import { useSavedJobs } from '../../lib/library/jobs'
+import { useSavedJobs, type SavedJob } from '../../lib/library/jobs'
 import { usePinnedAgent } from '../../lib/library/pinned'
 import { modelForPreset, ROLE_PRESETS } from '../../lib/library/roles'
-import { useAgentUses } from '../../lib/library/uses'
+import { useAgentUses, type AgentUse } from '../../lib/library/uses'
 import { agentPresence } from '../../lib/rail/presence'
 import type { RunRecord } from '../../lib/runs/client'
 import type { LoomMarkState } from '../../lib/story/loomMark'
@@ -21,6 +21,7 @@ import { AgentBuilder } from './AgentBuilder'
 import { AgentChip } from './AgentChip'
 import { AgentFrame, type AgentBarSlots } from './AgentFrame'
 import { FigureStill } from './FigureStill'
+import { RemoveAgentDialog } from './RemoveAgentDialog'
 import { navigate, useAgentsRoute, type AgentsRoute } from './route'
 
 export interface AgentsPageProps {
@@ -142,6 +143,7 @@ function AgentsList() {
     return byAgent
   }, [jobs, uses])
   const open = (to: string) => navigate(to)
+  const [removing, setRemoving] = useState<SavedJob | null>(null)
   return (
     <>
       <section className="home-hero agents-hero">
@@ -165,16 +167,44 @@ function AgentsList() {
         {jobs.length > 0 && (
           <ul className="home-grid agents-grid">
             {jobs.map((job) => (
-              <li key={job.id}>
+              <li key={job.id} className="agent-card-box">
                 <button type="button" className="home-card agent-card" onClick={() => open(`/agents/${encodeURIComponent(job.id)}`)}>
                   <AgentBadge compact markId={job.id} figure={figureFor(job.id, job.figure)} draft={draftFromJob(job)} usedIn={usage.get(job.id)} pinned={pinned === job.id} />
                 </button>
+                <AgentCardMenu name={job.name} chat={`/agents/${encodeURIComponent(job.id)}?view=chat`} onRemove={() => setRemoving(job)} />
               </li>
             ))}
           </ul>
         )}
         {problems.map((problem) => <p key={problem.file} className="home-empty alert" title={problem.message}>Can’t read {problem.file}: {problem.message}</p>)}
       </section>
+      {removing && <RemoveAgentDialog agent={removing} uses={uses === null ? null : uses.filter((use: AgentUse) => use.agent === removing.id)} onRemoved={() => setRemoving(null)} onClose={() => setRemoving(null)} />}
     </>
+  )
+}
+
+/** An agent's "…" on its card in My agents (ADR 0100): chat with it, or remove it, without opening it first. */
+function AgentCardMenu({ name, chat, onRemove }: { name: string; chat: string; onRemove: () => void }) {
+  const [open, setOpen] = useState(false)
+  const box = useRef<HTMLSpanElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const away = (event: PointerEvent) => { if (!box.current?.contains(event.target as Node)) setOpen(false) }
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false) }
+    window.addEventListener('pointerdown', away)
+    window.addEventListener('keydown', escape)
+    return () => { window.removeEventListener('pointerdown', away); window.removeEventListener('keydown', escape) }
+  }, [open])
+  return (
+    <span className="agent-card-menu" ref={box}>
+      <button type="button" className="iconbtn" aria-label={`More for ${name}`} title="More" aria-expanded={open} aria-haspopup="menu" onClick={() => setOpen((value) => !value)}><MoreHorizontal size={16} aria-hidden="true" /></button>
+      {open && (
+        <span className="idle-agent-menu" role="menu" aria-label={name}>
+          <a role="menuitem" href={chat} onClick={(event) => { event.preventDefault(); setOpen(false); navigate(chat) }}>Chat</a>
+          <span className="menu-rule" role="separator" />
+          <button type="button" role="menuitem" className="menu-alert" onClick={() => { setOpen(false); onRemove() }}>Remove from My agents…</button>
+        </span>
+      )}
+    </span>
   )
 }

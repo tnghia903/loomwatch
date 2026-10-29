@@ -11,7 +11,7 @@ import type { DetectedCapability } from '../../lib/library/client'
 import { BLANK_DRAFT, blankDraft, draftChanged, draftFromJob, draftFromPreset, specFromDraft, type AgentDraft } from '../../lib/library/draft'
 import type { ReadSource } from '../../lib/library/figure'
 import { figureFor, freshFigure } from '../../lib/library/figures'
-import { JobApiError, jobIdFor, removeJob, saveJob, useSavedJobs, versionOf, type SavedJob } from '../../lib/library/jobs'
+import { JobApiError, jobIdFor, saveJob, useSavedJobs, versionOf, type SavedJob } from '../../lib/library/jobs'
 import { usePinnedAgent } from '../../lib/library/pinned'
 import { ROLE_PRESETS } from '../../lib/library/roles'
 import type { TeamKnowledge } from '../../lib/library/teamDraft'
@@ -32,6 +32,7 @@ import { AgentAnswer, AgentChat, AgentFile } from './AgentChat'
 import { AgentDetails } from './AgentDetails'
 import { ByHand } from './ByHand'
 import { FigurePicker } from './FigurePicker'
+import { RemoveAgentDialog } from './RemoveAgentDialog'
 import { navigate, withView, type AgentView } from './route'
 import { withAllowed } from '../../lib/tools/allow'
 
@@ -65,7 +66,7 @@ export interface AgentBuilderProps {
   bar?: AgentBarSlots
 }
 
-type SaveState = { kind: 'idle' } | { kind: 'saving' } | { kind: 'saved' } | { kind: 'error'; message: string; removing?: boolean }
+type SaveState = { kind: 'idle' } | { kind: 'saving' } | { kind: 'saved' } | { kind: 'error'; message: string }
 
 /**
  * One of My agents, on its own page with two tabs, as a team has its own: Build and Chat.
@@ -203,11 +204,6 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
     }
   }
 
-  async function doRemove() {
-    if (!saved) return
-    try { await removeJob(saved.id); navigate('/agents') } catch (failed) { setSave({ kind: 'error', message: failed instanceof Error ? failed.message : String(failed), removing: true }); setRemoving(false) }
-  }
-
   // Its chat is kept under the id it is saved as, so a new agent saved under the name it had in its
   // chat goes on talking in the same chat. A name one of your agents already has keeps its own.
   const provisional = jobIdFor(draft.name || 'agent')
@@ -281,12 +277,10 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
           )}
 
           {/* On its own page, Remove is in its name chip's menu, as Delete team is in a team's (ADR 0043). */}
-          {/* Inside a team it can't be removed: that team uses it. */}
+          {/* Inside a team it isn't removed from My agents: that is done where My agents are. */}
           {saved && !bar && !inTeam && (
             <div className="agent-remove">
-              {removing
-                ? <><span className="t-meta">Remove it from My agents?</span><button type="button" className="btn" onClick={() => void doRemove()}>Remove</button><button type="button" className="btn" onClick={() => setRemoving(false)}>Keep it</button></>
-                : <button type="button" className="link" onClick={() => setRemoving(true)}><Trash2 size={12} aria-hidden="true" />Remove from My agents</button>}
+              <button type="button" className="link" onClick={() => setRemoving(true)}><Trash2 size={12} aria-hidden="true" />Remove from My agents…</button>
             </div>
           )}
         </div>
@@ -295,22 +289,26 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
     </div>
   )
 
+  // It comes off the teams it is in as it goes (ADR 0100).
+  const removeDialog = removing && saved && <RemoveAgentDialog agent={saved} uses={uses === null ? null : mine} onRemoved={() => navigate('/agents')} onClose={() => setRemoving(false)} />
+
   if (bar) {
     // The name chip says how it is kept, as a team's does: the dot, a line under the name, and Save
     // beside it while there is something to save.
     const state: ChipState = save.kind === 'saving' ? 'saving' : save.kind === 'error' ? 'failed' : problem ? 'incomplete' : !saved ? 'new' : changed ? 'dirty' : save.kind === 'saved' ? 'saved' : 'clean'
     // A saved agent can be kept at the notch of a Mac (ADR 0083): only the island there shows it.
     const pin = saved && isMac() ? { pinned: pinned.pinned === saved.id, notchShown: pinned.notchShown, onToggle: () => void togglePin(saved.id, name) } : undefined
-    const detail = save.kind === 'saving' ? 'Saving…' : save.kind === 'error' ? (save.removing ? 'Couldn’t remove' : 'Couldn’t save') : problem ?? (!saved ? 'Not saved yet' : changed ? 'Unsaved changes' : saved.savedAt ? `Saved ${relativeTime(new Date(saved.savedAt))}` : 'Saved')
+    const detail = save.kind === 'saving' ? 'Saving…' : save.kind === 'error' ? 'Couldn’t save' : problem ?? (!saved ? 'Not saved yet' : changed ? 'Unsaved changes' : saved.savedAt ? `Saved ${relativeTime(new Date(saved.savedAt))}` : 'Saved')
     return (
       <div className="agent-builder" data-tour="agent-builder" data-tour-saved={saved && !changed ? true : undefined}>
-        {bar.chip && createPortal(<AgentChip name={name} state={state} detail={detail} action={changed || save.kind === 'saving' ? saveButton : undefined} onRemove={saved ? () => void doRemove() : undefined} inTeams={mine.map((use) => use.teamName)} pin={pin} />, bar.chip)}
+        {bar.chip && createPortal(<AgentChip name={name} state={state} detail={detail} action={changed || save.kind === 'saving' ? saveButton : undefined} onRemove={saved ? () => setRemoving(true) : undefined} pin={pin} />, bar.chip)}
         {bar.tabs && createPortal(<AgentViewTabs view={view} onView={showView} tour inBar />, bar.tabs)}
         <h1 className="visually-hidden">{name}</h1>
         {/* The way back to a team, and what a save did. Always there, so a save is announced. */}
         <div className="agent-notices">{backToTeam}<span className={`agent-save-state t-meta${saveSaid === 'Saved.' ? ' quiet' : ''}`} role="status">{saveSaid ?? (changed && mine.length > 0 ? `Saving changes it in ${listNames(mine.map((use) => use.teamName))} too.` : pinSaid && (pinSaid.ok ? pinSaid.text : <span className="agent-save-error">{pinSaid.text}</span>))}</span></div>
         {bench}
         {side}
+        {removeDialog}
       </div>
     )
   }
@@ -333,6 +331,7 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
       </AgentHead>
       {bench}
       {side}
+      {removeDialog}
     </div>
   )
 }

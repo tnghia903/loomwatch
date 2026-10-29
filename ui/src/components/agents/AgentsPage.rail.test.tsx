@@ -41,7 +41,7 @@ describe('Moving between agents from the rail', () => {
   it('has no rail on the list, which shows every agent already', async () => {
     window.history.replaceState({}, '', '/agents')
     page()
-    await screen.findByRole('button', { name: /Writer/ }, { timeout: 5000 })
+    await screen.findAllByRole('button', { name: /Writer/ }, { timeout: 5000 })
     expect(screen.queryByRole('navigation', { name: 'My agents' })).not.toBeInTheDocument()
   })
 

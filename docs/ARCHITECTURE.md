@@ -424,6 +424,22 @@ adds the person's note. The daemon keeps a copy of every team file once before t
 team into a project of its own (`/api/move-into-projects`), through its normal save. Moving a
 team to another project later is the same save, with only its `project` changed.
 
+Deleting a project (ADR 0100), from the "…" on its card on Home or in its room:
+`DELETE /api/projects/{id}` takes the `project:` line out of each of its teams' files, all of them
+or none (`projects::without_project`), keeps an approved team approved, adds those teams to the
+`leftOut` list beside the move's record so the app never moves them into a project of their own,
+and moves the project's file to `.projects/.removed/`. Those teams stand on Home as cards of their
+own, whose "…" moves one into a project or deletes it. A removed project's id stays taken (`projects::removed_ids`, listed by `GET /api/projects` as
+`removed`): its notebook and Ask chat are kept under it.
+
+Removing one of My agents (ADR 0100), from the "…" on its card or its name's menu, takes it off
+every team it is in first, in the app (`lib/library/removeAgent.ts`): each team closes up around
+it (`lib/team-file/takeOff.ts`): whoever handed it work hands it on, the next one starts when it
+started the team, a review stop left at the front goes, and a team left with no agent goes to the
+trash. When it started a team and handed work to several, the confirmation asks which of them
+starts, and that one hands the work on to the others. `DELETE /api/jobs/{id}` still refuses an
+agent a team uses.
+
 In the app, Home is the studio (`components/studio/`, `lib/projects/studio.ts`). Home and a
 project's room open the same way, at a glance (`lib/projects/glance.ts`, `GlanceTiles`): four tiles
 that keep their places. Needs you counts by the bell's own rules (`ticketsFrom`), so the two never

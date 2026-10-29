@@ -878,30 +878,11 @@ export function useTeamDocument() {
       const remainingNodes = nodes.filter((node) => !idSet.has(node.id))
       const droppedEdges = edges.filter((edge) => idSet.has(edge.source) || idSet.has(edge.target))
       const remainingEdges = edges.filter((edge) => !idSet.has(edge.source) && !idSet.has(edge.target))
-      const configuredResponder = documentSnapshot?.responder
 
-      droppedEdges.forEach((edge) => modelRef.current?.removeEdge(edge.source, edge.target))
-      idSet.forEach((id) => modelRef.current?.removeAgent(id))
-      const orphanedChecks = remainingNodes.filter((node) => node.data.agent.checks && idSet.has(node.data.agent.checks)).map((node) => node.id)
-      orphanedChecks.forEach((id) => { modelRef.current?.setAgentField(id, 'checks', undefined); modelRef.current?.setAgentField(id, 'sendBack', undefined); modelRef.current?.setAgentField(id, 'sendBackOnce', undefined) })
-
-      let nextEntrypoint = entrypoint
-      if (entrypoint !== null && idSet.has(entrypoint)) {
-        // §5.4: exactly one survivor is promoted automatically; two or more (or zero) is left
-        // unset — and unset must mean unset in the YAML too, not a dangling reference to the
-        // agent that just left `agents`.
-        nextEntrypoint = remainingNodes.length === 1 ? remainingNodes[0].id : null
-        if (nextEntrypoint) {
-          modelRef.current?.setEntrypoint(nextEntrypoint)
-        } else {
-          modelRef.current?.clearEntrypoint()
-        }
-      }
-
-      if (configuredResponder) {
-        if (remainingEdges.length === 0 && nextEntrypoint) modelRef.current?.setResponder(nextEntrypoint)
-        else if (idSet.has(configuredResponder)) modelRef.current?.clearResponder()
-      }
+      // The file changes as Remove in My agents changes a team it takes an agent off (ADR 0100).
+      const removed = modelRef.current?.removeAgentCards(ids)
+      const orphanedChecks = removed?.unchecked ?? []
+      const nextEntrypoint = removed ? removed.entrypoint : entrypoint
 
       setNodes(remainingNodes.map((node) => ({ ...node, data: { ...node.data, isEntrypoint: node.id === nextEntrypoint, agent: orphanedChecks.includes(node.id) ? withoutChecks(node.data.agent) : node.data.agent } })))
       setEdges(remainingEdges)
@@ -923,7 +904,7 @@ export function useTeamDocument() {
         })
       }
     },
-    [nodes, edges, entrypoint, documentSnapshot?.responder, markDirty, captureHistory],
+    [nodes, edges, entrypoint, markDirty, captureHistory],
   )
 
   const removeAgent = useCallback((id: string) => removeAgents([id]), [removeAgents])
