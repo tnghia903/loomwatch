@@ -46,6 +46,21 @@ it('says why a rename was refused and keeps the new name to try again', async ()
   expect(within(screen.getByRole('form', { name: 'Rename team' })).getByLabelText('Team name')).toHaveValue('Japan trip')
 })
 
+// The file moves while the button waits, so a second press can't start a second move.
+it('keeps Rename pressed until the file has moved', async () => {
+  let moved: (refused: string | null) => void = () => {}
+  const onRename = vi.fn(() => new Promise<string | null>((resolve) => { moved = resolve }))
+  renderSwitcher({ onRename })
+  fireEvent.click(screen.getByRole('button', { name: /open team menu/ }))
+  fireEvent.click(screen.getByRole('button', { name: 'Rename' }))
+  const form = screen.getByRole('form', { name: 'Rename team' })
+  fireEvent.change(within(form).getByLabelText('Team name'), { target: { value: 'Japan trip' } })
+  fireEvent.click(within(form).getByRole('button', { name: 'Rename' }))
+  expect(within(form).getByRole('button', { name: 'Rename' })).toBeDisabled()
+  moved(null)
+  await waitFor(() => expect(screen.queryByRole('form', { name: 'Rename team' })).not.toBeInTheDocument())
+})
+
 // A saved team's file moves at once, so changes not saved come first; a team never saved has no
 // file yet and can be renamed with its changes.
 it('waits for changes to be saved before renaming a saved team', () => {

@@ -1173,11 +1173,14 @@ export function useTeamDocument() {
       }
       return null
     } catch (error) {
+      // A refusal says what to do (the team is working, say); anything else is LoomWatch's own
+      // trouble, and the daemon put everything back.
+      if (error instanceof TeamFileApiError && error.status === 409) return error.message
       if (error instanceof TeamFileApiError && error.status === 412) {
         void checkDiskRevision()
-        return 'The team’s file changed outside LoomWatch. Look at the change, then rename it again.'
+        return 'This team’s file changed outside LoomWatch, so it was read again. Rename it again.'
       }
-      return error instanceof Error ? error.message : String(error)
+      return 'LoomWatch couldn’t rename this team, so nothing changed. Try again.'
     }
   }, [path, saveState, teamsRoot, markDirty, captureHistory, applyDiskYaml, checkDiskRevision])
 

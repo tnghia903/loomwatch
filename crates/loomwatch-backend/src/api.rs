@@ -1614,7 +1614,7 @@ fn move_team_file(
             is_same_file_name(candidate, &team)
                 || is_free_team_file(&state.teams_root, candidate, &trashed, filed)
         })
-        .ok_or_else(|| refuse(format!("No free file name starts with {}.", rename.stem)))?;
+        .ok_or_else(|| refuse("Too many teams already have this name. Try another.".to_owned()))?;
     if is_same_file_name(&target, &team) {
         return Ok(None);
     }
@@ -1663,9 +1663,7 @@ fn refuse_while_in_use(
     }
     if runs.waits_to_try_again(relative) {
         return Err(
-            "This team's schedule is waiting to try its last work again. Rename the \
-                    team after that try."
-                .to_owned(),
+            "This team is trying its last work again soon. Rename it after that.".to_owned(),
         );
     }
     // `trip.yaml` and `trip.yml` side by side share `trip.brief/` and the rest.
@@ -1675,8 +1673,8 @@ fn refuse_while_in_use(
         .find(|sibling| sibling != team && sibling.is_file())
     {
         Some(sibling) => Err(format!(
-            "{} beside it keeps its files under the same name, so LoomWatch can't move this \
-             team alone.",
+            "{}, another team file with the same name, shares this team's files. Delete one of \
+             the two teams, then rename the other.",
             sibling.file_name().unwrap_or_default().to_string_lossy()
         )),
         None => Ok(()),
@@ -5133,11 +5131,22 @@ mod tests {
         assert!(
             error_text(refused)
                 .await
-                .contains("try its last work again")
+                .contains("trying its last work again")
         );
         assert!(root.0.join("trip.yaml").is_file());
 
         assert!(runs.set_next_try(&live.run_id, None));
+        // Another team's schedule waiting to try again holds only that team.
+        let mut elsewhere = crate::runs::RunRecord::queued(
+            "other.yaml".to_owned(),
+            "Write the weekly post".to_owned(),
+            &team,
+            crate::runs::RunTrigger::Schedule,
+        )
+        .expect("run record");
+        elsewhere.status = crate::runs::RunStatus::Failed;
+        elsewhere.next_try_at = Some("2026-10-29T10:00:00Z".to_owned());
+        runs.insert(elsewhere);
         let response = rename_request(
             router_with_runs(&root.0, runs),
             "trip.yaml",
@@ -5150,8 +5159,10 @@ mod tests {
         assert!(root.0.join("kyoto-week.yaml").is_file());
     }
 
-    /// A taken name gets the next number. Taken means a team's file, files left under the name, a
-    /// deleted team's name, or history filed under it: each would hand the team another's.
+    /// A taken name gets the next number. Taken means a team's file with either ending, a Brief,
+    /// layout or files left under the name, a deleted team's name, or history filed under it, held
+    /// by the daemon, kept in the database, or only a chat message: each would hand the team
+    /// another's files or past.
     #[tokio::test]
     async fn rename_takes_the_next_name_nothing_else_has() {
         let root = TempDirectory::new();
@@ -5159,11 +5170,33 @@ mod tests {
         fs::write(root.0.join("trip.yaml"), TRIP_TEAM).expect("write team");
         fs::write(root.0.join("kyoto-week.yaml"), VALID_TEAM).expect("a team with the name");
         fs::create_dir(root.0.join("kyoto-week-2.files")).expect("files left under a name");
-        fs::write(root.0.join("kyoto-week-4.yaml"), VALID_TEAM).expect("a team to delete");
-        let deleted = delete_request(test_router(&root.0), "kyoto-week-4.yaml").await;
+        fs::write(root.0.join("kyoto-week-3.yml"), VALID_TEAM).expect("a team, the other ending");
+        fs::create_dir(root.0.join("kyoto-week-4.brief")).expect("a Brief left under a name");
+        fs::write(root.0.join("kyoto-week-5.layout.json"), "{}").expect("a layout left");
+        fs::write(root.0.join("kyoto-week-6.yaml"), VALID_TEAM).expect("a team to delete");
+        let deleted = delete_request(test_router(&root.0), "kyoto-week-6.yaml").await;
         assert_eq!(deleted.status(), StatusCode::OK);
-        let (runs, _db, _approvals) = durable_runs(&root.0, &state.0).await;
-        finished_run(&runs, "kyoto-week-3.yaml", VALID_TEAM).await;
+        let (runs, db, _approvals) = durable_runs(&root.0, &state.0).await;
+        let team = TeamConfig::parse(VALID_TEAM).expect("team parses");
+        let held = crate::runs::RunRecord::queued(
+            "kyoto-week-7.yaml".to_owned(),
+            "Plan".to_owned(),
+            &team,
+            crate::runs::RunTrigger::Manual,
+        )
+        .expect("run record");
+        runs.insert(held);
+        let other_daemon =
+            crate::runs::RunRegistry::durable(crate::runs::RunStore::new(db.clone()));
+        finished_run(&other_daemon, "kyoto-week-8.yaml", VALID_TEAM).await;
+        sqlx::query(
+            "INSERT INTO chat_messages (id, team_key, team_path, text, created_at, route)
+             VALUES ('m9', 'path:kyoto-week-9.yaml', 'kyoto-week-9.yaml', 'Hello', '2026-10-29T00:00:00Z', 'team_note')",
+        )
+        .execute(db.writer())
+        .await
+        .expect("a chat with no work");
+
         let renamed = TRIP_TEAM.replace("name: Trip planner", "name: Kyoto week");
         let response = rename_request(
             router_with_runs(&root.0, runs),
@@ -5174,15 +5207,63 @@ mod tests {
         )
         .await;
         assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(response_json(response).await["path"], "kyoto-week-5.yaml");
+        assert_eq!(response_json(response).await["path"], "kyoto-week-10.yaml");
         assert_eq!(
-            fs::read_to_string(root.0.join("kyoto-week-5.yaml")).expect("moved team"),
+            fs::read_to_string(root.0.join("kyoto-week-10.yaml")).expect("moved team"),
             renamed
         );
         assert_eq!(
             fs::read_to_string(root.0.join("kyoto-week.yaml")).expect("other team"),
             VALID_TEAM
         );
+    }
+
+    /// A name that differs only in capitals is the same file on a Mac: it is saved in place, on
+    /// every computer.
+    #[tokio::test]
+    async fn rename_to_the_same_name_in_other_capitals_saves_in_place() {
+        let root = TempDirectory::new();
+        fs::write(root.0.join("Trip.yaml"), TRIP_TEAM).expect("write team");
+        let renamed = TRIP_TEAM.replace("name: Trip planner", "name: Trip");
+        let response = rename_request(
+            test_router(&root.0),
+            "Trip.yaml",
+            "trip",
+            &renamed,
+            Some(TRIP_TEAM),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response_json(response).await["path"], "Trip.yaml");
+        assert_eq!(
+            fs::read_to_string(root.0.join("Trip.yaml")).expect("team"),
+            renamed
+        );
+    }
+
+    /// A team approved before its file was changed outside `LoomWatch` is not approved as it is
+    /// now: the rename carries the approval only of the text that was approved.
+    #[tokio::test]
+    async fn rename_does_not_approve_a_file_changed_since_it_was_approved() {
+        let root = TempDirectory::new();
+        let state = TempDirectory::new();
+        fs::write(root.0.join("trip.yaml"), TRIP_TEAM).expect("the team as approved");
+        let (runs, _db, approvals) = durable_runs(&root.0, &state.0).await;
+        assert!(approvals.is_approved("trip.yaml", &revision(TRIP_TEAM.as_bytes())));
+        let changed = TRIP_TEAM.replace("limitUsd: 1", "limitUsd: 50");
+        fs::write(root.0.join("trip.yaml"), &changed).expect("changed outside LoomWatch");
+        let renamed = changed.replace("name: Trip planner", "name: Kyoto week");
+        let response = rename_request(
+            router_with_runs(&root.0, runs),
+            "trip.yaml",
+            "kyoto-week",
+            &renamed,
+            Some(&changed),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(root.0.join("kyoto-week.yaml").is_file());
+        assert!(!approvals.is_approved("kyoto-week.yaml", &revision(renamed.as_bytes())));
     }
 
     /// When the new name's file is the one the team has, the name is saved in place.
@@ -5254,6 +5335,28 @@ mod tests {
         fs::write(root.0.join("notes.yaml"), plain).expect("write team");
         let (runs, db, _approvals) = durable_runs(&root.0, &state.0).await;
         let run = finished_run(&runs, "notes.yaml", plain).await;
+        // Runs from before the key was kept: an empty key held and stored, and one stored as NULL.
+        let team = TeamConfig::parse(plain).expect("team parses");
+        let mut keyless = crate::runs::RunRecord::queued(
+            "notes.yaml".to_owned(),
+            "Sum up the meeting".to_owned(),
+            &team,
+            crate::runs::RunTrigger::Manual,
+        )
+        .expect("run record");
+        keyless.status = crate::runs::RunStatus::Succeeded;
+        keyless.team_key = String::new();
+        let keyless_run = keyless.run_id.clone();
+        runs.insert(keyless);
+        runs.persist(&keyless_run).await.expect("run kept");
+        let other_daemon =
+            crate::runs::RunRegistry::durable(crate::runs::RunStore::new(db.clone()));
+        let stored_run = finished_run(&other_daemon, "notes.yaml", plain).await;
+        sqlx::query("UPDATE runs SET team_key = NULL WHERE run_id = $1")
+            .bind(&stored_run)
+            .execute(db.writer())
+            .await
+            .expect("a run stored with no key");
         sqlx::query(
             "INSERT INTO chat_messages (id, team_key, team_path, text, created_at, route)
              VALUES ('m1', 'path:notes.yaml', 'notes.yaml', 'Hello', '2026-10-29T00:00:00Z', 'team_note')",
@@ -5261,6 +5364,13 @@ mod tests {
         .execute(db.writer())
         .await
         .expect("chat row");
+        sqlx::query(
+            "INSERT INTO work_passages (piece, kind, team_key, team_path, piece_at, target, who, said_at, part, text)
+             VALUES ('m1', 'note', 'path:notes.yaml', 'notes.yaml', '2026-10-29T00:00:00Z', 'request', NULL, '2026-10-29T00:00:00Z', 0, 'Hello')",
+        )
+        .execute(db.writer())
+        .await
+        .expect("search row");
         sqlx::query(
             "INSERT INTO chat_reactions (team_key, anchor, target, face, created_at)
              VALUES ('path:notes.yaml', 'r1', 'answer', 'thumbs-up', '2026-10-29T00:00:00Z')",
@@ -5295,10 +5405,15 @@ mod tests {
             [("notes".to_owned(), "meeting-notes.yaml".to_owned())]
         );
         assert_eq!(
-            rows(&db, "SELECT team_key, team_path FROM runs").await,
+            rows(&db, "SELECT DISTINCT team_key, team_path FROM runs").await,
             [("notes".to_owned(), "meeting-notes.yaml".to_owned())]
         );
         assert_eq!(runs.get(&run).expect("held run").team_key, "notes");
+        assert_eq!(runs.get(&keyless_run).expect("held run").team_key, "notes");
+        assert_eq!(
+            rows(&db, "SELECT team_key, team_path FROM work_passages").await,
+            [("notes".to_owned(), "meeting-notes.yaml".to_owned())]
+        );
         assert_eq!(
             rows(&db, "SELECT team_key, anchor FROM chat_reactions").await,
             [("notes".to_owned(), "r1".to_owned())]
@@ -5328,6 +5443,23 @@ mod tests {
             TRIP_TEAM
         );
         assert!(!root.0.join("kyoto-week.yaml").exists());
+
+        let other = VALID_TEAM.replace(
+            "schemaVersion: 1\n",
+            "schemaVersion: 1\nid: trip\nname: Other\n",
+        );
+        fs::write(root.0.join("trip.yml"), &other).expect("rewrite its namesake");
+        let refused = rename_request(
+            test_router(&root.0),
+            "trip.yml",
+            "kyoto-week",
+            &other.replace("name: Other", "name: Kyoto week"),
+            Some(&other),
+        )
+        .await;
+        assert_eq!(refused.status(), StatusCode::CONFLICT);
+        assert!(error_text(refused).await.contains("trip.yaml"));
+        assert!(root.0.join("trip.yml").is_file());
     }
 
     /// When the history cannot be filed under the new name, the files go back where they were, so
