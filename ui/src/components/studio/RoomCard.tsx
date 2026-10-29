@@ -1,7 +1,10 @@
 import { Fragment } from 'react'
 
-import { otherTeams, type Room, type Seat } from '../../lib/projects/studio'
-import { leadTeam, markOf, type FigureOf } from '../../lib/projects/studioUi'
+import { otherTeams, type Room, type RoomTeam, type Seat } from '../../lib/projects/studio'
+import { markOf, type FigureOf } from '../../lib/projects/studioUi'
+import { PRESENCE_WORDS } from '../../lib/rail/presence'
+import { teamHref } from '../../lib/team-file/teamHref'
+import { FileChip } from '../ui/FileChip'
 import { TeamDesks } from './TeamDesks'
 
 /** The small square beside a project's name: the only colour a room has. */
@@ -18,7 +21,7 @@ export function RoomWords({ room, count = true }: { room: Room; count?: boolean 
   const { named, more, moreQuiet } = otherTeams(room)
   const s = more === 1 ? '' : 's'
   // A dot is held to the words before it, so the line breaks only between teams.
-  const dot = <span className="room-sep">{'\u00a0·'}</span>
+  const dot = <span className="room-sep">{' ·'}</span>
   return (
     <>
       {room.line}
@@ -31,26 +34,74 @@ export function RoomWords({ room, count = true }: { room: Room; count?: boolean 
   )
 }
 
+/** How many teams a room card lists before "N more". */
+const TEAMS_LISTED = 4
+
+/** What a team is doing, in words: who is waiting or working, that it stopped, when it runs, or ready. */
+function teamLine(team: RoomTeam): string {
+  const seat = team.seats.find((candidate) => candidate.kind === 'agent' && candidate.state === team.state)
+  if (team.state === 'waiting' || team.state === 'working') return seat ? `${seat.name} is ${PRESENCE_WORDS[team.state]}` : `${PRESENCE_WORDS[team.state]}`
+  if (team.state === 'failed') return 'didn’t finish'
+  if (team.schedule) return `Runs ${team.schedule.charAt(0).toLowerCase()}${team.schedule.slice(1)}`
+  return 'Ready'
+}
+
+/** The shape that says a team's state beside its colour and words: a ring waits, a dot works, a cross stopped. */
+function StateShape({ state }: { state: RoomTeam['state'] }) {
+  if (state === 'waiting') return <svg className="glance-shape waiting" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5" /></svg>
+  if (state === 'working') return <span className="glance-dot" aria-hidden="true" />
+  if (state === 'failed') return <svg className="glance-shape failed" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7" /></svg>
+  return <span className="room-card-noshape" aria-hidden="true" />
+}
+
 /**
- * A project's room on Home: neutral, with its mark, its busiest team's desks, and one line saying
- * what is happening. With more teams, the desks carry their team's name and the line names every
- * other team at work. The whole card opens the room.
+ * A project's room on Home (ADR 0097), at a glance: each team on a line, most pressing first, with
+ * its agents' figures and what it is doing, each opening its chat; then the newest thing made here,
+ * one press from being read, and what this month cost. The rest of the card opens the room.
  */
-export function RoomCard({ room, figureOf, onOpen, onAway }: { room: Room; figureOf: FigureOf; onOpen: () => void; onAway?: (seat: Seat) => void }) {
-  const team = leadTeam(room)
+export function RoomCard({ room, figureOf, onOpen, onAway, newest = null, spend = null }: {
+  room: Room
+  figureOf: FigureOf
+  onOpen: () => void
+  onAway?: (seat: Seat) => void
+  /** The newest file the agents here made. */
+  newest?: string | null
+  /** What this month cost here, in words. */
+  spend?: string | null
+}) {
+  const more = room.teams.length - TEAMS_LISTED
   return (
     <article className="room-card" data-state={room.state} aria-labelledby={`room-${room.id}`}>
-      <h3 className="room-card-name">
-        <button type="button" id={`room-${room.id}`} onClick={onOpen}>
-          <ProjectMark id={room.id} mark={room.mark} />
-          <span>{room.name}</span>
-        </button>
-      </h3>
-      <div className="room-card-floor">
-        {team && room.teams.length > 1 && <span className="room-card-team">{team.name}</span>}
-        {team ? <TeamDesks team={team} figureOf={figureOf} onAway={onAway} /> : <span className="desk-empty">No team yet</span>}
+      <div className="room-card-top">
+        <h3 className="room-card-name">
+          <button type="button" id={`room-${room.id}`} onClick={onOpen}>
+            <ProjectMark id={room.id} mark={room.mark} />
+            <span>{room.name}</span>
+          </button>
+        </h3>
+        {room.teams.length > 1 && <span className="room-card-count">{room.teams.length} teams</span>}
       </div>
-      <p className={`room-line ${room.state}`}><RoomWords room={room} /></p>
+      {room.teams.length === 0 ? <p className="desk-empty">No team yet</p> : (
+        <ul className="room-card-teams" aria-label={`${room.name}’s teams`}>
+          {room.teams.slice(0, TEAMS_LISTED).map((team) => (
+            <li key={team.path} className="room-card-team">
+              <StateShape state={team.state} />
+              <span className="room-card-team-words">
+                <a href={teamHref(team.path, 'chat')}>{team.name}</a>
+                <small className={`room-state ${team.state}`}>{teamLine(team)}</small>
+              </span>
+              <TeamDesks team={team} figureOf={figureOf} size={26} compact onAway={onAway} />
+            </li>
+          ))}
+        </ul>
+      )}
+      {more > 0 && <p className="room-card-more">{more} more team{more === 1 ? '' : 's'}</p>}
+      {(newest || spend) && (
+        <div className="room-card-foot">
+          {newest && <span className="room-card-file"><FileChip path={newest} /></span>}
+          {spend && <span className="room-card-spend">{spend}</span>}
+        </div>
+      )}
     </article>
   )
 }

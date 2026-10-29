@@ -53,6 +53,8 @@ function NeedsTile({ needs, last, figureOf, onReview, onTryAgain, onOpenLast, on
 }
 
 export interface GlanceProps {
+  /** What the row is called to a screen reader: Home's is Your desk. */
+  label?: string
   needs: readonly NeedsYouItem[]
   /** The last work that went well and what it made first, shown when nothing needs you. */
   last: { run: RunRecord; file: string | null } | null
@@ -76,10 +78,10 @@ export interface GlanceProps {
  * Each says its state in words and a shape as well as colour, and what can be done is one press.
  */
 export function GlanceTiles(props: GlanceProps) {
-  const { working, next, finishedToday, spend, figureOf, onOpenWork } = props
+  const { label = 'At a glance', working, next, finishedToday, spend, figureOf, onOpenWork } = props
   const lead = working[0]
   return (
-    <div className="glance" role="group" aria-label="At a glance">
+    <div className="glance" role="group" aria-label={label}>
       <NeedsTile {...props} />
 
       <section className="glance-tile" aria-labelledby="glance-working">

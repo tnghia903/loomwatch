@@ -107,11 +107,59 @@ button.desk:focus-visible { outline: 2px solid var(--color-accent); outline-offs
 .project-mark[data-mark="oat"] { --mark: var(--color-fig-oat); }
 .project-mark[data-mark="butter"] { --mark: var(--color-fig-butter); }
 
-.room-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--sp-4); }
+.room-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: var(--sp-4); }
+/* Your desk on Home: the tiles, then the box to give any team work. */
+.studio-desk { display: flex; flex-direction: column; gap: var(--sp-3); scroll-margin: var(--sp-6); }
+
+/* A room card lists its teams, each on a line: its state as a shape, its name over what it is doing,
+   then its agents' figures alone, small. */
+.room-card-top { display: flex; align-items: center; gap: var(--sp-2); }
+.room-card-top .room-card-name { flex: 1; min-width: 0; }
+.room-card-count { flex: none; font-size: 12px; color: var(--color-ink-3); }
+.room-card-teams { list-style: none; margin: var(--sp-2) 0 0; padding: 0; display: flex; flex-direction: column; }
+.room-card-team { display: flex; align-items: center; gap: var(--sp-2); min-height: 48px; padding: 4px 0; border-top: 1px solid var(--color-hairline); }
+.room-card-team:first-child { border-top: 0; }
+.room-card-team > .glance-shape, .room-card-team > .glance-dot, .room-card-noshape { flex: none; width: 12px; }
+.room-card-team > .glance-dot { height: 8px; width: 8px; margin: 0 2px; }
+.room-card-team-words { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.room-card-team-words a {
+  position: relative; z-index: 1; align-self: flex-start; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--color-ink); font: 500 13.5px/18px var(--font-sans); text-decoration: none;
+}
+.room-card-team-words a:hover { text-decoration: underline; text-underline-offset: 3px; }
+.room-card-team-words a:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; border-radius: 2px; }
+.room-card-team-words small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 16px; color: var(--color-ink-3); }
+.room-card-more { margin: 0; font-size: 12.5px; color: var(--color-ink-3); }
+.room-card-foot { display: flex; align-items: center; gap: var(--sp-3); margin-top: auto; padding-top: var(--sp-3); border-top: 1px solid var(--color-hairline); }
+.room-card-file { position: relative; z-index: 1; flex: 1; min-width: 0; }
+.room-card-spend { flex: none; margin-left: auto; font-size: 12px; color: var(--color-ink-3); font-variant-numeric: tabular-nums; }
+
+/* The figures alone, in a line of words: no desk, no names (each still says who it is, and where). */
+.team-desks.compact { flex: none; gap: 0; }
+.team-desks.compact .desk { width: auto; min-width: 0; flex: none; }
+.team-desks.compact .desk-you { width: var(--fig); height: var(--fig); }
+.team-desks.compact .desk-onward { width: 10px; margin: calc(var(--fig) / 2 - 5px) 1px 0; }
+.team-desks.compact .desk-more { margin-left: 4px; font-size: 12px; }
+
+/* ---------- Pick up where you left off ---------- */
+.pick-up { display: flex; flex-direction: column; gap: var(--sp-2); }
+.pick-up-row { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.pick-up-file { display: inline-flex; min-width: 0; max-width: 260px; }
+.pick-up-chat {
+  display: inline-flex; align-items: center; gap: var(--sp-2); min-height: 44px; padding: 4px 12px 4px 6px;
+  border: 1px solid var(--color-hairline); border-radius: var(--r-md); background: var(--color-panel-solid); color: var(--color-ink); text-decoration: none;
+}
+.pick-up-chat > span:last-child { display: flex; flex-direction: column; }
+.pick-up-chat b { font: 500 13px/17px var(--font-sans); }
+.pick-up-chat small { font-size: 12px; line-height: 16px; color: var(--color-ink-3); }
+.pick-up-chat:hover { border-color: var(--color-accent-dim); }
+.pick-up-choose { position: relative; }
+.pick-up-choose .btn { min-height: 44px; }
+.pick-up-choose .desk-chat-menu { left: 0; right: auto; }
 /* The whole card opens the room: its name's button stretches over it, and an agent at your desk
    stays pressable above that, to go to it. */
 .room-card {
-  position: relative; display: flex; flex-direction: column; min-height: 228px; padding: 14px 16px; box-sizing: border-box;
+  position: relative; display: flex; flex-direction: column; min-height: 168px; padding: 14px 16px; box-sizing: border-box;
   border: 1px solid var(--color-hairline); border-radius: var(--r-lg); background: var(--color-panel-solid);
 }
 .room-card-name button::after { content: ''; position: absolute; inset: 0; border-radius: var(--r-lg); }
@@ -127,9 +175,6 @@ button.desk:focus-visible { outline: 2px solid var(--color-accent); outline-offs
 }
 .room-card-name button span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .room-card-name button:hover span:last-child { text-decoration: underline; text-underline-offset: 3px; }
-.room-card-floor { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-2); padding: var(--sp-3) 0 6px; }
-/* Which team the desks are, when the room has more than one. */
-.room-card-team { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-ink-2); font: 400 12px/16px var(--font-sans); }
 .room-line { margin: 0; font-size: 13px; color: var(--color-ink-3); }
 .room-line.waiting, .room-state.waiting { color: var(--color-accent); }
 .room-line.working, .room-state.working { color: var(--color-live); }
@@ -149,7 +194,7 @@ button.desk:focus-visible { outline: 2px solid var(--color-accent); outline-offs
 .room-tile.put-away button { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .room-tile.put-away button.room-tile-name { font-weight: 600; }
 .room-tile-when { font-size: 13px; color: var(--color-ink-3); }
-.room-new { align-items: center; color: var(--color-ink-2); border-style: dashed; min-height: 228px; font-weight: 500; }
+.room-new { align-items: center; color: var(--color-ink-2); border-style: dashed; min-height: 168px; font-weight: 500; }
 .room-tile:hover, .room-new:hover { border-color: var(--color-accent-dim); }
 .room-tile:focus-visible, .room-new:focus-visible, .room-card-name button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 

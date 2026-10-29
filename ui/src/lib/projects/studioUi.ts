@@ -1,4 +1,7 @@
+import { sendChatMessage } from '../chat/client'
 import { figureFor, type FigureChoice } from '../library/figures'
+import { newStartKey } from '../runs/client'
+import type { NeedsYouItem } from './glance'
 import type { Room, RoomTeam, Seat } from './studio'
 
 /** The colours a project's mark may take: the figures' own, so a mark never reads as a state. */
@@ -33,6 +36,11 @@ export function roomHref(id: string): string {
 /** Ask the bell's tray to open, where each waiting thing is answered in turn (one control, ADR 0043). */
 export function openNeedsYou(): void {
   window.dispatchEvent(new Event('loomwatch:open-needs-you'))
+}
+
+/** A team whose run stopped, asked again as it was: in its chat, as work, as the chat's own Try again does. */
+export async function tryAgain(item: Pick<NeedsYouItem, 'teamPath' | 'prompt'>): Promise<void> {
+  await sendChatMessage({ teamPath: item.teamPath, text: item.prompt, to: null, work: true, startKey: newStartKey() })
 }
 
 /** The figure each agent wears, by its id in My agents (or its id in the team). */

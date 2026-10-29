@@ -110,8 +110,8 @@ describe('Home, the studio (ADR 0097)', () => {
     fireEvent.change(screen.getByRole('textbox', { name: 'What you are working on' }), { target: { value: 'My final-year project at SUTD' } })
     fireEvent.click(setUp)
     expect(onAsk).toHaveBeenCalledWith('Set up a project for this: My final-year project at SUTD')
-    // Your desk is there too, to chat with one agent outside any project.
-    expect(screen.getByRole('heading', { name: 'Your desk' })).toBeInTheDocument()
+    // And a way to chat with one agent outside any project.
+    expect(screen.getByRole('button', { name: 'Chat with one agent' })).toBeInTheDocument()
     cleanup()
 
     render(<Home onPalette={vi.fn()} ask={{ unavailable: 'Ask runs on your OpenRouter key. Add it to start.', onAsk }} />)
@@ -134,19 +134,53 @@ describe('Home, the studio (ADR 0097)', () => {
     expect(assign).toHaveBeenCalledWith('/projects/sutd')
   })
 
-  it('puts whoever waits for you at Your desk, and Review opens what waits, as the bell does', async () => {
+  it('puts whoever waits for you first on Your desk, and Review opens what waits, as the bell does', async () => {
     fetchMock.mockImplementation(studio)
     const opened = vi.fn()
     window.addEventListener('loomwatch:open-needs-you', opened)
     render(<Home onPalette={vi.fn()} runs={[waitingOnTheResearcher]} />)
-    const desk = (await screen.findByRole('heading', { name: 'Your desk' })).closest('section') as HTMLElement
-    expect(await within(desk).findByText('Researcher brought work for you to check')).toBeInTheDocument()
-    expect(within(desk).getByText(/Research and design · waiting for you/)).toBeInTheDocument()
-    fireEvent.click(within(desk).getByRole('button', { name: 'Review' }))
+    const desk = await screen.findByRole('group', { name: 'Your desk' })
+    const needs = await within(desk).findByRole('region', { name: 'Needs you · 1' })
+    expect(within(needs).getByText('Researcher brought work for you to check')).toBeInTheDocument()
+    expect(within(needs).getByText('Research and design')).toBeInTheDocument()
+    fireEvent.click(within(needs).getByRole('button', { name: 'Review: Researcher brought work for you to check' }))
     expect(opened).toHaveBeenCalledTimes(1)
-    // One gold fill on the screen: Review.
+    // One gold fill on the screen: Review. The box beside it gives work with a plain Send meanwhile.
     expect(goldFilled()).toEqual(['Review'])
+    expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument()
     window.removeEventListener('loomwatch:open-needs-you', opened)
+  })
+
+  it('gives any team work from Home, its teams under their projects', async () => {
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => (url === '/api/chat/messages' && init?.method === 'POST' ? respond({ route: 'team', message: { id: 'm1' }, run: null }) : studio(url)))
+    renderHome()
+    const box = await screen.findByRole('form', { name: 'Give work' })
+    const to = within(box).getByRole('combobox', { name: 'To' })
+    expect([...to.querySelectorAll('optgroup')].map((group) => [group.label, [...group.querySelectorAll('option')].map((option) => option.textContent)])).toEqual([
+      ['Blog', ['Blog']],
+      ['SUTD final project', ['Research and design']],
+    ])
+    fireEvent.change(to, { target: { value: 'sutd/gate.yaml' } })
+    fireEvent.change(within(box).getByRole('textbox'), { target: { value: 'Find three gate designs.' } })
+    // Nothing waits for you: Send is the one gold fill.
+    expect(goldFilled()).toEqual(['Send'])
+    fireEvent.click(within(box).getByRole('button', { name: 'Send' }))
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/chat/messages')).toBe(true))
+    const [, init] = fetchMock.mock.calls.find(([url]) => url === '/api/chat/messages') as [string, RequestInit]
+    expect(JSON.parse(String(init.body))).toMatchObject({ teamPath: 'sutd/gate.yaml', text: 'Find three gate designs.', work: true })
+    localStorage.removeItem('loomwatch:work-box-team')
+  })
+
+  it('lists each team in its room with what it is doing, and opens its chat from its name', async () => {
+    fetchMock.mockImplementation(studio)
+    render(<Home onPalette={vi.fn()} runs={[waitingOnTheResearcher, run('blog.yaml', { runId: 'b1', status: 'succeeded', finishedAt: new Date().toISOString(), made: ['/teams/post.md'], spend: { spentUsd: 0.25 }, createdAt: new Date().toISOString() })]} />)
+    const [sutd, blog] = await screen.findAllByRole('article')
+    const teams = within(sutd).getByRole('list', { name: 'SUTD final project’s teams' })
+    expect(within(teams).getByRole('link', { name: 'Research and design' })).toHaveAttribute('href', '/?path=sutd%2Fgate.yaml&view=chat')
+    expect(teams).toHaveTextContent('Researcher is waiting for you')
+    // The newest thing made here, one press from being read, and what this month cost.
+    expect(within(blog).getByRole('button', { name: /post\.md/ })).toBeInTheDocument()
+    expect(blog).toHaveTextContent('$0.25 this month')
   })
 
   it('stands your agents in no project apart, each with Chat and Add to a project, and links to About you', async () => {
@@ -163,12 +197,12 @@ describe('Home, the studio (ADR 0097)', () => {
     expect(await within(row).findByRole('link', { name: 'Tell them about you' })).toHaveAttribute('href', '/you')
   })
 
-  it('opens a chat with one of your agents from Your desk', async () => {
+  it('opens a chat with one of your agents from where you left off', async () => {
     fetchMock.mockImplementation(studio)
     renderHome()
-    const desk = (await screen.findByRole('heading', { name: 'Your desk' })).closest('section') as HTMLElement
-    fireEvent.click(within(desk).getByRole('button', { name: 'Chat with one agent' }))
-    expect(await within(desk).findByRole('menuitem', { name: /Researcher/ })).toHaveAttribute('href', '/agents/researcher?view=chat')
+    const row = await screen.findByRole('region', { name: 'Pick up where you left off' })
+    fireEvent.click(within(row).getByRole('button', { name: 'Chat with one agent' }))
+    expect(await within(row).findByRole('menuitem', { name: /Researcher/ })).toHaveAttribute('href', '/agents/researcher?view=chat')
   })
 
   it('starts a new project from New project, and from New team, since every team works in one', async () => {
@@ -188,7 +222,7 @@ describe('Home, the studio (ADR 0097)', () => {
     render(<Home onPalette={vi.fn()} runs={[waitingOnTheResearcher]} />)
     await screen.findAllByRole('article')
     fireEvent.click(screen.getByRole('button', { name: 'List' }))
-    const list = screen.getByRole('list')
+    const list = screen.getByRole('list', { name: 'Projects' })
     expect(within(list).getAllByRole('button').map((button) => button.textContent)).toEqual([
       'SUTD final projectResearcher is waiting for youResearch and design',
       'BlogReadyBlog',

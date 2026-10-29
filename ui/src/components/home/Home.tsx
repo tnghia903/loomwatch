@@ -38,9 +38,10 @@ export interface HomeProps {
 }
 
 /**
- * What the operator sees before any team is open: the studio (ADR 0097). Your desk with whoever
- * waits for you, each project as a room, and your agents in no project; or, before any project,
- * what you are working on.
+ * What the operator sees before any team is open: the studio (ADR 0097). Your desk at a glance
+ * (what needs you, who is working, what finished today, this month) with a box to give any team
+ * work, where you left off, each project as a room, and your agents in no project; or, before any
+ * project, what you are working on.
  */
 export function Home({ notice = null, onPalette, topActions, runs = [], mark, ask, children }: HomeProps) {
   const { resolved, toggle } = useTheme()

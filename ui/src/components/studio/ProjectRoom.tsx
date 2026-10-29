@@ -1,7 +1,6 @@
 import { ChevronLeft, Folder, MoreHorizontal, Plus, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import { sendChatMessage } from '../../lib/chat/client'
 import { FileReaderContext, type FileToRead } from '../../lib/files/reader'
 import { figureFor, type FigureChoice } from '../../lib/library/figures'
 import { fetchJobs, saveJob, type SavedJob } from '../../lib/library/jobs'
@@ -10,7 +9,7 @@ import { lastFinished, madeHere, monthSpend, needsYou, nextWork, workingNow, typ
 import { inOpenedOrder, roomsOf } from '../../lib/projects/studio'
 import { useTeamShapes } from '../../lib/projects/useTeamShapes'
 import { historyRunUrl } from '../../lib/runs/history'
-import { fetchRuns, newStartKey, useSchedules, type RunRecord } from '../../lib/runs/client'
+import { fetchRuns, useSchedules, type RunRecord } from '../../lib/runs/client'
 import { fetchTeamFile, fetchTeamsDiscovery, saveTeamFile } from '../../lib/team-file/client'
 import { TeamFileModel } from '../../lib/team-file/document'
 import { teamOfMyAgents } from '../../lib/team-file/myAgents'
@@ -24,7 +23,7 @@ import { goToRun } from '../agents/route'
 import { FolderPicker } from '../canvas/FolderPicker'
 import { NewTeamDialog } from '../home/NewTeamDialog'
 import { SectionHead } from '../ui/SectionHead'
-import { MARKS, MARK_NAMES, defaultFigureOf, markOf, roomHref } from '../../lib/projects/studioUi'
+import { MARKS, MARK_NAMES, defaultFigureOf, markOf, roomHref, tryAgain } from '../../lib/projects/studioUi'
 import { GlanceTiles } from './GlanceTiles'
 import { MadeHere } from './MadeHere'
 import { ReaderSheet } from './ReaderSheet'
@@ -270,11 +269,9 @@ export function ProjectRoom({ id }: { id: string }) {
   const names = useMemo(() => new Map(shown.flatMap((shape) => shape.seats.map((seat) => [seat.id, seat.name] as const))), [shown])
   const nameOf = useCallback((agent: string) => names.get(agent) ?? agent, [names])
 
-  /** A team whose run stopped, asked again as it was: in its chat, as the chat's own Try again does. */
-  const tryAgain = (item: NeedsYouItem) => {
+  const again = (item: NeedsYouItem) => {
     setProblem(null)
-    sendChatMessage({ teamPath: item.teamPath, text: item.prompt, to: null, work: true, startKey: newStartKey() })
-      .then(readRuns, (caught: unknown) => setProblem(`Couldn’t start ${item.teamName} again. ${caught instanceof Error ? caught.message : String(caught)}`))
+    tryAgain(item).then(readRuns, (caught: unknown) => setProblem(`Couldn’t start ${item.teamName} again. ${caught instanceof Error ? caught.message : String(caught)}`))
   }
 
   if (error) return <main className="project-room"><p role="alert" className="home-empty alert">Couldn’t open the project. {error}</p></main>
@@ -325,7 +322,7 @@ export function ProjectRoom({ id }: { id: string }) {
           spend={monthSpend(all, root, scope)}
           figureOf={figureOf}
           onReview={openRun}
-          onTryAgain={tryAgain}
+          onTryAgain={again}
           onOpenLast={openRun}
           onOpenWork={openRun}
           onMore={() => { if (needs[2]) openRun(needs[2]) }}

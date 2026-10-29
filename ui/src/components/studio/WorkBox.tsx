@@ -34,7 +34,9 @@ export function WorkBox({ teams, primary, onSent }: { teams: readonly BoxTeam[];
   const [sending, setSending] = useState(false)
   const [said, setSaid] = useState<{ ok: boolean; words: string; team: BoxTeam } | null>(null)
   if (!team) return null
-  const projects = [...new Map(teams.flatMap((candidate) => (candidate.project ? [[candidate.project.id, candidate.project.name] as const] : []))).entries()]
+  // Under their projects when they have them; a team in none yet goes under "Other teams".
+  const grouped = teams.some((candidate) => candidate.project)
+  const projects = [...new Map(teams.map((candidate) => [candidate.project?.id ?? '', candidate.project?.name ?? 'Other teams'] as const)).entries()]
   const trimmed = text.trim()
   const choose = (path: string) => {
     setChosen(path)
@@ -65,10 +67,10 @@ export function WorkBox({ teams, primary, onSent }: { teams: readonly BoxTeam[];
           <label className="work-box-to">
             <span>To</span>
             <select value={team.path} onChange={(event) => choose(event.target.value)}>
-              {projects.length > 0
+              {grouped
                 ? projects.map(([id, name]) => (
                   <optgroup key={id} label={name}>
-                    {teams.filter((candidate) => candidate.project?.id === id).map((candidate) => <option key={candidate.path} value={candidate.path}>{candidate.name}</option>)}
+                    {teams.filter((candidate) => (candidate.project?.id ?? '') === id).map((candidate) => <option key={candidate.path} value={candidate.path}>{candidate.name}</option>)}
                   </optgroup>
                 ))
                 : teams.map((candidate) => <option key={candidate.path} value={candidate.path}>{candidate.name}</option>)}
