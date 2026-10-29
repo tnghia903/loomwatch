@@ -221,7 +221,7 @@ export function ProjectRoom({ id }: { id: string }) {
   // The order the teams stood in once the runs were read, kept while you are here: the room puts
   // the team waiting for you first, but a team that starts work never slides under your pointer.
   const [opened, setOpened] = useState<string[] | null>(null)
-  useEffect(() => { if (room && runs && !opened) setOpened(room.teams.map((team) => team.path)) }, [room, runs, opened])
+  if (room && runs && !opened) setOpened(room.teams.map((team) => team.path))
 
   useEffect(() => { if (project) document.title = `${project.name} · LoomWatch` }, [project])
   useEffect(() => {
