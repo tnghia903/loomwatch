@@ -8,6 +8,7 @@ import type { RunRecord } from '../../lib/runs/client'
 import { formatCost } from '../../lib/watch/usage'
 import { FigureStill } from '../agents/FigureStill'
 import { FileChip } from '../ui/FileChip'
+import { Icon } from '../ui/icon'
 
 /** How many of what needs you a tile lists before "N more". */
 const LISTED = 2
@@ -20,14 +21,23 @@ function NeedsShape({ kind }: { kind: NeedsYouItem['kind'] }) {
 }
 
 /**
- * The one press that answers an item: Review for work to check, Answer for a question, a permission
- * or a limit; for work that stopped, the fix LoomWatch knows for why (adding credits, say), or See
- * why, which opens it where it stopped. The first item's is the screen's one gold fill.
+ * The one press that answers an item: Approve for work to check, with its work one press away to
+ * read first; Answer for a question, a permission or a limit; for work that stopped, the fix
+ * LoomWatch knows for why (adding credits, say), or See why, which opens it where it stopped. The
+ * first item's is the screen's one gold fill.
  */
-function ItemAction({ item, primary, onReview, onOpenRun }: { item: NeedsYouItem; primary: boolean; onReview: GlanceProps['onReview']; onOpenRun: GlanceProps['onOpenRun'] }) {
+function ItemAction({ item, primary, busy, onApprove, onReview, onOpenRun }: { item: NeedsYouItem; primary: boolean; busy: boolean; onApprove?: (item: NeedsYouItem) => void; onReview: GlanceProps['onReview']; onOpenRun: GlanceProps['onOpenRun'] }) {
   const className = primary ? 'btn btn-primary' : 'btn'
+  if (item.kind === 'waiting' && item.asks === 'check' && onApprove) {
+    return (
+      <span className="glance-acts">
+        <button type="button" className="iconbtn glance-read" onClick={() => onReview(item)} aria-label={`Read ${item.seat.name}’s work first`} title="Read it first"><Icon name="page" size={16} /></button>
+        <button type="button" className={className} disabled={busy} onClick={() => onApprove(item)} aria-label={`Approve: ${item.seat.name} ${item.says}`}>Approve</button>
+      </span>
+    )
+  }
   if (item.kind === 'waiting') {
-    const verb = item.asks === 'check' ? 'Review' : 'Answer'
+    const verb = item.asks === 'check' ? 'Approve' : 'Answer'
     return <button type="button" className={className} onClick={() => onReview(item)} aria-label={`${verb}: ${item.seat.name} ${item.says}`}>{verb}</button>
   }
   if (item.fix) {
@@ -37,14 +47,28 @@ function ItemAction({ item, primary, onReview, onOpenRun }: { item: NeedsYouItem
 }
 
 /** What needs you, each with the one press that answers it; or, with nothing waiting, the last work that went well. */
-function NeedsTile({ needs, last, figureOf, onReview, onOpenRun, onMore }: Pick<GlanceProps, 'needs' | 'last' | 'figureOf' | 'onReview' | 'onOpenRun' | 'onMore'>) {
+function NeedsTile({ needs, last, figureOf, onApprove, onReview, onOpenRun, onMore }: Pick<GlanceProps, 'needs' | 'last' | 'figureOf' | 'onApprove' | 'onReview' | 'onOpenRun' | 'onMore'>) {
   const [all, setAll] = useState(false)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [said, setSaid] = useState('')
+  const approve = onApprove && (async (item: NeedsYouItem) => {
+    setBusy(item.key)
+    setSaid('')
+    try {
+      if (await onApprove(item)) setSaid(`Approved. ${item.teamName} carries on.`)
+    } catch (caught) {
+      setSaid(`Couldn’t approve: ${caught instanceof Error ? caught.message : String(caught)}`)
+    } finally {
+      setBusy(null)
+    }
+  })
   if (needs.length === 0) {
     return (
       <section className="glance-tile" aria-labelledby="glance-last">
         <h3 id="glance-last" className="glance-label">{last ? `Last finished · ${relativeTime(new Date(last.run.finishedAt ?? last.run.createdAt))}` : 'Nothing is waiting for you'}</h3>
         {last && <button type="button" className="glance-ask" onClick={() => onOpenRun(last.run)}>{last.run.prompt}</button>}
         {last?.file && <FileChip path={last.file} />}
+        <p className="glance-said t-meta" aria-live="polite">{said}</p>
       </section>
     )
   }
@@ -61,12 +85,13 @@ function NeedsTile({ needs, last, figureOf, onReview, onOpenRun, onMore }: Pick<
               <span><NeedsShape kind={item.kind} />{item.seat.name} {item.says}</span>
               <small title={item.reason}>{item.reason ? `${item.teamName} · ${item.reason}` : item.teamName}</small>
             </span>
-            <ItemAction item={item} primary={index === 0} onReview={onReview} onOpenRun={onOpenRun} />
+            <ItemAction item={item} primary={index === 0} busy={busy === item.key} onApprove={approve} onReview={onReview} onOpenRun={onOpenRun} />
           </li>
         ))}
       </ul>
       {/* Home's bell lists them all; a room, which has no bell, shows them here. */}
       {more > 0 && <button type="button" className="link glance-more" onClick={() => (onMore ? onMore() : setAll(true))}>Show {more} more</button>}
+      <p className="glance-said t-meta" aria-live="polite">{said}</p>
     </section>
   )
 }
@@ -86,7 +111,11 @@ export interface GlanceProps {
   /** This month's cost by where it was paid, when the usage report could be read. */
   cost: MonthCost | null
   figureOf: FigureOf
+  /** Read an item's work first: where it waits (the bell's tray on Home, its run in a room). */
   onReview: (item: NeedsYouItem) => void
+  /** Approve work waiting to be checked, in one press; true once it is approved. Without it,
+      Approve opens the work, as onReview does. */
+  onApprove?: (item: NeedsYouItem) => Promise<boolean>
   /** Open a piece of work where it was given: its team's chat, at that work. */
   onOpenRun: (run: Pick<RunRecord, 'runId' | 'teamPath'>) => void
   /** Show everything that needs you; without it the tile lists the rest itself. */

@@ -6,7 +6,7 @@ import { teamDisplayName } from '../team-file/client'
 import { movedInPlace } from '../team-file/inPlace'
 import { useTeamList } from '../team-file/useTeamList'
 import { useLoomMarkState } from './loomMark'
-import { ticketsFrom, type Ticket } from './needsYou'
+import { APPROVAL_TEXT, ticketsFrom, type Ticket } from './needsYou'
 
 const DISMISSED_KEY = 'loomwatch.needsYou.dismissed'
 /** Said on the window when a stopped run is dismissed, so every reader of the poll leaves it out. */
@@ -32,6 +32,8 @@ async function refreshRuns(signal?: AbortSignal) {
   try {
     const fetched = await fetchRuns(signal)
     if (signal?.aborted || mine !== runs.generation) return
+    // Every screen draws from this list, so an answer that isn't one is an error, never a crash.
+    if (!Array.isArray(fetched)) throw new Error('LoomWatch’s list of runs couldn’t be read.')
     lastRecords = fetched
     const records = keepIfSame(runs.snapshot.records, fetched)
     if (records !== runs.snapshot.records || runs.snapshot.error !== null) {
@@ -137,6 +139,21 @@ export function useNeedsYou() {
   const mark = useLoomMarkState(records, tickets.length, working)
   const teamList = useMemo(() => [...names].map(([path, name]) => ({ path, name })), [names])
   return { records, tickets, working, mark, error, dismiss, answer, answerPermission: answerPermissionTicket, answerSpend: answerSpendTicket, refresh, teams: teamList }
+}
+
+/**
+ * Approve, from anywhere a review shows outside its run (Home, a room): the review the run waits
+ * on, from the shared poll, read again first when the poll hasn't seen the run yet. The same words
+ * the tray's Approve sends. False when the run has no review waiting any more.
+ */
+export async function approveRun(runId: string): Promise<boolean> {
+  const review = () => ticketsFrom(runs.snapshot.records, new Map(), new Set()).find((one) => one.kind === 'review' && one.runId === runId)
+  if (!review()) await refreshRuns()
+  const ticket = review()
+  if (!ticket?.node) return false
+  await answerRun(ticket.runId, ticket.node, APPROVAL_TEXT)
+  await refreshRuns()
+  return true
 }
 
 /** Tab title and tab icon carry the count, so a waiting team is visible from another tab. */

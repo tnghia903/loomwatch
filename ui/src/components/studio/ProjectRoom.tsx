@@ -7,7 +7,7 @@ import { fetchJobs, saveJob, type SavedJob } from '../../lib/library/jobs'
 import { addProjectNote, NOTE_CHARS, ABOUT_CHARS, projectsChanged, saveProject, useProjects, type Project, type ProjectEntry } from '../../lib/projects/client'
 import { lastFinished, madeHere, monthCost, monthSpend, needsYou, nextWork, workingNow, type MadeFile } from '../../lib/projects/glance'
 import { useMonthUsage } from '../../lib/projects/useMonthUsage'
-import { loadDismissed } from '../../lib/story/useNeedsYou'
+import { approveRun, loadDismissed } from '../../lib/story/useNeedsYou'
 import { inOpenedOrder, roomsOf } from '../../lib/projects/studio'
 import { useTeamShapes } from '../../lib/projects/useTeamShapes'
 import { historyRunUrl } from '../../lib/runs/history'
@@ -331,6 +331,7 @@ export function ProjectRoom({ id }: { id: string }) {
               spend={monthSpend(all, root, scope)}
               cost={monthCost(usage, teams.map((team) => team.name))}
               figureOf={figureOf}
+              onApprove={(item) => approveRun(item.runId).then((done) => { if (done) readRuns(); else openRun(item); return done })}
               onReview={openRun}
               onOpenRun={openRun}
             />

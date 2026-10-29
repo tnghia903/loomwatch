@@ -6,6 +6,7 @@ import { resetFirstRunForTests } from '../../lib/firstrun/store'
 import { readTourState, resetTourForTests } from '../../lib/tour/store'
 import { forgetYou } from '../../lib/you/client'
 import type { RunRecord } from '../../lib/runs/client'
+import { APPROVAL_TEXT } from '../../lib/story/needsYou'
 import { cascaded, goldFilled, isGoldFill } from '../../test/cascade'
 import { Home } from './Home'
 
@@ -133,8 +134,16 @@ describe('Home, the studio (ADR 0097)', () => {
     expect(assign).toHaveBeenCalledWith('/projects/sutd')
   })
 
-  it('puts whoever waits for you first on Your desk, and Review opens what waits, as the bell does', async () => {
-    fetchMock.mockImplementation(studio)
+  it('puts whoever waits for you first on Your desk, with Approve one press and the work one press away', async () => {
+    const answered: unknown[] = []
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === '/api/runs?preview=true') return respond(answered.length ? [] : [waitingOnTheResearcher])
+      if (url === `/api/runs/${encodeURIComponent(waitingOnTheResearcher.runId)}/answers` && init?.method === 'POST') {
+        answered.push(JSON.parse(String(init.body)))
+        return respond({ ...waitingOnTheResearcher, waitingOn: null })
+      }
+      return studio(url)
+    })
     const opened = vi.fn()
     window.addEventListener('loomwatch:open-needs-you', opened)
     render(<Home onPalette={vi.fn()} runs={[waitingOnTheResearcher]} />)
@@ -142,14 +151,18 @@ describe('Home, the studio (ADR 0097)', () => {
     const needs = await within(desk).findByRole('region', { name: 'Needs you · 1' })
     expect(within(needs).getByText('Researcher brought work for you to check')).toBeInTheDocument()
     expect(within(needs).getByText('Research and design')).toBeInTheDocument()
-    fireEvent.click(within(needs).getByRole('button', { name: 'Review: Researcher brought work for you to check' }))
-    expect(opened).toHaveBeenCalledTimes(1)
-    // At that item: the tray opens on the work whose Review was pressed.
+    // Reading it first opens the bell's tray at that item, where Send back is.
+    fireEvent.click(within(needs).getByRole('button', { name: 'Read Researcher’s work first' }))
     expect((opened.mock.calls[0][0] as CustomEvent<string>).detail).toBe(waitingOnTheResearcher.runId)
-    // One gold fill on the screen: Review. The box beside it gives work with a plain Send meanwhile,
+    // One gold fill on the screen: Approve. The box beside it gives work with a plain Send meanwhile,
     // even with words in it (an empty box's Send is off, and off is never gold).
     fireEvent.change(within(screen.getByRole('form', { name: 'Give work' })).getByRole('textbox'), { target: { value: 'Draw the gate.' } })
-    expect(goldFilled()).toEqual(['Review'])
+    expect(goldFilled()).toEqual(['Approve'])
+    // Approve answers the review the run waits on, with the words the tray's Approve sends.
+    fireEvent.click(within(needs).getByRole('button', { name: 'Approve: Researcher brought work for you to check' }))
+    expect(await screen.findByText('Approved. Research and design carries on.')).toBeInTheDocument()
+    expect(answered).toEqual([{ node: 'review', text: APPROVAL_TEXT }])
+    expect(opened).toHaveBeenCalledTimes(1)
     window.removeEventListener('loomwatch:open-needs-you', opened)
   })
 

@@ -8,7 +8,7 @@ import { useProjects, type ProjectEntry } from '../../lib/projects/client'
 import { costWords, finishedToday, lastFinished, madeHere, monthCost, monthSpend, needsYou, workingNow } from '../../lib/projects/glance'
 import { roomsOf, studioLayout, type Room } from '../../lib/projects/studio'
 import { useMonthUsage } from '../../lib/projects/useMonthUsage'
-import { loadDismissed } from '../../lib/story/useNeedsYou'
+import { approveRun, loadDismissed } from '../../lib/story/useNeedsYou'
 import { useTeamShapes } from '../../lib/projects/useTeamShapes'
 import { benchChatId } from '../../lib/rail/presence'
 import { historyRunUrl } from '../../lib/runs/history'
@@ -222,8 +222,9 @@ export function Studio({ runs, onSetUp, setUpUnavailable, asking = false, part =
           spend={monthSpend(runs, root)}
           cost={monthCost(usage, null)}
           figureOf={figureOf}
-          // Home's Review opens the bell's tray at that item, where each thing waiting is answered
-          // in turn (ADR 0043); "Show N more" opens it at the first.
+          // Approve is one press here; reading the work first opens the bell's tray at that item,
+          // where each thing waiting is answered in turn (ADR 0043); "Show N more" opens it at the first.
+          onApprove={(item) => approveRun(item.runId).then((done) => { if (!done) openNeedsYou(item.runId); return done })}
           onReview={(item) => openNeedsYou(item.runId)}
           onOpenRun={openRun}
           onMore={() => openNeedsYou()}

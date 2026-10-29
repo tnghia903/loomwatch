@@ -359,6 +359,11 @@ button.wall-paper:focus-visible { outline: 2px solid var(--color-accent); outlin
 .glance-needs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
 .glance-needs li { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
 .glance-needs .btn { flex: none; min-height: 40px; }
+/* Approve, with the work one press away to read first. */
+.glance-acts { flex: none; display: inline-flex; align-items: center; gap: var(--sp-1); }
+.glance-read { width: 40px; height: 40px; color: var(--color-ink-2); }
+.glance-said { margin: 0; color: var(--color-ink-2); }
+@media (max-width: 767px) { .glance-read, .glance-needs .btn { min-width: 44px; min-height: 44px; } }
 .glance-need-words { flex: 1; min-width: 0; display: flex; flex-direction: column; font-size: 13px; line-height: 18px; color: var(--color-ink); }
 .glance-need-words > span { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .glance-need-words small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--color-ink-2); }

@@ -239,7 +239,7 @@ export function NeedsYouTray({ tickets, working, onAnswer, onPermission, onSpend
                   </form>
                 ) : (
                   <div className="ticket-acts">
-                    {ticket.kind === 'review' && <button type="button" className={main(index)} disabled={busy === ticket.id} onClick={() => void send(ticket, APPROVAL_TEXT)}><Check size={13} aria-hidden="true" />Looks good<kbd>A</kbd></button>}
+                    {ticket.kind === 'review' && <button type="button" className={main(index)} disabled={busy === ticket.id} onClick={() => void send(ticket, APPROVAL_TEXT)}><Check size={13} aria-hidden="true" />Approve<kbd>A</kbd></button>}
                     {ticket.kind === 'review' && <button type="button" className="btn" onClick={() => startReply(ticket)}>{ticket.sendBackTo ? 'Send back…' : 'Add a note…'}<kbd>R</kbd></button>}
                     {ticket.kind === 'question' && <button type="button" className={main(index)} onClick={() => startReply(ticket)}>Answer…<kbd>R</kbd></button>}
                     {ticket.kind === 'permission' && onPermission && <>
