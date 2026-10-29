@@ -172,6 +172,45 @@ describe('Workspace', () => {
     expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0)
   })
 
+  // Ask stays open on the team it has just set up, and the team opens on its chat. Laid under the
+  // panel, the chat's right side, where your own messages sit, was hidden.
+  it('keeps the team’s chat clear of Ask while Ask is open beside it', async () => {
+    renderWorkspace()
+    fireEvent.click(screen.getByRole('button', { name: 'Run team' }))
+    const chat = screen.getByRole('region', { name: /chat$/ })
+    expect(cascaded(chat, ['inset', 'right'])).not.toMatch(/inspector/)
+    fireEvent.click(screen.getByRole('button', { name: 'Ask LoomWatch' }))
+    expect(screen.getByRole('complementary', { name: 'Ask LoomWatch' })).toBeInTheDocument()
+    expect(cascaded(chat, ['inset', 'right'])).toBe('calc(var(--lw-inspector-w) + 2 * var(--lw-panel-inset))')
+    // On a phone Ask is a sheet at the bottom, and the chat keeps the whole width.
+    expect(cascaded(chat, ['inset', 'right'], PHONE)).not.toMatch(/inspector/)
+  })
+
+  // Only the screen's own chat moves. An agent's chat on the Agents tab sits in its column, where
+  // `right` would slide it over the bench; and beside Details on a wide screen the chat is already
+  // the column on the left. Below 1100px Details covers the chat or steps aside from it, so there
+  // the chat still stops short of Ask.
+  it('moves only the screen’s own chat clear of Ask, and leaves it where Details already does', () => {
+    const shell = document.createElement('div')
+    shell.className = 'lw-shell ask-docked'
+    const own = document.createElement('section')
+    own.className = 'tc'
+    const column = document.createElement('div')
+    column.className = 'byhand-chat'
+    const agents = document.createElement('section')
+    agents.className = 'tc'
+    column.append(agents)
+    shell.append(own, column)
+    document.body.append(shell)
+    const clear = 'calc(var(--lw-inspector-w) + 2 * var(--lw-panel-inset))'
+    expect(cascaded(own, ['inset', 'right'])).toBe(clear)
+    expect(cascaded(agents, ['inset', 'right'])).toBe('auto')
+    shell.classList.add('details-open')
+    expect(cascaded(own, ['inset', 'right'])).toBe('auto')
+    expect(cascaded(own, ['inset', 'right'], { width: 900 })).toBe(clear)
+    shell.remove()
+  })
+
   // ADR 0051: Run team opens the team's chat, where work starts only when you send @team.
   it('opens the team’s chat from Run team without starting work', async () => {
     renderWorkspace()
@@ -582,6 +621,15 @@ describe('Workspace', () => {
     expect(screen.getByText('2 steps in order')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: RUN_BUTTON })).toBeDisabled()
     expect(screen.getByText('sequence from Researcher to Reviewer')).toBeInTheDocument()
+  })
+
+  // The canvas's own words call each agent a card ("Drag from the dot on the right of a card"); its
+  // line under the canvas said "node", a word from code a newcomer doesn't have.
+  it('says to select a card, the canvas’s own word, not a node', () => {
+    renderWorkspace()
+    const legend = document.querySelector('.build-canvas-legend')
+    expect(legend).toHaveTextContent('Select a card to edit')
+    expect(legend?.textContent).not.toMatch(/node/i)
   })
 
   it('keeps a capability card at each live drag position', async () => {

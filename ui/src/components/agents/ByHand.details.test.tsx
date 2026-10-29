@@ -60,7 +60,7 @@ function Bench({ start = {}, onSet }: { start?: Partial<AgentDraft>; onSet?: (ke
 }
 
 const skillsBlock = () => screen.getByRole('region', { name: 'Skills' })
-const cards = () => within(skillsBlock()).getByRole('list', { name: 'Recipe cards you can add' })
+const cards = () => within(skillsBlock()).getByRole('list', { name: 'Skills you can give it' })
 
 describe('By hand: reading a skill', () => {
   it('opens a card to read every word of it, and pins it up from there', async () => {
@@ -84,11 +84,11 @@ describe('By hand: reading a skill', () => {
     expect(sheet).toHaveTextContent('accessibility-review/SKILL.md')
     expect(onSet).not.toHaveBeenCalled()
 
-    fireEvent.click(within(sheet).getByRole('button', { name: 'Pin it up' }))
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Give it this skill' }))
     expect(onSet).toHaveBeenCalledWith('skills', ['accessibility-review'])
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     // Pinned up, it left the cards for the pegboard, and focus went with it.
-    const pinned = within(skillsBlock()).getByRole('list', { name: 'Recipe cards on its pegboard' })
+    const pinned = within(skillsBlock()).getByRole('list', { name: 'Its skills' })
     const chip = within(pinned).getByRole('button', { name: 'Read accessibility-review' })
     expect(chip).toHaveFocus()
     expect(within(cards()).queryByRole('button', { name: 'Read accessibility-review' })).not.toBeInTheDocument()
@@ -97,15 +97,15 @@ describe('By hand: reading a skill', () => {
   it('opens a pinned-up skill too, to take it down', async () => {
     const onSet = vi.fn()
     render(<Bench start={{ skills: ['accessibility-review', 'gone-skill'] }} onSet={onSet} />)
-    const pinned = within(skillsBlock()).getByRole('list', { name: 'Recipe cards on its pegboard' })
+    const pinned = within(skillsBlock()).getByRole('list', { name: 'Its skills' })
     // One LoomWatch can't find any more has nothing to open.
     expect(within(pinned).queryByRole('button', { name: 'Read gone-skill' })).not.toBeInTheDocument()
-    expect(within(pinned).getByRole('button', { name: 'Take gone-skill down' })).toBeInTheDocument()
+    expect(within(pinned).getByRole('button', { name: 'Take gone-skill away' })).toBeInTheDocument()
 
     fireEvent.click(within(pinned).getByRole('button', { name: 'Read accessibility-review' }))
     const sheet = await screen.findByRole('dialog', { name: 'Accessibility review' })
-    expect(within(sheet).queryByRole('button', { name: 'Pin it up' })).not.toBeInTheDocument()
-    fireEvent.click(within(sheet).getByRole('button', { name: 'Take it down' }))
+    expect(within(sheet).queryByRole('button', { name: 'Give it this skill' })).not.toBeInTheDocument()
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Take this skill away' }))
     expect(onSet).toHaveBeenCalledWith('skills', ['gone-skill'])
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(within(cards()).getByRole('button', { name: 'Read accessibility-review' })).toHaveFocus()
@@ -120,7 +120,7 @@ describe('By hand: reading a skill', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(onSet).not.toHaveBeenCalled()
 
-    fireEvent.click(within(cards()).getByRole('button', { name: 'Pin apple-notes up' }))
+    fireEvent.click(within(cards()).getByRole('button', { name: 'Give it apple-notes' }))
     expect(onSet).toHaveBeenCalledWith('skills', ['apple-notes'])
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })

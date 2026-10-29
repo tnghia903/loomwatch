@@ -70,13 +70,13 @@ describe('a team’s agents, the first of its views', () => {
     const props = renderTeamAgents({ agents: [scoper], selected: 'scope' })
     const block = screen.getByRole('region', { name: 'What it reads' })
     expect(block).toHaveTextContent('Reads 1 folder, 1 file and 1 Notion page')
-    const held = within(block).getByRole('list', { name: 'In its file drawer' })
+    const held = within(block).getByRole('list', { name: 'Folders, files and pages it reads' })
     expect(within(held).getAllByRole('listitem').map((item) => item.textContent)).toEqual([
       'sutd-final-projectFolder · /Users/me/Developer/sutd-final-project',
       'brief.mdFile · scope.files/brief.md',
       'EKIS hubNotion page · read when each run starts',
     ])
-    expect(screen.getByText(/has 1 recipe card, and reads 1 folder, 1 file and 1 Notion page\./)).toBeInTheDocument()
+    expect(screen.getByText(/has 1 skill, and reads 1 folder, 1 file and 1 Notion page\./)).toBeInTheDocument()
     // Given here or with a line in Workflow, it is the same card: either place changes it.
     expect(block).toHaveTextContent('Each is a card in Workflow with a line to this agent')
     expect(within(block).getByRole('group', { name: 'Give it something to read' })).toBeInTheDocument()
@@ -172,25 +172,25 @@ describe('a team’s agents, the first of its views', () => {
   it('says what every agent can do without a tool', () => {
     renderTeamAgents({ agents: [{ ...scoper, capabilities: [{ kind: 'skill', name: 'algorithmic-art' }] }], selected: 'scope' })
     const block = screen.getByRole('region', { name: 'Tools it can use' })
-    expect(block).toHaveTextContent('Files, the web and commands, as its keys allow')
+    expect(block).toHaveTextContent('Files, the web and commands, as you allow')
     expect(within(block).queryByRole('list', { name: 'Tools you gave it' })).toBeNull()
   })
 
-  it('says on the bench which tools don’t fit in the tool drawer', async () => {
+  it('says on the bench which tools aren’t shown', async () => {
     const many = (count: number): AgentConfig => ({ ...scoper, capabilities: ['github', 'notion', 'linear', 'memory', 'browser', 'sentry'].slice(0, count).map((name) => ({ kind: 'tool' as const, name })) })
     renderTeamAgents({ agents: [many(6)], selected: 'scope' })
-    expect(await screen.findByRole('button', { name: 'The tool drawer: Files, the web and commands; 6 tools aren’t connected (2 not in the drawer)' })).toHaveTextContent('Tools · 6 (2 not in the drawer)')
+    expect(await screen.findByRole('button', { name: 'Tools it can use: Files, the web and commands; 6 tools aren’t connected (2 not shown)' })).toHaveTextContent('Tools · 6 (2 not shown)')
     cleanup()
     // Four fit: every one is in the drawer, and nothing is said.
     renderTeamAgents({ agents: [many(4)], selected: 'scope' })
-    expect(await screen.findByRole('button', { name: 'The tool drawer: Files, the web and commands; 4 tools aren’t connected' })).toHaveTextContent(/^Tools · 4$/)
+    expect(await screen.findByRole('button', { name: 'Tools it can use: Files, the web and commands; 4 tools aren’t connected' })).toHaveTextContent(/^Tools · 4$/)
   })
 
-  it('says on the bench, and in its block, what doesn’t fit in the file drawer', async () => {
+  it('says on the bench, and in its block, what it reads that isn’t shown', async () => {
     const folders = ['notes', 'drafts', 'sources', 'archive', 'inbox'].map((name) => ({ kind: 'knowledge' as const, name, path: `/Users/me/${name}` }))
     renderTeamAgents({ agents: [{ ...scoper, capabilities: folders }], selected: 'scope' })
-    expect(await screen.findByRole('button', { name: 'The file drawer: Reads 5 folders (1 not in the drawer)' })).toHaveTextContent('Reads · 5 (1 not in the drawer)')
-    expect(screen.getByRole('region', { name: 'What it reads' })).toHaveTextContent('The drawer has room for 4, so inbox isn’t in it. It still reads it.')
+    expect(await screen.findByRole('button', { name: 'What it reads: Reads 5 folders (1 not shown)' })).toHaveTextContent('Reads · 5 (1 not shown)')
+    expect(screen.getByRole('region', { name: 'What it reads' })).toHaveTextContent('Only 4 fit in the picture. It still reads inbox.')
   })
 
   it('chats with a team’s own agent on its own, in a Chat tab beside its bench', async () => {
@@ -301,7 +301,7 @@ describe('a team’s agents, the first of its views', () => {
     expect(goldFilled()).toEqual(['Save'])
     expect(heightOf(save)).toBe(32)
     expect(heightOf(save, PHONE)).toBe(44)
-    const offers = screen.getAllByRole('button', { name: 'Hand it over' })
+    const offers = screen.getAllByRole('button', { name: /^Allow: / })
     expect(offers.length).toBeGreaterThan(1)
     for (const offer of offers) expect(isGoldFill(offer)).toBe(false)
   })
@@ -342,7 +342,7 @@ describe('a team’s agents, the first of its views', () => {
     renderTeamAgents({ agents: [placed], selected: 'scope', savedJobs: [reading] })
     const block = await screen.findByRole('region', { name: 'What it reads' })
     expect(block).toHaveTextContent('Reads 1 folder in every team it joins, and 1 Notion page this team gives it')
-    const held = within(block).getByRole('list', { name: 'In its file drawer' })
+    const held = within(block).getByRole('list', { name: 'Folders, files and pages it reads' })
     expect(within(held).getAllByRole('listitem').map((item) => item.textContent)).toEqual([
       'Style guideFolder · /Users/me/style',
       'EKIS hubNotion page · read when each run startsThis team gives it',

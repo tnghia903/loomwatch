@@ -79,15 +79,15 @@ export const QUESTS: readonly Quest[] = [
   },
   {
     item: 'pin', reward: 'accessory', area: 'harness', name: 'Safety-pin clip', practice: 'Least privilege',
-    hint: 'Before a scheduled run, switch on only the keys (web, files, commands) its job uses.',
-    why: 'A key the job never uses only turns a model’s mistake into real damage.',
-    earnedWhen: 'A scheduled run finishes without asking for any permission, and every key its agents hold was used.',
+    hint: 'Before a scheduled run, allow its agents only what their job uses: web search, file edits or commands.',
+    why: 'Anything allowed that the job doesn’t use only turns a model’s mistake into real damage.',
+    earnedWhen: 'A scheduled run finishes without asking you anything, and its agents used everything they were allowed.',
   },
   {
     item: 'cushion', reward: 'accessory', area: 'harness', name: 'Wrist pincushion', practice: 'Test before you ship',
-    hint: 'Try an agent on its test bench in My agents before a team uses it.',
+    hint: 'Try an agent in its Chat tab in My agents before a team uses it.',
     why: 'An agent acts over many steps and changes things, so a trial run catches problems before they reach real work.',
-    earnedWhen: 'A team run finishes with an agent from My agents that had a test bench run that finished before it.',
+    earnedWhen: 'A team run finishes with an agent from My agents that you tried in its Chat tab first.',
   },
   {
     item: 'shuttle', reward: 'accessory', area: 'graph', name: 'Shuttle', practice: 'Orchestrator and workers',

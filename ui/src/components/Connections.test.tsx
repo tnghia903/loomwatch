@@ -33,6 +33,13 @@ function daemon({ tools = [] as unknown[], destination = null as typeof page | n
   return fetch
 }
 
+// It goes Home, and says so: "Back to the canvas" named a screen this page isn't reached from.
+it('leads back to Home by name', async () => {
+  daemon()
+  render(<Connections />)
+  expect(await screen.findByRole('link', { name: 'Back to Home' })).toHaveAttribute('href', '/')
+})
+
 describe('Notion is one of the tools (ADR 0070)', () => {
   it('has no Notion section, sign-in or token of its own', async () => {
     daemon()

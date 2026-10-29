@@ -234,7 +234,7 @@ export function AgentAnswer({ runId, name, onClose }: { runId: string; name: str
   const written = useMemo(() => filesWritten(session.projection.evidence), [session.projection.evidence])
   return (
     <div className="agent-answer" onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); onClose() } }}>
-      <button type="button" className="link agent-answer-back" onClick={onClose}><ArrowLeft size={14} aria-hidden="true" />Back to {name} at the bench</button>
+      <button type="button" className="link agent-answer-back" onClick={onClose}><ArrowLeft size={14} aria-hidden="true" />Back to {name}</button>
       <AnswerDocument text={text} by={name} streaming={!session.terminal} touched={touched} folder={responder?.folder} written={written} />
     </div>
   )
@@ -249,7 +249,7 @@ export function AgentFile({ bench, chatId, name, figure }: { bench: BenchFile; c
   return (
     <TeamFiguresContext.Provider value={figures}>
       <div className="agent-answer agent-file" onKeyDown={(event) => { if (event.key === 'Escape' && !event.defaultPrevented) { event.stopPropagation(); bench.close() } }}>
-        <button type="button" className="link agent-answer-back" onClick={bench.close}><ArrowLeft size={14} aria-hidden="true" />Back to {name} at the bench</button>
+        <button type="button" className="link agent-answer-back" onClick={bench.close}><ArrowLeft size={14} aria-hidden="true" />Back to {name}</button>
         <FileReader key={reading.path} file={{ ...reading, from: reading.from ?? agentId }} name={(id) => (id === agentId ? name : id)} hue={() => figureHue(figure)}
           onAsk={bench.askInChat} asked={bench.passages.asked} asking={bench.passages.asking} onShowAsked={bench.showAsked} />
       </div>

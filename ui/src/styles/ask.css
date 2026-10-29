@@ -364,4 +364,14 @@
 }
 @media (min-width: 768px) {
   .lw-shell.ask-docked .ask-notice { left: calc((100vw - var(--lw-inspector-w) - var(--lw-panel-inset)) / 2); }
+  /* The team's chat stops short of it too. Laid under it, your own messages, which sit on the
+     right, were hidden, as they are the moment Ask opens a team it has just set up. Only the
+     screen's own chat: an agent's chat on the Agents tab sits in its column, and moving it would
+     slide it over the bench. Below 1100px Details covers the chat or steps aside from it, so the
+     chat stops short with Details open too. */
+  .lw-shell.ask-docked > .tc { right: calc(var(--lw-inspector-w) + 2 * var(--lw-panel-inset)); }
+}
+/* From 1100px, Details open makes the chat the column on the left, already clear of it. */
+@media (min-width: 1100px) {
+  .lw-shell.ask-docked.details-open > .tc { right: auto; }
 }

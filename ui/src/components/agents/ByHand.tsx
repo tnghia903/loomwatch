@@ -1,5 +1,5 @@
 import { Suspense, useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
-import { ExternalLink, FilePlus2, FileText, Folder, FolderPlus, KeyRound, Network, NotebookText, Plug, Plus, Puzzle, Search, Store, Wrench, X } from 'lucide-react'
+import { ExternalLink, FilePlus2, FileText, Folder, FolderPlus, Network, NotebookText, Plug, Plus, Puzzle, Search, Store, Wrench, X } from 'lucide-react'
 
 import { shortName } from '../../lib/ai/client'
 import { effortWord, modelEfforts, placeEffort } from '../../lib/ai/efforts'
@@ -38,6 +38,7 @@ import { SkillDetails } from '../skills/SkillDetails'
 import SkillsMarket from '../skills/SkillsMarket'
 import { ConnectTool } from '../tools/ConnectTool'
 import { ToolIcon } from '../tools/ToolIcon'
+import { SWITCH_ICONS } from './switchIcons'
 import { AgentFigure } from './benchFigure'
 import { benchLabels, readCount, readsSay, toolsSay, useFigureMood } from './benchOf'
 import type { BenchView } from './workbenchScene'
@@ -112,17 +113,22 @@ export interface ByHandProps {
   cover?: ReactNode
 }
 
-/** Each block: its title, and where it is on the bench. In the order you would set an agent up. */
-const BLOCKS: readonly { part: FigurePart; title: string; where: string }[] = [
-  { part: 'name', title: 'Name', where: 'the nameplate' },
-  { part: 'job', title: 'Instructions', where: 'the clipboard' },
-  { part: 'mind', title: 'Model', where: 'the figure and the laptop' },
-  { part: 'skills', title: 'Skills', where: 'the recipe cards' },
-  { part: 'reads', title: 'What it reads', where: 'the file drawer' },
-  { part: 'tools', title: 'Tools it can use', where: 'the tool drawer' },
-  { part: 'keys', title: 'What it may do without asking', where: 'the keys, and your dish' },
-  { part: 'reply', title: 'What it hands back', where: 'the tray' },
+/**
+ * Each block's title, in the order you would set an agent up. Plain words only: the bench is the
+ * picture, and a block never names the object it is drawn as, so nobody decodes a metaphor to set
+ * one up. Picking a thing on the bench brings its block into view instead.
+ */
+const BLOCKS: readonly { part: FigurePart; title: string }[] = [
+  { part: 'name', title: 'Name' },
+  { part: 'job', title: 'Instructions' },
+  { part: 'mind', title: 'Model' },
+  { part: 'skills', title: 'Skills' },
+  { part: 'reads', title: 'What it reads' },
+  { part: 'tools', title: 'Tools it can use' },
+  { part: 'keys', title: 'What it may do without asking' },
+  { part: 'reply', title: 'What it hands back' },
 ]
+
 
 export function ByHand({ draft, set: write, skills, skillsLoading, roleField, figure, record, hideDoes = false, readOnly = false, reads: teamReads, teamOwn, onShowWorkflow, learned, suggestFor, following, chat, onBuild, cover }: ByHandProps) {
   const chatting = chat !== undefined
@@ -154,8 +160,6 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
   const ids = useId()
   const shape = { ...instructionShape(draft.instructions), ...(draft.doneWhen.length ? { check: true } : {}) }
   const replyPart = replySection(draft.instructions)
-  const given = FIGURE_KEYS.filter(({ key }) => draft.allow[key])
-  const kept = FIGURE_KEYS.filter(({ key }) => !draft.allow[key])
   const giveKey = (key: AllowSwitch, on: boolean) => set('allow', { ...draft.allow, [key]: on })
   const addSkill = (name: string) => { if (!draft.skills.includes(name)) set('skills', [...draft.skills, name]) }
   /** Back from the marketplace: what was added there for this agent goes on its pegboard. */
@@ -250,7 +254,7 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
     skills: draft.skills.length ? `${draft.skills.length} skill${draft.skills.length === 1 ? '' : 's'} it opens when the work calls for one` : 'No skills yet',
     reads: readsSay(ownReads, teamGiven, Boolean(teamOwn)),
     tools: toolsSay(givenTools, connected.state === 'loading'),
-    keys: given.length ? `Goes ahead with ${given.map((item) => item.word.toLowerCase()).join(' and ')}${kept.length ? `; asks you first for ${kept.map((item) => item.word.toLowerCase()).join(' and ')}` : ''}` : 'Asks you before it searches the web, changes files or runs a command',
+    keys: keysSay(draft.allow),
     reply: replyPart ? replySays(replyPart.text) : 'Its instructions don’t say yet',
   }
   const labels = benchLabels({ draft, model, effort: effort?.name.toLowerCase() ?? null, reads, readsSaid: says.reads, toolsSaid: says.tools, asked })
@@ -272,7 +276,6 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
         {flashing && <span key={flash.at} className="byhand-block-flash" aria-hidden="true" onAnimationEnd={() => setFlash(null)} />}
         <header className="byhand-block-head">
           <h3 id={`${ids}-${part}`}>{meta.title}</h3>
-          <span className="byhand-block-where">{meta.where}</span>
         </header>
         {says[part] && <p className="byhand-block-says">{says[part]}</p>}
         {body}
@@ -351,7 +354,7 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
           />)}
 
           {block('tools', <>
-            <p className="t-meta">Every agent can read and write files in its own folder, search and read the web, and run commands, as its keys below allow.</p>
+            <p className="t-meta">Every agent can read and write files in its own folder, search and read the web, and run commands, as you allow below.</p>
             {givenTools.length > 0 && <ul className="byhand-tools" aria-label="Tools you gave it">
               {givenTools.map(({ name, tool }) => {
                 const allowed = allowedFor(draft.toolAllow, name)
@@ -402,15 +405,18 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
           </>)}
 
           {block('keys', <ul className="byhand-keys">
-            {FIGURE_KEYS.map(({ key, word }) => {
+            {FIGURE_KEYS.map(({ key }) => {
               const on = draft.allow[key] === true
               const info = ALLOW_SWITCHES.find((item) => item.key === key)!
+              const Icon = SWITCH_ICONS[key]
               return (
                 <li key={key} className={on ? 'on' : ''}>
-                  <KeyRound size={15} aria-hidden="true" />
-                  <span><b>{word}</b> · {info.label.toLowerCase()}<em>{on ? info.on : 'It asks you first. On a schedule nobody is there to answer, so it is declined.'}</em></span>
-                  {/* A key is offered, not the page's main action: Save is its one gold fill. */}
-                  <button type="button" className="btn" onClick={() => giveKey(key, !on)}>{on ? 'Take it back' : 'Hand it over'}</button>
+                  <Icon size={15} aria-hidden="true" />
+                  {/* The setting comes first, in the bench's words, so the button can only read as
+                      what pressing it does. */}
+                  <span><b>{info.label}</b><em>{on ? `Allowed. ${info.on}` : 'Asks you first. On a schedule nobody can answer, so it is declined.'}</em></span>
+                  {/* Not the page's main action: Save is its one gold fill. */}
+                  <button type="button" className="btn" aria-label={`${on ? 'Ask me first' : 'Allow'}: ${info.label.toLowerCase()}`} onClick={() => giveKey(key, !on)}>{on ? 'Ask me first' : 'Allow'}</button>
                 </li>
               )
             })}
@@ -432,29 +438,29 @@ function showBlock(block: HTMLElement | undefined) {
   block.querySelector<HTMLElement>('textarea, input, select, button')?.focus({ preventScroll: true })
 }
 
-/** What the skills shelf says: recipe cards on the pegboard. */
+/** What the skills shelf says, in the words the tools block uses: a skill is given and taken away. */
 const SHELF = {
   skill: {
     Icon: Puzzle,
-    chosen: 'Recipe cards on its pegboard',
-    none: 'None yet. A skill is a recipe card: instructions it opens when the work calls for it. Click one below to read it, press + to pin it up, or drag it onto the bench.',
-    noneToGive: 'None yet. A skill is a recipe card: instructions it opens when the work calls for it. LoomWatch has none to give yet, so find some in the marketplace.',
-    looking: 'Looking for recipe cards…',
-    find: (count: number) => `Find a recipe card (${count} in LoomWatch)`,
+    chosen: 'Its skills',
+    none: 'None yet. A skill is a set of instructions it opens when the work calls for it. Click one below to read it; press + or drag it onto the bench to give it to this agent.',
+    noneToGive: 'None yet. A skill is a set of instructions it opens when the work calls for it. LoomWatch has none to give yet, so find some in the marketplace.',
+    looking: 'Looking for skills…',
+    find: (count: number) => `Find a skill (${count} in LoomWatch)`,
     findLabel: 'Find a skill',
-    list: 'Recipe cards you can add',
-    take: (name: string) => `Take ${name} down`,
-    give: (name: string) => `Pin ${name} up`,
+    list: 'Skills you can give it',
+    take: (name: string) => `Take ${name} away`,
+    give: (name: string) => `Give it ${name}`,
     read: (name: string) => `Read ${name}`,
     market: 'Find skills in the marketplace',
     marketFor: (query: string) => `Search the marketplace for “${query}”`,
-    fromMarket: (names: readonly string[]) => `Pinned up ${listNames(names)} from the marketplace.`,
+    fromMarket: (names: readonly string[]) => `Gave it ${listNames(names)} from the marketplace.`,
   },
 } as const
 
 /**
  * The skills it has, each with a way to take it off, and the others LoomWatch has to give it. They
- * can also be dragged onto the bench, where they are pinned up as recipe cards. LoomWatch gets more
+ * can also be dragged onto the bench, where they are drawn as cards on its board. LoomWatch gets more
  * from the marketplace (`onMarket`, with what was typed when nothing here matches it). Any of them,
  * pinned up or not, opens to be read in full (SkillDetails).
  */
@@ -503,12 +509,32 @@ function Shelf({ kind, chosen, available, loading, onAdd, onRemove, onDrag, onMa
   )
 }
 
+/** What each switch lets it do, as the end of "It …". */
+const DOES: Record<AllowSwitch, string> = { web: 'searches the web', edits: 'edits files', commands: 'runs commands' }
+
+/** The line under its "What it may do without asking" block, in the sentence's own words. */
+function keysSay(allow: AgentDraft['allow']): string {
+  const has = FIGURE_KEYS.filter(({ key }) => allow[key]).map(({ key }) => DOES[key])
+  const asks = FIGURE_KEYS.filter(({ key }) => !allow[key]).map(({ key }) => DOES[key])
+  if (!has.length) return `Asks you before it ${orList(asks)}`
+  const goes = listNames(has)
+  return `${goes.charAt(0).toUpperCase()}${goes.slice(1)} without asking${asks.length ? `; asks you before it ${orList(asks)}` : ''}`
+}
+
+/** "a, b or c". */
+function orList(items: readonly string[]): string {
+  return items.length > 1 ? `${items.slice(0, -1).join(', ')} or ${items[items.length - 1]}` : items[0] ?? ''
+}
+
 /** The bench in one sentence, for anyone who reads rather than looks, and for screen readers. */
 function sentence(draft: AgentDraft, model: string, reads: readonly ReadSource[]): ReactNode {
   const name = draft.name.trim() || 'This agent'
-  const has = FIGURE_KEYS.filter(({ key }) => draft.allow[key]).map(({ word }) => word.toLowerCase())
-  const keys = has.length ? `It has the ${has.join(' and ')} key${has.length === 1 ? '' : 's'}; for anything else it asks you first.` : 'It has no keys, so it asks you before it searches the web, changes files or runs a command.'
-  const skills = draft.skills.length ? `${draft.skills.length} recipe card${draft.skills.length === 1 ? '' : 's'}` : 'no recipe cards yet'
+  const has = FIGURE_KEYS.filter(({ key }) => draft.allow[key]).map(({ key }) => DOES[key])
+  const asks = FIGURE_KEYS.filter(({ key }) => !draft.allow[key]).map(({ key }) => DOES[key])
+  const keys = !has.length ? `It asks you before it ${orList(asks)}.`
+    : !asks.length ? `It ${listNames(has)} without asking you.`
+      : `It ${listNames(has)} without asking, and asks you before it ${orList(asks)}.`
+  const skills = draft.skills.length ? `${draft.skills.length} skill${draft.skills.length === 1 ? '' : 's'}` : 'no skills yet'
   return <><b>{name}</b> thinks with {model}, has {skills}, and reads {reads.length ? readCount(reads) : 'nothing yet'}. {keys}</>
 }
 
@@ -550,7 +576,7 @@ function Reads({ reads, own, teamOwn, inTeam, readOnly, agentName, onGive, onTak
   const workflowLabel = teamOwn ? (reads.length ? 'See it in Workflow' : null) : !own ? (reads.length ? 'Change it in Workflow' : 'Give it something in Workflow') : 'Give it more in Workflow'
   return (
     <>
-      {reads.length > 0 && <ul className="byhand-reads" aria-label="In its file drawer">
+      {reads.length > 0 && <ul className="byhand-reads" aria-label="Folders, files and pages it reads">
         {reads.map((source, index) => {
           const Icon = source.kind === 'page' ? NotebookText : source.kind === 'file' ? FileText : Folder
           const mine = index < own
@@ -567,7 +593,7 @@ function Reads({ reads, own, teamOwn, inTeam, readOnly, agentName, onGive, onTak
           )
         })}
       </ul>}
-      {reads.length > READ_SLOTS && <p className="t-meta">The drawer has room for {READ_SLOTS}, so {listNames(reads.slice(READ_SLOTS).map((source) => source.name))} {reads.length - READ_SLOTS === 1 ? 'isn’t' : 'aren’t'} in it. It still reads {reads.length - READ_SLOTS === 1 ? 'it' : 'them'}.</p>}
+      {reads.length > READ_SLOTS && <p className="t-meta">Only {READ_SLOTS} fit in the picture. It still reads {listNames(reads.slice(READ_SLOTS).map((source) => source.name))}.</p>}
       {giving && <>
         <div className="byhand-reads-give" role="group" aria-label="Give it something to read">
           <button type="button" className="btn" onClick={() => setPicking('folder')}><FolderPlus size={14} aria-hidden="true" />Folder</button>

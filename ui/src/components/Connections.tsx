@@ -11,7 +11,7 @@ export default function Connections() {
   return (
     <main className="lw-settings">
       <div className="lw-settings-column">
-        <a href="/" className="link lw-settings-back"><ArrowLeft size={14} aria-hidden="true" /> Back to the canvas</a>
+        <a href="/" className="link lw-settings-back"><ArrowLeft size={14} aria-hidden="true" /> Back to Home</a>
         <div className="lw-settings-head">
           <h1 className="t-display">Connections</h1>
           <p className="t-body">Choose how your agents’ models are paid, connect your tools, and choose where your work belongs.</p>

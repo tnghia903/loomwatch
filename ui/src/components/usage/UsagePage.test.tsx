@@ -39,6 +39,11 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 describe('Usage', () => {
+  it('leads back to Home by name', async () => {
+    render(<UsagePage />)
+    expect(await screen.findByRole('link', { name: 'Back to Home' })).toHaveAttribute('href', '/')
+  })
+
   it('says what each way of paying counts, what it can’t, and where to see the rest', async () => {
     render(<UsagePage />)
     const plan = await screen.findByRole('region', { name: 'Your ChatGPT plan' })
