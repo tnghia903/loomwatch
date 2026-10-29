@@ -568,8 +568,10 @@ are counted.
   (`Author::Bus`), as every check step does.
 - **Anywhere else** — team mode's root (`run_answerable_session`, between `open_and_work` and
   `finish_live`) or a pipeline's unchecked last stage — `check_the_answer` starts LoomWatch's own
-  checker (`AgentConfig::checker`, the built-in Checker job) in a folder of its own with the work
-  as `answer.md`, under a `PermissionAsker::reading_only`. Its rounds are `run_checks`'s, sending
+  checker (`AgentConfig::checker`, the built-in Checker job) in the answering agent's own folder,
+  so the files the reply names are where it looks, with the work as `answer.md` in the run's own
+  `answer_folder` outside it, under a `PermissionAsker::reading_only` and with nothing switched on.
+  Its rounds are `run_checks`'s, sending
   back into the answering agent's open session through `work_round` (`Author::Open`).
 - **A number in digits is measured**: `CheckReading::settle` holds Met without a number in its
   evidence to Not sure (`measured`), for every check.
