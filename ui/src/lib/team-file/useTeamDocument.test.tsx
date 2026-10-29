@@ -351,6 +351,27 @@ describe('useTeamDocument', () => {
     expect(moves).toEqual([{ from: '/teams/research-team.yaml', to: '/teams/trip-planner-japan.yaml' }])
   })
 
+  // A team renamed before its file followed, as "Research team" in old-project.yaml: the same
+  // name again brings the file in line, and a name its file already matches changes nothing.
+  it('brings the file in line when the name stays and the file was named before', async () => {
+    const fetchMock = renameDaemon(TEAM_YAML)
+    vi.stubGlobal('fetch', fetchMock)
+    const { result, unmount } = renderHook(() => useTeamDocument())
+    await waitFor(() => expect(result.current.saveState).toBe('clean'))
+    await act(async () => { await result.current.renameTeam('Research and review') })
+    expect(renameCalls(fetchMock).map((call) => call.body)).toMatchObject([{ stem: 'research-and-review', yaml: TEAM_YAML }])
+    expect(result.current.path).toBe('/teams/research-and-review.yaml')
+    unmount()
+
+    setPath('/teams/research-team.yaml')
+    const matching = renameDaemon(TEAM_YAML.replace('name: Research and review', 'name: Research team'))
+    vi.stubGlobal('fetch', matching)
+    const again = renderHook(() => useTeamDocument())
+    await waitFor(() => expect(again.result.current.saveState).toBe('clean'))
+    await act(async () => { await again.result.current.renameTeam('Research team') })
+    expect(renameCalls(matching)).toEqual([])
+  })
+
   it('writes in the id a team without one was filed under, so its notes stay with it', async () => {
     const fetchMock = renameDaemon(TEAM_YAML.replace('id: research-team\n', ''))
     vi.stubGlobal('fetch', fetchMock)

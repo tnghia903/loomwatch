@@ -1127,8 +1127,11 @@ export function useTeamDocument() {
   const renameTeam = useCallback(async (name: string): Promise<string | null> => {
     const trimmed = name.trim()
     const model = modelRef.current
-    if (!trimmed || !model || !path || trimmed === model.snapshot().name) return null
+    if (!trimmed || !model || !path) return null
     const stem = slugifyTeamName(trimmed)
+    // The same name again still brings a file named before (`old-project.yaml` for
+    // "Research team") in line with it.
+    if (trimmed === model.snapshot().name && (isNewRef.current || baseName(path).replace(/\.ya?ml$/i, '') === stem)) return null
     if (isNewRef.current) {
       let next: string
       try {

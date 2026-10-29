@@ -134,8 +134,8 @@ export function DocumentSwitcher(props: DocumentSwitcherProps) {
               <button type="button" className="btn" onClick={() => { setRenaming(null); setRenameRefused(null) }}>Cancel</button>
             </form>
           )}
-          {renaming !== null && renameRefused && <p className="pop-note t-meta" role="alert" style={{ margin: 0 }}>{renameRefused}</p>}
           <div className="pop-foot">
+            {renaming !== null && renameRefused && <p className="t-meta" role="alert" style={{ margin: 0, color: 'var(--color-ink-2)' }}>{renameRefused}</p>}
             <span className="path t-mono-sm selectable">{path}</span>
             <span className="acts">
               {onRename && <button type="button" className="link" onClick={() => setRenaming(teamName ?? filename.replace(/\.ya?ml$/i, ''))} disabled={renameWaits} title={renameWaits ? 'Save or discard your changes first' : undefined}>Rename</button>}
