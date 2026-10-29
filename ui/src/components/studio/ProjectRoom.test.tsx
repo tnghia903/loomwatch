@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ProjectRoom } from './ProjectRoom'
@@ -43,7 +43,7 @@ beforeEach(() => {
   fetchMock = vi.fn(daemon)
   vi.stubGlobal('fetch', fetchMock)
 })
-afterEach(() => { cleanup(); vi.unstubAllGlobals() })
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.useRealTimers() })
 
 describe('a project’s room (ADR 0097)', () => {
   it('holds on its wall what every agent here knows, and its teams at their desks', async () => {
@@ -62,8 +62,44 @@ describe('a project’s room (ADR 0097)', () => {
     expect(screen.getByRole('note')).toHaveTextContent('Every agent in this project reads these. They stay in this project.')
     const team = await screen.findByRole('link', { name: /Research and design/ })
     expect(team).toHaveAttribute('href', '/?path=sutd%2Fgate.yaml&view=chat')
-    expect(team).toHaveTextContent(/On its schedule|Every/)
+    expect(team).toHaveTextContent(/Every Friday at 5:00/)
+    expect(team).not.toHaveTextContent('didn’t finish')
     expect(await screen.findByRole('group', { name: /Research and design: Researcher/ })).toBeInTheDocument()
+  })
+
+  it('says beside a team’s name that its last run didn’t finish', async () => {
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => url === '/api/runs?preview=true'
+      ? respond([{ runId: 'r1', sessionId: 'r1', teamPath: 'sutd/gate.yaml', prompt: 'p', status: 'failed', mode: 'pipeline', entrypoint: 'researcher', responder: 'researcher', agentIds: [], createdAt: '2026-10-28T09:00:00Z', startedAt: '2026-10-28T09:00:00Z', finishedAt: '2026-10-28T09:01:00Z', error: 'Out of credit', exitCode: null, eventCount: null, reply: null }])
+      : daemon(url, init))
+    render(<ProjectRoom id="sutd" />)
+    await waitFor(() => expect(screen.getByRole('link', { name: /Research and design/ })).toHaveTextContent(/^Research and design didn’t finish · Every Friday at 5:00/))
+  })
+
+  it('puts the team waiting for you first, and keeps that order while you are here', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    project = { ...SUTD, teams: ['sutd/gate.yaml', 'sutd/blog.yaml'] }
+    const BLOG = 'schemaVersion: 1\nid: blog\nname: Blog\nproject: sutd\nentrypoint: writer\nagents:\n  - {id: writer, name: Writer}\nedges: []\n'
+    // A review stop with no agent before it: the team waits for you, and no desk shows it.
+    let waiting = 'sutd/blog.yaml'
+    const waitingRun = () => ({ runId: 'r1', sessionId: 'r1', teamPath: waiting, prompt: 'p', status: 'running', mode: 'pipeline', entrypoint: 'a', responder: 'a', agentIds: [], createdAt: '2026-10-28T09:00:00Z', startedAt: '2026-10-28T09:00:00Z', finishedAt: null, error: null, exitCode: null, eventCount: null, reply: null, waitingOn: { node: 'review', name: 'You', kind: 'review_stop', since: 'x', question: 'Pick', handoverFrom: null, park: 'none', parkNote: '', sendBackAvailable: true } })
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === '/api/runs?preview=true') return respond([waitingRun()])
+      if (url.startsWith('/api/team?') && url.includes('blog')) return respond({ path: 'sutd/blog.yaml', yaml: BLOG, revision: 'r' })
+      if (url === '/api/teams') return respond({ root: '/teams', files: project.teams, teams: [{ path: 'sutd/gate.yaml', name: 'Research and design', agentCount: 1 }, { path: 'sutd/blog.yaml', name: 'Blog', agentCount: 1 }], trashed: [] })
+      return daemon(url, init)
+    })
+    render(<ProjectRoom id="sutd" />)
+    const order = () => [...document.querySelectorAll('.room-team-name b')].map((name) => name.textContent)
+    const blog = () => screen.getByRole('link', { name: /^Blog/ })
+    await waitFor(() => expect(order()).toEqual(['Blog', 'Research and design']))
+    expect(blog()).toHaveTextContent(/^Blog waiting for you$/)
+
+    // Now the other team waits: it says so, and stays where it stood.
+    waiting = 'sutd/gate.yaml'
+    await act(() => vi.advanceTimersByTimeAsync(4100))
+    await waitFor(() => expect(screen.getByRole('link', { name: /^Research and design/ })).toHaveTextContent(/^Research and design waiting for you · Every Friday/))
+    expect(blog()).toHaveTextContent(/^Blog$/)
+    expect(order()).toEqual(['Blog', 'Research and design'])
   })
 
   // Ruling 1: teams that started as projects of their own can be moved into one project.

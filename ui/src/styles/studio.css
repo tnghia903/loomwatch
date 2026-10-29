@@ -119,12 +119,17 @@ button.desk:focus-visible { outline: 2px solid var(--color-accent); outline-offs
 }
 .room-card-name button span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .room-card-name button:hover span:last-child { text-decoration: underline; text-underline-offset: 3px; }
-.room-card-floor { flex: 1; display: flex; align-items: center; justify-content: center; padding: var(--sp-3) 0 6px; }
+.room-card-floor { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-2); padding: var(--sp-3) 0 6px; }
+/* Which team the desks are, when the room has more than one. */
+.room-card-team { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-ink-2); font: 400 12px/16px var(--font-sans); }
 .room-line { margin: 0; font-size: 13px; color: var(--color-ink-3); }
-.room-line.waiting { color: var(--color-accent); }
-.room-line.working { color: var(--color-live); }
-.room-line.failed { color: var(--color-alert); }
-.room-more { color: var(--color-ink-3); }
+.room-line.waiting, .room-state.waiting { color: var(--color-accent); }
+.room-line.working, .room-state.working { color: var(--color-live); }
+.room-line.failed, .room-state.failed { color: var(--color-alert); }
+/* Each other team's words stay on one line, its name plain and its state in colour; the dots are punctuation. */
+.room-other, .room-more { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+.room-other { color: var(--color-ink-2); }
+.room-sep, .room-more { color: var(--color-ink-3); }
 
 .room-tile, .room-new {
   display: flex; flex-direction: column; justify-content: center; gap: 4px; min-height: 96px; padding: var(--sp-3) var(--sp-4);

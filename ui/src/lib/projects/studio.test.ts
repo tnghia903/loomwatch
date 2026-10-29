@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { RunRecord } from '../runs/client'
 import type { ProjectEntry } from './client'
-import { deskItems, rankRooms, roomsOf, seatWords, shownSeats, studioLayout, teamShapeOf, type Room, type TeamShape } from './studio'
+import { deskItems, otherTeams, rankRooms, roomsOf, seatWords, shownSeats, studioLayout, teamShapeOf, type Room, type TeamShape } from './studio'
 
 const PIPELINE = `schemaVersion: 1
 id: gate
@@ -42,6 +42,8 @@ describe('the studio (ADR 0097)', () => {
     const lead = teamShapeOf('lead.yaml', 'schemaVersion: 1\nname: Desk\nentrypoint: lead\nschedule: {cron: "0 8 * * *"}\nagents:\n  - {id: helper, name: Helper}\n  - {id: lead, name: Lead}\nedges: []\n') as TeamShape
     expect(lead.seats.map((seat) => seat.name)).toEqual(['Lead', 'Helper'])
     expect(lead.schedule).toMatch(/^Every day at 8/)
+    // A paused routine doesn't run, so it isn't said, and its team doesn't stand up for it.
+    expect((teamShapeOf('p.yaml', 'schemaVersion: 1\nname: Desk\nentrypoint: lead\nschedule: {cron: "0 8 * * *", enabled: false}\nagents:\n  - {id: lead, name: Lead}\nedges: []\n') as TeamShape).schedule).toBeNull()
   })
 
   it('draws an agent where it is now: waiting at your desk, working where it works', () => {
@@ -79,6 +81,38 @@ describe('the studio (ADR 0097)', () => {
     expect(blog.state).toBe('failed')
     expect(blog.line).toBe('Blog didn’t finish')
     expect(empty.line).toBe('No team yet')
+  })
+
+  it('puts a room’s team waiting for you first, then working, then the next to run, and names the others at work', () => {
+    const gate = teamShapeOf('gate.yaml', PIPELINE, JOBS) as TeamShape
+    const pages: TeamShape = { path: 'pages.yaml', name: 'Product pages', project: 'shop', seats: [{ kind: 'agent', id: 'w', name: 'Writer', agent: 'writer' }], schedule: null }
+    const weekly: TeamShape = { path: 'weekly.yaml', name: 'Weekly report', project: 'shop', seats: [{ kind: 'agent', id: 'c', name: 'Checker', agent: 'checker' }], schedule: 'Every Monday at 9:00 AM' }
+    const plain: TeamShape = { path: 'plain.yaml', name: 'Plain', project: 'shop', seats: [], schedule: null }
+    const runs = [
+      run('pages.yaml', { working: ['w'] }),
+      run('gate.yaml', { waitingOn: { node: 'review', name: 'You', kind: 'review_stop', since: 'x', question: 'Pick', handoverFrom: 'researcher', park: 'none', parkNote: '', sendBackAvailable: true } }),
+    ]
+    // Listed in the project in another order: the room still leads with what needs you.
+    const [shop] = roomsOf([project('shop', ['plain.yaml', 'weekly.yaml', 'pages.yaml', 'gate.yaml'])], [gate, pages, weekly, plain], runs, null)
+    expect(shop.teams.map((team) => team.name)).toEqual(['Research and design', 'Product pages', 'Weekly report', 'Plain'])
+    expect(shop.line).toBe('Researcher is waiting for you')
+    expect(otherTeams(shop)).toEqual({ named: [{ path: 'pages.yaml', name: 'Product pages', state: 'working', words: 'is working' }], more: 2, moreQuiet: true })
+
+    // Quiet, the team that runs on a schedule leads, and the line says when it runs.
+    const [quiet] = roomsOf([project('shop', ['plain.yaml', 'weekly.yaml'])], [weekly, plain], [], null)
+    expect(quiet.teams.map((team) => team.name)).toEqual(['Weekly report', 'Plain'])
+    expect(quiet.line).toBe('Runs every Monday at 9:00 AM')
+    expect(otherTeams(quiet)).toEqual({ named: [], more: 1, moreQuiet: true })
+  })
+
+  it('shows, of two teams at work, the one with someone at a desk doing it', () => {
+    const lead: TeamShape = { path: 'a.yaml', name: 'Alpha', project: 'p', seats: [{ kind: 'agent', id: 'x', name: 'Xavier', agent: 'x' }], schedule: null }
+    const other: TeamShape = { path: 'b.yaml', name: 'Beta', project: 'p', seats: [{ kind: 'agent', id: 'y', name: 'Yara', agent: 'y' }], schedule: null }
+    // Alpha's run is under way with no one at work yet; Beta's Yara works. The card shows Yara at it.
+    const [room] = roomsOf([project('p', ['a.yaml', 'b.yaml'])], [lead, other], [run('a.yaml'), run('b.yaml', { working: ['y'] })], null)
+    expect(room.teams.map((team) => team.name)).toEqual(['Beta', 'Alpha'])
+    expect(room.line).toBe('Yara is working')
+    expect(otherTeams(room).named.map((team) => `${team.name} ${team.words}`)).toEqual(['Alpha is working'])
   })
 
   it('puts rooms waiting for you first, then working, then the rest, newest work first', () => {

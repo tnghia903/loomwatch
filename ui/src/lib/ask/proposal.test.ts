@@ -41,7 +41,7 @@ describe('proposalChanges', () => {
       edge('collector', 'writer') + edge('writer', 'old'),
       'schedule:\n  cron: "0 8 * * 1-5"\n  prompt: Today\n',
     )
-    expect(proposalChanges(BEFORE, proposed).lines).toEqual([expect.stringMatching(/^Runs on its own: weekdays at 8/)])
+    expect(proposalChanges(BEFORE, proposed).lines).toEqual([expect.stringMatching(/^Runs on its own: every weekday at 8/)])
   })
 
   it('names the skills an agent is given or loses, whatever their case, and a new team’s skills', () => {

@@ -421,7 +421,9 @@ team to another project later is the same save, with only its `project` changed.
 In the app, Home is the studio (`components/studio/`, `lib/projects/studio.ts`): Your desk first,
 with whoever waits for the person (its Review opens the bell's tray), then a room per project with
 its busiest team's agents at their desks in the order work moves, then the person's agents in no
-project. An agent is lit only where it is now: elsewhere its figure is faint and unlit, with words
+project. A project's teams stand waiting first, then working, then stopped, then the next to run on
+a schedule, and its room keeps the order it opened with while the person is in it. When there is
+more than one, the card names the team it shows and up to two other teams at work. An agent is lit only where it is now: elsewhere its figure is faint and unlit, with words
 saying it is at the person's desk or naming the team it works in. Where the person checks, the desk
 holds the review step's ring, as on the canvas. A project's room is `/projects/<id>`: its wall (About,
 folders, notes), its teams, Add an agent, New team, and Ask about the project.

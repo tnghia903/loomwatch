@@ -4,7 +4,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { figureFor, type FigureChoice } from '../../lib/library/figures'
 import { fetchJobs, saveJob, type SavedJob } from '../../lib/library/jobs'
 import { addProjectNote, NOTE_CHARS, ABOUT_CHARS, projectsChanged, saveProject, useProjects, type Project, type ProjectEntry } from '../../lib/projects/client'
-import { roomsOf } from '../../lib/projects/studio'
+import { PRESENCE_WORDS } from '../../lib/rail/presence'
+import { inOpenedOrder, litAt, roomsOf, type RoomTeam } from '../../lib/projects/studio'
 import { useTeamShapes } from '../../lib/projects/useTeamShapes'
 import { fetchRuns, type RunRecord } from '../../lib/runs/client'
 import { fetchTeamFile, fetchTeamsDiscovery, saveTeamFile } from '../../lib/team-file/client'
@@ -27,16 +28,23 @@ import { TeamDesks } from './TeamDesks'
 /** How often the room looks at its teams' runs again, so its figures follow the work. */
 const RUNS_EVERY_MS = 4000
 
-function useRuns(): RunRecord[] {
-  const [runs, setRuns] = useState<RunRecord[]>([])
+/** The runs, read again every few seconds; null until the first read. */
+function useRuns(): RunRecord[] | null {
+  const [runs, setRuns] = useState<RunRecord[] | null>(null)
   useEffect(() => {
     let live = true
-    const read = () => { void fetchRuns().then((next) => { if (live) setRuns(next) }, () => {}) }
+    const read = () => { void fetchRuns().then((next) => { if (live) setRuns(next) }, () => { if (live) setRuns((last) => last ?? []) }) }
     read()
     const timer = window.setInterval(read, RUNS_EVERY_MS)
     return () => { live = false; window.clearInterval(timer) }
   }, [])
   return runs
+}
+
+/** What a team in the room is doing, when none of its desks shows it: it stopped, or nobody is at work yet. */
+function said(team: RoomTeam): string | null {
+  if (team.state === 'ready' || litAt(team)) return null
+  return team.state === 'failed' ? 'didn’t finish' : PRESENCE_WORDS[team.state]
 }
 
 /** The project without the fields the list adds, as `PUT /api/projects/{id}` takes it. */
@@ -209,7 +217,11 @@ export function ProjectRoom({ id }: { id: string }) {
   const project = list?.projects.find((candidate) => candidate.id === id) ?? null
   const figures = useMemo(() => new Map<string, FigureChoice | undefined>(jobs.map((job) => [job.id, job.figure])), [jobs])
   const figureOf = useMemo(() => defaultFigureOf(figures), [figures])
-  const room = useMemo(() => (project && shapes ? roomsOf([project], shapes, runs, root)[0] : null), [project, shapes, runs, root])
+  const room = useMemo(() => (project && shapes ? roomsOf([project], shapes, runs ?? [], root)[0] : null), [project, shapes, runs, root])
+  // The order the teams stood in once the runs were read, kept while you are here: the room puts
+  // the team waiting for you first, but a team that starts work never slides under your pointer.
+  const [opened, setOpened] = useState<string[] | null>(null)
+  useEffect(() => { if (room && runs && !opened) setOpened(room.teams.map((team) => team.path)) }, [room, runs, opened])
 
   useEffect(() => { if (project) document.title = `${project.name} · LoomWatch` }, [project])
   useEffect(() => {
@@ -309,9 +321,14 @@ export function ProjectRoom({ id }: { id: string }) {
 
         <section className="room-floor" aria-labelledby="room-floor-title">
           <h2 id="room-floor-title" className="studio-head">Teams</h2>
-          {room?.teams.map((team) => (
+          {inOpenedOrder(room?.teams ?? [], opened).map((team) => (
             <div key={team.path} className="room-team">
-              <a className="room-team-name" href={teamHref(team.path, 'chat')}><b>{team.name}</b>{team.schedule && <span>{team.schedule}</span>}</a>
+              {/* When no desk shows what the team is doing (it stopped, or nobody is at work yet), its name says it. */}
+              <a className="room-team-name" href={teamHref(team.path, 'chat')}>
+                <b>{team.name}</b>
+                {said(team) && <>{' '}<span className={`room-state ${team.state}`}>{said(team)}</span></>}
+                {team.schedule && <>{' '}<span>{said(team) ? `· ${team.schedule}` : team.schedule}</span></>}
+              </a>
               <MoveTeam
                 team={team}
                 projects={list.projects.filter((other) => other.id !== project.id)}
