@@ -148,6 +148,12 @@ export interface RunRecord {
   replyableAgents?: string[]
   /** What the run spent and may spend (ADR 0068); absent on runs recorded before spend limits. */
   spend?: RunSpend | null
+  /**
+   * The files the run's agents made, by full path: what their edit calls name, of those that went
+   * through. Worked out by the daemon once the run ends (`made.rs`, the same rule as
+   * `filesWritten`); absent while it runs, and when it made none.
+   */
+  made?: string[]
   /** Limits the run waits at until you answer (ADR 0068); absent when there are none. */
   spendStops?: SpendStop[]
   waitingOn?: WaitingOn | null

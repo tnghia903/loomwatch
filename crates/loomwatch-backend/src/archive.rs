@@ -517,6 +517,33 @@ impl EventArchive {
         .with_context(|| format!("failed to load session {session_id}"))?;
         Ok(rows)
     }
+
+    /// A session's tool calls, their updates and the permissions asked for them, oldest first, as
+    /// `(agent id, kind, payload)`: what [`crate::made`] reads to say which files a run made. The
+    /// raw frames are not read.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for database failures or a payload that is not JSON.
+    pub(crate) async fn tool_events(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<(String, String, Value)>> {
+        self.flush().await;
+        let rows: Vec<(String, String, Value)> = sqlx::query_as(
+            "SELECT agent_id, kind, payload FROM run_events
+             WHERE session_id = $1 AND kind IN ($2, $3, $4)
+             ORDER BY seq ASC",
+        )
+        .bind(session_id)
+        .bind(EventKind::ToolCall.as_str())
+        .bind(EventKind::ToolUpdate.as_str())
+        .bind(EventKind::Permission.as_str())
+        .fetch_all(self.db.reader())
+        .await
+        .with_context(|| format!("failed to load session {session_id}'s tool calls"))?;
+        Ok(rows)
+    }
 }
 
 /// An archived event's `payload` and `raw`, as stored.
