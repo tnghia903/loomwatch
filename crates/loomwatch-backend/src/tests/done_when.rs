@@ -94,6 +94,12 @@ async fn a_message_s_own_limit_sends_the_answer_back_until_it_is_met() -> Result
         )
         .remembering(&["draft of 266 words"]),
     ]);
+    let team = solo("message-limit", &writer);
+    let archive = EventArchive::new(pool);
+    let (_registry, desk, run_id) = operator_desk(&team, &archive);
+    let answer_file = crate::answer_folder(&run_id).join("answer.md");
+    let answer_file = answer_file.display().to_string();
+    let named = format!("The work is also in the file `{answer_file}`, to count and measure");
     let (checker, _) = stand_in(vec![
         turn(
             &[
@@ -101,7 +107,7 @@ async fn a_message_s_own_limit_sends_the_answer_back_until_it_is_met() -> Result
                 "1. Three sections: Agreed, Open and Next steps\n2. At most 250 words\n3. Does \
                  what the request asked",
                 "An item with a number is Met only on what you measured",
-                "The work is also in the file `answer.md` in your folder",
+                &named,
                 "You check writer name's work",
             ],
             &loop_block(
@@ -116,7 +122,7 @@ async fn a_message_s_own_limit_sends_the_answer_back_until_it_is_met() -> Result
         .never(&[CONTRADICTION_ITEM])
         .calling(
             "read_file",
-            serde_json::json!({"path": "answer.md"}),
+            serde_json::json!({"path": answer_file}),
             "draft of 266 words",
         ),
         turn(
@@ -129,13 +135,10 @@ async fn a_message_s_own_limit_sends_the_answer_back_until_it_is_met() -> Result
         )
         .calling(
             "read_file",
-            serde_json::json!({"path": "answer.md"}),
+            serde_json::json!({"path": answer_file}),
             "draft of 241 words",
         ),
     ]);
-    let team = solo("message-limit", &writer);
-    let archive = EventArchive::new(pool);
-    let (_registry, desk, run_id) = operator_desk(&team, &archive);
     let asked = MessageDone::found(&[SECTIONS, LIMIT], Some(3)).checked_on(Some(checker.clone()));
 
     let outcome = run_solo(&team, &archive, &desk, &run_id, &asked).await?;
@@ -175,6 +178,73 @@ async fn a_message_s_own_limit_sends_the_answer_back_until_it_is_met() -> Result
     assert_eq!(last["rounds"], 2);
     assert_eq!(last["checker"]["model"], checker.as_str());
     assert_eq!(last["ended"], true, "the marks go once the check has ended");
+    assert!(
+        !crate::answer_folder(&run_id).exists(),
+        "the answer's file goes when the check ends"
+    );
+    Ok(())
+}
+
+/// **The check finds the files the work names where the work was done.** The reply says it wrote
+/// `reconciliation.csv`; `LoomWatch`'s checker reads it by that name, in the agent's own folder,
+/// and finds what the agent wrote. A checker in a folder of its own found no such file and sent
+/// the work back for it (the calibration of 2026-10-29). The check leaves nothing in that folder.
+#[tokio::test]
+async fn the_check_finds_the_files_the_work_names_where_the_work_was_done() -> Result<()> {
+    const FILE: &str = "Writes reconciliation.csv, one row per invoice";
+    let pool = crate::db::Db::temp().await;
+    let work = std::env::temp_dir().join(format!("loomwatch-work-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&work)?;
+    let work = platform::canonicalize(&work)?;
+    std::fs::write(
+        work.join("reconciliation.csv"),
+        "invoice,status\nINV-1031,paid\n",
+    )?;
+    let (writer, _) = stand_in(vec![turn(
+        &[REQUEST],
+        "Wrote reconciliation.csv: 1 invoice, paid.",
+    )]);
+    let (checker, _) = stand_in(vec![
+        turn(
+            &["Your folder is the one the work was done in"],
+            &loop_block(
+                "",
+                &[
+                    (1, "Met", FILE, "reconciliation.csv has 1 row, INV-1031"),
+                    (2, "Met", "Does what the request asked", "it reconciles"),
+                ],
+            ),
+        )
+        .calling(
+            "read_file",
+            serde_json::json!({"path": "reconciliation.csv"}),
+            "INV-1031,paid",
+        ),
+    ]);
+    let mut team = (*solo("message-files", &writer)).clone();
+    team.agents[0].spawn.cwd.clone_from(&work);
+    let team = Arc::new(team);
+    let archive = EventArchive::new(pool);
+    let (_registry, desk, run_id) = operator_desk(&team, &archive);
+    let asked = MessageDone::found(&[FILE], None).checked_on(Some(checker));
+
+    let outcome = run_solo(&team, &archive, &desk, &run_id, &asked).await?;
+
+    assert_eq!(outcome.reply, "Wrote reconciliation.csv: 1 invoice, paid.");
+    let events = archive.load_verified_session(&run_id).await?;
+    assert_eq!(
+        check_results(&events),
+        [(1, verdict_list(["met", "met"]), true)]
+    );
+    let left: Vec<_> = std::fs::read_dir(&work)?
+        .map(|entry| entry.map(|entry| entry.file_name()))
+        .collect::<std::io::Result<_>>()?;
+    assert_eq!(
+        left,
+        ["reconciliation.csv"],
+        "the check wrote nothing where the work was done"
+    );
+    let _ = std::fs::remove_dir_all(&work);
     Ok(())
 }
 

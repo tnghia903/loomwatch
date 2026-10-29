@@ -386,9 +386,10 @@ depend on the document as a whole:
     no fixed order, a pipeline whose last stage is not checked), LoomWatch checks the reply itself
     against the message's items and "Does what the request asked": the built-in Checker job, at
     its effort, on the `check` tier's model, or the `strong` tier's when that is another maker
-    than the checked agent's. It works in a folder of its own, with the work in `answer.md` to
-    count and measure; it runs commands that only read, and every other command is declined
-    without asking. What is not met goes back into the answering agent's still-open session, as a
+    than the checked agent's. It works in the checked agent's folder, so it finds the files the
+    work made and used, and has the work in an `answer.md` of its own, outside that folder, to
+    count and measure. It changes no file there: it runs commands that only read, and every
+    other command is declined without asking. What is not met goes back into the answering agent's still-open session, as a
     check step sends it back. A pipeline that ends on a review stop is the person's own check, and
     gets none.
   - **Tries.** A try is the first work or one revision: "5 tries" is 4 send-backs, never more than

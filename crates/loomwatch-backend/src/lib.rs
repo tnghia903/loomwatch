@@ -4624,6 +4624,12 @@ const ASKED_WAIT: Duration = Duration::from_secs(60);
 /// The file `LoomWatch`'s own check finds the work in, to count and measure it.
 const ANSWER_FILE: &str = "answer.md";
 
+/// Where `LoomWatch`'s own check of `run_id` keeps the work as a file to measure (ADR 0098): a
+/// folder of the run's own, so the check leaves nothing in the folder the work was done in.
+pub(crate) fn answer_folder(run_id: &str) -> PathBuf {
+    std::env::temp_dir().join(format!("loomwatch-check-{run_id}"))
+}
+
 /// What the operator's message said done looks like (ADR 0098), once read, less what the person
 /// took off. `None` when there is nothing to check.
 async fn asked_now(lineage: &RunLineage) -> Option<message_done::Asked> {
@@ -4671,7 +4677,8 @@ struct AnswerCheck<'a> {
 /// with no fixed order, a pipeline whose last stage is not checked.
 ///
 /// The built-in Checker job checks the reply against the message's items and the request, on
-/// another maker's model where it can, measuring in a folder of its own with the work as a file.
+/// another maker's model where it can. It works in the folder the work was done in, so the files
+/// the reply names are where it looks, and measures the reply as a file kept outside it.
 /// What is not met goes back into the answering agent's still-open session, round after round,
 /// as a check step sends it back; then the work is the answer, or the run stops and asks.
 ///
@@ -4702,8 +4709,14 @@ async fn check_the_answer(
         .send_back(check.message.tries);
     done.set_rounds(send_back.rounds);
     let items = answer_check_items(&check.message.items);
-    let folder = std::env::temp_dir().join(format!("loomwatch-check-{}", uuid::Uuid::new_v4()));
+    let folder = answer_folder(&shared_log.map_or_else(
+        || uuid::Uuid::new_v4().to_string(),
+        |log| log.session_id().to_owned(),
+    ));
     let answer_file = folder.join(ANSWER_FILE);
+    // A checker in a folder of its own found none of the files the reply named, and sent the work
+    // back for a file it had written (the calibration of 2026-10-29).
+    let work_folder = check.asked.spec.cwd.clone();
     let (role, _, _) = crate::control::checker_job();
     let (model, effort) = done.checker_model(&agent.model);
     let checker = config::AgentConfig::checker(
@@ -4714,8 +4727,10 @@ async fn check_the_answer(
         effort,
     );
     let material = format!(
-        "{}\nThe work is also in the file `{ANSWER_FILE}` in your folder, to count and measure.\n",
-        check_material(team, &agent.id, &reply, Some(&check.given), &items)
+        "{}\nYour folder is the one the work was done in, with the files it made and used. The \
+         work is also in the file `{}`, to count and measure.\n",
+        check_material(team, &agent.id, &reply, Some(&check.given), &items),
+        answer_file.display()
     );
     let task = NodeTask {
         place: Some(format!(
@@ -4731,17 +4746,15 @@ async fn check_the_answer(
     // handover from the agent that wrote it.
     let packet = memory::ContextPacket::default();
     let composed = compose_prompt(&checker, &packet, &task);
+    // Nothing switched on: it changes no file, and runs only what Auto mode finds only reads.
     let policy = permissions::PermissionPolicy::new(
         config::AgentAllow::default(),
-        &folder,
-        [
-            check.asked.spec.cwd.clone(),
-            crate::chat_files::folder(team_path),
-        ],
+        &work_folder,
+        [folder.clone(), crate::chat_files::folder(team_path)],
         Vec::<String>::new(),
     );
     let spec = ProcessSpec {
-        cwd: folder.clone(),
+        cwd: work_folder.clone(),
         permissions: Some(policy),
         asker: permissions::PermissionAsker::for_run(
             lineage.operator.as_ref(),
@@ -4749,7 +4762,7 @@ async fn check_the_answer(
             &checker,
         )
         .map(permissions::PermissionAsker::reading_only),
-        ..crate::control::ask_spec(folder.clone())
+        ..crate::control::ask_spec(work_folder)
     };
     let mut context = TeamSessionContext {
         archive,
