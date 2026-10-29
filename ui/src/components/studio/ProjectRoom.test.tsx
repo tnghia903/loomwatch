@@ -219,6 +219,53 @@ describe('a project’s room (ADR 0097)', () => {
       expect(screen.getByRole('button', { name: 'Start' })).not.toHaveClass('btn-primary')
     })
 
+    it('gives the gold fill to the first thing to do, whatever it is: a fix, or See why', async () => {
+      twoTeams([record({ runId: 'f1', status: 'failed', error: 'Your OpenRouter account is out of credits. Add credits on openrouter.ai, then try again.' })])
+      render(<ProjectRoom id="sutd" />)
+      const tile = await screen.findByRole('region', { name: 'Needs you · 1' })
+      expect(within(tile).getByRole('link', { name: 'Add OpenRouter credits' })).toHaveClass('btn-primary')
+      cleanup()
+      twoTeams([record({ runId: 'f2', status: 'failed' })])
+      render(<ProjectRoom id="sutd" />)
+      expect(await screen.findByRole('button', { name: 'See why Research and design didn’t finish' })).toHaveClass('btn-primary')
+    })
+
+    it('keeps your words and says why when the team has to be looked over before it starts', async () => {
+      twoTeams([])
+      const review = { error: 'Look over this team first.', code: 'team_needs_review', teamPath: 'sutd/blog.yaml', teamRevision: 'r', review: [] }
+      fetchMock.mockImplementation(((next) => (url: string, init?: RequestInit) => (url === '/api/chat/messages' && init?.method === 'POST' ? respond(review, 409) : next(url, init)))(fetchMock.getMockImplementation() as typeof daemon))
+      render(<ProjectRoom id="sutd" />)
+      const box = await screen.findByRole('form', { name: 'Give work' })
+      fireEvent.change(within(box).getByRole('combobox', { name: 'To' }), { target: { value: 'sutd/blog.yaml' } })
+      fireEvent.change(within(box).getByRole('textbox'), { target: { value: 'Write the launch post.' } })
+      fireEvent.click(within(box).getByRole('button', { name: 'Start' }))
+      const said = await within(box).findByRole('alert')
+      expect(said).toHaveTextContent('Blog changed since it last ran. Look it over in its chat before it starts.')
+      expect(within(said).getByRole('link', { name: 'Open its chat' })).toHaveAttribute('href', '/?path=sutd%2Fblog.yaml&view=chat')
+      expect(within(box).getByRole('textbox')).toHaveValue('Write the launch post.')
+      expect(assign).not.toHaveBeenCalled()
+      localStorage.removeItem('loomwatch:work-box-team')
+    })
+
+    it('reads a made file over the room, links to ask about it in its chat, and gives focus back on close', async () => {
+      twoTeams([record({ runId: 'm1', teamPath: 'sutd/blog.yaml', responder: 'writer', made: ['/teams/launch post.md'] })])
+      fetchMock.mockImplementation(((next) => (url: string, init?: RequestInit) => {
+        if (url.startsWith('/api/files/stat')) return respond({ path: '/teams/launch post.md', name: 'launch post.md', exists: true, isDir: false, sizeBytes: 12, modifiedAt: null, kind: 'markdown', folder: '/teams', openable: true })
+        if (url.startsWith('/api/files/read')) return respond({ path: '/teams/launch post.md', text: '# Launch\n', kind: 'markdown' })
+        return next(url, init)
+      })(fetchMock.getMockImplementation() as typeof daemon))
+      render(<ProjectRoom id="sutd" />)
+      const made = await screen.findByRole('region', { name: 'Made here' })
+      const chip = await within(made).findByRole('button', { name: /^Read launch post\.md/ })
+      chip.focus()
+      fireEvent.click(chip)
+      const sheet = await screen.findByRole('dialog', { name: 'launch post.md' })
+      expect(within(sheet).getByRole('link', { name: 'Ask about it in its chat' })).toHaveAttribute('href', '/?path=sutd%2Fblog.yaml&run=m1')
+      fireEvent.keyDown(window, { key: 'Escape' })
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'launch post.md' })).toBeNull())
+      expect(chip).toHaveFocus()
+    })
+
     it('says who is working, what runs next and what this month cost', async () => {
       twoTeams(
         [record({ runId: 'a', teamPath: 'sutd/blog.yaml', status: 'running', finishedAt: null, working: ['writer'], startedAt: new Date().toISOString(), responder: 'writer' }), record({ runId: 'b', spend: { spentUsd: 0.4 } }), record({ runId: 'c', spend: { spentUsd: 0.12 } })],

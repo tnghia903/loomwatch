@@ -273,10 +273,11 @@ export function ProjectRoom({ id }: { id: string }) {
   const names = useMemo(() => new Map(shown.flatMap((shape) => shape.seats.map((seat) => [seat.id, seat.name] as const))), [shown])
   const nameOf = useCallback((agent: string) => names.get(agent) ?? agent, [names])
 
-  // Where to ask about a file read here: the chat of the work that made it.
+  // Where to ask about a file read here: the chat of the work that made it. A file opened from a
+  // chip comes with no run, so the run is the one that made it.
   const chatOf = (file: FileToRead) => {
-    const run = all.find((candidate) => candidate.runId === file.runId)
-    return run ? historyRunUrl({ id: run.runId, teamPath: run.teamPath }) : null
+    const maker = made.find((candidate) => candidate.path === file.path) ?? all.find((candidate) => candidate.runId === file.runId)
+    return maker ? historyRunUrl({ id: maker.runId, teamPath: maker.teamPath }) : null
   }
 
   if (error) return <main className="project-room"><p role="alert" className="home-empty alert">Couldn’t open the project. {error}</p></main>

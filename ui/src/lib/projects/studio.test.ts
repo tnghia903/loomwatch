@@ -63,6 +63,10 @@ describe('the studio (ADR 0097)', () => {
     expect(market.line).toBe('Writer is working')
     // The Researcher waits for you in Research and design, so its desk in Market brief is faint, saying where.
     expect(market.teams[0].seats[1]).toMatchObject({ name: 'Researcher', away: 'in Research and design' })
+    // Waiting here and working there at once, it is lit in both, each where it is busy.
+    const both = roomsOf([project('sutd', ['gate.yaml']), project('market', ['brief.yaml'])], [gate, brief], [...runs, run('brief.yaml', { working: ['r'] })], null)
+    expect(both[0].teams[0].seats[0]).toMatchObject({ name: 'Researcher', state: 'waiting', away: null })
+    expect(both[1].teams[0].seats[1]).toMatchObject({ name: 'Researcher', state: 'working', away: null })
   })
 
   it('names the team an agent works in when it is elsewhere, and draws it in each room it works in', () => {

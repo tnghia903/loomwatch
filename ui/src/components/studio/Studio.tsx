@@ -164,10 +164,11 @@ export function Studio({ runs, onSetUp, setUpUnavailable, asking = false }: {
     else window.location.assign(roomHref(room.id))
   }
   const openRun = (run: Pick<RunRecord, 'runId' | 'teamPath'>) => goToRun(historyRunUrl({ id: run.runId, teamPath: run.teamPath }))
-  // Where to ask about a file read here: the chat of the work that made it.
+  // Where to ask about a file read here: the chat of the work that made it. A file opened from a
+  // chip comes with no run, so the run is the one that made it.
   const chatOf = (file: FileToRead) => {
-    const run = runs.find((candidate) => candidate.runId === file.runId)
-    return run ? historyRunUrl({ id: run.runId, teamPath: run.teamPath }) : null
+    const maker = made.find((candidate) => candidate.path === file.path) ?? runs.find((candidate) => candidate.runId === file.runId)
+    return maker ? historyRunUrl({ id: maker.runId, teamPath: maker.teamPath }) : null
   }
 
   if (error) return <p role="alert" className="home-empty alert">Couldn’t list your projects. {error} <button type="button" className="link" onClick={reload}>Try again</button></p>

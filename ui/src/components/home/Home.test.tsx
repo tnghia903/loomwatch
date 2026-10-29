@@ -174,6 +174,15 @@ describe('Home, the studio (ADR 0097)', () => {
     localStorage.removeItem('loomwatch:work-box-team')
   })
 
+  it('counts this month from the runs when the usage report can’t be read as one', async () => {
+    // An older daemon, or anything that isn't a usage report: Home still draws, from the runs.
+    fetchMock.mockImplementation((url: string) => (url.startsWith('/api/usage') ? respond({ root: '/teams', files: [], teams: [] }) : studio(url)))
+    render(<Home onPalette={vi.fn()} runs={[run('blog.yaml', { runId: 'u1', status: 'succeeded', finishedAt: new Date().toISOString(), createdAt: new Date().toISOString(), spend: { spentUsd: 0.25 } }), run('blog.yaml', { runId: 'u2', status: 'succeeded', finishedAt: new Date().toISOString(), createdAt: new Date().toISOString() })]} />)
+    const month = await screen.findByRole('region', { name: 'This month' })
+    expect(month).toHaveTextContent('at least $0.25')
+    expect(month).toHaveTextContent('2 pieces of work')
+  })
+
   it('lists each team in its room with what it is doing, and opens its chat from its name', async () => {
     fetchMock.mockImplementation(studio)
     render(<Home onPalette={vi.fn()} runs={[waitingOnTheResearcher, run('blog.yaml', { runId: 'b1', status: 'succeeded', finishedAt: new Date().toISOString(), made: ['/teams/post.md'], spend: { spentUsd: 0.25 }, createdAt: new Date().toISOString() })]} />)
