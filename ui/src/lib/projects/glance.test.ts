@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest'
 
 import type { RunRecord, ScheduleEntry } from '../runs/client'
 import type { UsageReport } from '../usage/client'
-import { costWords, finishedToday, isMadeThing, lastFinished, madeHere, monthCost, monthSpend, needsYou, nextWork, workingNow, type MonthCost } from './glance'
-import type { TeamShape } from './studio'
+import { costLines, costWords, crewOf, doneByOf, elapsedWords, finishedToday, placeOf, isMadeThing, lastFinished, madeHere, monthCost, monthSpend, monthSpenders, needsYou, nextWork, workingNow, type MonthCost } from './glance'
+import type { Seat, TeamShape } from './studio'
 
 const ROOT = '/teams'
 
@@ -142,5 +142,71 @@ describe('what a room shows at a glance', () => {
     const failed = run('watch.yaml', { status: 'failed', finishedAt: new Date(2026, 9, 28, 10).toISOString() })
     expect(lastFinished([older, newest, failed], ROOT, ROOM)).toEqual({ run: newest, file: '/w/hero.png' })
     expect(finishedToday([older, newest, failed], ROOT, ROOM, now)).toEqual([newest])
+  })
+
+  it('says who did a piece of work and where: its desk in its team, or the agent whose own chat it was', () => {
+    const doneBy = doneByOf(SHAPES, ROOT)
+    expect(doneBy(run('/teams/launch.yaml', { responder: 'writer', teamName: 'Old name' }))).toEqual({ seat: LAUNCH.seats[2], place: 'Launch posts' })
+    // An agent's own chat is no team of a project: the agent, wearing its own figure, in your chat.
+    expect(doneBy(run('/teams/.jobs/.bench/cole.yaml', { responder: 'agent', agentNames: { agent: 'Cole' }, teamName: 'Cole · chat' }))).toEqual({ seat: { kind: 'agent', id: 'agent', name: 'Cole', agent: 'cole' }, place: 'your chat' })
+    expect(doneBy(run('gone.yaml', { responder: 'x' }))).toEqual({ seat: { kind: 'agent', id: 'x', name: 'x' }, place: 'gone' })
+    expect(workingNow([run('launch.yaml', { working: ['writer'], prompt: 'Write the post.' })], SHAPES, ROOT, ROOM)[0]).toMatchObject({ prompt: 'Write the post.', seat: LAUNCH.seats[2] })
+    // At work in its own chat: itself, wearing its figure, in your chat.
+    const chatting = workingNow([run('/teams/.jobs/.bench/cole.yaml', { working: ['agent'], agentNames: { agent: 'Cole' }, teamName: 'Cole · chat' })], SHAPES, ROOT)[0]
+    expect(chatting.seat).toEqual({ kind: 'agent', id: 'agent', name: 'Cole', agent: 'cole' })
+    expect(placeOf(chatting)).toBe('your chat')
+  })
+
+  it('says how long work has gone on as a clock does', () => {
+    const since = '2026-10-28T09:00:00Z'
+    const at = (minutes: number) => Date.parse(since) + minutes * 60_000
+    expect([0.5, 1, 59, 60, 65, 130].map((minutes) => elapsedWords(since, at(minutes)))).toEqual(['just started', 'started 1 min ago', 'started 59 min ago', 'started 1 h ago', 'started 1 h 5 min ago', 'started 2 h 10 min ago'])
+  })
+
+  it('draws each agent once, where it is lit rather than where it is away, and leaves out your review stops', () => {
+    const seat = (id: string, extra: Partial<Seat> = {}): Seat => ({ kind: 'agent', id, name: id, state: 'ready', away: null, ...extra })
+    const crew = crewOf([
+      { path: 'a.yaml', seats: [seat('writer', { agent: 'writer', away: 'working in B' }), { ...seat('check'), kind: 'you' }, seat('scout')] },
+      { path: 'b.yaml', seats: [seat('writer', { agent: 'writer', state: 'working' }), seat('scout')] },
+    ])
+    // The writer of My agents sits in both teams and is drawn once, as it works in B; the two
+    // scouts are each their own team's agent, so both are drawn.
+    expect(crew.map((at) => `${at.id}:${at.state}`)).toEqual(['writer:working', 'scout:ready', 'scout:ready'])
+  })
+
+  it('says whose this month’s dollars were: each agent once over its sources and teams, never Ask, a plan or LoomWatch’s own reading, costliest first', () => {
+    const tally = (costUsd: number, costEstimated = false) => ({ calls: 1, inputTokens: 0, cachedTokens: 0, outputTokens: 0, costUsd, costEstimated })
+    // The writer of My agents sits in two teams, under two ids.
+    const launch = shape('launch.yaml', 'Launch posts', [{ kind: 'agent', id: 'writer', name: 'Writer', agent: 'writer' }])
+    const watch = shape('watch.yaml', 'Competitor watch', [{ kind: 'agent', id: 'scout', name: 'Scout' }, { kind: 'agent', id: 'pen', name: 'Writer', agent: 'writer' }])
+    const report = {
+      since: '2026-10-01', days: [], sources: [],
+      agents: [
+        // An agent's own chat: the report names its team only by its name, so it is found by its own.
+        { ...tally(0.05), team: 'Cole · chat', ask: false, agentId: 'agent', agentName: 'Cole', source: 'openrouter', runs: 1 },
+        { ...tally(0.3, true), team: 'Launch posts', ask: false, agentId: 'writer', agentName: 'Writer', source: 'anthropic', runs: 1 },
+        { ...tally(0.1), team: 'Launch posts', ask: false, agentId: 'writer', agentName: 'Writer', source: 'openrouter', runs: 1 },
+        { ...tally(0.15), team: 'Competitor watch', ask: false, agentId: 'pen', agentName: 'Writer', source: 'openrouter', runs: 1 },
+        { ...tally(0.2), team: 'Competitor watch', ask: false, agentId: 'scout', agentName: 'Scout', source: 'openrouter', runs: 1 },
+        { ...tally(0.9), ask: true, agentId: 'ask', source: 'openrouter', runs: 1 },
+        // LoomWatch reading a message for whether it is work: in no team, so no one's.
+        { ...tally(0.7), ask: false, agentId: 'reader', source: 'openrouter', runs: 3 },
+        { ...tally(0), team: 'Landing page', ask: false, agentId: 'illustrator', source: 'chatgpt', runs: 1 },
+      ],
+    } as unknown as UsageReport
+    const spent = monthSpenders(report, null, [launch, watch], [{ id: 'cole', name: 'Cole' }])
+    expect(spent.map((part) => [part.seat.name, Number(part.usd.toFixed(2)), part.estimated])).toEqual([['Writer', 0.55, true], ['Scout', 0.2, false], ['Cole', 0.05, false]])
+    // Each drawn as its team's desk is, so it wears its own figure.
+    expect(spent[0].seat).toBe(launch.seats[0])
+    expect(spent[2].seat.agent).toBe('cole')
+    // A room's, its own teams' agents only.
+    expect(monthSpenders(report, ['Competitor watch'], [launch, watch], []).map((part) => [part.seat.name, part.usd])).toEqual([['Scout', 0.2], ['Writer', 0.15]])
+    expect(monthSpenders(null, null, SHAPES, [])).toEqual([])
+  })
+
+  it('puts a plan under the dollars, on a line of its own', () => {
+    expect(costLines({ usd: 1.5, estimated: true, plan: true })).toEqual({ main: '≈ $1.50', plan: '+ ChatGPT plan' })
+    expect(costLines({ usd: 0, estimated: false, plan: true })).toEqual({ main: 'ChatGPT plan', plan: null })
+    expect(costLines({ usd: 0.4, estimated: false, plan: false })).toEqual({ main: '$0.4', plan: null })
   })
 })

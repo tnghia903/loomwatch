@@ -432,9 +432,17 @@ try again and that wasn't dismissed. Each has the one press that answers it: Rev
 check, Answer for a question, a permission or a limit (on Home both open the bell's tray at that
 item; in a room, the work itself); for stopped work, the fix LoomWatch knows for why it stopped
 (`problemAction`, such as adding credits), or See why, which opens it in its chat. With nothing
-waiting it shows the last work that went well. Then Working now; Next on a schedule in a room,
-Finished today on Home; and This month, from the usage report (ADR 0073) so a ChatGPT plan is said as
-a plan and a list-price estimate with "≈". Under the tiles a box gives a team work as its chat's box
+waiting it shows the last work that went well: the agent who answered it, drawn big, and what it
+was asked. Then Working now: the longest at work drawn big with what it was given, its team and how
+long it has been at it, the next two under it; while nobody works, the agents of the teams shown
+(`crewOf`, each once), each lit as it is now. Next on a schedule in a room, Finished today on Home,
+each piece of today's work as the agent who answered it, one press from it. And This month, from the
+usage report (ADR 0073) so a ChatGPT plan is said as a plan and a list-price estimate with "≈",
+with the dollars split by agent (`monthSpenders`): a bar in shares of the whole, each part keyed
+under it, the three costliest by their figures, then everything else. Ask and LoomWatch's own
+reading of messages belong to no team, so to no agent's part.
+Only Working now lights its figures: elsewhere a figure says who did the work, not what it is doing
+now. Under the tiles a box gives a team work as its chat's box
 does (`WorkBox`, `POST /api/chat/messages` to the team with `work`), named for the team it goes to,
 with "To" when there is more than one. The first thing to do is the screen's one gold fill: the
 first item's answer, or Start while nothing waits.
