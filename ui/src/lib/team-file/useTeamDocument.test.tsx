@@ -300,21 +300,171 @@ describe('useTeamDocument', () => {
     listens.mockRestore()
   })
 
-  it('renames the team without touching its id or file', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) =>
-      String(input) === '/api/config/schema'
-        ? jsonResponse(200, SCHEMA_GATE)
-        : jsonResponse(200, { path: '/teams/research-team.yaml', yaml: TEAM_YAML }),
-    ))
+  /**
+   * The daemon's side of Rename (ADR 0099) for these tests: the team at `/teams/research-team.yaml`
+   * as `yaml`, the teams folder at `/teams`, and a rename that moves it to `<stem>.yaml`.
+   */
+  function renameDaemon(yaml: string, answer?: (body: { path: string; stem: string; yaml: string }) => Response, myAgents?: Map<string, Record<string, unknown>>) {
+    return withMyAgents(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/api/config/schema') return jsonResponse(200, SCHEMA_GATE)
+      if (url === '/api/teams') return jsonResponse(200, { root: '/teams', files: ['research-team.yaml', 'trip-planner.yaml'], trashed: ['trip-planner-2.yaml'] })
+      if (url === '/api/team/rename') {
+        const body = JSON.parse(String(init?.body)) as { path: string; stem: string; yaml: string }
+        return answer?.(body) ?? jsonResponse(200, { path: `${body.stem}.yaml`, yaml: body.yaml, revision: 'r2' })
+      }
+      return jsonResponse(200, { path: '/teams/research-team.yaml', yaml, revision: 'r1' })
+    }, myAgents)
+  }
+
+  function renameCalls(fetchMock: { mock: { calls: unknown[][] } }) {
+    return fetchMock.mock.calls
+      .filter(([input]) => String(input) === '/api/team/rename')
+      .map(([, init]) => ({ body: JSON.parse(String((init as RequestInit).body)) as { path: string; stem: string; yaml: string }, headers: (init as RequestInit).headers as Record<string, string> }))
+  }
+
+  // ADR 0099: the file's name said one thing and the team's another.
+  it('renames a saved team and its file, and opens it again where it now is', async () => {
+    const fetchMock = renameDaemon(TEAM_YAML)
+    vi.stubGlobal('fetch', fetchMock)
+    const moves: unknown[] = []
+    const heard = (event: Event) => moves.push((event as CustomEvent).detail)
+    window.addEventListener('loomwatch:team-moved', heard)
     const { result } = renderHook(() => useTeamDocument())
     await waitFor(() => expect(result.current.saveState).toBe('clean'))
-    act(() => result.current.renameTeam('  Trip planner (Japan) '))
+
+    let refused: string | null = 'not answered'
+    await act(async () => { refused = await result.current.renameTeam('  Trip planner (Japan) ') })
+    window.removeEventListener('loomwatch:team-moved', heard)
+
+    expect(refused).toBeNull()
+    const [call] = renameCalls(fetchMock)
+    expect(call.headers['If-Match']).toBe('"r1"')
+    expect(call.body.path).toBe('/teams/research-team.yaml')
+    expect(call.body.stem).toBe('trip-planner-japan')
+    // The file as it is on disk, with only its name changed: the id its notes are filed by stays.
+    expect(call.body.yaml).toBe(TEAM_YAML.replace('name: Research and review', 'name: Trip planner (Japan)'))
+    expect(result.current.path).toBe('/teams/trip-planner-japan.yaml')
     expect(result.current.teamName).toBe('Trip planner (Japan)')
-    expect(result.current.saveState).toBe('dirty')
-    expect(result.current.yamlPreview).toContain('name: Trip planner (Japan)')
-    expect(result.current.yamlPreview).toContain('id: research-team')
-    act(() => result.current.undo())
+    expect(result.current.saveState).toBe('clean')
+    expect(new URLSearchParams(window.location.search).get('path')).toBe('/teams/trip-planner-japan.yaml')
+    expect(moves).toEqual([{ from: '/teams/research-team.yaml', to: '/teams/trip-planner-japan.yaml' }])
+  })
+
+  // A team renamed before its file followed, as "Research team" in old-project.yaml: the same
+  // name again brings the file in line, and a name its file already matches changes nothing.
+  it('brings the file in line when the name stays and the file was named before', async () => {
+    const fetchMock = renameDaemon(TEAM_YAML)
+    vi.stubGlobal('fetch', fetchMock)
+    const { result, unmount } = renderHook(() => useTeamDocument())
+    await waitFor(() => expect(result.current.saveState).toBe('clean'))
+    await act(async () => { await result.current.renameTeam('Research and review') })
+    expect(renameCalls(fetchMock).map((call) => call.body)).toMatchObject([{ stem: 'research-and-review', yaml: TEAM_YAML }])
+    expect(result.current.path).toBe('/teams/research-and-review.yaml')
+    unmount()
+
+    setPath('/teams/research-team.yaml')
+    const matching = renameDaemon(TEAM_YAML.replace('name: Research and review', 'name: Research team'))
+    vi.stubGlobal('fetch', matching)
+    const again = renderHook(() => useTeamDocument())
+    await waitFor(() => expect(again.result.current.saveState).toBe('clean'))
+    await act(async () => { await again.result.current.renameTeam('Research team') })
+    expect(renameCalls(matching)).toEqual([])
+  })
+
+  it('writes in the id a team without one was filed under, so its notes stay with it', async () => {
+    const fetchMock = renameDaemon(TEAM_YAML.replace('id: research-team\n', ''))
+    vi.stubGlobal('fetch', fetchMock)
+    const { result } = renderHook(() => useTeamDocument())
+    await waitFor(() => expect(result.current.saveState).toBe('clean'))
+    await act(async () => { await result.current.renameTeam('Trip planner') })
+    const [call] = renameCalls(fetchMock)
+    expect((parse(call.body.yaml) as TeamDocument).id).toBe('research-team')
+    expect(result.current.path).toBe('/teams/trip-planner.yaml')
+  })
+
+  it('says why a saved team was not renamed, and stays where it is', async () => {
+    const fetchMock = renameDaemon(TEAM_YAML, () => jsonResponse(409, { error: 'This team is working right now.' }))
+    vi.stubGlobal('fetch', fetchMock)
+    const { result } = renderHook(() => useTeamDocument())
+    await waitFor(() => expect(result.current.saveState).toBe('clean'))
+    let refused: string | null = null
+    await act(async () => { refused = await result.current.renameTeam('Trip planner') })
+    expect(refused).toBe('This team is working right now.')
+    expect(result.current.path).toBe('/teams/research-team.yaml')
     expect(result.current.teamName).toBe('Research and review')
+    expect(result.current.saveState).toBe('clean')
+  })
+
+  // The page shows an agent of My agents filled in; the file holds only where it comes from. The
+  // rename is of the file, so what is sent is the file with only its name changed.
+  it('renames the file as it is on disk, not as the page fills it in', async () => {
+    const pointerYaml = 'schemaVersion: 1\nid: research-team\nname: Research and review\nentrypoint: researcher\nagents:\n  - id: researcher\n    from:\n      agent: researcher\nedges: []\n'
+    const myAgents = new Map<string, Record<string, unknown>>([['researcher', {
+      id: 'researcher', file: '.jobs/researcher.yaml', name: 'Researcher', instructions: 'Find facts.', model: 'fake/offline', version: 1,
+    }]])
+    const fetchMock = renameDaemon(pointerYaml, undefined, myAgents)
+    vi.stubGlobal('fetch', fetchMock)
+    const { result } = renderHook(() => useTeamDocument())
+    await waitFor(() => expect(result.current.saveState).toBe('clean'))
+    expect(result.current.nodes[0].data.agent).toMatchObject({ name: 'Researcher', role: 'Find facts.' })
+    await act(async () => { await result.current.renameTeam('Trip planner') })
+    expect(renameCalls(fetchMock)[0].body.yaml).toBe(pointerYaml.replace('name: Research and review', 'name: Trip planner'))
+    expect(result.current.nodes[0].data.agent).toMatchObject({ name: 'Researcher', role: 'Find facts.' })
+  })
+
+  // Changed on disk since it was read: the clean page reads it again and the name can be tried again.
+  it('reads the file again when it changed outside LoomWatch before the rename', async () => {
+    const fetchMock = renameDaemon(TEAM_YAML, () => jsonResponse(412, { error: 'The team file changed or the destination already exists. Reload before saving.' }))
+    vi.stubGlobal('fetch', fetchMock)
+    const { result } = renderHook(() => useTeamDocument())
+    await waitFor(() => expect(result.current.saveState).toBe('clean'))
+    let refused: string | null = null
+    await act(async () => { refused = await result.current.renameTeam('Trip planner') })
+    expect(refused).toBe('This team’s file changed outside LoomWatch, so it was read again. Rename it again.')
+    expect(result.current.path).toBe('/teams/research-team.yaml')
+  })
+
+  // What went wrong inside LoomWatch is no help to the person: the daemon put everything back.
+  it('says plainly that nothing changed when renaming failed inside LoomWatch', async () => {
+    const fetchMock = renameDaemon(TEAM_YAML, () => jsonResponse(500, { error: "couldn't move /teams/research-team.brief: Permission denied (os error 13); nothing was moved" }))
+    vi.stubGlobal('fetch', fetchMock)
+    const { result } = renderHook(() => useTeamDocument())
+    await waitFor(() => expect(result.current.saveState).toBe('clean'))
+    let refused: string | null = null
+    await act(async () => { refused = await result.current.renameTeam('Trip planner') })
+    expect(refused).toBe('LoomWatch couldn’t rename this team, so nothing changed. Try again.')
+    expect(result.current.path).toBe('/teams/research-team.yaml')
+  })
+
+  it('moves a saved team’s file only once its changes are saved', async () => {
+    const fetchMock = renameDaemon(TEAM_YAML)
+    vi.stubGlobal('fetch', fetchMock)
+    const { result } = renderHook(() => useTeamDocument())
+    await waitFor(() => expect(result.current.saveState).toBe('clean'))
+    act(() => result.current.renameAgent('reviewer', 'name', 'Editor'))
+    let refused: string | null = null
+    await act(async () => { refused = await result.current.renameTeam('Trip planner') })
+    expect(refused).toBe('Save or discard your changes first.')
+    expect(renameCalls(fetchMock)).toEqual([])
+    expect(result.current.teamName).toBe('Research and review')
+  })
+
+  it('renames a team not saved yet, and the file it will be saved as, writing nothing', async () => {
+    window.history.pushState({}, '', '/')
+    const fetchMock = renameDaemon(TEAM_YAML)
+    vi.stubGlobal('fetch', fetchMock)
+    const { result } = renderHook(() => useTeamDocument())
+    await waitFor(() => expect(result.current.isValid).toBe(true))
+    act(() => result.current.createNewDocument('Research & Review'))
+    await act(async () => { await result.current.renameTeam('Trip planner') })
+    // trip-planner.yaml is a team and trip-planner-2.yaml a deleted one's: the next name is free.
+    expect(result.current.path).toBe('trip-planner-3.yaml')
+    expect(result.current.teamName).toBe('Trip planner')
+    expect(result.current.yamlPreview).toContain('id: trip-planner-3')
+    expect(result.current.saveState).toBe('new')
+    expect(renameCalls(fetchMock)).toEqual([])
+    expect(fetchMock.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === 'PUT')).toBe(false)
   })
 
   it('routes malformed YAML from manual reload through the parse-failure modal state', async () => {

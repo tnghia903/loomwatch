@@ -323,6 +323,15 @@ which is what makes a run replayable. How it stays fast as history grows:
   refused are left out, the same rule as the app's `filesWritten`, at most 100 per run. The run
   list sends it as `made`, so Home and a project's room show what the agents made without
   replaying any run. Runs recorded before it get theirs once, in the background, after a start.
+- **A renamed team's history.** Rename moves the team file to the new name
+  (`POST /api/team/rename`, `team_rename.rs`, ADR 0099), with `<team>.brief/`, `<team>.layout.json`
+  and `<team>.files/`, and changes those names inside the file. One transaction files its `runs`,
+  `chat_messages` and `work_passages` under the new path, gives rows filed by `path:<file>` the
+  team's id, and names the files sent in the chat and the files its runs made in `<team>.files/`
+  where they are now. The id never changes (one is written in for a team without it), so notes,
+  lessons and the workspace, filed by id, stay put. The approval moves with the file only for the
+  text that was approved, so a move never approves a team. It is refused while a run is live or a
+  routine waits to try again, and the files go back when the history can't move.
 - **Search** in the Notebook is SQLite FTS5 with English stemming.
 - **Finding in a team's chat** (`chat_find.rs`, ADR 0081) searches every request, answer, note and
   line of the agents' talk (handovers, check verdicts, questions, Team Bus messages), cut into

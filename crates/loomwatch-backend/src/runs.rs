@@ -1312,6 +1312,55 @@ impl RunRegistry {
             .map(|entry| entry.record.clone())
     }
 
+    /// Whether a routine of the team at `team_path` waits to try one of its runs again
+    /// (`next_try_at`). The schedule finds that try by the team's path.
+    #[must_use]
+    pub fn waits_to_try_again(&self, team_path: &str) -> bool {
+        let inner = self.inner.read().unwrap_or_else(PoisonError::into_inner);
+        inner
+            .runs
+            .values()
+            .any(|entry| entry.record.team_path == team_path && entry.record.next_try_at.is_some())
+    }
+
+    /// Every team path the records held here name.
+    pub(crate) fn team_paths(&self) -> BTreeSet<String> {
+        let inner = self.inner.read().unwrap_or_else(PoisonError::into_inner);
+        inner
+            .runs
+            .values()
+            .map(|entry| entry.record.team_path.clone())
+            .collect()
+    }
+
+    /// File the records held here for the team Rename moved under its new path, as
+    /// [`crate::team_rename::refile_history`] files the rows.
+    pub(crate) fn refile_team(&self, refile: &crate::team_rename::Refile) {
+        let mut inner = self.inner.write().unwrap_or_else(PoisonError::into_inner);
+        for entry in inner.runs.values_mut() {
+            let record = &mut entry.record;
+            if record.team_path != refile.from {
+                continue;
+            }
+            record.team_path.clone_from(&refile.to);
+            if record.team_key.is_empty() || record.team_key == refile.path_key() {
+                record.team_key.clone_from(&refile.key);
+            }
+            if let Some(made) = &mut record.made {
+                for path in made.iter_mut() {
+                    if let Some(moved) = refile.moved_file(path) {
+                        *path = moved;
+                    }
+                }
+            }
+        }
+    }
+
+    /// The database the records are kept in, when this registry is durable.
+    pub(crate) fn database(&self) -> Option<crate::db::Db> {
+        self.store.as_ref().map(|store| store.db.clone())
+    }
+
     /// `queued → starting`; stamps `started_at`. `false` when the run was cancelled first.
     #[must_use]
     pub fn mark_starting(&self, run_id: &str) -> bool {
