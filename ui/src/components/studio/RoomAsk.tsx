@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { decideRunRequest, type AskContext } from '../../lib/ask/client'
 import type { ProposalCard, ReviewNoteCard, RunRequestCard } from '../../lib/ask/thread'
@@ -8,6 +8,7 @@ import { teamHref } from '../../lib/team-file/teamHref'
 import { AskButton } from '../ask/AskButton'
 import type { CardActions } from '../ask/AskCards'
 import { AskPanel } from '../ask/AskPanel'
+import { registerAskToggle } from '../frame/frameStore'
 
 /** A team's page at one of its runs, or showing a proposal for it. */
 function teamPage(file: string, extra: Record<string, string>): string {
@@ -22,6 +23,10 @@ function teamPage(file: string, extra: Record<string, string>): string {
 export function RoomAsk({ project, name }: { project: string; name: string }) {
   const context = useMemo<AskContext>(() => ({ view: 'project', teamPath: null, runId: null, project }), [project])
   const ask = useAsk(context)
+  // The dock's Ask opens the room's own panel, about this project.
+  const askRef = useRef(ask)
+  useEffect(() => { askRef.current = ask })
+  useEffect(() => registerAskToggle(() => askRef.current.setOpen(!askRef.current.open)), [])
   const [busyCard, setBusyCard] = useState<string | null>(null)
   const [cardError, setCardError] = useState<{ id: string; message: string } | null>(null)
   const cards: CardActions = {

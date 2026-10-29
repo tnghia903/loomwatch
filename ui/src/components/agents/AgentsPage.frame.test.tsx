@@ -91,15 +91,6 @@ describe('An agent’s page in the team page’s frame', () => {
     expect(window.location.pathname).toBe('/agents')
   })
 
-  it('keeps the rail as it is while the agent beside it changes', async () => {
-    window.history.replaceState({}, '', '/agents/writer')
-    page()
-    const rail = screen.getByRole('navigation', { name: 'My agents' })
-    fireEvent.click(await within(rail).findByRole('link', { name: 'Editor' }, { timeout: 5000 }))
-    expect(await screen.findByRole('button', { name: /^Editor, Saved/ }, { timeout: 5000 })).toBeInTheDocument()
-    expect(screen.getByRole('navigation', { name: 'My agents' })).toBe(rail)
-  })
-
   // A team's header hides its name chip and menu in a narrow window; an agent's Save is in its chip,
   // so on an agent's page they move to a row under the header instead of going away.
   it('keeps the name chip, Save and the menu in a narrow window', async () => {

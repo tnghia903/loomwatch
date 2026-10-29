@@ -149,9 +149,8 @@ import { fileRefsIn, filesTouched, filesWritten, workspaceAgent } from '../lib/f
 import { askedInChat, type AskedPassage } from '../lib/files/passage'
 import { baseName } from '../lib/files/paths'
 import { goToTeam } from '../lib/team-file/teamPage'
-import { openTeam, type TeamView as TeamTab } from '../lib/team-file/useTeamList'
-import type { LeaveGuard } from './rail/CrewRail'
-import { showTeamRail } from './rail/teamRailStore'
+import { registerAskToggle } from './frame/frameStore'
+import { openTeam } from '../lib/team-file/useTeamList'
 import { FileOriginContext, FileReaderContext, readerFormat, type FileToRead } from '../lib/files/reader'
 import { useFilesFound } from '../lib/files/useFile'
 import { lookupFile } from '../lib/files/client'
@@ -1819,6 +1818,8 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   }, [askOpen, askDockBusy, askSetOpen, askFor])
   const toggleAskRef = useRef(toggleAsk)
   useEffect(() => { toggleAskRef.current = toggleAsk })
+  // The dock's Ask opens this screen's own panel.
+  useEffect(() => registerAskToggle(() => toggleAskRef.current()), [])
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'j') {
@@ -2331,24 +2332,6 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   // ---- commands + keys ----------------------------------------------------------------------
   // With a team open the dialog belongs to the workspace; on Home, Home owns it.
   const openNewTeam = useCallback(() => { if (doc.path) setNewTeamSheet(true); else window.dispatchEvent(new Event('loomwatch:new-team')) }, [doc.path])
-  // The team rail: this team as it is on screen, and leaving it for another. Changes not saved are
-  // saved or dropped first (the rail asks), and the page moves once they are, so the browser's own
-  // "Leave site?" prompt never asks a second time.
-  const railAgents = useMemo(() => doc.nodes.filter((node) => node.data.agent.kind !== 'operator').map((node) => node.data.agent), [doc.nodes])
-  const railTeam = useMemo(() => (doc.path ? { path: doc.path, name: doc.teamName ?? baseName(doc.path).replace(/\.ya?ml$/i, ''), agents: railAgents } : null), [doc.path, doc.teamName, railAgents])
-  const railTab: TeamTab = runView || runSetup ? 'chat' : agentsView ? 'agents' : 'workflow'
-  const unsavedTeam = ['dirty', 'invalid', 'conflict'].includes(doc.documentChipState)
-  const [leavingTo, setLeavingTo] = useState<string | null>(null)
-  useEffect(() => { if (leavingTo && !unsavedTeam) goToTeam(leavingTo) }, [leavingTo, unsavedTeam])
-  const { save: saveTeam, reloadFromDisk } = doc
-  const leaveTeam = useCallback((): LeaveGuard | null => (unsavedTeam
-    ? { save: saveTeam, problem: doc.isValid ? null : 'It has problems to fix before it can be saved.', discard: async () => { await reloadFromDisk() } }
-    : null), [unsavedTeam, saveTeam, reloadFromDisk, doc.isValid])
-  // The page frame draws the rail (FrameTeamRail), so it stays while teams change in place beside it.
-  useLayoutEffect(() => {
-    showTeamRail(railTeam ? { open: railTeam, runs: needsYou.records, savedJobs, view: railTab, go: setLeavingTo, onNewTeam: openNewTeam, leave: leaveTeam } : null)
-  }, [railTeam, needsYou.records, savedJobs, railTab, openNewTeam, leaveTeam])
-  useLayoutEffect(() => () => showTeamRail(null), [])
   const toggleLibrary = useCallback(() => window.dispatchEvent(new Event('loomwatch:toggle-library')), [])
   const actions = useMemo<CommandAction[]>(() => [
     { label: 'Ask LoomWatch…', shortcut: '⌘J', icon: MessageSquareText, run: () => askFor() },
@@ -2536,6 +2519,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   if (!doc.path) {
     return (
       <Home
+        part={window.location.pathname === '/projects' ? 'projects' : 'all'}
         notice={requestedPath && doc.saveState === 'error' ? `Couldn't open “${requestedPath}”. ${/no such file|not found/i.test(doc.saveError ?? '') ? 'It may have been moved, renamed or deleted — pick a team below.' : doc.saveError ?? ''}` : null}
         onPalette={() => setPaletteOpen(true)}
         // Ask keeps the app's own button on Home (ADR 0097): it answers questions there, and Set up

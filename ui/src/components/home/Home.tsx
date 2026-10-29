@@ -34,6 +34,8 @@ export interface HomeProps {
   mark?: LoomMarkState
   /** Ask LoomWatch, which sets a project up from what you are working on (ADR 0097). */
   ask?: { unavailable: string | null; onAsk: (text: string) => void; open?: boolean }
+  /** Home, or the dock's Projects: the same studio with only its projects and agents in none. */
+  part?: 'all' | 'projects'
   children?: ReactNode
 }
 
@@ -43,7 +45,7 @@ export interface HomeProps {
  * work, where you left off, each project as a room, and your agents in no project; or, before any
  * project, what you are working on.
  */
-export function Home({ notice = null, onPalette, topActions, runs = [], mark, ask, children }: HomeProps) {
+export function Home({ notice = null, onPalette, topActions, runs = [], mark, ask, part = 'all', children }: HomeProps) {
   const { resolved, toggle } = useTheme()
   const ai = useAiStatus()
   const key = ai?.openrouter ?? null
@@ -55,7 +57,7 @@ export function Home({ notice = null, onPalette, topActions, runs = [], mark, as
   // Someone who has never had anything made in this LoomWatch opens on the first run (ADR 0075),
   // instead of this page; see lib/firstrun/store.ts. Asked once per visit. It replaces the
   // getting-started guide opening by itself, which stays a link here and in the menu.
-  const [firstRun, setFirstRun] = useState<'checking' | 'on' | 'off'>(() => (readFirstRun() ? 'off' : 'checking'))
+  const [firstRun, setFirstRun] = useState<'checking' | 'on' | 'off'>(() => (part === 'projects' || readFirstRun() ? 'off' : 'checking'))
   useEffect(() => {
     if (firstRun !== 'checking') return
     let live = true
@@ -123,6 +125,7 @@ export function Home({ notice = null, onPalette, topActions, runs = [], mark, as
         <UsageNotices />
 
         <Studio
+          part={part}
           runs={runs}
           setUpUnavailable={ask ? ask.unavailable : 'Ask LoomWatch isn’t available here.'}
           asking={ask?.open === true}

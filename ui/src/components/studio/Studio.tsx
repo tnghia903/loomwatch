@@ -106,8 +106,10 @@ function NotInAProject({ jobs, rooms, used }: { jobs: readonly SavedJob[]; rooms
  * project as a room, its agents at their desks in team order, waiting rooms first; then your agents
  * in no project. With no project yet it asks what you are working on.
  */
-export function Studio({ runs, onSetUp, setUpUnavailable, asking = false }: {
+export function Studio({ runs, onSetUp, setUpUnavailable, asking = false, part = 'all' }: {
   runs: readonly RunRecord[]
+  /** Home shows everything; Projects (the dock's place) shows only the projects and agents in none. */
+  part?: 'all' | 'projects'
   onSetUp: (start: ProjectStart) => void
   setUpUnavailable: string | null
   /** Ask's panel is open: Set up project says Ask is already at work beside it. */
@@ -182,7 +184,7 @@ export function Studio({ runs, onSetUp, setUpUnavailable, asking = false }: {
       <FileReaderContext.Provider value={read}>
       <div className="studio studio-empty">
         <SetUpProject onSetUp={setUp} unavailable={setUpUnavailable} asking={asking} />
-        {pickUp}
+        {part === 'all' && pickUp}
         <CantBeOpened teams={problems} />
         <NotInAProject jobs={jobs} rooms={rooms} used={used} />
       </div>
@@ -210,7 +212,7 @@ export function Studio({ runs, onSetUp, setUpUnavailable, asking = false }: {
   return (
     <FileReaderContext.Provider value={read}>
     <div className="studio">
-      <div id="your-desk" className="studio-desk">
+      {part === 'all' && <div id="your-desk" className="studio-desk">
         <GlanceTiles
           label="Your desk"
           needs={needs}
@@ -227,8 +229,8 @@ export function Studio({ runs, onSetUp, setUpUnavailable, asking = false }: {
           onMore={() => openNeedsYou()}
         />
         {boxTeams.length > 0 && <WorkBox teams={boxTeams} primary={needs.length === 0} />}
-      </div>
-      {pickUp}
+      </div>}
+      {part === 'all' && pickUp}
       <section className="studio-projects" aria-labelledby="studio-projects-title" data-tour="projects">
         <div className="studio-projects-head">
           <h2 id="studio-projects-title" className="studio-head">Projects</h2>

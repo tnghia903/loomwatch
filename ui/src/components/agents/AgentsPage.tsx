@@ -9,19 +9,17 @@ import { useSavedJobs } from '../../lib/library/jobs'
 import { usePinnedAgent } from '../../lib/library/pinned'
 import { modelForPreset, ROLE_PRESETS } from '../../lib/library/roles'
 import { useAgentUses } from '../../lib/library/uses'
-import { agentPresence } from '../../lib/rail/presence'
 import type { RunRecord } from '../../lib/runs/client'
 import type { LoomMarkState } from '../../lib/story/loomMark'
 import { useTheme } from '../../lib/theme'
-import { CrewRail, type LeaveGuard } from '../rail/CrewRail'
 import { LoomMark, LoomWordmark } from '../ui/glyphs'
 import { KnowYou } from '../you/KnowYou'
 import { AgentBadge } from './AgentBadge'
 import { AgentBuilder } from './AgentBuilder'
 import { AgentChip } from './AgentChip'
 import { AgentFrame, type AgentBarSlots } from './AgentFrame'
-import { FigureStill } from './FigureStill'
-import { navigate, useAgentsRoute, type AgentsRoute } from './route'
+import type { LeaveGuard } from './leave'
+import { navigate, useAgentsRoute } from './route'
 
 export interface AgentsPageProps {
   skills: DetectedCapability[]
@@ -43,16 +41,15 @@ export function AgentsPage(props: AgentsPageProps) {
   const route = useAgentsRoute()
   const { resolved, toggle } = useTheme()
   const { records = NO_RUNS, tray, mark, ...builder } = props
-  // What leaving the agent on screen would lose, kept by its builder and read by the rail.
+  // What leaving the agent on screen would lose, kept by its builder.
   const leave = useRef<LeaveGuard | null>(null)
   // Where the agent on screen puts its name chip and tabs in the header.
   const [slots, setSlots] = useState<AgentBarSlots>(NO_SLOTS)
   if (route.kind !== 'list') {
-    // An agent's page, or a new one's, in a team page's frame: the rail, the header, then the page.
-    // The frame stays as you move between agents; only the agent in it changes.
+    // An agent's page, or a new one's: the header, then the page, beside the dock.
     const starting = route.kind === 'new' && !route.from
     return (
-      <AgentFrame mark={mark} tray={tray} rail={<AgentRail route={route} records={records} leave={() => leave.current} />} chip={starting ? <AgentChip name="New agent" state="new" detail="Start from a job" /> : undefined} onSlots={setSlots}>
+      <AgentFrame mark={mark} tray={tray} chip={starting ? <AgentChip name="New agent" state="new" detail="Start from a job" /> : undefined} onSlots={setSlots}>
         <main className="home-main agents-main">
           {starting
             ? <AgentTemplates team={route.team} />
@@ -79,25 +76,6 @@ export function AgentsPage(props: AgentsPageProps) {
 const NO_RUNS: readonly RunRecord[] = []
 const NO_SLOTS: AgentBarSlots = { chip: null, tabs: null }
 
-/**
- * My agents down the side of an agent's page: one click is another agent, on the same tab, so
- * moving between agents never goes back through the list. Each glows what it is doing in its own
- * chat, so one finishing, or waiting for you, is seen while you work with another.
- */
-function AgentRail({ route, records, leave }: { route: Exclude<AgentsRoute, { kind: 'list' }>; records: readonly RunRecord[]; leave: () => LeaveGuard | null }) {
-  const { jobs } = useSavedJobs()
-  const tab = route.view === 'chat' ? '?view=chat' : ''
-  const items = jobs.map((job) => ({
-    key: job.id,
-    href: `/agents/${encodeURIComponent(job.id)}${tab}`,
-    name: job.name,
-    detail: job.does || undefined,
-    presence: agentPresence(records, job.id),
-    current: route.kind === 'agent' && route.id === job.id,
-    art: <FigureStill className="crew-rail-figure" figure={figureFor(job.id, job.figure)} alt="" width={46} height={46} decoding="async" />,
-  }))
-  return <CrewRail label="My agents" items={items} find="Find an agent" none="No agents yet." add={{ label: 'New agent', href: '/agents/new', current: route.kind === 'new' }} go={(href) => navigate(href)} leave={leave} />
-}
 
 /**
  * Where building an agent starts: a job to start from, with working instructions on the model its

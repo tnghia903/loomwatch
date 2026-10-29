@@ -1,0 +1,30 @@
+/* ---------- The frame: the dock down the side of every screen (round 3) ---------- */
+/* The dock stands where the crew rail stood, so the layout math that leaves room for it
+   (--lw-rail-w, runtime.css) holds on every screen. */
+.lw-app { --lw-rail-w: 72px; display: flex; width: 100%; height: 100%; background: var(--color-ground); color: var(--color-ink); }
+.lw-app-main { position: relative; flex: 1; min-width: 0; min-height: 0; }
+.lw-dock { flex: none; width: 72px; height: 100%; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between; padding: var(--sp-3) 0; background: var(--color-panel); border-right: 1px solid var(--color-hairline); z-index: 60; }
+.lw-dock-places { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; align-items: center; gap: var(--sp-1); }
+.lw-dock-place { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; width: 56px; min-height: 48px; padding: 6px 0; box-sizing: border-box; border: 0; border-radius: var(--r-md); background: transparent; color: var(--color-ink-2); text-decoration: none; cursor: pointer; font: inherit; }
+.lw-dock-place:hover { background: color-mix(in srgb, var(--color-ink) 6%, transparent); color: var(--color-ink); }
+.lw-dock-place[aria-current='page'] { color: var(--color-ink); background: color-mix(in srgb, var(--color-ink) 8%, transparent); }
+/* Where you are: the gold stitch beside the place, a line in the text gold, never a fill. */
+.lw-dock-place[aria-current='page']::before { content: ''; position: absolute; left: -8px; top: 12px; bottom: 12px; border-left: 3px dashed var(--color-accent); }
+.lw-dock-icon { position: relative; display: inline-flex; }
+/* A newcomer's names, in the ink so 11 px still reads; they leave once each place is known. */
+.lw-dock-label { font-size: 11px; line-height: 13px; font-weight: 500; color: var(--color-ink); }
+.lw-dock-label[hidden] { display: none; }
+/* What needs you: a count on Home, in gold words on a ring, never a gold fill and never red. */
+.lw-dock-count { position: absolute; top: -7px; right: -12px; min-width: 18px; height: 18px; padding: 0 4px; box-sizing: border-box; border: 1.5px solid var(--color-accent); border-radius: var(--r-full); background: var(--color-ground); color: var(--color-accent); font-size: 11px; line-height: 15px; font-weight: 600; text-align: center; }
+
+/* A phone: the dock lies along the top, as the rail did, and the stitch runs under the place. */
+@media (max-width: 767px) {
+  .lw-app { --lw-rail-w: 0px; flex-direction: column; }
+  .lw-dock { width: 100%; height: auto; flex-direction: row; padding: 0 var(--sp-2); border-right: 0; border-bottom: 1px solid var(--color-hairline); overflow-x: auto; }
+  .lw-dock-places { flex-direction: row; }
+  .lw-dock-place[aria-current='page']::before { left: 12px; right: 12px; top: auto; bottom: -1px; border-left: 0; border-bottom: 3px dashed var(--color-accent); }
+}
+
+/* The first run is one conversation with your first agent: no dock until it is done. */
+.lw-app:has([data-first-run]) { --lw-rail-w: 0px; }
+.lw-app:has([data-first-run]) > .lw-dock { display: none; }

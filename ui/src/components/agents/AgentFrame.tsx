@@ -9,13 +9,10 @@ export interface AgentFrameProps {
   mark?: LoomMarkState
   /** The bell: what waits on you, from the same poll as a team's. */
   tray?: ReactNode
-  /** My agents down the side. */
-  rail: ReactNode
   /** The name chip, when the page has one of its own (a new agent's start); otherwise the agent's
       page puts its own in the header's slot. */
   chip?: ReactNode
-  /** Where the agent on screen puts its name chip and its Build · Chat tabs. The frame stays while
-      you move between agents, so the rail beside it does too. */
+  /** Where the agent on screen puts its name chip and its Build · Chat tabs. */
   onSlots: (slots: AgentBarSlots) => void
   children: ReactNode
 }
@@ -39,7 +36,7 @@ const isNarrow = () => window.matchMedia?.(NARROW).matches ?? false
  * then the page. Skills, Quests and the theme, which a team's screen reaches from its palette and
  * view bar, are in the menu here.
  */
-export function AgentFrame({ mark, tray, rail, chip, onSlots, children }: AgentFrameProps) {
+export function AgentFrame({ mark, tray, chip, onSlots, children }: AgentFrameProps) {
   const { resolved, toggle } = useTheme()
   const chipSlot = useRef<HTMLDivElement>(null)
   const narrowChipSlot = useRef<HTMLDivElement>(null)
@@ -57,7 +54,6 @@ export function AgentFrame({ mark, tray, rail, chip, onSlots, children }: AgentF
   const menu = <WorkspaceMenu more={more} screen="agent" />
   return (
     <div className="lw-railed agent-frame-root" data-tour="agents">
-      {rail}
       <div className="agent-frame">
         <div className="lw-shell agent-bar">
           <div className="workspace-chrome pointer-events-none absolute inset-x-0 z-40 flex flex-col items-center gap-2" style={{ top: 'var(--lw-panel-inset)' }}>

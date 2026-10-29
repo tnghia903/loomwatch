@@ -11,8 +11,7 @@ import AboutYouPage from './components/you/AboutYouPage'
 import { Updates } from './components/updates/Updates'
 import { GettingStarted } from './components/tour/GettingStarted'
 import { Workspace } from './components/Workspace'
-import { FrameTeamRail } from './components/rail/TeamRail'
-import { useTeamRailShown } from './components/rail/teamRailStore'
+import { AppFrame } from './components/frame/AppFrame'
 import { NeedsYouTray } from './components/workspace/NeedsYouTray'
 import { useAiStatus } from './lib/ai/useKeyStatus'
 import { connectedSources } from './lib/ai/sources'
@@ -63,30 +62,26 @@ function Guide() {
 function Editor() {
   const capabilities = useCapabilities()
   const [, setDocumentOpen] = useState(() => new URLSearchParams(window.location.search).has('path'))
-  // Another team opens in place (lib/team-file/teamPage.ts): the frame and the rail stay, and the
+  // Another team opens in place (lib/team-file/teamPage.ts): the frame stays, and the
   // team's own part, canvas included, starts fresh under a new key, as on a page load.
   const page = useTeamPage()
-  const railed = useTeamRailShown()
   return (
     <>
       {/* Above Home and the workspace alike: the guide carries on across the page load a new team causes. */}
       <Guide />
       <Feedback />
       <Updates />
-      <div className={railed ? 'lw-railed' : 'lw-frame'}>
-        <FrameTeamRail />
-        <ReactFlowProvider key={page.key}>
-          <Workspace
-            capabilityInventory={capabilities.inventory}
-            capabilitiesLoading={capabilities.loading}
-            capabilitiesError={capabilities.error}
-            capabilitiesScannedAt={capabilities.scannedAt}
-            onRetryCapabilities={capabilities.retry}
-            onDocumentOpen={() => setDocumentOpen(true)}
-            initialRunId={page.runId}
-          />
-        </ReactFlowProvider>
-      </div>
+      <ReactFlowProvider key={page.key}>
+        <Workspace
+          capabilityInventory={capabilities.inventory}
+          capabilitiesLoading={capabilities.loading}
+          capabilitiesError={capabilities.error}
+          capabilitiesScannedAt={capabilities.scannedAt}
+          onRetryCapabilities={capabilities.retry}
+          onDocumentOpen={() => setDocumentOpen(true)}
+          initialRunId={page.runId}
+        />
+      </ReactFlowProvider>
     </>
   )
 }
@@ -121,6 +116,11 @@ function Quests() {
 }
 
 export default function App() {
+  return <AppFrame><Screen /></AppFrame>
+}
+
+/** The screen the address asks for, inside the one frame. */
+function Screen() {
   useTheme()
   // The first open after every agent became one of My agents moves the teams there (ADR 0094).
   // Pages draw at once; only a move that is needed holds them, and they draw afresh after it.
@@ -128,7 +128,7 @@ export default function App() {
   // Then every team works in a project (ADR 0097): one in none becomes a project of its own.
   const projects = useMoveIntoProjects(move === 'done')
   const { pathname, search } = window.location
-  const showsTeams = pathname === '/' || pathname === '/watch' || pathname === '/agents' || pathname.startsWith('/agents/') || pathname.startsWith('/projects/')
+  const showsTeams = pathname === '/' || pathname === '/projects' || pathname === '/watch' || pathname === '/agents' || pathname.startsWith('/agents/') || pathname.startsWith('/projects/')
   if (move === 'moving' && showsTeams) {
     return <p className="t-meta" role="status" style={{ padding: 32, color: 'var(--color-ink-3)' }}>Adding your teams’ agents to My agents…</p>
   }
