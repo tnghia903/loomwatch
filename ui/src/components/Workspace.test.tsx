@@ -254,9 +254,14 @@ describe('Workspace', () => {
     expect(screen.getByRole('region', { name: /chat$/ })).toBeInTheDocument()
   })
 
-  // ADR 0051: a piece's replies are read beside the chat, drawn there by the piece itself.
-  it('reads a piece’s replies in the pane’s first tab, drawn by the piece in the chat', async () => {
-    sessionState.events = [event(0, 'process', { phase: 'spawned', pid: 1 })]
+  // The owner (2026-10-29): a piece's replies are read in the team chat, under its line, never in
+  // the pane beside it.
+  it('reads a piece’s replies in the chat, under its line, and the pane beside it holds only Details', async () => {
+    const handover = { phase: 'prompt_sections', sections: [{ kind: 'stage_results', heading: '## stage_results', text: 'The repo has three crates.' }] }
+    sessionState.events = [
+      event(0, 'process', { phase: 'spawned', pid: 1 }),
+      { ...event(1, 'session_meta', handover, 'reviewer'), raw: { source: 'loomwatch', phase: 'prompt_sections' } },
+    ]
     const fallback = globalThis.fetch
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input).startsWith('/api/chat?')) {
@@ -266,34 +271,51 @@ describe('Workspace', () => {
     }))
     renderWorkspace()
     fireEvent.click(screen.getByRole('button', { name: 'Run team' }))
-    fireEvent.click(await within(await screen.findByRole('log', { name: 'Messages' })).findByRole('button', { name: 'Details' }))
+    const log = await screen.findByRole('log', { name: 'Messages' })
+    // Work in progress shows its replies as they are said, in the chat.
+    const line = await within(log).findByRole('button', { name: '1 reply' })
+    expect(line).toHaveAttribute('aria-expanded', 'true')
+    expect(within(log).getByText('The repo has three crates.')).toBeInTheDocument()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(screen.queryByRole('complementary', { name: 'Details of this piece of work' })).not.toBeInTheDocument()
+    // The line folds them, and opens them again, in the chat.
+    fireEvent.click(line)
+    expect(line).toHaveAttribute('aria-expanded', 'false')
+    expect(within(log).queryByText('The repo has three crates.')).toBeNull()
+    expect(screen.queryByRole('complementary', { name: 'Details of this piece of work' })).not.toBeInTheDocument()
+    fireEvent.click(line)
+    expect(within(log).getByText('The repo has three crates.')).toBeInTheDocument()
+    // Details, beside the line, opens the record beside the chat: no Replies there.
+    fireEvent.click(within(log).getByRole('button', { name: 'Details' }))
     const pane = await screen.findByRole('complementary', { name: 'Details of this piece of work' })
-    expect(within(pane).getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Replies', 'Details'])
-    fireEvent.click(within(pane).getByRole('tab', { name: 'Replies' }))
-    expect(within(pane).getByRole('tab', { name: 'Replies' })).toHaveAttribute('aria-selected', 'true')
-    const panel = within(pane).getByRole('tabpanel')
-    expect(panel).toHaveAttribute('aria-labelledby', 'tc-pane-replies')
-    expect(await within(panel).findByText('No replies yet.')).toBeInTheDocument()
-    expect(within(screen.getByRole('log', { name: 'Messages' })).queryByText('No replies yet.')).toBeNull()
+    expect(within(pane).getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Details'])
+    expect(within(pane).queryByText('The repo has three crates.')).toBeNull()
+    expect(within(log).getByText('The repo has three crates.')).toBeInTheDocument()
   })
 
-  // A newcomer's reading: on a narrow screen the pane covers the chat, where the only Approve is.
-  it('steps the replies aside on a narrow screen while the work waits on you', async () => {
+  // A newcomer's reading (2026-10-29): on a narrow window the pane covers the chat, where the
+  // replies are, so the timeline's Read the message moves it aside.
+  it('moves the pane aside on a narrow window to show a message the timeline points at', async () => {
     vi.stubGlobal('matchMedia', (query: string) => ({ matches: false, media: query, addEventListener() {}, removeEventListener() {} }))
-    sessionState.events = [event(0, 'process', { phase: 'spawned', pid: 1 })]
-    const waiting = { ...runRecord, waitingOn: { node: 'reviewer', name: 'Reviewer', kind: 'question', since: at(1), question: 'Which market?', context: null, handoverFrom: null, park: 'reloadable', parkNote: '', sendBackAvailable: false } }
+    const handover = { phase: 'prompt_sections', sections: [{ kind: 'stage_results', heading: '## stage_results', text: 'The repo has three crates.' }] }
+    sessionState.events = [
+      event(0, 'process', { phase: 'spawned', pid: 1 }),
+      { ...event(1, 'session_meta', handover, 'reviewer'), raw: { source: 'loomwatch', phase: 'prompt_sections' } },
+    ]
     const fallback = globalThis.fetch
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
-      if (url.startsWith('/api/chat?')) return new Response(JSON.stringify({ teamKey: 'demo', teamPath: 'demo.yaml', more: false, items: [{ kind: 'work', run: waiting, request: null, notes: [] }] }), { status: 200 })
-      if (url.includes('/api/runs/run-1') && !url.includes('/checkpoints')) return new Response(JSON.stringify(waiting), { status: 200 })
+      if (url.startsWith('/api/chat?')) return new Response(JSON.stringify({ teamKey: 'demo', teamPath: 'demo.yaml', more: false, items: [{ kind: 'work', run: runRecord, request: null, notes: [] }] }), { status: 200 })
+      if (url.includes('/api/runs/run-1') && !url.includes('/checkpoints')) return new Response(JSON.stringify(runRecord), { status: 200 })
       return fallback(input, init)
     }))
     renderWorkspace('run-1')
     const pane = await screen.findByRole('complementary', { name: 'Details of this piece of work' })
-    fireEvent.click(within(pane).getByRole('tab', { name: 'Replies' }))
+    const previous = within(pane).getByRole('button', { name: 'Previous moment' })
+    for (let tries = 0; tries < 5 && !within(pane).queryByRole('button', { name: 'Read the message' }); tries += 1) fireEvent.click(previous)
+    fireEvent.click(within(pane).getByRole('button', { name: 'Read the message' }))
     await waitFor(() => expect(screen.queryByRole('complementary', { name: 'Details of this piece of work' })).not.toBeInTheDocument())
-    expect(within(screen.getByRole('log', { name: 'Messages' })).getByText('Which market?')).toBeInTheDocument()
+    expect(within(screen.getByRole('log', { name: 'Messages' })).getByText('The repo has three crates.')).toBeInTheDocument()
   })
 
   describe('what a piece of work made, as tabs beside the chat', () => {
@@ -339,7 +361,7 @@ describe('Workspace', () => {
       expect(await within(pane).findByRole('heading', { name: 'West region' })).toBeInTheDocument()
       expect(within(pane).getByRole('tabpanel')).toHaveAttribute('aria-labelledby', tab.id)
       // A short answer is read in the chat; a file no longer on this computer is no tab.
-      expect(within(pane).getAllByRole('tab').map((each) => each.textContent)).toEqual(['Replies', 'Details', 'market.md'])
+      expect(within(pane).getAllByRole('tab').map((each) => each.textContent)).toEqual(['Details', 'market.md'])
       fireEvent.click(within(pane).getByRole('tab', { name: 'Details' }))
       expect(within(pane).getByRole('main', { name: 'Run workspace' })).toBeInTheDocument()
     })
@@ -361,15 +383,15 @@ describe('Workspace', () => {
       await waitFor(() => expect(within(pane).getByRole('tab', { name: 'market.md' })).toHaveAttribute('aria-selected', 'true'))
       // As a browser does, the next tab takes its place.
       fireEvent.click(within(pane).getByRole('button', { name: 'Close market.md' }))
-      expect(tabs()).toEqual(['Replies', 'Details', 'Reviewer'])
+      expect(tabs()).toEqual(['Details', 'Reviewer'])
       expect(within(pane).getByRole('tab', { name: 'Reviewer’s answer' })).toHaveAttribute('aria-selected', 'true')
       // Nothing after the answer to set it apart from.
       expect(pane.querySelector('.tc-pane-split')).toBeNull()
       await new Promise((resolve) => setTimeout(resolve, 50))
-      expect(tabs()).toEqual(['Replies', 'Details', 'Reviewer'])
+      expect(tabs()).toEqual(['Details', 'Reviewer'])
       fireEvent.click(await screen.findByRole('button', { name: 'Read market.md here' }))
       await waitFor(() => expect(within(pane).getByRole('tab', { name: 'market.md' })).toHaveAttribute('aria-selected', 'true'))
-      expect(tabs()).toEqual(['Replies', 'Details', 'Reviewer', 'market.md'])
+      expect(tabs()).toEqual(['Details', 'Reviewer', 'market.md'])
     })
 
     // A long answer stays a short card in the chat and is read here. The owner: "there is no way to
@@ -383,7 +405,7 @@ describe('Workspace', () => {
       const pane = await openPane()
       // The pane still opens on the file the work made, though the answer's tab comes first.
       await waitFor(() => expect(within(pane).getByRole('tab', { name: 'market.md' })).toHaveAttribute('aria-selected', 'true'))
-      expect(within(pane).getAllByRole('tab').map((each) => each.textContent)).toEqual(['Replies', 'Details', 'Reviewer', 'market.md'])
+      expect(within(pane).getAllByRole('tab').map((each) => each.textContent)).toEqual(['Details', 'Reviewer', 'market.md'])
       expect(within(pane).queryByRole('tab', { name: 'Answer' })).not.toBeInTheDocument()
       const answer = within(pane).getByRole('tab', { name: 'Reviewer’s answer' })
       expect(answer).toHaveAttribute('title', 'Reviewer’s answer\nMarket brief')
@@ -432,7 +454,7 @@ describe('Workspace', () => {
       renderWorkspace()
       const pane = await openPane()
       await waitFor(() => expect(within(pane).getByRole('tab', { name: 'market.md' })).toHaveAttribute('aria-selected', 'true'))
-      expect(within(pane).getAllByRole('tab').map((each) => each.textContent)).toEqual(['Replies', 'Details', 'q3.md', 'make_chart.py', 'market.md'])
+      expect(within(pane).getAllByRole('tab').map((each) => each.textContent)).toEqual(['Details', 'q3.md', 'make_chart.py', 'market.md'])
     })
 
     // A newcomer's run (a75f05b4): the answer named what it wrote, in the person's own folder, in
@@ -448,7 +470,7 @@ describe('Workspace', () => {
       renderWorkspace()
       const pane = await openPane()
       await waitFor(() => expect(within(pane).getByRole('tab', { name: 'q3.md' })).toHaveAttribute('aria-selected', 'true'))
-      expect(within(pane).getAllByRole('tab')).toHaveLength(4)
+      expect(within(pane).getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Details', 'Reviewer', 'q3.md'])
       // The answer read in full there names it as a file too.
       fireEvent.click(within(pane).getByRole('tab', { name: 'Reviewer’s answer' }))
       const chip = await within(within(pane).getByRole('tabpanel')).findByRole('button', { name: /q3\.md/ })
@@ -491,9 +513,9 @@ describe('Workspace', () => {
       // At once, before what its work made is found, and in the place it keeps once that is found.
       expect(within(pane).getByRole('tab', { name: 'sales.md' })).toHaveAttribute('aria-selected', 'true')
       expect(window.location.search).toContain('run=run-1')
-      expect(tabs()).toEqual(['Replies', 'Details', 'sales.md', 'market.md'])
+      expect(tabs()).toEqual(['Details', 'sales.md', 'market.md'])
       await waitFor(() => expect(within(pane).getByRole('tab', { name: 'sales.md' }).querySelector('svg')?.getAttribute('class')).toContain('lucide-file-text'))
-      expect(tabs()).toEqual(['Replies', 'Details', 'sales.md', 'market.md'])
+      expect(tabs()).toEqual(['Details', 'sales.md', 'market.md'])
       // Its kind's mark, as when its own work was on screen.
       expect(mark()).toBe(itsMark)
       fireEvent.click(within(pane).getByRole('tab', { name: 'market.md' }))
@@ -502,12 +524,12 @@ describe('Workspace', () => {
       // And back: the file just read stays too, not only the last one.
       fireEvent.click(screen.getByRole('button', { name: 'Read market.md here' }))
       await waitFor(() => expect(window.location.search).toContain('run=run-2'))
-      await waitFor(() => expect(tabs()).toEqual(['Replies', 'Details', 'market.md', 'sales.md']))
+      await waitFor(() => expect(tabs()).toEqual(['Details', 'market.md', 'sales.md']))
       expect(within(pane).getByRole('tab', { name: 'market.md' })).toHaveAttribute('aria-selected', 'true')
       fireEvent.click(within(pane).getByRole('button', { name: 'Close sales.md' }))
-      expect(tabs()).toEqual(['Replies', 'Details', 'market.md'])
+      expect(tabs()).toEqual(['Details', 'market.md'])
       await new Promise((resolve) => setTimeout(resolve, 50))
-      expect(tabs()).toEqual(['Replies', 'Details', 'market.md'])
+      expect(tabs()).toEqual(['Details', 'market.md'])
     })
 
     // ADR 0051: work you start shows in the chat; a closed pane stays closed while it runs.

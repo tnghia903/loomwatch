@@ -17,13 +17,12 @@ function initials(name: string): string {
 }
 
 /**
- * The pane's tabs: what the agents said to each other on the piece (`replies`, in a team's chat),
- * and its record; its long answer as the chat shows a message, by the figure and name of who gave
+ * The pane's tabs: the piece's record; its long answer as the chat shows a message, by the figure and name of who gave
  * it, shaped as a bubble and set apart; then each file it made, by its own name and the mark of its
- * kind. Each made tab has its own close. When they outgrow the pane the made tabs scroll under the
- * piece's own two, which stay put; the side with more fades, and the one on screen is kept in view.
+ * kind. Each made tab has its own close. When they outgrow the pane the made tabs scroll under
+ * Details, which stays put; the side with more fades, and the one on screen is kept in view.
  */
-export function PaneTabs({ tabs, shown, replies = false, hue, onShow, onClose }: { tabs: readonly MadeTab[]; shown: PaneTab; replies?: boolean; hue: (id: string) => number; onShow: (tab: PaneTab) => void; onClose: (made: MadeTab) => void }) {
+export function PaneTabs({ tabs, shown, hue, onShow, onClose }: { tabs: readonly MadeTab[]; shown: PaneTab; hue: (id: string) => number; onShow: (tab: PaneTab) => void; onClose: (made: MadeTab) => void }) {
   const list = useRef<HTMLDivElement>(null)
   const shownId = paneTabId(tabs, shown)
   const [more, setMore] = useState<{ before: boolean; after: boolean; pin: number }>({ before: false, after: false, pin: 0 })
@@ -65,7 +64,6 @@ export function PaneTabs({ tabs, shown, replies = false, hue, onShow, onClose }:
     <div className="tc-pane-tabs" role="tablist" aria-label="Show" ref={list} data-more={fade} style={{ '--tc-pane-pin': `${more.pin}px` } as CSSProperties}
       onScroll={measure} onWheel={(event) => { if (Math.abs(event.deltaY) > Math.abs(event.deltaX)) event.currentTarget.scrollLeft += event.deltaY }}>
       <span className="tc-pane-own">
-        {replies && <button type="button" role="tab" id="tc-pane-replies" aria-selected={shown === 'replies'} aria-controls="tc-pane-body" onClick={() => onShow('replies')}>Replies</button>}
         <button type="button" role="tab" id="tc-pane-details" aria-selected={shown === 'details'} aria-controls="tc-pane-body" onClick={() => onShow('details')}>Details</button>
       </span>
       {tabs.map((made, at) => {

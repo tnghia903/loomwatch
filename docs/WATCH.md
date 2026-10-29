@@ -45,15 +45,15 @@ Each piece of work in the team's chat has its **replies**, what the agents said 
 each pipeline handover, every Team Bus `ask` with the answer it got (and whether the asked agent
 answered from its open session or from a fresh start), `dispatch` and `handoff` tasks, `ask_user`
 questions with your answers, and your answers at a review step. In the chat they are one line under
-your request, the faces of who spoke and how many replies ("3 replies"; on hover, who they are from
-and when the last came), and that line opens them in the **Replies** tab beside the chat. There they read as a group chat of
-their own: each agent has its own colour and initials, numbered as its card is, and your messages
-sit on the right. What they wait on you for is answered in the chat, on its card: the replies show
-the question or handover without its buttons, so the screen has one **Approve**, and on a narrow
-window, where the pane covers the chat, the replies step aside until you have answered. What you
-answered stays in the chat. An agent's own
-chat (My agents) opens the replies under the line instead, and there a review's **Approve** and
-**Send back** stand where your reply goes, under the handover they decide. **Reply** on that handover quotes it above the message box; what you type there is
+your request, ending under its right corner with the faces of who spoke and how many replies ("3
+replies"; on hover, who they are from and when the last came), and the replies themselves under
+that line, in the chat. The newest piece
+and any piece still working show them as they are said; older pieces hide them, and the line shows
+or hides them again. They read as the rest of the group chat does: each agent has its own colour
+and figure, and your messages sit on the right. An agent's own chat (My agents) shows its replies
+the same way. A review's **Approve** and **Send back** stand where your reply goes, under the
+handover they decide, and a permission's buttons under the message that asks; while the replies
+are hidden, each has a card of its own in the chat, so each is answered in one place. **Reply** on that handover quotes it above the message box; what you type there is
 still your review note. <kbd>Enter</kbd> sends the work back with it and never approves; a note
 that @mentions another agent or the team waits for the buttons. A question names who it is for
 with an @mention, and its answer quotes it. A handover shows as a document shared with the stage
@@ -63,8 +63,8 @@ on to, and the direction and handover that stage was then given fold into it, as
 repeat it. A long message shows its first lines and **Read more** shows it verbatim; **Info**
 says how long the answer took, what the agent did meanwhile, and leads to the record.
 `ui/src/lib/watch/messages.ts` collects the messages in the same pass as the rest of the
-projection, and the timeline's **Read the message** in Details opens the piece's **Replies** and
-lands on that message, as a search result or a reply's quote of one does.
+projection, and the timeline's **Read the message** in Details opens the piece's replies in the
+chat and lands on that message, as a search result or a reply's quote of one does.
 
 When your message says what done looks like ("at most 250 words", "exactly three sections", "stop
 after 5 tries"), a few seconds after you send it **Done when** shows under it, with what LoomWatch
@@ -94,14 +94,14 @@ All five are additive: runs archived before them still read, and a handover send
 taken from the team's connections says so when its row is opened.
 
 Past work lives in each team's chat: the Chat tab lists the team's runs as pieces of
-work, oldest first, as one conversation. Under each request is its line: the faces of the agents
-who spoke, each glowing what it is doing (blue at work, gold waiting for you, red where the work
-stopped), how many replies, and while the work runs who has it, what it spent and **Stop**. The
-line opens the piece's **Replies** beside the chat, where **Details**, this view, is the next tab;
-when nothing passed between the agents the line reads **Details** and opens it, and a stopped
-piece's card leaves that to the line. Clicked again, the
-line closes the pane, and Esc closes it too. The pane opens by itself only to hand over what the
-newest work made (below), never on its replies or its record. The chat holds what was said and Details how it was made: a piece's
+work, oldest first, as one conversation. Under each request is its line: while the work runs, who
+has it and what it spent; then, under the request's right corner, **Details**, **Stop** while it
+runs, and the faces of the agents who spoke, each glowing what it is doing (blue at work, gold
+waiting for you, red where the work stopped), with how many replies. That pill shows or hides the
+piece's replies under it, and **Details** next to it opens this view beside the chat; when nothing passed between the agents the line itself reads **Details** and
+opens it, and a stopped piece's card leaves that to the line. Clicked again, **Details** closes
+the pane, and Esc closes it too. The pane opens by itself only to hand over what the newest work
+made (below), never on its record. The chat holds what was said and Details how it was made: a piece's
 answer is read only in the chat, with its record's verdict (which opens the review), the files it
 names, **Copy**, **Download** and **Send to Notion** under it; Details shows the receipt (the
 run's tokens, and its cost on each turn's `turn_end`: as OpenRouter reported it, ≈ at Claude's list
@@ -120,7 +120,7 @@ The request and the answer themselves are read in the chat, not again here. A fi
 names that another agent wrote, such as the Writer's guide in the Lead's answer, comes into the
 chat as that agent's own message just before the answer, and the answer keeps the files its own
 agent wrote or only named. What the work made is a tab of the pane beside the chat, after
-**Replies** and **Details**: first a long answer (or a titled one past
+**Details**: first a long answer (or a titled one past
 a few lines), as the chat shows a message, by the figure and name of the agent who gave it, in a
 bubble, with its title on hover; then, past a thin line, each file its answer names that
 LoomWatch can show and that is on this computer, by its name and the mark of its kind. A file the
@@ -133,8 +133,8 @@ sheet or picture it wrote, else its long answer. Code, and files it only read, w
 that stopped opens nothing, and an open pane keeps its record on screen. Closing the pane stops
 this until you start work again. Each tab has its own ×, and closing the one on screen shows the next; a tab
 closed stays closed for that work until **Read** on the file's card (or **Open** on the answer's)
-brings it back in its place. Past the pane's width the tabs scroll under **Replies** and
-**Details**, which stay put. A file that has been on screen stays a tab until its × is pressed. It stays when newer work
+brings it back in its place. Past the pane's width the tabs scroll under **Details**, which
+stays put. A file that has been on screen stays a tab until its × is pressed. It stays when newer work
 starts, so a change to a part asked about can be seen, and when **Read** opens a file from other
 work, which gets its own tab. The pane's own × closes them all. Mark
 any words in a file to ask about them (ADR 0077): **Ask** puts them in the message box, **Explain**

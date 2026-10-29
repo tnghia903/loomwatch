@@ -305,9 +305,10 @@
 .tc-pending:not(.failed) .tc-mention { color: var(--color-ink); }
 .tc-schedule { display: inline-grid; place-items: center; }
 
-/* What the agents said to each other, as one line under the piece, in the text column: their faces
-   and how many replies, which open the replies beside the chat, then while the work runs who has
-   it. The faces glow what each is doing, as in the header. */
+/* What the agents said to each other, as one line under the piece, in the text column: while the
+   work runs who has it, then at the line's right end, under your message, Details, Stop and the
+   faces with how many replies, which open and fold the replies under it. The faces glow what each
+   is doing, as in the header. */
 .tc-replies {
   --tc-gutter: 42px;
   display: flex;
@@ -329,15 +330,21 @@
   transition: border-color var(--t-instant) var(--ease-out);
 }
 .tc-replies-open b { font-weight: 600; color: var(--color-ink); font-variant-numeric: tabular-nums; }
-/* Shown beside the chat: a gold ring, the words in ink (gold words on the gold tint fail contrast
-   in light, and the piece's gold edge already ties it to the pane). */
+/* Its record open beside the chat: a gold ring, as the piece's gold edge ties it to the pane. Its
+   replies open under it, most lines most of the time: a dim one. The words stay in ink. */
 .tc-replies-open:hover, .tc-replies-open:focus-visible { border-color: color-mix(in srgb, var(--color-accent) 55%, transparent); }
 .tc-replies-open:not([aria-pressed='true'], [aria-expanded='true']):is(:hover, :focus-visible) b { color: var(--color-accent); }
-.tc-replies-open[aria-pressed='true'], .tc-replies-open[aria-expanded='true'] { border-color: var(--color-accent); }
+.tc-replies-open[aria-expanded='true'] { border-color: var(--color-accent-dim); }
+.tc-replies-open[aria-pressed='true'] { border-color: var(--color-accent); }
 .tc-replies-faces { display: inline-flex; align-items: center; }
 .tc-replies-faces .chat-avatar + .chat-avatar { margin-left: -5px; }
 .tc-replies-open:not(:has(.tc-replies-faces)) { padding-left: 12px; }
 @media (pointer: coarse) { .tc-replies-open { min-height: 44px; } }
+/* Details and Stop beside it: a finger's 44 px, without making the line taller. */
+@media (pointer: coarse) {
+  .tc-talk-acts .tc-link { position: relative; }
+  .tc-talk-acts .tc-link::after { content: ''; position: absolute; inset: -12px -6px; }
+}
 /* What the line says reads as a sentence: beside the pill when it fits, else on its own row, where
    it wraps as words do; never squeezed into a column per word. */
 .tc-talk-line { display: block; flex: 0 1 auto; min-width: 0; color: var(--color-ink-2); text-wrap: pretty; }
@@ -348,7 +355,8 @@
 .tc-talk-line .chat-name { color: var(--hue); }
 .tc-replies.live .tc-talk-line .chat-dots i { background: var(--color-live); }
 .tc-replies.live .tc-talk-line b.tc-wait { color: var(--color-accent); }
-.tc-talk-acts { display: inline-flex; flex-wrap: wrap; gap: 4px 12px; margin-left: auto; }
+.tc-replies-end { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 12px; margin-left: auto; }
+.tc-talk-acts { display: inline-flex; flex-wrap: wrap; gap: 4px 12px; }
 /* What the run spent (ADR 0068): a bobbin that unwinds as the agents spend, the thread run off it
    in each agent's colour, and the figure. Gold once the run has used its limit. */
 .tc-spool { display: inline-flex; align-items: center; gap: 6px; color: var(--color-ink-3); font: 500 11.5px/1 var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -610,7 +618,6 @@
 
 @container (max-width: 560px) {
   .tc-decision, .tc-stopped, .tc-continue, .tc-learned, .tc-piece .permission-prompt.inline { margin-left: 0; }
-  .tc-talk-acts { margin-left: 0; }
   /* Narrow: the lesson keeps the width, and what you can do with it goes under it. */
   .tc-learned-line { flex-wrap: wrap; row-gap: 2px; }
   .tc-learned-words { flex: 1 1 calc(100% - 20px); }
@@ -773,10 +780,6 @@ a mark.tc-find-hit { box-shadow: none; }
 
 /* ---------- What the agents said, inside the chat ---------- */
 .tc-said .chat.bare { margin: 2px 0 0; border: 0; border-radius: 0; background: transparent; overflow: visible; }
-/* A piece's replies beside the chat (ADR 0051): the talk as the chat would draw it, scrolling in the
-   pane under its tabs, with room for its replies' reactions and Reply. */
-.tc-replies-pane { position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain; padding: 4px 18px 28px; container-type: inline-size; }
-.tc-replies-pane > .tc-said { margin: 0; }
 .tc-said .chat.bare .chat-log { padding: 0 0 4px; }
 /* Your turn, on the message that asks: the buttons stand where "waiting for you" would. */
 .chat-your-turn { display: grid; justify-items: end; gap: 6px; margin-top: 2px; }
@@ -1324,5 +1327,9 @@ button.tc-reply-quote:hover, button.tc-reply-quote:focus-visible { border-left-c
 .chat-loomwatch { display: inline-flex; flex: none; align-items: center; justify-content: center; color: var(--color-ink-2); }
 .tc-react-head .lw-face { color: var(--color-ink-2); }
 /* An answer at a stop quotes its question on one line, cut with an ellipsis: without this the grid
-   column takes the whole unwrapped line and runs off the chat's edge. */
+   column takes the whole unwrapped line and runs off the chat's edge. The line itself is held to
+   the column too: set to the right, it would otherwise run off the chat's left edge, and its time
+   stays on one line beside it. */
 .tc-decided .chat-stack { grid-template-columns: minmax(0, 1fr); }
+.tc-decided .chat-meta { max-width: 100%; }
+.tc-decided .chat-meta time { flex: none; white-space: nowrap; }

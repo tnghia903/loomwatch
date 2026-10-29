@@ -368,7 +368,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
     screen: 'workspace',
     view: () => ({
       title: 'Watch it work',
-      body: 'This line says who is working. Click it to read what the agents say to each other, and the full record, beside the chat. Write while an agent works, and your note joins its next turn; Send now stops its current step first.',
+      body: 'This line says who is working. What the agents say to each other shows under it. Write while an agent works, and your note joins its next turn; Send now stops its current step first. Details opens the full record.',
       target: ['[data-tour="stages"]'],
       sides: ['bottom', 'right', 'top'],
       advance: 'next',
