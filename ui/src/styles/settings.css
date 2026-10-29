@@ -37,13 +37,15 @@
   gap: var(--sp-6);
 }
 
-/* Every settings surface returns to the canvas the same way, top left. */
-.lw-settings-back {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-2);
-  align-self: flex-start;
-}
+/* You's row, the same on About you, Connections and Usage: its tabs, then the look, the guide and
+   feedback. The dock is the way back to everything else. */
+.lw-you-tabs { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); }
+.lw-you-tabset { display: inline-flex; gap: 4px; padding: 4px; border-radius: var(--r-lg); background: var(--color-panel); border: 1px solid var(--color-hairline); }
+.lw-you-tab { display: inline-flex; align-items: center; justify-content: center; width: 48px; height: 36px; border-radius: var(--r-md); border: 1px solid transparent; color: var(--color-ink-2); }
+.lw-you-tab:hover { color: var(--color-ink); }
+.lw-you-tab[aria-current='page'] { color: var(--color-ink); background: color-mix(in srgb, var(--color-ink) 9%, var(--color-panel-solid)); border-color: color-mix(in srgb, var(--color-ink) 18%, transparent); }
+.lw-you-acts { display: inline-flex; gap: var(--sp-2); }
+.lw-you-acts .iconbtn { width: 40px; height: 40px; }
 
 .lw-settings-head { display: flex; flex-direction: column; gap: var(--sp-2); }
 .lw-settings-head h1 { margin: 0; }

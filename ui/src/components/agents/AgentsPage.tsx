@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, type ReactNode } from 'react'
-import { Moon, Plus, Sun, UserRound } from '../ui/icon'
+import { Plus, UserRound } from '../ui/icon'
 
 import { modelNameFromId } from '../../lib/ai/modelIds'
 import type { DetectedCapability } from '../../lib/library/client'
@@ -9,10 +9,6 @@ import { useSavedJobs } from '../../lib/library/jobs'
 import { usePinnedAgent } from '../../lib/library/pinned'
 import { modelForPreset, ROLE_PRESETS } from '../../lib/library/roles'
 import { useAgentUses } from '../../lib/library/uses'
-import type { RunRecord } from '../../lib/runs/client'
-import type { LoomMarkState } from '../../lib/story/loomMark'
-import { useTheme } from '../../lib/theme'
-import { LoomMark, LoomWordmark } from '../ui/glyphs'
 import { KnowYou } from '../you/KnowYou'
 import { AgentBadge } from './AgentBadge'
 import { AgentBuilder } from './AgentBuilder'
@@ -24,10 +20,6 @@ import { navigate, useAgentsRoute } from './route'
 export interface AgentsPageProps {
   skills: DetectedCapability[]
   skillsLoading: boolean
-  /** What the header's mark says, from the needs-you poll. */
-  mark?: LoomMarkState
-  /** Every run the daemon knows, from the same poll: what each agent in the rail is doing. */
-  records?: readonly RunRecord[]
   /** The bell in an agent's header, as a team's has it: what waits on you. */
   tray?: ReactNode
 }
@@ -39,8 +31,7 @@ export interface AgentsPageProps {
  */
 export function AgentsPage(props: AgentsPageProps) {
   const route = useAgentsRoute()
-  const { resolved, toggle } = useTheme()
-  const { records = NO_RUNS, tray, mark, ...builder } = props
+  const { tray, ...builder } = props
   // What leaving the agent on screen would lose, kept by its builder.
   const leave = useRef<LeaveGuard | null>(null)
   // Where the agent on screen puts its name chip and tabs in the header.
@@ -49,7 +40,7 @@ export function AgentsPage(props: AgentsPageProps) {
     // An agent's page, or a new one's: the header, then the page, beside the dock.
     const starting = route.kind === 'new' && !route.from
     return (
-      <AgentFrame mark={mark} tray={tray} chip={starting ? <AgentChip name="New agent" state="new" detail="Start from a job" /> : undefined} onSlots={setSlots}>
+      <AgentFrame tray={tray} chip={starting ? <AgentChip name="New agent" state="new" detail="Start from a job" /> : undefined} onSlots={setSlots}>
         <main className="home-main agents-main">
           {starting
             ? <AgentTemplates team={route.team} />
@@ -61,19 +52,11 @@ export function AgentsPage(props: AgentsPageProps) {
   return (
     <div className="lw-home lw-agents" data-tour="agents">
       <div className="ground" aria-hidden="true" />
-      <header className="home-top">
-        <a className="home-brand" href="/" aria-label="LoomWatch home"><LoomMark size={28} state={mark} /><LoomWordmark height={19} /></a>
-        <span className="home-top-acts">
-          <a className="btn" href="/" data-tour="your-teams">My team</a>
-          <button type="button" className="iconbtn" onClick={toggle} aria-label={resolved === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}>{resolved === 'dark' ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />}</button>
-        </span>
-      </header>
       <main className="home-main agents-main"><AgentsList /></main>
     </div>
   )
 }
 
-const NO_RUNS: readonly RunRecord[] = []
 const NO_SLOTS: AgentBarSlots = { chip: null, tabs: null }
 
 

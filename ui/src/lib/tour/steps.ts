@@ -179,12 +179,12 @@ export const TOUR_STEPS: readonly TourStep[] = [
   {
     id: 'save',
     screen: 'agents',
-    // Going to My team is a new page, Home, where the guide carries on by itself.
+    // Going Home is a new page, where the guide carries on by itself.
     view: () => present('[data-tour="agent-builder"][data-tour-saved]')
       ? {
           title: 'Now put it in a team',
-          body: 'It is in My agents now, ready for any team. Click LoomWatch at the top to go Home.',
-          target: ['[data-tour="your-teams"]'],
+          body: 'It is in My agents now, ready for any team. Click Home to go there.',
+          target: ['[data-tour="dock-home"]'],
           sides: ['bottom', 'left'],
           advance: 'action',
         }

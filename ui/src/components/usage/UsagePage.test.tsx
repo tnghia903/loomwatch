@@ -39,9 +39,13 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 describe('Usage', () => {
-  it('leads back to Home by name', async () => {
+  it('is one of You’s tabs, beside About you and Connections', async () => {
+    window.history.replaceState(null, '', '/usage')
     render(<UsagePage />)
-    expect(await screen.findByRole('link', { name: 'Back to Home' })).toHaveAttribute('href', '/')
+    const you = await screen.findByRole('navigation', { name: 'You' })
+    expect(within(you).getByRole('link', { name: 'Usage' })).toHaveAttribute('aria-current', 'page')
+    expect(within(you).getByRole('link', { name: 'Connections' })).toHaveAttribute('href', '/connections')
+    expect(screen.queryByRole('link', { name: 'Back to Home' })).toBeNull()
   })
 
   it('says what each way of paying counts, what it can’t, and where to see the rest', async () => {

@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { partsDone, type Wardrobe } from '../../lib/quests/wardrobe'
 import { QuestsPage } from './QuestsPage'
-import { QuestsLink } from './QuestsLink'
 
 beforeEach(() => vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 404 }))))
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
@@ -49,13 +48,5 @@ describe('the Quests page', () => {
     const parts = within(card('Bobbin')).getByRole('list', { name: '2 of 5 parts so far' })
     expect(within(parts).getByText('Team shape').closest('li')).toHaveClass('on')
     expect(within(parts).getByText('Prompt').closest('li')).not.toHaveClass('on')
-  })
-
-  it('is reached from the top bar, with the count once the wardrobe is read', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ earned }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
-    render(<QuestsLink />)
-    const link = screen.getByRole('link', { name: /Quests/ })
-    expect(link).toHaveAttribute('href', '/quests')
-    expect(await within(link).findByLabelText('2 of 13 earned')).toHaveTextContent('2/13')
   })
 })

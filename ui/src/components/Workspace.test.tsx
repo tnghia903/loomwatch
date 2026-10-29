@@ -10,6 +10,7 @@ import { keys } from '../lib/platform'
 import { background, cascaded, DESKTOP, goldFilled, heightOf, isGoldFill, PHONE } from '../test/cascade'
 import { typeInto, wordsIn } from '../test/chipField'
 import { Workspace } from './Workspace'
+import { Dock } from './frame/Dock'
 
 // The Run button shows its key as this computer writes it: ↵ on a Mac, Enter elsewhere.
 const RUN_BUTTON = new RegExp(`^Run ${keys('↵')}`)
@@ -151,12 +152,17 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.clearAllMocks() })
 
 describe('Workspace', () => {
-  it('opens Ask LoomWatch from the header, ⌘J and the palette, where Build’s own words are suggested', async () => {
+  it('opens Ask LoomWatch from the dock, ⌘J and the palette, where Build’s own words are suggested', async () => {
     renderWorkspace()
+    render(<Dock />)
     const ask = () => screen.queryByRole('complementary', { name: 'Ask LoomWatch' })
-    fireEvent.click(screen.getByRole('button', { name: 'Ask LoomWatch' }))
+    // Ask is the dock's, on every screen: the team's header has no button of its own for it.
+    expect(within(document.querySelector('.workspace-chrome') as HTMLElement).queryByRole('button', { name: /Ask/ })).toBeNull()
+    const dockAsk = screen.getByRole('button', { name: 'Ask' })
+    fireEvent.click(dockAsk)
     // At once: the panel comes with the app, so nothing waits for its code.
     expect(screen.getByRole('complementary', { name: 'Ask LoomWatch' })).toBeInTheDocument()
+    expect(dockAsk).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByRole('textbox', { name: 'Message to Ask LoomWatch' })).toHaveAttribute('placeholder', 'Ask for a change, or say “run it”')
     expect(screen.getByRole('button', { name: 'Add a fact-checker before the last step' })).toBeInTheDocument()
 
@@ -173,10 +179,11 @@ describe('Workspace', () => {
   // panel, the chat's right side, where your own messages sit, was hidden.
   it('keeps the team’s chat clear of Ask while Ask is open beside it', async () => {
     renderWorkspace()
+    render(<Dock />)
     fireEvent.click(screen.getByRole('button', { name: 'Run team' }))
     const chat = screen.getByRole('region', { name: /chat$/ })
     expect(cascaded(chat, ['inset', 'right'])).not.toMatch(/inspector/)
-    fireEvent.click(screen.getByRole('button', { name: 'Ask LoomWatch' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }))
     expect(screen.getByRole('complementary', { name: 'Ask LoomWatch' })).toBeInTheDocument()
     expect(cascaded(chat, ['inset', 'right'])).toBe('calc(var(--lw-inspector-w) + 2 * var(--lw-panel-inset))')
     // On a phone Ask is a sheet at the bottom, and the chat keeps the whole width.
@@ -1235,19 +1242,19 @@ describe('Workspace', () => {
 
   // The menu is the only way from a team to Team memory, About you, Connections, Usage and the guide.
   // A phone hid it, so a team opened on a phone had no way to any of them.
-  it('keeps the team menu on a phone, beside Ask and the bell rather than under them', async () => {
+  it('keeps the team’s ⋯ on a phone, beside the bell rather than under it', async () => {
     renderWorkspace()
-    const toggle = screen.getByRole('button', { name: 'Menu' })
+    const toggle = screen.getByRole('button', { name: 'More' })
     const menu = toggle.parentElement!
     const anchor = document.querySelector('.workspace-chrome > .needs-you-anchor')!
     for (const viewport of [DESKTOP, PHONE]) expect(cascaded(menu, 'display', viewport)).toBe('flex')
-    // On a phone both stand in the row under the header, side by side: the menu at the end, with the
-    // bell's 30 px look, and Ask and the bell to its left.
+    // On a phone both stand in the row under the header, side by side: the ⋯ at the end, with the
+    // bell's 30 px look, and the bell to its left.
     expect(cascaded(menu, 'right', PHONE)).toBe('19px')
     expect(heightOf(toggle, PHONE)).toBe(30)
     expect(cascaded(anchor, 'right', PHONE)).toBe('64px')
     fireEvent.click(toggle)
-    for (const item of ['Team memory', 'About you…', 'Connections…', 'Usage…']) expect(screen.getByRole('menuitem', { name: item })).toBeInTheDocument()
+    for (const item of ['Team memory', 'Getting started guide']) expect(screen.getByRole('menuitem', { name: item })).toBeInTheDocument()
   })
 
   // A team with unsaved changes: Run team saves before it starts, so it keeps the one gold fill and
@@ -1619,9 +1626,9 @@ it('organizes execution and resources without changing the team, and restores th
   composerLayoutState.edges = [{ from: 'researcher', to: 'knowledge:source' }]
   renderWorkspace()
   // Organize and its undo live in the view bar only (ADR 0043).
-  fireEvent.click(screen.getByRole('button', { name: 'Menu' }))
+  fireEvent.click(screen.getByRole('button', { name: 'More' }))
   expect(screen.queryByRole('menuitem', { name: /Organize/ })).not.toBeInTheDocument()
-  fireEvent.click(screen.getByRole('button', { name: 'Menu' }))
+  fireEvent.click(screen.getByRole('button', { name: 'More' }))
   const organize = await screen.findByRole('button', { name: /^Organize$/ })
   await waitFor(() => expect(organize).toBeEnabled())
   fireEvent.click(organize)
@@ -1902,24 +1909,6 @@ describe('switching workspace tab closes the node inspector', () => {
 // A scheduled delivery fails with "Open Connections and choose a destination page", so the
 // route has to be reachable without knowing the URL or the ⌘K palette. Before this, the
 // workspace menu was the only chrome that could carry it and it did not.
-describe('Connections entry point', () => {
-  it('offers Connections in the workspace menu and navigates to the settings surface', async () => {
-    // jsdom makes location.assign non-configurable, so stand in a whole location.
-    // `search` is kept because Workspace reads it for the ?path= it is rendered with.
-    const real = window.location
-    const assign = vi.fn()
-    Object.defineProperty(window, 'location', { configurable: true, value: { href: real.href, pathname: real.pathname, search: real.search, assign } })
-    renderWorkspace()
-    fireEvent.click(await screen.findByRole('button', { name: 'Menu' }))
-    const item = screen.getByRole('menuitem', { name: 'Connections…' })
-    fireEvent.click(item)
-    expect(assign).toHaveBeenCalledWith('/connections')
-    // The menu closes behind it, like every other item here.
-    expect(screen.queryByRole('menuitem', { name: 'Connections…' })).not.toBeInTheDocument()
-    Object.defineProperty(window, 'location', { configurable: true, value: real })
-  })
-})
-
 // Every agent thinks on the person's OpenRouter key: a team can't run until one is added, and Build
 // says so before the run rather than letting the first model call fail.
 describe('a team whose way of paying isn’t connected', () => {
@@ -1961,14 +1950,14 @@ describe('a team whose way of paying isn’t connected', () => {
 // ADR 0043: Home's way into Ask is "Describe the job", so its header has no Ask button too.
 describe('Home', () => {
   // ADR 0097: on Home, Set up project makes projects, and Ask keeps the app's own button.
-  it('sets projects up through Set up project, and keeps Ask’s own button in the header', async () => {
+  it('sets projects up through Set up project, with Ask the dock’s rather than a button in Home’s header', async () => {
     const path = documentState.path
     documentState.path = ''
     try {
       renderWorkspace()
       expect(await screen.findByRole('heading', { name: 'What are you working on?' })).toBeInTheDocument()
       expect(screen.getByRole('button', { name: 'Set up project' })).toBeInTheDocument()
-      expect(within(screen.getByRole('banner')).getAllByRole('button', { name: /Ask LoomWatch/ })).toHaveLength(1)
+      expect(within(screen.getByRole('banner')).queryAllByRole('button', { name: /Ask/ })).toHaveLength(0)
     } finally {
       documentState.path = path
     }

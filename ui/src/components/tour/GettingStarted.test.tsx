@@ -48,11 +48,11 @@ const EMPTY_HOME = '<div data-tour="home"><div data-tour="key"></div><form data-
 /** A project's room, where its teams are started. */
 const ROOM = '<div data-tour="room"><button data-tour="new-team">New team</button></div>'
 /** Your agents: the builder for one agent, with its chat open or not, or the list with its New agent button. */
-const builder = (saved = false, chat = '') => `<div data-tour="agents"><a data-tour="your-teams">My team</a><div data-tour="agent-builder"${saved ? ' data-tour-saved="true"' : ''}><button data-tour="save-agent">Save to My agents</button><nav><button data-tour="agent-tab-build"></button><button data-tour="agent-tab-chat"></button></nav><div data-tour="agent-blocks"></div>${chat}</div></div>`
+const builder = (saved = false, chat = '') => `<div data-tour="agents"><a data-tour="dock-home">Home</a><div data-tour="agent-builder"${saved ? ' data-tour-saved="true"' : ''}><button data-tour="save-agent">Save to My agents</button><nav><button data-tour="agent-tab-build"></button><button data-tour="agent-tab-chat"></button></nav><div data-tour="agent-blocks"></div>${chat}</div></div>`
 /** Its chat, before and after it answers. */
 const CHAT = '<section data-tour="chat"><form data-tour="composer"></form></section>'
 const ANSWERED = '<section data-tour="chat"><div data-tour="output"></div><form data-tour="composer"></form></section>'
-const AGENTS_LIST = '<div data-tour="agents"><a data-tour="your-teams">My team</a><button data-tour="new-agent">New agent</button></div>'
+const AGENTS_LIST = '<div data-tour="agents"><a data-tour="dock-home">Home</a><button data-tour="new-agent">New agent</button></div>'
 const workspace = (inner: string, agents = 1, view = 'workflow', proposal = false) => `<div data-tour="workspace" data-tour-agents="${agents}" data-tour-view="${view}"${proposal ? ' data-tour-proposal="showing"' : ''}><nav data-tour="view-tabs"><button data-tour="tab-agents"></button><button data-tour="tab-workflow"></button><button data-tour="tab-chat"></button></nav>${inner}</div>`
 
 describe('GettingStarted', () => {

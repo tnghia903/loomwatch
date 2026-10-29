@@ -22,23 +22,11 @@
 }
 
 .home-top {
-  position: relative; display: flex; align-items: center; justify-content: space-between;
+  position: relative; display: flex; align-items: center; justify-content: flex-end;
   padding: var(--sp-5) var(--sp-7);
 }
-.home-brand { display: inline-flex; align-items: center; gap: 10px; }
-.home-brand .fr-mark { animation: none; }
 /* Wraps rather than scroll sideways when the bell and an update badge are long. */
 .home-top-acts { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: var(--sp-2); }
-/* Skills and Quests: a word each, quieter than a button, so a newcomer finds them without hunting
-   through menus. */
-.home-pill {
-  display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 var(--sp-3);
-  border-radius: 99px; border: 1px solid var(--color-hairline); background: transparent;
-  color: var(--color-ink-2); font: 500 12px/1 var(--font-sans); text-decoration: none; cursor: pointer;
-  transition: color var(--t-quick) var(--ease-out), border-color var(--t-quick) var(--ease-out);
-}
-.home-pill:hover { color: var(--color-ink); border-color: var(--color-accent-dim); }
-.home-pill:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 /* The menu stands in the row, and stays on a phone, where it is the only way to Feedback and the
    theme. */
 .home-top-acts .prototype-workspace-menu { display: flex; position: relative; right: auto; top: auto; }
@@ -130,7 +118,6 @@
   .home-top { flex-wrap: wrap; gap: var(--sp-3); }
   .home-top-acts { margin-left: auto; }
   /* A touch target, as tall as the header's other buttons (app.css, §11.6). */
-  .home-pill { height: 44px; }
   .home-top .needs-you { position: static; }
   .home-top .needs-you-panel { top: calc(100% - var(--sp-3)); right: var(--sp-3); width: min(420px, calc(100% - 2 * var(--sp-3))); }
 }

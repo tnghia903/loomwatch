@@ -1,7 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { FEEDBACK_EVENT } from '../../lib/feedback/report'
 import { forgetKeyStatus } from '../../lib/ai/useKeyStatus'
 import { resetFirstRunForTests } from '../../lib/firstrun/store'
 import { readTourState, resetTourForTests } from '../../lib/tour/store'
@@ -329,32 +328,17 @@ describe('Home, the studio (ADR 0097)', () => {
 
   // Home wears the header a team's and an agent's page have, the bell beside the menu. Skills and
   // Quests are Home's own, so they stand in the header as links, once: the menu doesn't repeat them.
-  it('has Skills and Quests in its header, and the menu a team’s page has, with the theme and feedback in it', async () => {
+  // Round 3: the places are the dock's, and the look, the guide and feedback are in You. Home's
+  // corner keeps the bell and search; no brand, pills or menu come back beside them.
+  it('keeps only the bell and search in its corner', async () => {
     fetchMock.mockImplementation((url: string) => respond(url === '/api/wardrobe' ? { items: {} } : { root: '/teams', files: [], teams: [] }))
-    const sent = vi.fn()
-    window.addEventListener(FEEDBACK_EVENT, sent)
-    render(<Home onPalette={vi.fn()} topActions={<button type="button">1 needs you</button>} />)
+    const palette = vi.fn()
+    render(<Home onPalette={palette} topActions={<button type="button">1 needs you</button>} />)
     const header = screen.getByRole('banner')
-    expect(within(header).getAllByRole('button').map((button) => button.getAttribute('aria-label') ?? button.textContent)).toEqual(['Open the command palette', '1 needs you', 'Menu'])
-    expect(within(header).getAllByRole('link').map((link) => link.getAttribute('href'))).toEqual(['/skills', '/quests'])
-    const skills = within(header).getByRole('link', { name: 'Skills' })
-    const quests = await within(header).findByRole('link', { name: 'Quests 0 of 13 earned' })
-    for (const pill of [skills, quests]) expect(pill.querySelector('svg')).toBeNull()
-    const menu = within(header).getByRole('button', { name: 'Menu' })
-    fireEvent.click(menu)
-    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
-      'My agents…', 'About you…', 'Connections…', 'Usage…', expect.stringMatching(/^Switch to (light|dark) theme$/), 'Getting started guide', 'Send feedback…',
-    ])
-    fireEvent.click(menu)
-    const before = document.documentElement.dataset.theme
-    fireEvent.click(menu)
-    fireEvent.click(screen.getByRole('menuitem', { name: /^Switch to (light|dark) theme$/ }))
-    expect(document.documentElement.dataset.theme).not.toBe(before)
-    fireEvent.click(menu)
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Send feedback…' }))
-    expect(sent.mock.calls.map(([event]) => (event as CustomEvent).detail)).toEqual([{ screen: 'home' }])
-    window.removeEventListener(FEEDBACK_EVENT, sent)
-    localStorage.removeItem('loomwatch:theme')
+    expect(within(header).getAllByRole('button').map((button) => button.getAttribute('aria-label') ?? button.textContent)).toEqual(['1 needs you', 'Open the command palette'])
+    expect(within(header).queryAllByRole('link')).toEqual([])
+    fireEvent.click(within(header).getByRole('button', { name: 'Open the command palette' }))
+    expect(palette).toHaveBeenCalledOnce()
   })
 
   it('says when the account has no credits yet, or OpenRouter refused the key', async () => {
@@ -433,16 +417,13 @@ describe('Home, the first run and the getting-started guide', () => {
     await expect(screen.findByText('What shall we make first?', {}, { timeout: 300 })).rejects.toThrow()
   })
 
-  it('leaves someone who has run a team on Home, and lets them start the guide from the menu', async () => {
+  it('leaves someone who has run a team on Home, where the guide’s first step still points', async () => {
     fetchMock.mockImplementation(daemon({ runs: [ran], teams: [desk] }))
     renderHome()
     await homeHeading()
     await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/runs?preview=true')).toBe(true))
     expect(screen.queryByText('What shall we make first?')).toBeNull()
     expect(readTourState()).toBeNull()
-    fireEvent.click(within(screen.getByRole('banner')).getByRole('button', { name: 'Menu' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Getting started guide' }))
-    expect(readTourState()).toMatchObject({ status: 'active', step: 'welcome' })
     // The guide's first step points at building an agent, which Home keeps.
     expect(document.querySelector('[data-tour="build-agent"]')).toHaveAttribute('href', '/agents/new')
   })

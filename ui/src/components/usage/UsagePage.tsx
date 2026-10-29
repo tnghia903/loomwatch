@@ -1,4 +1,4 @@
-import { ArrowLeft, ExternalLink } from '../ui/icon'
+import { ExternalLink } from '../ui/icon'
 import { useEffect, useMemo, useState } from 'react'
 
 import { sourceMaker } from '../../lib/ai/makers'
@@ -11,6 +11,7 @@ import { formatCost, formatTokens } from '../../lib/watch/usage'
 import { MakerMark } from '../models/MakerMark'
 import { SourceChip } from '../models/ModelPicker'
 import { DailyBars, type DayValue } from './DailyBars'
+import { YouTabs } from '../you/YouTabs'
 
 /** "Oct 1", from a UTC date (`2026-10-01`). */
 function shortDate(day: string): string {
@@ -70,7 +71,7 @@ export function UsagePage() {
   return (
     <main className="lw-settings">
       <div className="lw-settings-column usage-column">
-        <a href="/" className="link lw-settings-back"><ArrowLeft size={14} aria-hidden="true" /> Back to Home</a>
+        <YouTabs />
         <div className="lw-settings-head">
           <h1 className="t-display">Usage</h1>
           <p className="t-body">What your agents and Ask used in the last {DAYS} days, by how it was paid. Each way of paying counts it differently, and each card links to where you see the exact figure.</p>

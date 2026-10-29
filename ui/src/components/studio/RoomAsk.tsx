@@ -5,10 +5,9 @@ import type { ProposalCard, ReviewNoteCard, RunRequestCard } from '../../lib/ask
 import { useAsk } from '../../lib/ask/useAsk'
 import { newStartKey, startRun } from '../../lib/runs/client'
 import { teamHref } from '../../lib/team-file/teamHref'
-import { AskButton } from '../ask/AskButton'
 import type { CardActions } from '../ask/AskCards'
 import { AskPanel } from '../ask/AskPanel'
-import { registerAskToggle } from '../frame/frameStore'
+import { registerAskToggle, showAsk } from '../frame/frameStore'
 
 /** A team's page at one of its runs, or showing a proposal for it. */
 function teamPage(file: string, extra: Record<string, string>): string {
@@ -27,6 +26,8 @@ export function RoomAsk({ project, name }: { project: string; name: string }) {
   const askRef = useRef(ask)
   useEffect(() => { askRef.current = ask })
   useEffect(() => registerAskToggle(() => askRef.current.setOpen(!askRef.current.open)), [])
+  useEffect(() => { showAsk({ open: ask.open, activity: ask.activity }) }, [ask.open, ask.activity])
+  useEffect(() => () => showAsk({ open: false, activity: null }), [])
   const [busyCard, setBusyCard] = useState<string | null>(null)
   const [cardError, setCardError] = useState<{ id: string; message: string } | null>(null)
   const cards: CardActions = {
@@ -68,9 +69,6 @@ export function RoomAsk({ project, name }: { project: string; name: string }) {
     },
   }
   return (
-    <>
-      <AskButton ask={ask} />
-      {ask.open && <AskPanel ask={ask} view="project" cards={cards} onHome title={`Ask about ${name}`} />}
-    </>
+    ask.open ? <AskPanel ask={ask} view="project" cards={cards} onHome title={`Ask about ${name}`} /> : null
   )
 }

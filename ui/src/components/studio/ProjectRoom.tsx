@@ -1,4 +1,4 @@
-import { ChevronLeft, Folder, MoreHorizontal, Plus, X } from '../ui/icon'
+import { Folder, MoreHorizontal, Plus, X } from '../ui/icon'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { FileReaderContext, type FileToRead } from '../../lib/files/reader'
@@ -288,7 +288,6 @@ export function ProjectRoom({ id }: { id: string }) {
   return (
     <div className="project-room-page" data-tour="room">
       <header className="room-top">
-        <a className="room-home" href="/"><ChevronLeft size={14} aria-hidden="true" />Home</a>
         <ProjectMark id={project.id} mark={project.mark} />
         {renaming ? (
           <form className="room-rename" onSubmit={(event) => { event.preventDefault(); const name = new FormData(event.currentTarget).get('name'); void keep({ name: String(name ?? '') }).then(() => setRenaming(false), () => {}) }}>

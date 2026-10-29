@@ -2,7 +2,6 @@
    frame (home.css); gold (accent) marks what you have earned, as it marks what is yours elsewhere. */
 
 .quests-main { width: min(1180px, 100%); }
-.lw-quests a.home-brand { color: inherit; text-decoration: none; }
 .quests-hero { max-width: 760px; }
 
 .quests-progress { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4); }

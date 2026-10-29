@@ -1,4 +1,4 @@
-import { ArrowLeft } from '../ui/icon'
+import { YouTabs } from './YouTabs'
 
 import { AboutYou } from './AboutYou'
 
@@ -8,7 +8,7 @@ export default function AboutYouPage() {
   return (
     <main className="lw-settings">
       <div className="lw-settings-column">
-        <a href="/agents" className="link lw-settings-back"><ArrowLeft size={14} aria-hidden="true" /> Back to My agents</a>
+        <YouTabs />
         <div className="lw-settings-head">
           <h1 className="t-display">About you</h1>
           <p className="t-body">Tell your agents who you are, so their answers fit you.</p>

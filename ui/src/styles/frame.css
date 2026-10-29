@@ -16,6 +16,9 @@
 .lw-dock-label[hidden] { display: none; }
 /* What needs you: a count on Home, in gold words on a ring, never a gold fill and never red. */
 .lw-dock-count { position: absolute; top: -7px; right: -12px; min-width: 18px; height: 18px; padding: 0 4px; box-sizing: border-box; border: 1.5px solid var(--color-accent); border-radius: var(--r-full); background: var(--color-ground); color: var(--color-accent); font-size: 11px; line-height: 15px; font-weight: 600; text-align: center; }
+/* Ask at work: a small dot in the working blue, said in Ask's name as well. It holds still. */
+.lw-dock-live { position: absolute; top: -3px; right: -5px; width: 8px; height: 8px; border-radius: var(--r-full); background: var(--glow-working); box-shadow: 0 0 0 2px var(--color-panel); }
+.lw-dock-place[aria-pressed='true'] { color: var(--color-ink); background: color-mix(in srgb, var(--color-ink) 8%, transparent); }
 
 /* A phone: the dock lies along the top, as the rail did, and the stitch runs under the place. */
 @media (max-width: 767px) {

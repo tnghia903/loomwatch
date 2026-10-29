@@ -55,19 +55,18 @@
 /* On a phone (Home, an agent's page, a team's page), a finger's worth: the button and each item 44 px. */
 @media(max-width:767px) { .prototype-workspace-menu>button { width:44px; height:44px; } .prototype-workspace-menu>div button { min-height:44px; } }
 .lw-shell .workspace-view-tabs button { display:flex; justify-content:center; align-items:center; gap:8px; }
-/* The team chip lives in the header's first column, after the brand, and can never be wider than
-   that column. Pinned at `left:180px; width:330px` it reached under the centred Run tab whenever
-   the window was narrower than ~1230px, and covered it. Placing the chip explicitly means the brand
-   and the tabs must be placed explicitly too, or auto-placement would push them a column right. */
-.lw-shell .workspace-chrome>.delivery-brand { grid-column:1; grid-row:1; justify-self:start; }
+/* The team chip lives in the header's first column and can never be wider than that column. Pinned
+   at `left:180px; width:330px` it reached under the centred Run tab whenever the window was
+   narrower than ~1230px, and covered it. Placing the chip explicitly means the tabs must be placed
+   explicitly too, or auto-placement would push them a column right. On a phone the tabs are the row. */
 .lw-shell .workspace-chrome>.workspace-view-tabs { grid-column:2; grid-row:1; }
-.lw-shell .workspace-chrome>div:has(.lw-chip) { grid-column:1; grid-row:1; justify-self:start; margin-left:152px; width:330px; max-width:calc(100% - 152px); min-width:0; }
+@media(max-width:767px) { .lw-shell .workspace-chrome>.workspace-view-tabs { grid-column:1; } }
+.lw-shell .workspace-chrome>div:has(.lw-chip) { grid-column:1; grid-row:1; justify-self:start; width:330px; max-width:100%; min-width:0; }
 /* Below ~1180px that column is too narrow for the team name beside a Save or Review button, so the
    header gives the chip room: slimmer tabs, a tighter gap after the brand, no chevron (the whole
    chip opens the switcher). What still does not fit is truncated, and the chip's tooltip has it. */
 @media (min-width:768px) and (max-width:1180px) {
   .lw-shell .workspace-view-tabs button { min-width:80px; }
-  .lw-shell .workspace-chrome>div:has(.lw-chip) { margin-left:140px; max-width:calc(100% - 140px); }
   .lw-shell .workspace-chrome .lw-chip { padding:0 8px; }
   .lw-shell .workspace-chrome .lw-chip .chev { display:none; }
   /* Plain text lines: as flex containers they clipped mid-letter instead of ending in an ellipsis. */

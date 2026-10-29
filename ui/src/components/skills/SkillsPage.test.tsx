@@ -416,10 +416,11 @@ describe('the page’s words', () => {
     expect(document.body.textContent).not.toMatch(/sign[ -]?in|log[ -]?in|subscription|account/i)
   })
 
-  it('leads back to My agents and My team, named as their pages are', async () => {
+  it('has no header of its own: the dock is the way to every other place', async () => {
     daemon(on('GET', '/api/skills', () => folder([])))
     render(<SkillsPage />)
-    expect(await screen.findByRole('link', { name: 'My agents' })).toHaveAttribute('href', '/agents')
-    expect(screen.getByRole('link', { name: 'My team' })).toHaveAttribute('href', '/')
+    expect(await screen.findByRole('heading', { name: 'Skills', level: 1 })).toBeInTheDocument()
+    expect(screen.queryByRole('banner')).toBeNull()
+    expect(screen.queryByRole('link', { name: /My agents|My team|LoomWatch/ })).toBeNull()
   })
 })

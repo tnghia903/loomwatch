@@ -95,7 +95,7 @@ import { afterClosing, closedKey, fileTab, madeTabs, paneTabId, shownPaneTab, ty
 import type { HandOver } from '../lib/chat/handed'
 import type { ReceiptLine } from '../lib/story/receipt'
 import { PromptNodeCard } from './run/StoryNodes'
-import { ChipDot, LoomMark, LoomWordmark } from './ui/glyphs'
+import { ChipDot } from './ui/glyphs'
 import { SegmentThumb } from './ui/SegmentThumb'
 import { InlineMarkdown } from './ui/Markdown'
 import { AttentionAlerts } from './workspace/AttentionAlerts'
@@ -139,7 +139,6 @@ import { WorkspaceMenu } from './workspace/WorkspaceMenu'
 import { useAsk } from '../lib/ask/useAsk'
 import { DEFAULT_ROUTINE_NOTION_TITLE, NOTION_PAGE_SOURCE, useNotionConnection, type NotionPageHit } from '../lib/notion/connection'
 import type { AskContext } from '../lib/ask/client'
-import { AskButton } from './ask/AskButton'
 import { AskPanel } from './ask/AskPanel'
 import type { CardActions } from './ask/AskCards'
 import { proposalSource, sameTeamFile, teamFileForAsk, useAskActions } from './ask/useAskActions'
@@ -148,8 +147,7 @@ import { sendBackFields, sendBackOf, type SendBackSetting } from '../lib/team-fi
 import { fileRefsIn, filesTouched, filesWritten, workspaceAgent } from '../lib/files/fileRefs'
 import { askedInChat, type AskedPassage } from '../lib/files/passage'
 import { baseName } from '../lib/files/paths'
-import { goToTeam } from '../lib/team-file/teamPage'
-import { registerAskToggle } from './frame/frameStore'
+import { registerAskToggle, showAsk } from './frame/frameStore'
 import { openTeam } from '../lib/team-file/useTeamList'
 import { FileOriginContext, FileReaderContext, readerFormat, type FileToRead } from '../lib/files/reader'
 import { useFilesFound } from '../lib/files/useFile'
@@ -1819,17 +1817,11 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   const toggleAskRef = useRef(toggleAsk)
   useEffect(() => { toggleAskRef.current = toggleAsk })
   // The dock's Ask opens this screen's own panel.
+  // ⌘J is the dock's, on every screen, so it reaches this one through the same toggle.
   useEffect(() => registerAskToggle(() => toggleAskRef.current()), [])
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'j') {
-        event.preventDefault()
-        toggleAskRef.current()
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  const askActivity = ask.activity
+  useEffect(() => { showAsk({ open: askOpen, activity: askActivity }) }, [askOpen, askActivity])
+  useEffect(() => () => showAsk({ open: false, activity: null }), [])
   /** The inspected capability as a card: what wiring and the canvas compare it by. */
   const inspectedCard = inspectedCapability ? { kind: inspectedCapability.kind, name: inspectedCapability.item.name, source: inspectedCapability.item.source, memory: inspectedCapability.item.memory, ...(inspectedCapability.item.path ? { path: inspectedCapability.item.path } : {}), ...(inspectedCapability.item.notion ? { notion: inspectedCapability.item.notion } : {}) } : null
   // Kind and name identify a card, and a path identifies a folder or file; a recorded source can
@@ -2522,11 +2514,10 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
         part={window.location.pathname === '/projects' ? 'projects' : 'all'}
         notice={requestedPath && doc.saveState === 'error' ? `Couldn't open “${requestedPath}”. ${/no such file|not found/i.test(doc.saveError ?? '') ? 'It may have been moved, renamed or deleted — pick a team below.' : doc.saveError ?? ''}` : null}
         onPalette={() => setPaletteOpen(true)}
-        // Ask keeps the app's own button on Home (ADR 0097): it answers questions there, and Set up
-        // project asks it to set a project up, saying so while it is already at work.
-        topActions={<><AskButton ask={ask} onToggle={toggleAsk} />{needsYouTray()}</>}
+        // Ask is the dock's (ADR 0097's own button on Home moved there): Set up project asks it to
+        // set a project up, and the dock's Ask says while it is at work.
+        topActions={needsYouTray()}
         runs={needsYou.records}
-        mark={needsYou.mark}
         ask={{ unavailable: ask.unavailable, onAsk: askFor, open: ask.open }}
       >
         {paletteOpen && <CommandPalette actions={actions} interpret={interpret} fallback={askFallback} onClose={() => setPaletteOpen(false)} />}
@@ -2729,12 +2720,9 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
         )}
 
         <div className="workspace-chrome pointer-events-none absolute inset-x-0 z-40 flex flex-col items-center gap-2" style={{ top: 'var(--lw-panel-inset)' }}>
-          {/* The brand is the way home: every team is one click from the list of all teams. */}
-          {/* Home opens in place, as another team does; a click that asks for a new tab gets one. */}
-          <a className="delivery-brand" href="/" aria-label="LoomWatch, my team" title="My team" style={{ pointerEvents: 'auto', color: 'inherit', textDecoration: 'none' }}
-            onClick={(event) => { if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); goToTeam('/') }}><LoomMark size={26} state={needsYou.mark} /><LoomWordmark height={19} /></a>
+          {/* Home, Ask and the other places are the dock's; the header keeps what is this team's. */}
           <WorkspaceMenu runView={runView} onMemory={() => { clearSelection(); setMemoryOpen(true) }} />
-          <div className="needs-you-anchor"><AskButton ask={ask} onToggle={toggleAsk} />{needsYouTray(runView ? activeRunId : null)}</div>
+          <div className="needs-you-anchor">{needsYouTray(runView ? activeRunId : null)}</div>
           <nav className="workspace-view-tabs" aria-label="Workspace view" data-tour="view-tabs">
             <SegmentThumb />
             {/* In the order a team is made: its agents, then its workflow, then its chat. */}
