@@ -31,7 +31,15 @@
 }
 button.desk { cursor: pointer; border-radius: var(--r-sm); }
 button.desk:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
-.desk-top { display: block; width: 80%; max-width: 62px; height: 12px; border-radius: 3px; background: var(--color-hairline); }
+/* The desk itself: a table top drawn in front of the figure's feet, on two legs. A filled grey bar
+   read as something still loading. */
+.desk-top {
+  position: relative; z-index: 1; display: block; width: 84%; max-width: 64px; height: 7px; margin: -8px 0 7px;
+  box-sizing: border-box; border: 1px solid var(--color-warp); border-radius: 2px; background: var(--color-panel-solid);
+}
+.desk-top::before, .desk-top::after { content: ''; position: absolute; top: 5px; width: 1.5px; height: 7px; border-radius: 1px; background: var(--color-warp); }
+.desk-top::before { left: 12%; }
+.desk-top::after { right: 12%; }
 .desk-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--color-ink-2); }
 .desk-state { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 14px; color: var(--color-ink-3); }
 .desk-state.waiting { color: var(--color-accent); }
@@ -260,21 +268,134 @@ button.wall-paper:focus-visible { outline: 2px solid var(--color-accent); outlin
 }
 .wall-folder svg { color: var(--color-ink-3); }
 
-.room-floor { display: flex; flex-direction: column; gap: var(--sp-5); padding: var(--sp-2) 0; }
-/* A team's whole row opens it, as its name does; its ⋯ stays pressable above that. */
-.room-team { position: relative; display: flex; flex-direction: column; gap: var(--sp-3); }
-.room-team-name::after { content: ''; position: absolute; inset: 0; }
-.room-team-move { position: absolute; top: -8px; right: 0; z-index: 1; }
-.room-team-move .iconbtn { width: 44px; height: 44px; }
-.room-team-move-head { padding: 4px var(--sp-3) 2px; font-size: 12px; color: var(--color-ink-3); }
-.room-team-name { align-self: flex-start; display: inline-flex; align-items: baseline; gap: var(--sp-2); min-height: 28px; color: var(--color-ink); text-decoration: none; }
+/* ---------- Inside a room, at a glance: tiles, the box, then teams and what they made beside the wall ---------- */
+.room-body { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--sp-6); }
+.room-main { flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: var(--sp-6); }
+.room-side { flex: 1 1 280px; max-width: 380px; min-width: 0; display: flex; flex-direction: column; gap: var(--sp-4); }
+.room-side .room-wall-board { flex-direction: column; align-items: stretch; gap: var(--sp-3); }
+.room-side .wall-paper, .room-side .wall-paper.note, .room-side .wall-paper.editing { width: 100%; }
+.room-side .wall-folder { display: flex; }
+.room-side .wall-folder span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.room-floor { display: flex; flex-direction: column; gap: var(--sp-3); }
+.room-floor-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
+.room-floor-head .studio-head { flex: 1; }
+.room-floor-acts { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.room-floor-acts .btn { min-height: 40px; }
+
+/* A team's card opens its chat, as its name does; its ⋯ and its newest file stay pressable above that. */
+.team-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: var(--sp-3); }
+.team-grid.one { grid-template-columns: minmax(0, 1fr); }
+.team-card {
+  position: relative; display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; padding: 12px 14px 14px;
+  border: 1px solid var(--color-hairline); border-radius: var(--r-lg); background: var(--color-panel-solid);
+}
+.team-card[data-state="waiting"], .team-card:hover { border-color: var(--color-accent-dim); }
+.team-card-head { display: flex; align-items: flex-start; gap: var(--sp-2); min-width: 0; }
+.team-card .team-desks { flex-wrap: wrap; row-gap: var(--sp-3); }
+/* A figure's light (a filter) or fade would lift it above the card's link and swallow the click. */
+.team-card span.desk { pointer-events: none; }
+.team-card-made { position: relative; z-index: 2; min-width: 0; }
+.room-team-name::after { content: ''; position: absolute; inset: 0; border-radius: var(--r-lg); }
+.room-team-name { flex: 1; min-width: 0; display: inline-flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--sp-2); min-height: 28px; color: var(--color-ink); text-decoration: none; }
 .room-team-name b { font-weight: 600; }
 .room-team-name span { font-size: 13px; color: var(--color-ink-3); }
 .room-team-name:hover b { text-decoration: underline; text-underline-offset: 3px; }
-.room-team .desk { width: 92px; flex-basis: 92px; }
-.room-team .desk-top { max-width: 70px; height: 13px; }
-.room-floor-acts { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
-.room-floor-acts .btn { min-height: 44px; }
+.room-team-name:focus-visible { outline: none; }
+.room-team-name:focus-visible::after { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.room-team-move { position: relative; z-index: 2; flex: none; margin: -8px -8px 0 0; }
+.room-team-move .iconbtn { width: 44px; height: 44px; }
+.room-team-move-head { padding: 4px var(--sp-3) 2px; font-size: 12px; color: var(--color-ink-3); }
+
+/* ---------- The tiles a room and Home open with ---------- */
+.glance { display: grid; grid-template-columns: minmax(280px, 1.5fr) repeat(3, minmax(150px, 1fr)); gap: var(--sp-3); }
+.glance-tile {
+  display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; padding: 14px 16px;
+  border: 1px solid var(--color-hairline); border-radius: var(--r-lg); background: var(--color-panel-solid);
+}
+.glance-tile.needs { border-color: var(--color-accent-dim); }
+.glance-label { margin: 0; font: 500 12px/16px var(--font-sans); color: var(--color-ink-3); }
+.glance-tile.needs .glance-label { color: var(--color-accent); }
+.glance-needs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.glance-needs li { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
+.glance-needs .btn { flex: none; min-height: 40px; }
+.glance-need-words { flex: 1; min-width: 0; display: flex; flex-direction: column; font-size: 13px; line-height: 18px; color: var(--color-ink); }
+.glance-need-words > span { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.glance-need-words small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--color-ink-3); }
+.glance-shape { width: 12px; height: 12px; flex: none; fill: none; stroke-width: 2; stroke-linecap: round; }
+.glance-shape.waiting { stroke: var(--color-accent); stroke-dasharray: 2.6 2.4; }
+.glance-shape.failed { stroke: var(--color-alert); }
+.glance-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--color-live); }
+.glance-agent { display: flex; align-items: center; gap: var(--sp-3); min-height: 44px; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.glance-agent:hover .glance-need-words > span { text-decoration: underline; text-underline-offset: 3px; }
+.glance-main { margin: 0; font: 500 14px/19px var(--font-sans); color: var(--color-ink); overflow-wrap: anywhere; }
+.glance-number { margin: 0; font: 600 26px/32px var(--font-sans); font-variant-numeric: tabular-nums; color: var(--color-ink); }
+.glance-number small { font: 500 12px var(--font-sans); color: var(--color-ink-3); }
+.glance-sub { margin: 0; font-size: 12.5px; line-height: 17px; color: var(--color-ink-3); }
+.glance-quiet { margin: 0; font-size: 13px; color: var(--color-ink-3); }
+.glance-ask {
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 38px; padding: 0;
+  border: 0; background: none; color: var(--color-ink); font: 500 14px/19px var(--font-sans); text-align: left; cursor: pointer;
+}
+.glance-ask:hover { text-decoration: underline; text-underline-offset: 3px; }
+.glance-more { align-self: flex-start; font-size: 13px; }
+.glance-agent:focus-visible, .glance-ask:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; border-radius: var(--r-sm); }
+
+/* ---------- Give a team work, as its chat's box does ---------- */
+.work-box { display: flex; flex-direction: column; gap: var(--sp-2); }
+.work-box-row {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); padding: 6px;
+  border: 1px solid var(--color-hairline); border-radius: 14px; background: var(--color-panel-solid);
+}
+.work-box-row:focus-within { border-color: var(--color-accent-dim); outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.work-box-to { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 4px 0 12px; border-radius: 10px; background: var(--color-ground); font-size: 13px; color: var(--color-ink-3); }
+.work-box-to select { min-height: 40px; max-width: 240px; border: 0; background: transparent; color: var(--color-ink); font: 500 13px var(--font-sans); cursor: pointer; }
+.work-box-to select:focus { outline: none; }
+.work-box-words { flex: 1 1 240px; display: flex; min-width: 0; }
+.work-box-words input { flex: 1; min-width: 0; height: 44px; padding: 0 var(--sp-2); border: 0; outline: 0; background: transparent; color: var(--color-ink); font: 400 15px var(--font-sans); }
+.work-box-attach { width: 44px; height: 44px; }
+.work-box-send { min-height: 44px; padding: 0 18px; }
+.work-box-files { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.work-box-files li { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 4px 0 10px; border: 1px solid var(--color-hairline); border-radius: var(--r-full); font-size: 12.5px; }
+.work-box-files li.failed { border-color: var(--color-alert); }
+.work-box-files small { color: var(--color-ink-3); }
+.work-box-said { margin: 0; font-size: 13px; color: var(--color-ink-2); }
+.work-box-said.alert { color: var(--color-alert); }
+
+/* ---------- What the agents made, and reading one where you are ---------- */
+.made-here { display: flex; flex-direction: column; gap: var(--sp-3); }
+.made-here-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
+.made-here-teams { display: flex; flex-wrap: wrap; gap: 6px; }
+.made-here-teams button {
+  min-height: 32px; padding: 0 12px; border: 1px solid var(--color-hairline); border-radius: var(--r-full);
+  background: transparent; color: var(--color-ink-2); font: 500 12.5px var(--font-sans); cursor: pointer;
+}
+.made-here-teams button[aria-pressed="true"] { background: var(--color-hairline); color: var(--color-ink); }
+.made-here-files { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: var(--sp-2); }
+.made-here-files .file-card { width: 100%; box-sizing: border-box; }
+.made-here > .link { align-self: flex-start; font-size: 13px; }
+
+.reader-sheet-backdrop { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; padding: var(--sp-4); background: color-mix(in srgb, var(--color-ground) 60%, transparent); }
+.reader-sheet {
+  display: flex; flex-direction: column; width: min(900px, 100%); height: min(88vh, 1000px); overflow: hidden;
+  border: 1px solid var(--color-hairline); border-radius: var(--r-lg); background: var(--color-panel-solid); box-shadow: var(--e2-shadow);
+}
+.reader-sheet-top { flex: none; display: flex; justify-content: flex-end; padding: 4px; border-bottom: 1px solid var(--color-hairline); }
+.reader-sheet-top .iconbtn { width: 40px; height: 40px; }
+.reader-sheet-body { position: relative; flex: 1; min-height: 0; }
+
+@media (max-width: 1000px) {
+  .glance { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .room-side { max-width: none; }
+}
+@media (max-width: 767px) {
+  .made-here-teams button, .work-box-files li { min-height: 44px; }
+}
+@media (max-width: 560px) {
+  .glance { grid-template-columns: minmax(0, 1fr); }
+  .work-box-to { flex: 1 1 100%; }
+  .work-box-to select { max-width: none; flex: 1; }
+}
 
 .add-agent h2 { margin: 0 0 var(--sp-3); font: 600 18px/24px var(--font-sans); }
 .add-agent-pick { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-bottom: var(--sp-4); }

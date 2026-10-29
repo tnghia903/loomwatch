@@ -36,7 +36,7 @@ export function openNeedsYou(): void {
 }
 
 /** The figure each agent wears, by its id in My agents (or its id in the team). */
-export type FigureOf = (seat: Seat) => FigureChoice
+export type FigureOf = (seat: Pick<Seat, 'id' | 'agent'>) => FigureChoice
 
 export function defaultFigureOf(figures: ReadonlyMap<string, FigureChoice | undefined>): FigureOf {
   return (seat) => figureFor(seat.agent ?? seat.id, seat.agent ? figures.get(seat.agent) : undefined)

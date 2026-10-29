@@ -1,13 +1,16 @@
 import { ChevronLeft, Folder, MoreHorizontal, Plus, X } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
+import { sendChatMessage } from '../../lib/chat/client'
+import { FileReaderContext, type FileToRead } from '../../lib/files/reader'
 import { figureFor, type FigureChoice } from '../../lib/library/figures'
 import { fetchJobs, saveJob, type SavedJob } from '../../lib/library/jobs'
 import { addProjectNote, NOTE_CHARS, ABOUT_CHARS, projectsChanged, saveProject, useProjects, type Project, type ProjectEntry } from '../../lib/projects/client'
-import { PRESENCE_WORDS } from '../../lib/rail/presence'
-import { inOpenedOrder, litAt, roomsOf, type RoomTeam } from '../../lib/projects/studio'
+import { lastFinished, madeHere, monthSpend, needsYou, nextWork, workingNow, type MadeFile, type NeedsYouItem } from '../../lib/projects/glance'
+import { inOpenedOrder, roomsOf } from '../../lib/projects/studio'
 import { useTeamShapes } from '../../lib/projects/useTeamShapes'
-import { fetchRuns, type RunRecord } from '../../lib/runs/client'
+import { historyRunUrl } from '../../lib/runs/history'
+import { fetchRuns, newStartKey, useSchedules, type RunRecord } from '../../lib/runs/client'
 import { fetchTeamFile, fetchTeamsDiscovery, saveTeamFile } from '../../lib/team-file/client'
 import { TeamFileModel } from '../../lib/team-file/document'
 import { teamOfMyAgents } from '../../lib/team-file/myAgents'
@@ -17,35 +20,38 @@ import { hashTeamYaml, teamIdForPath } from '../../lib/team-file/useTeamDocument
 import { useTeamList } from '../../lib/team-file/useTeamList'
 import { useTheme } from '../../lib/theme'
 import { FigureStill } from '../agents/FigureStill'
+import { goToRun } from '../agents/route'
 import { FolderPicker } from '../canvas/FolderPicker'
 import { NewTeamDialog } from '../home/NewTeamDialog'
 import { SectionHead } from '../ui/SectionHead'
 import { MARKS, MARK_NAMES, defaultFigureOf, markOf, roomHref } from '../../lib/projects/studioUi'
+import { GlanceTiles } from './GlanceTiles'
+import { MadeHere } from './MadeHere'
+import { ReaderSheet } from './ReaderSheet'
 import { RoomAsk } from './RoomAsk'
 import { ProjectMark } from './RoomCard'
-import { TeamDesks } from './TeamDesks'
+import { TeamGrid } from './TeamGrid'
+import { WorkBox } from './WorkBox'
 
 /** How often the room looks at its teams' runs again, so its figures follow the work. */
 const RUNS_EVERY_MS = 4000
 
-/** The runs, read again every few seconds; null until the first read. */
-function useRuns(): RunRecord[] | null {
+/** The runs, read again every few seconds, and a way to read them at once; null until the first read. */
+function useRuns(): [RunRecord[] | null, () => void] {
   const [runs, setRuns] = useState<RunRecord[] | null>(null)
+  const [again, setAgain] = useState(0)
   useEffect(() => {
     let live = true
     const read = () => { void fetchRuns().then((next) => { if (live) setRuns(next) }, () => { if (live) setRuns((last) => last ?? []) }) }
     read()
     const timer = window.setInterval(read, RUNS_EVERY_MS)
     return () => { live = false; window.clearInterval(timer) }
-  }, [])
-  return runs
+  }, [again])
+  return [runs, useCallback(() => setAgain((value) => value + 1), [])]
 }
 
-/** What a team in the room is doing, when none of its desks shows it: it stopped, or nobody is at work yet. */
-function said(team: RoomTeam): string | null {
-  if (team.state === 'ready' || litAt(team)) return null
-  return team.state === 'failed' ? 'didn’t finish' : PRESENCE_WORDS[team.state]
-}
+/** Open a run where it was given: its team's chat, at that piece of work. */
+const openRun = (run: Pick<RunRecord, 'runId' | 'teamPath'>) => goToRun(historyRunUrl({ id: run.runId, teamPath: run.teamPath }))
 
 /** The project without the fields the list adds, as `PUT /api/projects/{id}` takes it. */
 function fileOf(project: ProjectEntry): Project {
@@ -194,14 +200,19 @@ function AddAnAgent({ jobs, project, teams, initial, onClose }: { jobs: readonly
 }
 
 /**
- * Inside a project's room (ADR 0097): the wall holds what every agent here knows (its About, its
- * folders and the notes kept), and the floor its teams at their desks, in the order work moves.
+ * Inside a project's room (ADR 0097), at a glance: what needs you, who is working, what comes next
+ * and what this month cost; a box to give a team work; the teams at their desks, in the order work
+ * moves, each with the newest thing it made; and everything made here. Beside them, the wall holds
+ * what every agent here knows (its About, its folders and the notes kept).
  */
 export function ProjectRoom({ id }: { id: string }) {
   useTheme()
   const { list, error, reload } = useProjects()
   const { root, shapes, jobs } = useTeamShapes(list)
-  const runs = useRuns()
+  const [runs, readRuns] = useRuns()
+  const { entries: schedules } = useSchedules()
+  const [reading, setReading] = useState<FileToRead | null>(null)
+  const read = useCallback((file: FileToRead) => setReading(file), [])
   // Where teams are and were: a new team never takes the place of a deleted one, whose history it would inherit.
   const { teams: listed, trashed } = useTeamList()
   const [noting, setNoting] = useState(false)
@@ -244,6 +255,28 @@ export function ProjectRoom({ id }: { id: string }) {
     }
   }
 
+  // At a glance, kept to this project's teams.
+  const scope = project?.teams ?? null
+  const shown = useMemo(() => shapes ?? [], [shapes])
+  const all = useMemo(() => runs ?? [], [runs])
+  const needs = useMemo(() => (scope ? needsYou(all, shown, root, scope) : []), [all, shown, root, scope])
+  const working = useMemo(() => (scope ? workingNow(all, shown, root, scope) : []), [all, shown, root, scope])
+  const made = useMemo(() => (scope ? madeHere(all, root, scope) : []), [all, root, scope])
+  const newest = useMemo(() => {
+    const first = new Map<string, MadeFile>()
+    for (const file of made) if (!first.has(file.team)) first.set(file.team, file)
+    return first
+  }, [made])
+  const names = useMemo(() => new Map(shown.flatMap((shape) => shape.seats.map((seat) => [seat.id, seat.name] as const))), [shown])
+  const nameOf = useCallback((agent: string) => names.get(agent) ?? agent, [names])
+
+  /** A team whose run stopped, asked again as it was: in its chat, as the chat's own Try again does. */
+  const tryAgain = (item: NeedsYouItem) => {
+    setProblem(null)
+    sendChatMessage({ teamPath: item.teamPath, text: item.prompt, to: null, work: true, startKey: newStartKey() })
+      .then(readRuns, (caught: unknown) => setProblem(`Couldn’t start ${item.teamName} again. ${caught instanceof Error ? caught.message : String(caught)}`))
+  }
+
   if (error) return <main className="project-room"><p role="alert" className="home-empty alert">Couldn’t open the project. {error}</p></main>
   if (!list) return <main className="project-room"><p role="status" className="home-empty">Opening the project…</p></main>
   if (!project) return <main className="project-room"><p role="alert" className="home-empty">There is no project “{id}”. <a className="link" href="/">Back to Home</a></p></main>
@@ -281,8 +314,56 @@ export function ProjectRoom({ id }: { id: string }) {
         </div>
       </header>
 
+      <FileReaderContext.Provider value={read}>
       <main className="project-room">
         {problem && <p role="alert" className="home-empty alert">{problem}</p>}
+        <GlanceTiles
+          needs={needs}
+          last={lastFinished(all, root, scope)}
+          working={working}
+          next={nextWork(schedules ?? [], root, scope)}
+          spend={monthSpend(all, root, scope)}
+          figureOf={figureOf}
+          onReview={openRun}
+          onTryAgain={tryAgain}
+          onOpenLast={openRun}
+          onOpenWork={openRun}
+          onMore={() => { if (needs[2]) openRun(needs[2]) }}
+        />
+        {teams.length > 0 && <WorkBox teams={teams} primary={needs.length === 0} onSent={readRuns} />}
+
+        <div className="room-body">
+        <div className="room-main">
+        <section className="room-floor" aria-labelledby="room-floor-title">
+          <div className="room-floor-head">
+            <h2 id="room-floor-title" className="studio-head">{teams.length > 1 ? `Teams · ${teams.length}` : 'Team'}</h2>
+            <span className="room-floor-acts">
+              <button type="button" className="btn" onClick={() => setAdding(null)}>Add an agent</button>
+              <button type="button" className="btn" data-tour="new-team" onClick={() => setNewTeam(true)}>New team</button>
+            </span>
+          </div>
+          <TeamGrid
+            teams={inOpenedOrder(room?.teams ?? [], opened)}
+            figureOf={figureOf}
+            newest={newest}
+            menu={(team) => (
+              <MoveTeam
+                team={team}
+                projects={list.projects.filter((other) => other.id !== project.id)}
+                onMove={(to) => {
+                  setProblem(null)
+                  moveTeam(team.path, to.id).then(() => { setMoved({ team: team.name, to }); reload() }, (caught: unknown) => setProblem(`Couldn’t move ${team.name}. ${caught instanceof Error ? caught.message : String(caught)}`))
+                }}
+              />
+            )}
+          />
+          {moved && <p role="status" className="studio-quiet">{moved.team} works in <a className="link" href={roomHref(moved.to.id)}>{moved.to.name}</a> now.</p>}
+          {room && room.teams.length === 0 && <p className="studio-quiet">No team works here yet.</p>}
+        </section>
+        <MadeHere files={made} teams={teams} />
+        </div>
+
+        <aside className="room-side">
         <section className="room-wall" aria-labelledby="room-wall-title">
           <div className="room-wall-head">
             <SectionHead as="h2" title="What agents here know" className="studio-head" explain="Every agent in this project reads these. They stay in this project." />
@@ -318,36 +399,11 @@ export function ProjectRoom({ id }: { id: string }) {
             )}
           </div>
         </section>
-
-        <section className="room-floor" aria-labelledby="room-floor-title">
-          <h2 id="room-floor-title" className="studio-head">Teams</h2>
-          {inOpenedOrder(room?.teams ?? [], opened).map((team) => (
-            <div key={team.path} className="room-team">
-              {/* When no desk shows what the team is doing (it stopped, or nobody is at work yet), its name says it. */}
-              <a className="room-team-name" href={teamHref(team.path, 'chat')}>
-                <b>{team.name}</b>
-                {said(team) && <>{' '}<span className={`room-state ${team.state}`}>{said(team)}</span></>}
-                {team.schedule && <>{' '}<span>{said(team) ? `· ${team.schedule}` : team.schedule}</span></>}
-              </a>
-              <MoveTeam
-                team={team}
-                projects={list.projects.filter((other) => other.id !== project.id)}
-                onMove={(to) => {
-                  setProblem(null)
-                  moveTeam(team.path, to.id).then(() => { setMoved({ team: team.name, to }); reload() }, (caught: unknown) => setProblem(`Couldn’t move ${team.name}. ${caught instanceof Error ? caught.message : String(caught)}`))
-                }}
-              />
-              <TeamDesks team={team} figureOf={figureOf} size={56} all />
-            </div>
-          ))}
-          {moved && <p role="status" className="studio-quiet">{moved.team} works in <a className="link" href={roomHref(moved.to.id)}>{moved.to.name}</a> now.</p>}
-          {room && room.teams.length === 0 && <p className="studio-quiet">No team works here yet.</p>}
-          <span className="room-floor-acts">
-            <button type="button" className="btn" onClick={() => setAdding(null)}>Add an agent</button>
-            <button type="button" className="btn" data-tour="new-team" onClick={() => setNewTeam(true)}>New team</button>
-          </span>
-        </section>
+        </aside>
+        </div>
       </main>
+      </FileReaderContext.Provider>
+      {reading && <ReaderSheet file={reading} name={nameOf} onClose={() => setReading(null)} />}
 
       {picking && (
         <FolderPicker
