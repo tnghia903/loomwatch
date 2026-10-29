@@ -72,7 +72,7 @@ describe('By hand: skills from the marketplace', () => {
     fireEvent.click(open)
     const market = await screen.findByRole('dialog', { name: 'Find skills for Reader' })
     await waitFor(() => expect(sent.some((request) => request.url.startsWith('/api/skills/search?') && request.url.includes('q=pdf'))).toBe(true))
-    expect(market).toHaveTextContent('What you add here is pinned up on Reader when you go back.')
+    expect(market).toHaveTextContent('What you add here goes to Reader when you go back.')
 
     const changed = vi.fn()
     window.addEventListener(SKILLS_CHANGED_EVENT, changed)
@@ -80,13 +80,13 @@ describe('By hand: skills from the marketplace', () => {
     window.removeEventListener(SKILLS_CHANGED_EVENT, changed)
     // Whatever lists LoomWatch's skills reads them again (App's capability scan).
     expect(changed).toHaveBeenCalled()
-    expect(market.querySelector('.lw-skills-market-says')).toHaveTextContent('PDF will be pinned up on Reader.')
+    expect(market.querySelector('.lw-skills-market-says')).toHaveTextContent('PDF goes to Reader when you go back.')
 
     fireEvent.click(within(market).getByRole('button', { name: 'Back to Reader' }))
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Find skills for Reader' })).toBeNull())
     expect(onSet).toHaveBeenCalledWith('skills', ['pdf'])
-    expect(within(skillsBlock()).getByRole('list', { name: 'Recipe cards on its pegboard' })).toHaveTextContent('pdf')
-    expect(skillsBlock()).toHaveTextContent('Pinned up pdf from the marketplace.')
+    expect(within(skillsBlock()).getByRole('list', { name: 'Its skills' })).toHaveTextContent('pdf')
+    expect(skillsBlock()).toHaveTextContent('Gave it pdf from the marketplace.')
     // Everything else set on the agent is still there, and you are back where you left off.
     expect(screen.getByRole('textbox', { name: 'Instructions' })).toHaveValue('Read the forms.')
     expect(within(skillsBlock()).getByRole('button', { name: 'Find skills in the marketplace' })).toBe(document.activeElement)
@@ -101,7 +101,7 @@ describe('By hand: skills from the marketplace', () => {
     await addPdf(market)
     fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
     expect(await screen.findByText('Took back PDF.')).toBeInTheDocument()
-    await waitFor(() => expect(market).toHaveTextContent('What you add here is pinned up on Reader when you go back.'))
+    await waitFor(() => expect(market).toHaveTextContent('What you add here goes to Reader when you go back.'))
 
     fireEvent.keyDown(market, { key: 'Escape' })
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Find skills for Reader' })).toBeNull())
@@ -112,7 +112,7 @@ describe('By hand: skills from the marketplace', () => {
   it('points at the marketplace from the cards too, and not where nothing can change', () => {
     const pdf: DetectedCapability = { id: 'skill:pdf', name: 'pdf', source: 'LoomWatch', detail: 'Fills PDF forms.', status: 'Ready' }
     const { unmount } = render(<Bench start={{ name: 'Reader' }} available={[pdf]} />)
-    expect(skillsBlock()).toHaveTextContent('Click one below to read it, press + to pin it up, or drag it onto the bench.')
+    expect(skillsBlock()).toHaveTextContent('Click one below to read it; press + or drag it onto the bench to give it to this agent.')
     expect(within(skillsBlock()).getByRole('button', { name: 'Find skills in the marketplace' })).toBeInTheDocument()
     unmount()
     render(<Bench start={{ name: 'Reader' }} readOnly />)

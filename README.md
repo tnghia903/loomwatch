@@ -70,8 +70,8 @@ and asks.
 
 ### 01 &nbsp;Agents
 
-**Build an agent** once: its job, the model it thinks with, its skills, and the keys it may use
-without asking, such as the web or running commands. Pick it a face, **try it on its own**
+**Build an agent** once: its job, the model it thinks with, its skills, and what it may do
+without asking, such as searching the web or running commands. Pick it a face, **try it on its own**
 with a real request, and save it to **My agents**. It is the same agent in every team it's in:
 change its job later and every team uses the change the next time it works.
 
@@ -215,7 +215,7 @@ with a lead that hands out work and asks its teammates questions as it goes.
 
 ### 🧑‍🔧 My agents
 
-Build an agent once: its job, model, skills and the keys it may use. Try it on its own in its
+Build an agent once: its job, model, skills and what it may do without asking. Try it on its own in its
 **Chat** tab, then add it to any team: it is the same agent in every team it's in. Tell them about you once, in **About you**, and every agent fits its answers
 to you. Your agents line the left of each agent's page, and your teams the left of each team's:
 one click moves to another, and each glows while it works or waits for you.
@@ -757,9 +757,9 @@ with what should change; under its new version, **Continue with the team** runs 
    with its company. **Usage…** in the ☰ menu shows what LoomWatch has used on each.
 2. Open **My agents** (☰ menu, or **Build an agent** on Home before you have one) and start from a job, such as Researcher or Writer, or from
    **Blank**. Give it a name, change its instructions, model and how hard it thinks to fit your work,
-   pin up the skills it needs and hand it the keys it may use without asking. Pick it a face, then
-   open its **Chat** tab and give it a real request: it runs on its model, and asks you before it
-   uses a key it wasn't given. **Save to My agents** when it does the job.
+   give it the skills it needs and **Allow** what it may do without asking. Pick it a face, then
+   open its **Chat** tab and give it a real request: it runs on its model, and asks you before
+   anything you didn't allow. **Save to My agents** when it does the job.
 3. Every team works in a project, a room on Home whose wall holds what every agent in it knows: its
    About, its folders and the notes kept from earlier work. On Home, say what you are working on and
    click **Set up project**: Ask sets up the project and its first team for you to check, and nothing

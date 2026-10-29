@@ -47,12 +47,12 @@ export function SkillDetails({ item, pinned, onPin, onTakeDown, onClose }: {
   const body = definition ? skillBody(definition.content) : ''
   const footer = pinned
     ? <>
-      <button type="button" className="btn" onClick={onTakeDown}>Take it down</button>
+      <button type="button" className="btn" onClick={onTakeDown}>Take this skill away</button>
       <button type="button" className="btn btn-primary" onClick={onClose}>Close</button>
     </>
     : <>
       <button type="button" className="btn" onClick={onClose}>Close</button>
-      <button type="button" className="btn btn-primary" onClick={onPin}><Plus size={14} aria-hidden="true" />Pin it up</button>
+      <button type="button" className="btn btn-primary" onClick={onPin}><Plus size={14} aria-hidden="true" />Give it this skill</button>
     </>
 
   return createPortal(
@@ -61,7 +61,7 @@ export function SkillDetails({ item, pinned, onPin, onTakeDown, onClose }: {
         <Glyph name={item.name} description={item.detail} size="lg" />
         <div>
           {item.detail && <p className="lw-skills-intro-desc"><InlineMarkdown>{item.detail}</InlineMarkdown></p>}
-          <p className="lw-skills-quiet">{pinned ? 'On this agent’s pegboard. It opens this card when the work calls for it.' : 'Pin it up and this agent opens it when the work calls for it.'}</p>
+          <p className="lw-skills-quiet">{pinned ? 'This agent has it, and opens it when the work calls for it.' : 'It opens a skill only when the work calls for it.'}</p>
         </div>
       </div>
       <NeedTags runtimes={record?.runtimes ?? []} needs={needs} hasScripts={record?.hasScripts ?? false} />

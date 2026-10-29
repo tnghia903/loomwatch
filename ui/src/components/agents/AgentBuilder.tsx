@@ -236,7 +236,7 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
   const saveLabel = !saved ? 'Save to My agents' : 'Save'
   const markId = saved?.id ?? (draft.name || 'new')
   const figure = figureFor(saved?.id ?? startKey, draft.figure)
-  const badge = <AgentBadge markId={markId} figure={figure} draft={draft} modelName={modelName} effortName={effortName} usedIn={saved ? { teams: mine.length, scheduled: scheduledUses } : undefined} />
+  const badge = <AgentBadge markId={markId} figure={figure} draft={draft} modelName={modelName} effortName={effortName} usedIn={saved ? { teams: mine.length, scheduled: scheduledUses } : undefined} usesListed={Boolean(saved)} />
 
   const name = draft.name.trim() || 'New agent'
   const saveButton = <button type="button" className="btn btn-primary" data-tour="save-agent" disabled={!changed || Boolean(problem) || save.kind === 'saving'} title={problem ?? undefined} onClick={() => void doSave()}>{save.kind === 'saving' ? 'Saving…' : saveLabel}</button>

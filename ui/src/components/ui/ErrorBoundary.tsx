@@ -47,7 +47,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
             <pre className="code t-mono" style={{ whiteSpace: 'pre-wrap' }}>{error.message}</pre>
           </details>
           <div style={{ display: 'flex', gap: 'var(--sp-3)' }}>
-            <button type="button" className="btn btn-primary" onClick={() => window.location.assign('/')}>Back to your teams</button>
+            <button type="button" className="btn btn-primary" onClick={() => window.location.assign('/')}>Back to Home</button>
             <button type="button" className="btn" onClick={() => window.location.reload()}>Reload</button>
             {/* The app below is gone, so this is a plain link rather than the feedback dialog. */}
             <a className="btn" style={{ textDecoration: 'none' }} href={issueUrl('problem', describeSystem(about, null, { error: error.message }), `Error: ${error.message}`)} target="_blank" rel="noreferrer">Report this problem</a>

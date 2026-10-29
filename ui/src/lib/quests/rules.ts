@@ -141,13 +141,13 @@ function pin({ run, succeeded, agents, projection, current }: QuestFacts): Award
         : item.kind === 'command'))
   if (!held.every(({ agent, key }) => used(agent.id, key))) return null
   const words = [...new Set(held.map(({ key }) => SWITCH_WORDS[key]))]
-  return { item: 'pin', agentId: null, line: `This scheduled run never had to ask for a permission, and every key it held was used (${words.join(', ')}).` }
+  return { item: 'pin', agentId: null, line: `This scheduled run never had to ask you, and its agents used everything they were allowed (${words.join(', ')}).` }
 }
 
 function cushion({ succeeded, agents, current, benched }: QuestFacts): Award | null {
   if (!succeeded) return null
   const agent = agents.find((candidate) => candidate.from && current.agentIds.includes(candidate.id) && benched.has(candidate.from.agent))
-  return agent ? { item: 'cushion', agentId: agent.id, line: `${agent.name} was tried on its test bench before this team used it.` } : null
+  return agent ? { item: 'cushion', agentId: agent.id, line: `${agent.name} was tried in its Chat tab before this team used it.` } : null
 }
 
 function shuttle({ succeeded, agents, projection }: QuestFacts): Award | null {

@@ -15,6 +15,7 @@ import type { SavedJob } from '../../lib/library/jobs'
 import { knowledgeOf } from '../../lib/library/reads'
 import { readsOf } from '../../lib/library/teamDraft'
 import type { RunRecord } from '../../lib/runs/client'
+import { ALLOW_SWITCHES } from '../../lib/team-file/allow'
 import { INSTRUCTION_PARTS, instructionShape } from '../../lib/team-file/checkup'
 import type { AllowSwitch } from '../../lib/team-file/types'
 import { toolNamed, useConnectedTools, type ConnectedTool } from '../../lib/tools/client'
@@ -51,34 +52,43 @@ export interface BenchWords {
 export function benchLabels({ draft, model, effort, reads, readsSaid, toolsSaid, asked }: BenchWords): BenchLabel[] {
   const shape = { ...instructionShape(draft.instructions), ...(draft.doneWhen.length ? { check: true } : {}) }
   const replyPart = replySection(draft.instructions)
-  const given = FIGURE_KEYS.filter(({ key }) => draft.allow[key])
-  const kept = FIGURE_KEYS.filter(({ key }) => !draft.allow[key])
+  // Each switch by its own short name, as on the agent's card: "Edit files", not the bench key's "Files".
+  const given = FIGURE_KEYS.filter(({ key }) => draft.allow[key]).map(({ key }) => ({ key, word: switchName(key) }))
+  const kept = FIGURE_KEYS.filter(({ key }) => !draft.allow[key]).map(({ key }) => ({ key, word: switchName(key) }))
   const thinks = effort ? `${model} · ${effort} effort` : model
   const name = draft.name.trim() || 'New agent'
-  const more = draft.skills.length > CARD_SLOTS ? ` (${draft.skills.length - CARD_SLOTS} not pinned)` : ''
-  const keysText = given.length ? `Keys it has · ${given.map((item) => item.word).join(', ')}` : 'Keys it has · none'
-  const asking = asked && !draft.allow[asked] ? FIGURE_KEYS.find(({ key }) => key === asked)?.word : null
-  const dishText = asking ? `It’s asking you for the ${asking} key` : kept.length ? `You keep: ${kept.map((item) => item.word).join(', ')} · it asks you first` : 'You keep no keys'
+  const more = draft.skills.length > CARD_SLOTS ? ` (${draft.skills.length - CARD_SLOTS} not shown)` : ''
+  // The two sides of "what it may do without asking", in its card's words (AgentBadge): what it is
+  // allowed, and what it asks you first. The bench draws them as keys on hooks and keys in a dish,
+  // but the words never ask anyone to read that picture (and a "key" is what pays for models).
+  const keysText = given.length ? `Allowed · ${given.map((item) => item.word).join(', ')}` : 'Allowed · nothing'
+  const asking = asked && !draft.allow[asked] ? switchName(asked) : null
+  const dishText = asking ? `It’s asking to ${ALLOW_SWITCHES.find(({ key }) => key === asked)?.label.toLowerCase() ?? asking.toLowerCase()}` : kept.length ? `Asks you first · ${kept.map((item) => item.word).join(', ')}` : 'Asks you first · nothing'
   // More than a drawer has room for still count, as skills past the pegboard's do: the label says
   // how many aren't in it. It gives only the total then, so the two drawers' labels stay short
   // enough to sit side by side.
-  const readsOff = reads.length > READ_SLOTS ? ` (${reads.length - READ_SLOTS} not in the drawer)` : ''
-  const toolsOff = draft.tools.length > TOOL_SLOTS ? ` (${draft.tools.length - TOOL_SLOTS} not in the drawer)` : ''
+  const readsOff = reads.length > READ_SLOTS ? ` (${reads.length - READ_SLOTS} not shown)` : ''
+  const toolsOff = draft.tools.length > TOOL_SLOTS ? ` (${draft.tools.length - TOOL_SLOTS} not shown)` : ''
   const readsText = !reads.length ? 'Reads · nothing yet' : reads.length === 1 ? `Reads · ${reads[0].name}` : readsOff ? `Reads · ${reads.length}${readsOff}` : `Reads · ${readCount(reads)}`
   const toolsText = !draft.tools.length ? 'Tools · none yet' : draft.tools.length === 1 ? `Tools · ${draft.tools[0]}` : `Tools · ${draft.tools.length}${toolsOff}`
   return [
-    { anchor: 'mind', part: 'mind', place: 'right', text: <>Thinks with <b>{model}</b>{effort && <> · {effort}</>}</>, short: <b>{model}</b>, label: `The figure, the model it thinks with: ${thinks}` },
-    { anchor: 'job', part: 'job', place: 'above', text: <>The job <span className="byhand-parts">{INSTRUCTION_PARTS.map((part) => <i key={part} className={shape[part] ? 'on' : ''} />)}</span></>, short: 'Job', label: 'The job on the clipboard: its instructions' },
-    { anchor: 'skills', part: 'skills', place: 'above', text: `Skills · ${draft.skills.length || 'none yet'}${more}`, short: `Skills · ${draft.skills.length}`, label: `The recipe cards: ${draft.skills.length} skill${draft.skills.length === 1 ? '' : 's'}` },
-    { anchor: 'keys', part: 'keys', place: 'above', text: keysText, short: `Keys · ${given.length}`, label: `The key hooks: ${keysText}` },
-    { anchor: 'dish', part: 'keys', place: 'below', text: dishText, short: asking ? `Asking for ${asking}` : `You keep ${kept.length}`, label: `Your dish: ${dishText}` },
-    { anchor: 'reply', part: 'reply', place: 'above', text: `Hands back · ${replyPart ? 'see the tray' : 'not said yet'}`, short: 'Hands back', label: 'The tray: what it hands back' },
+    { anchor: 'mind', part: 'mind', place: 'right', text: <>Thinks with <b>{model}</b>{effort && <> · {effort}</>}</>, short: <b>{model}</b>, label: `Thinks with ${thinks}` },
+    { anchor: 'job', part: 'job', place: 'above', text: <>The job <span className="byhand-parts">{INSTRUCTION_PARTS.map((part) => <i key={part} className={shape[part] ? 'on' : ''} />)}</span></>, short: 'Job', label: 'The job: its instructions' },
+    { anchor: 'skills', part: 'skills', place: 'above', text: `Skills · ${draft.skills.length || 'none yet'}${more}`, short: `Skills · ${draft.skills.length}`, label: `Skills: ${draft.skills.length || 'none yet'}${more}` },
+    { anchor: 'keys', part: 'keys', place: 'above', text: keysText, short: `Allowed · ${given.length}`, label: `Allowed without asking: ${given.length ? given.map((item) => item.word).join(', ') : 'nothing'}` },
+    { anchor: 'dish', part: 'keys', place: 'below', text: dishText, short: asking ? `Asking: ${asking}` : `Asks first · ${kept.length}`, label: asking ? dishText : `What it asks you first: ${kept.length ? kept.map((item) => item.word).join(', ') : 'nothing'}` },
+    { anchor: 'reply', part: 'reply', place: 'above', text: `Hands back · ${replyPart ? 'said in its instructions' : 'not said yet'}`, short: 'Hands back', label: `What it hands back: ${replyPart ? 'said in its instructions' : 'not said yet'}` },
     // Under the bench's two drawers, on its face: what it works with, apart from the work on top.
-    { anchor: 'reads', part: 'reads', place: 'below', text: readsText, short: `Reads · ${reads.length}`, label: `The file drawer: ${readsSaid}${readsOff}` },
-    { anchor: 'tools', part: 'tools', place: 'below', text: toolsText, short: `Tools · ${draft.tools.length}`, label: `The tool drawer: ${toolsSaid}${toolsOff}` },
-    { anchor: 'name', part: 'name', place: 'plate', label: `The nameplate: ${name}` },
-    { anchor: 'app', part: 'app', place: 'plate', label: `The laptop, the model it thinks with: ${model}` },
+    { anchor: 'reads', part: 'reads', place: 'below', text: readsText, short: `Reads · ${reads.length}`, label: `What it reads: ${readsSaid}${readsOff}` },
+    { anchor: 'tools', part: 'tools', place: 'below', text: toolsText, short: `Tools · ${draft.tools.length}`, label: `Tools it can use: ${toolsSaid}${toolsOff}` },
+    { anchor: 'name', part: 'name', place: 'plate', label: `Name: ${name}` },
+    { anchor: 'app', part: 'app', place: 'plate', label: `The model it thinks with: ${model}` },
   ]
+}
+
+/** A switch's short name, as the agent's card shows it: "Web", "Edit files", "Commands". */
+function switchName(key: AllowSwitch): string {
+  return ALLOW_SWITCHES.find((item) => item.key === key)?.short ?? key
 }
 
 /**
@@ -183,7 +193,7 @@ export function readCount(reads: readonly ReadSource[]): string {
 /** What its tools add up to, in words, for the line under the block's title and the tool drawer. */
 export function toolsSay(given: readonly { name: string; tool: ConnectedTool | undefined }[], loading: boolean): string {
   const builtIn = 'Files, the web and commands'
-  if (!given.length) return `${builtIn}, as its keys allow`
+  if (!given.length) return `${builtIn}, as you allow`
   const usable = given.filter((item) => item.tool).map((item) => item.name)
   const missing = given.length - usable.length
   const plus = usable.length ? `${builtIn}, plus ${listNames(usable)}` : builtIn

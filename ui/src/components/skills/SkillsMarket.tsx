@@ -55,7 +55,7 @@ export default function SkillsMarket({ agentName, query = '', onClose }: {
       <header className="home-top lw-skills-market-top">
         <button type="button" className="btn" onClick={close}><ArrowLeft size={14} aria-hidden="true" />Back to {agentName}</button>
         <p className="lw-skills-market-says" role="status">
-          {kept.length ? <>{listNames(kept.map(displayName))} will be pinned up on {agentName}.</> : <>What you add here is pinned up on {agentName} when you go back.</>}
+          {kept.length ? <>{listNames(kept.map(displayName))} {kept.length === 1 ? 'goes' : 'go'} to {agentName} when you go back.</> : <>What you add here goes to {agentName} when you go back.</>}
         </p>
       </header>
       <SkillsStore

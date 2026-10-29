@@ -1,9 +1,9 @@
 # Give agents tools
 
 Every agent can already read and write files in its own folder, search and read the web, and run
-commands, as its keys allow. A **tool** lets it use a service too: add a to-do to Todoist, search
-flights on Kiwi.com, read a page with Jina. Each thing a tool can do, such as "Create issue" or
-"Search flights", is an **action**.
+commands, as you allow in its **What it may do without asking** block. A **tool** lets it use a
+service too: add a to-do to Todoist, search flights on Kiwi.com, read a page with Jina. Each thing a
+tool can do, such as "Create issue" or "Search flights", is an **action**.
 
 LoomWatch talks to the service for the agent. Nothing is installed on your computer, and the agent
 never gets your sign-in.

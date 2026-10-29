@@ -41,6 +41,15 @@ describe('An agent’s page, one agent in every team', () => {
   // Longer than both waits: a missing link fails on the link, not on the test's own time.
   }, 15000)
 
+  // The card at the top of the side counted the teams too ("Used in: 1 team"), right above the list
+  // headed Used in: the page said it twice.
+  it('says which teams use it once, in the list under its card', async () => {
+    render(<AgentsPage skills={[]} skillsLoading={false} />)
+    const usedIn = await screen.findByRole('region', { name: 'Used in' }, { timeout: 5000 })
+    await within(usedIn).findByRole('link', { name: /Blog/ }, { timeout: 5000 })
+    expect(screen.getAllByText('Used in')).toHaveLength(1)
+  }, 15000)
+
   it('saves a change with plain Save, asks for no note, and says no more than that it saved', async () => {
     const { container } = render(<AgentsPage skills={[]} skillsLoading={false} />)
     fireEvent.change(await screen.findByRole('textbox', { name: /Instructions/ }, { timeout: 5000 }), { target: { value: 'Write a short draft with a title.' } })

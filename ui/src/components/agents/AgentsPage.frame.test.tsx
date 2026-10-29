@@ -130,13 +130,13 @@ describe('An agent’s page in the team page’s frame', () => {
 })
 
 // One gold fill per screen (DESIGN_LANGUAGE §8): on an agent's page it is Save, at least 32 px, and
-// each key is offered with a plain button. Three gold Hand it over buttons once stood beside Save.
+// each switch is offered with a plain button. Three gold buttons once stood beside Save.
 describe('the gold on an agent’s page', () => {
-  it('fills only Save, at least 32 px, while its keys are offered with plain buttons', async () => {
+  it('fills only Save, at least 32 px, while its switches are offered with plain buttons', async () => {
     window.history.replaceState({}, '', '/agents/writer')
     page()
     fireEvent.change(await screen.findByRole('textbox', { name: /Instructions/ }, { timeout: 5000 }), { target: { value: 'Write a short draft with a title.' } })
-    const offers = screen.getAllByRole('button', { name: 'Hand it over' })
+    const offers = screen.getAllByRole('button', { name: /^Allow: / })
     expect(offers.length).toBeGreaterThan(1)
     for (const offer of offers) expect(isGoldFill(offer)).toBe(false)
     expect(goldFilled()).toEqual(['Save'])
