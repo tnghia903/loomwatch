@@ -87,7 +87,7 @@ export function GlanceTiles(props: GlanceProps) {
       <section className="glance-tile" aria-labelledby="glance-working">
         <h3 id="glance-working" className="glance-label">Working now{working.length > 1 ? ` · ${working.length}` : ''}</h3>
         {lead ? (
-          <button type="button" className="glance-agent" onClick={() => onOpenWork?.(lead)}>
+          <button type="button" className="glance-agent" onClick={() => onOpenWork?.(lead)} aria-label={`${lead.seat.name} is working, in ${lead.teamName}. Open it`}>
             <span className="desk-figure" data-glow="working"><FigureStill figure={figureOf(lead.seat)} alt="" width={34} height={34} decoding="async" /></span>
             <span className="glance-need-words">
               <span><span className="glance-dot" aria-hidden="true" />{lead.seat.name} is working</span>

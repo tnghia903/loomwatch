@@ -209,7 +209,7 @@ export function ProjectRoom({ id }: { id: string }) {
   const { list, error, reload } = useProjects()
   const { root, shapes, jobs } = useTeamShapes(list)
   const [runs, readRuns] = useRuns()
-  const { entries: schedules } = useSchedules()
+  const { entries: schedules, error: scheduleError } = useSchedules()
   const [reading, setReading] = useState<FileToRead | null>(null)
   const read = useCallback((file: FileToRead) => setReading(file), [])
   // Where teams are and were: a new team never takes the place of a deleted one, whose history it would inherit.
@@ -314,7 +314,8 @@ export function ProjectRoom({ id }: { id: string }) {
       <FileReaderContext.Provider value={read}>
       <main className="project-room">
         {problem && <p role="alert" className="home-empty alert">{problem}</p>}
-        <GlanceTiles
+        {/* Only once the teams, the runs and the schedules are read: a count or "nothing" said too early is wrong. */}
+        {shapes && runs && (schedules || scheduleError) && <GlanceTiles
           needs={needs}
           last={lastFinished(all, root, scope)}
           working={working}
@@ -326,7 +327,7 @@ export function ProjectRoom({ id }: { id: string }) {
           onOpenLast={openRun}
           onOpenWork={openRun}
           onMore={() => { if (needs[2]) openRun(needs[2]) }}
-        />
+        />}
         {teams.length > 0 && <WorkBox teams={teams} primary={needs.length === 0} onSent={readRuns} />}
 
         <div className="room-body">

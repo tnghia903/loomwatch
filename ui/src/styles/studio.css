@@ -329,7 +329,8 @@ button.wall-paper:focus-visible { outline: 2px solid var(--color-accent); outlin
 .room-floor-acts .btn { min-height: 40px; }
 
 /* A team's card opens its chat, as its name does; its ⋯ and its newest file stay pressable above that. */
-.team-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: var(--sp-3); }
+/* Wide enough for four desks and their names, whole, before a row wraps. */
+.team-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: var(--sp-3); }
 .team-grid.one { grid-template-columns: minmax(0, 1fr); }
 .team-card {
   position: relative; display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; padding: 12px 14px 14px;
@@ -416,8 +417,10 @@ button.wall-paper:focus-visible { outline: 2px solid var(--color-accent); outlin
   background: transparent; color: var(--color-ink-2); font: 500 12.5px var(--font-sans); cursor: pointer;
 }
 .made-here-teams button[aria-pressed="true"] { background: var(--color-hairline); color: var(--color-ink); }
-.made-here-files { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: var(--sp-2); }
-.made-here-files .file-card { width: 100%; box-sizing: border-box; }
+.made-here-files { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--sp-3) var(--sp-4); }
+.made-here-files li { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; }
+.made-here-files li .file-chip-wrap { max-width: 100%; }
+.made-here-files small { padding-left: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; font-size: 12px; color: var(--color-ink-3); }
 .made-here > .link { align-self: flex-start; font-size: 13px; }
 
 .reader-sheet-backdrop { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; padding: var(--sp-4); background: color-mix(in srgb, var(--color-ground) 60%, transparent); }
@@ -437,7 +440,11 @@ button.wall-paper:focus-visible { outline: 2px solid var(--color-accent); outlin
   .made-here-teams button, .work-box-files li { min-height: 44px; }
 }
 @media (max-width: 560px) {
-  .glance { grid-template-columns: minmax(0, 1fr); }
+  /* What needs you across the width, the other three two by two, so the box is in reach. */
+  .glance { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .glance > .glance-tile:first-child { grid-column: 1 / -1; }
+  .glance-tile { padding: 12px 14px; }
+  .glance-number { font-size: 22px; line-height: 28px; }
   .work-box-to { flex: 1 1 100%; }
   .work-box-to select { max-width: none; flex: 1; }
 }

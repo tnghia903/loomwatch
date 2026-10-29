@@ -204,8 +204,9 @@ describe('a project’s room (ADR 0097)', () => {
       fireEvent.click(within(tile).getByRole('button', { name: 'Review: Writer has a question for you' }))
       expect(assign).toHaveBeenCalledWith('/?path=sutd%2Fblog.yaml&run=w1')
       fireEvent.click(within(tile).getByRole('button', { name: 'Try again: Research and design' }))
-      // Asked again as it was, in its team's chat, as work.
-      await waitFor(() => expect(posted()).toEqual([expect.objectContaining({ teamPath: 'sutd/gate.yaml', text: 'Find three sources on gates.', work: true, to: null })]))
+      // Asked again as it was, in its team's chat, as work for the team: a message to no one is
+      // only a note, and starts nothing.
+      await waitFor(() => expect(posted()).toEqual([expect.objectContaining({ teamPath: 'sutd/gate.yaml', text: 'Find three sources on gates.', work: true, to: { kind: 'team' } })]))
       // What waits for you is the screen's one gold fill; the box's Send is plain meanwhile.
       expect(within(tile).getByRole('button', { name: /^Review/ })).toHaveClass('btn-primary')
       expect(screen.getByRole('button', { name: 'Send' })).not.toHaveClass('btn-primary')
@@ -234,7 +235,7 @@ describe('a project’s room (ADR 0097)', () => {
       // Nothing waits for you, so Send is the one gold fill.
       expect(within(box).getByRole('button', { name: 'Send' })).toHaveClass('btn-primary')
       fireEvent.click(within(box).getByRole('button', { name: 'Send' }))
-      await waitFor(() => expect(posted()).toEqual([expect.objectContaining({ teamPath: 'sutd/blog.yaml', text: 'Write the launch post.', work: true })]))
+      await waitFor(() => expect(posted()).toEqual([expect.objectContaining({ teamPath: 'sutd/blog.yaml', text: 'Write the launch post.', work: true, to: { kind: 'team' } })]))
       expect(await within(box).findByRole('status')).toHaveTextContent('Blog has it.')
       expect(posted()[0].startKey).toEqual(expect.any(String))
       cleanup()
@@ -252,7 +253,7 @@ describe('a project’s room (ADR 0097)', () => {
       ])
       render(<ProjectRoom id="sutd" />)
       const made = await screen.findByRole('region', { name: 'Made here' })
-      const names = () => [...made.querySelectorAll('.file-card-name')].map((name) => name.textContent)
+      const names = () => [...made.querySelectorAll('.file-chip-name')].map((name) => name.textContent)
       // Code isn't something made to read: it stays in the chat.
       expect(names()).toEqual(['launch post.md', 'sources.csv'])
       fireEvent.click(within(made).getByRole('button', { name: 'Research and design' }))

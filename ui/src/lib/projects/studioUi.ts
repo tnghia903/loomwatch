@@ -40,7 +40,7 @@ export function openNeedsYou(): void {
 
 /** A team whose run stopped, asked again as it was: in its chat, as work, as the chat's own Try again does. */
 export async function tryAgain(item: Pick<NeedsYouItem, 'teamPath' | 'prompt'>): Promise<void> {
-  await sendChatMessage({ teamPath: item.teamPath, text: item.prompt, to: null, work: true, startKey: newStartKey() })
+  await sendChatMessage({ teamPath: item.teamPath, text: item.prompt, to: { kind: 'team' }, work: true, startKey: newStartKey() })
 }
 
 /** The figure each agent wears, by its id in My agents (or its id in the team). */

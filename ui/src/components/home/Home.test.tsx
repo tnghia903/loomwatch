@@ -168,7 +168,7 @@ describe('Home, the studio (ADR 0097)', () => {
     fireEvent.click(within(box).getByRole('button', { name: 'Send' }))
     await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/chat/messages')).toBe(true))
     const [, init] = fetchMock.mock.calls.find(([url]) => url === '/api/chat/messages') as [string, RequestInit]
-    expect(JSON.parse(String(init.body))).toMatchObject({ teamPath: 'sutd/gate.yaml', text: 'Find three gate designs.', work: true })
+    expect(JSON.parse(String(init.body))).toMatchObject({ teamPath: 'sutd/gate.yaml', text: 'Find three gate designs.', work: true, to: { kind: 'team' } })
     localStorage.removeItem('loomwatch:work-box-team')
   })
 

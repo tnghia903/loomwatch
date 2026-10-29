@@ -47,7 +47,9 @@ export function WorkBox({ teams, primary, onSent }: { teams: readonly BoxTeam[];
     setSending(true)
     setSaid(null)
     try {
-      const result = await sendChatMessage({ teamPath: team.path, text: trimmed, to: null, work: true, startKey: newStartKey(), files: attachments.kept })
+      // Addressed to the team, as the chat's Send is: a message to no one is a note the team reads
+      // when it next works, and starts nothing (ADR 0051).
+      const result = await sendChatMessage({ teamPath: team.path, text: trimmed, to: { kind: 'team' }, work: true, startKey: newStartKey(), files: attachments.kept })
       setText('')
       attachments.clear()
       setSaid({ ok: true, words: `${team.name} has it.`, team })
@@ -66,7 +68,7 @@ export function WorkBox({ teams, primary, onSent }: { teams: readonly BoxTeam[];
         {teams.length > 1 && (
           <label className="work-box-to">
             <span>To</span>
-            <select value={team.path} onChange={(event) => choose(event.target.value)}>
+            <select value={team.path} aria-label="To" onChange={(event) => choose(event.target.value)}>
               {grouped
                 ? projects.map(([id, name]) => (
                   <optgroup key={id} label={name}>
