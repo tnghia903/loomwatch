@@ -275,14 +275,17 @@ mod tests {
 
     #[test]
     fn calls_are_told_apart_by_agent_and_a_file_made_twice_is_listed_once() {
+        // Two agents' harnesses both number their first call "1": the writer's went through and
+        // the researcher's failed, whichever update comes first.
         let events = [
             event("researcher", "tool_call", edit("1", &at("brief.md"))),
             event("writer", "tool_call", edit("1", &at("post.md"))),
-            event("writer", "tool_update", done("1", "failed")),
-            event("researcher", "tool_update", done("1", "completed")),
+            event("writer", "tool_update", done("1", "completed")),
+            event("researcher", "tool_update", done("1", "failed")),
             event("researcher", "tool_call", edit("2", &at("brief.md"))),
+            event("researcher", "tool_call", edit("3", &at("brief.md"))),
         ];
-        assert_eq!(made_from(&events), [at("brief.md")]);
+        assert_eq!(made_from(&events), [at("post.md"), at("brief.md")]);
     }
 
     #[test]

@@ -25,12 +25,18 @@ const ROOM = SHAPES.map((team) => team.path)
 
 describe('what a room shows at a glance', () => {
   it('puts what waits for you first, then each team that stopped, and keeps to the room', () => {
+    const waitingOn = (since: string) => ({ node: 'check', name: 'You', kind: 'review_stop' as const, since, question: 'Check it', handoverFrom: 'illustrator', park: 'none' as const, parkNote: '', sendBackAvailable: true })
+    // Two teams of another project: one whose run waits for you, one whose newest run stopped.
+    const OTHERS = [shape('wait.yaml', 'Elsewhere', [{ kind: 'agent', id: 'illustrator', name: 'Illustrator' }]), shape('stop.yaml', 'Stopped elsewhere', [{ kind: 'agent', id: 'writer', name: 'Writer' }])]
     const runs = [
       run('watch.yaml', { status: 'failed', createdAt: '2026-10-28T07:00:00Z', finishedAt: '2026-10-28T07:02:00Z', prompt: 'What changed on their pricing pages?', responder: 'scout' }),
-      run('/teams/landing.yaml', { waitingOn: { node: 'check', name: 'You', kind: 'review_stop', since: '2026-10-28T09:20:00Z', question: 'Check it', handoverFrom: 'illustrator', park: 'none', parkNote: '', sendBackAvailable: true } }),
-      run('elsewhere.yaml', { status: 'failed' }),
+      run('/teams/landing.yaml', { waitingOn: waitingOn('2026-10-28T09:20:00Z') }),
+      run('wait.yaml', { waitingOn: waitingOn('2026-10-28T08:00:00Z') }),
+      run('stop.yaml', { status: 'failed', createdAt: '2026-10-28T06:00:00Z' }),
     ]
-    const items = needsYou(runs, SHAPES, ROOT, ROOM)
+    // Home sees them all; the room only its own.
+    expect(needsYou(runs, [...SHAPES, ...OTHERS], ROOT, null).map((item) => item.teamName)).toEqual(['Elsewhere', 'Landing page', 'Stopped elsewhere', 'Competitor watch'])
+    const items = needsYou(runs, [...SHAPES, ...OTHERS], ROOT, ROOM)
     expect(items.map((item) => [item.kind, item.teamName, item.seat.name, item.says])).toEqual([
       ['waiting', 'Landing page', 'Illustrator', 'brought work for you to check'],
       ['failed', 'Competitor watch', 'Scout', 'didn’t finish'],

@@ -145,9 +145,10 @@ describe('Home, the studio (ADR 0097)', () => {
     expect(within(needs).getByText('Research and design')).toBeInTheDocument()
     fireEvent.click(within(needs).getByRole('button', { name: 'Review: Researcher brought work for you to check' }))
     expect(opened).toHaveBeenCalledTimes(1)
-    // One gold fill on the screen: Review. The box beside it gives work with a plain Send meanwhile.
+    // One gold fill on the screen: Review. The box beside it gives work with a plain Send meanwhile,
+    // even with words in it (an empty box's Send is off, and off is never gold).
+    fireEvent.change(within(screen.getByRole('form', { name: 'Give work' })).getByRole('textbox'), { target: { value: 'Draw the gate.' } })
     expect(goldFilled()).toEqual(['Review'])
-    expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument()
     window.removeEventListener('loomwatch:open-needs-you', opened)
   })
 
@@ -178,9 +179,12 @@ describe('Home, the studio (ADR 0097)', () => {
     const teams = within(sutd).getByRole('list', { name: 'SUTD final project’s teams' })
     expect(within(teams).getByRole('link', { name: 'Research and design' })).toHaveAttribute('href', '/?path=sutd%2Fgate.yaml&view=chat')
     expect(teams).toHaveTextContent('Researcher is waiting for you')
-    // The newest thing made here, one press from being read, and what this month cost.
+    // The newest thing made here, one press from being read, and what this month cost; each card
+    // its own project's.
     expect(within(blog).getByRole('button', { name: /post\.md/ })).toBeInTheDocument()
-    expect(blog).toHaveTextContent('$0.25 this month')
+    expect(within(blog).getByText('$0.25 this month')).toBeInTheDocument()
+    expect(within(sutd).queryByRole('button', { name: /post\.md/ })).toBeNull()
+    expect(sutd).not.toHaveTextContent('$0.25')
   })
 
   it('stands your agents in no project apart, each with Chat and Add to a project, and links to About you', async () => {

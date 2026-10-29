@@ -7705,6 +7705,60 @@ pub(crate) mod tests {
         );
     }
 
+    /// What a run made is kept only once it has ended, sent only when there is something, and never
+    /// undone by a write from a record that hasn't worked it out.
+    #[tokio::test]
+    async fn what_a_run_made_is_kept_once_it_ends_and_sent_only_when_there_is_something() {
+        let pool = crate::db::Db::temp().await;
+        let team = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: x\n      cwd: .\n    model: m\n",
+        )
+        .expect("a valid team");
+        let archive = EventArchive::new(pool);
+        let registry = RunRegistry::durable(archive.run_store());
+        let record = RunRecord::queued("t.yaml".into(), "go".into(), &team, RunTrigger::Manual)
+            .expect("queued");
+        let id = record.run_id.clone();
+        registry.insert(record);
+        assert!(registry.mark_starting(&id));
+        // Still going: it may make more, so nothing is kept yet.
+        assert!(!registry.set_made(&id, vec!["/w/early.md".into()]));
+        assert_eq!(registry.get(&id).and_then(|r| r.made), None);
+
+        assert!(registry.mark_succeeded(
+            &id,
+            &SessionOutcome {
+                session_id: id.clone(),
+                event_count: 1,
+                exit_code: 0,
+                reply: "answer".into(),
+            },
+            None,
+        ));
+        assert!(registry.set_made(&id, Vec::new()));
+        let nothing = registry.get(&id).expect("the run");
+        assert_eq!(nothing.made, Some(Vec::new()));
+        // Worked out, and nothing made: the list leaves it out.
+        assert!(
+            serde_json::to_value(&nothing)
+                .unwrap()
+                .get("made")
+                .is_none()
+        );
+
+        let made = vec!["/w/brief.md".to_owned()];
+        assert!(registry.set_made(&id, made.clone()));
+        let kept = registry.get(&id).expect("the run");
+        assert_eq!(serde_json::to_value(&kept).unwrap()["made"], json!(made));
+        let store = archive.run_store();
+        store.upsert(&kept, None, None).await.expect("stored");
+        // A write from a record that hasn't worked it out (one read before it was) keeps it.
+        let stale = RunRecord { made: None, ..kept };
+        store.upsert(&stale, None, None).await.expect("stored");
+        let stored = store.recent().await.expect("read back");
+        assert_eq!(stored[0].record.made, Some(made));
+    }
+
     /// A run a restart cut off keeps the files its agents made before, worked out as the daemon
     /// comes back; and a finished run recorded before runs kept them gets them filled in.
     #[tokio::test]
