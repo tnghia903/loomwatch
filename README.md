@@ -107,8 +107,8 @@ anything runs.
 
 Each team has one chat. Write **@team** and the job in plain words: _"@team Prepare today's AI and
 tech news digest, and link every claim."_ Each stage starts when the one before it hands over;
-under your message their faces glow as they work, and what they tell each other gathers as
-replies you open beside the chat. A note you write while an agent
+under your message their faces glow as they work, and what they tell each other appears there
+as they say it. A note you write while an agent
 works joins its next turn, each agent's status is said in words beside its face (_"Writing its
 reply"_, _"Waiting for you"_), and every handover lands on a **live timeline** in Details that you
 can drag back to replay. Paste a screenshot or drop files on the chat to send them with your words;
@@ -745,9 +745,9 @@ learn the interface without calling a model provider.
 </details>
 
 Everything the team has done stays in its chat: scroll up, or search it with the magnifier at the
-top. The line under each piece (**3 replies**) opens what the agents said to each other beside the
-chat, with its stages, timeline and record in the **Details** tab next to it; drag across the
-timeline to replay what happened. To change one step's work, write **@** and that agent's name
+top. The line under each piece (**3 replies**) shows or hides what the agents said to each other.
+**Details** next to it opens the piece's stages, timeline and record beside the chat; drag across
+the timeline to replay what happened. To change one step's work, write **@** and that agent's name
 with what should change; under its new version, **Continue with the team** runs the steps after it.
 
 ## Run your own agents

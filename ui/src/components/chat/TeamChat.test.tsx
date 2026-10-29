@@ -456,11 +456,14 @@ describe('the team’s chat', () => {
     expect(text.indexOf('we only cover listed companies')).toBeLessThan(text.indexOf('The chip story.'))
     expect(within(log).getByText('The schedule')).toBeInTheDocument()
     expect(within(log).getByText('Writer took it in its next turn')).toBeInTheDocument()
-    // Who worked on each finished piece, and how long it took: their faces on its request, not a line.
-    expect(within(log).getAllByRole('button', { name: /^Researcher and Writer worked on this · \d+ min$/ })).toHaveLength(2)
+    // Nothing passed between the agents on either piece: each piece's line opens its record, and
+    // says on hover who worked on it and how long it took. Their faces are on the line, not again
+    // on the request.
+    const lines = within(log).getAllByRole('button', { name: 'Details' })
+    expect(lines).toHaveLength(2)
+    expect(lines.map((line) => line.getAttribute('title'))).toEqual(['Researcher and Writer · 3 min', 'Researcher and Writer · 4 min'])
     expect(within(log).queryByText(/worked on this/)).not.toBeInTheDocument()
-    // Nothing passed between the agents on either piece: each piece's line opens its record.
-    expect(within(log).getAllByRole('button', { name: 'Details' })).toHaveLength(2)
+    expect(within(log).queryByRole('button', { name: /worked on this/ })).toBeNull()
     // The chat speaks the team's words: no "run", "session" or "stage" (those live in Details).
     expect(screen.getByRole('region', { name: 'News desk chat' }).textContent).not.toMatch(/\b(run|runs|session|stage|stages)\b/i)
   })
@@ -475,7 +478,8 @@ describe('the team’s chat', () => {
       request: message({ route: 'agent', agentId: 'writer', runId: 'turn', text: `${heading}\n\n**Day 1:** the lake.`, handedBack }),
       notes: [],
     }]
-    renderChat()
+    // In the agent's own chat, where a team's answer comes back to it.
+    renderChat({ team: { ...team, solo: 'writer' } })
     const log = await screen.findByRole('log', { name: 'Messages' })
     const said = (await within(log).findByText('Trip planner')).closest<HTMLElement>('.chat-msg')!
     expect(said).not.toHaveClass('mine')
@@ -1496,6 +1500,31 @@ describe('a piece of work', () => {
     expect(document.querySelector('.tc-decided .chat-bubble')).toBeNull()
   })
 
+  // The owner (2026-10-29): a command you let an agent run, said on one line on the right, ran off
+  // the chat's left edge, and its time broke over two lines.
+  it('keeps a long line of what you decided inside the chat, cut at its end, with its time on one line', async () => {
+    const command = `node -e "try{console.log(require.resolve('playwright'))}catch(e){console.log('no playwright')}"; which chromium || which google-chrome || true`
+    said.messages = [{
+      id: 'permission:p1', kind: 'permission', from: 'researcher', handedBy: null, to: 'operator', text: `Run: ${command}`, context: null,
+      eventId: 'e1', evidenceId: null, seq: 1, ts: '2026-10-06T02:02:00.000Z', offsetMs: 120_000, state: 'answered', error: null, carried: false,
+      permission: { requestId: 'p1', switch: 'commands', detail: command, outcome: 'allow_run', settled: null },
+      reply: { from: 'operator', text: 'allow_run', eventId: 'e2', seq: 2, ts: '2026-10-06T02:03:00.000Z', offsetMs: 180_000, source: null, sentBackTo: null },
+    }]
+    page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null }), request: message({}), notes: [] }]
+    renderChat()
+    fireEvent.click(await screen.findByRole('button', { expanded: true, name: /repl/ }))
+    await waitFor(() => expect(document.querySelector('.tc-decided')).not.toBeNull())
+    const meta = document.querySelector('.tc-decided .chat-meta')!
+    expect(meta).toHaveTextContent(`You let Researcher do this for the rest of the run: Run: ${command}`)
+    // Set to the right in its column, the line is held to the column's width; its words are cut.
+    expect(cascaded(meta, 'max-width')).toBe('100%')
+    expect([cascaded(meta.querySelector('.tc-to')!, 'min-width'), cascaded(meta.querySelector('.tc-to')!, 'text-overflow')]).toEqual(['0', 'ellipsis'])
+    // Its time keeps its width and its one line.
+    expect([cascaded(meta.querySelector('time')!, 'flex'), cascaded(meta.querySelector('time')!, 'white-space')]).toEqual(['none', 'nowrap'])
+    // The whole of it on hover.
+    expect(meta.querySelector('.tc-to')).toHaveAttribute('title', `You let Researcher do this for the rest of the run: Run: ${command}`)
+  })
+
   it('says nothing is checked when every item is off', async () => {
     said.doneWhen = { state: 'found', items: [{ text: 'At most 250 words', checked: false }], tries: null, rounds: null, checker: null, ended: false }
     page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null }), request: message({}), notes: [] }]
@@ -1707,6 +1736,9 @@ describe('a piece of work', () => {
 })
 
 describe('reactions', () => {
+  // Who worked on your request, as faces on it, shows in an agent's own chat; a team's chat has
+  // them on the piece's line instead.
+  const solo: TeamView = { ...team, solo: 'writer' }
   const handover: TeamMessage = {
     id: 'h-1', kind: 'handover', from: null, handedBy: { from: ['researcher'], via: [] }, to: 'writer', text: 'Three stories, sourced.', context: null,
     eventId: 'e0', evidenceId: null, seq: 0, ts: '2026-10-06T02:01:00.000Z', offsetMs: 60_000, state: 'delivered', error: null, reply: null, carried: false,
@@ -1721,7 +1753,7 @@ describe('reactions', () => {
   it('shows the agents looking up at what they were handed, and yours with what it tells the team', async () => {
     said.messages = [handover]
     page = [{ kind: 'work', run: run({}), request: message({}), notes: [], reactions: [{ target: 'answer', face: 'hmm', at: '2026-10-06T02:05:00.000Z' }] }]
-    renderChat()
+    renderChat({ team: solo })
     // Both worked on the request, and Writer was handed Researcher's work.
     expect(await screen.findByRole('button', { name: 'Researcher and Writer worked on this · 4 min' })).toBeDisabled()
     const talk = await screen.findByRole('region', { name: 'What the agents said' })
@@ -1734,7 +1766,7 @@ describe('reactions', () => {
       { kind: 'note', message: message({ id: 'n-1', route: 'team_note', runId: null, text: 'we only cover listed companies', createdAt: '2026-10-06T01:00:00.000Z' }) },
       { kind: 'work', run: run({}), request: message({}), notes: [message({ id: 'n-2', route: 'note', agentId: 'writer', text: 'keep it short', deliveredAt: '2026-10-06T02:02:00.000Z' })] },
     ]
-    renderChat()
+    renderChat({ team: solo })
     expect(await screen.findByRole('button', { name: "React to Writer's answer" })).toBeInTheDocument()
     for (const yours of ['React to your note', 'React to your request', 'React to your note to Writer']) {
       expect(screen.getByRole('button', { name: yours })).toBeInTheDocument()
@@ -1747,7 +1779,7 @@ describe('reactions', () => {
   it('keeps the faces against the message’s edge, with the button and any error on the far side', async () => {
     page = [{ kind: 'work', run: run({}), request: message({}), notes: [], reactions: [{ target: 'answer', face: 'hmm', at: '2026-10-06T02:05:00.000Z' }] }]
     answer = () => new Response('the archive is busy', { status: 503 })
-    renderChat()
+    renderChat({ team: solo })
     const row = (about: string) => screen.getByRole('group', { name: `Reactions to ${about}` })
     const order = (about: string) => [...row(about).children].map((child) => child.getAttribute('role') ?? child.querySelector('button')?.getAttribute('aria-label') ?? child.getAttribute('aria-label'))
     // Your request sits on the right: the agents' face ends at its edge, the button left of it.
@@ -2501,69 +2533,95 @@ describe('a link to one of the team’s runs', () => {
   })
 })
 
-// ADR 0051: in a team's chat each piece's talk is one line — faces, "N replies" — and the replies
-// are read beside the chat, so the chat holds what is said to you and the files handed to you.
-describe('replies beside the chat', () => {
+// ADR 0051: in a team's chat each piece's talk is one line — faces, "N replies" — and the owner
+// (2026-10-29) has the replies read in the chat, under that line, not beside it.
+describe('replies in the chat', () => {
   const said_ = (extra: Partial<TeamMessage> & Pick<TeamMessage, 'id' | 'kind'>): TeamMessage => ({
     from: null, handedBy: null, to: null, text: 'x', context: null, eventId: extra.id, evidenceId: null, seq: 1, ts: '2026-10-06T02:01:00.000Z',
     offsetMs: 0, state: 'delivered', error: null, reply: null, carried: false, ...extra,
   })
   const answered = (text: string) => ({ from: 'researcher', text, eventId: 'r1', seq: 2, ts: '2026-10-06T02:02:00.000Z', offsetMs: 0, source: 'open' as const, sentBackTo: null })
-  const slot = () => {
-    const element = document.createElement('div')
-    document.body.append(element)
-    return element
-  }
+  const talk = () => document.querySelector<HTMLElement>('.tc-said')
 
-  it('counts the replies as they are drawn, and opens them beside the chat rather than in it', async () => {
+  it('counts the replies as they are drawn, shows them under the line, and the line folds them', async () => {
     said.messages = [
       said_({ id: 'a1', kind: 'ask', from: 'writer', to: 'researcher', text: 'Which outlet broke the chip story?', reply: answered('Reuters, at 9:02.') }),
       said_({ id: 'a2', kind: 'ask', from: 'writer', to: 'researcher', text: 'And the second source?', seq: 3, state: 'pending' }),
     ]
     page = [{ kind: 'work', run: run({}), request: message({}), notes: [] }]
-    const onReplies = vi.fn()
-    renderChat({ onReplies })
+    const { props } = renderChat()
     const log = await screen.findByRole('log', { name: 'Messages' })
     // Two things said and one answer; the answer still awaited is no reply.
     const line = await within(log).findByRole('button', { name: '3 replies' })
-    expect(line).toHaveAttribute('aria-pressed', 'false')
     // Who they are from, and when the last came, said on hover: the line keeps few words.
     expect(line).not.toHaveTextContent('Last reply')
     expect(line).toHaveAttribute('title', `From Writer and Researcher · last reply ${clockTime('2026-10-06T02:02:00.000Z')}`)
     // Who said them, by their faces, in the order they spoke, and then who answered you.
     expect([...line.querySelectorAll('.chat-avatar')].map((face) => face.getAttribute('class')?.match(/hue-\d/)?.[0])).toEqual(['hue-2', 'hue-1'])
-    expect(log).not.toHaveTextContent('Which outlet broke the chip story?')
+    // The owner (2026-10-29): it sits at the line's right end, under your message, after Details.
+    const end = line.closest<HTMLElement>('.tc-replies-end')!
+    expect(line.closest('.tc-replies')!.lastElementChild).toBe(end)
+    expect(end.lastElementChild).toBe(line)
+    expect(cascaded(end, 'margin-left')).toBe('auto')
+    expect(within(end).getAllByRole('button')).toEqual([within(end).getByRole('button', { name: 'Details' }), line])
+    // The newest piece's replies are in the chat, under its line, before the answer. Open is the
+    // usual state, so its ring is the dim gold; the bright one is for the record open beside it.
+    expect(line).toHaveAttribute('aria-expanded', 'true')
+    expect(cascaded(line, 'border-color')).toBe('var(--color-accent-dim)')
+    await waitFor(() => expect(talk()).toHaveTextContent('Which outlet broke the chip story?'))
+    expect(log).toContainElement(talk())
+    expect(talk()).toHaveTextContent('Reuters, at 9:02.')
+    expect(talk()!.compareDocumentPosition(document.querySelector('.tc-answer')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // The line folds them, and opens them again; the answer stays in the chat.
     fireEvent.click(line)
-    expect(onReplies).toHaveBeenCalledWith('run-1')
-    // The answer is still the team's, in the chat.
+    expect(line).toHaveAttribute('aria-expanded', 'false')
+    expect(log).not.toHaveTextContent('Which outlet broke the chip story?')
     expect(within(log).getByText('The chip story.')).toBeInTheDocument()
+    fireEvent.click(line)
+    expect(log).toHaveTextContent('Which outlet broke the chip story?')
+    // The record opens beside the chat from the line's Details: the word, no stock icon.
+    const details = within(line.closest<HTMLElement>('.tc-replies')!).getByRole('button', { name: 'Details' })
+    expect(details.querySelector('svg')).toBeNull()
+    fireEvent.click(details)
+    expect(props.onDetails).toHaveBeenCalledWith('run-1')
   })
 
-  it('draws the replies where the pane shows them, and leaves what they ask of you on the chat’s card', async () => {
+  it('folds an older piece’s replies to its line until it is opened', async () => {
+    said.messages = [said_({ id: 'a1', kind: 'ask', from: 'writer', to: 'researcher', text: 'Which outlet?', reply: answered('Reuters.') })]
+    page = [
+      { kind: 'work', run: run({ runId: 'run-0', sessionId: 'run-0', createdAt: '2026-10-06T01:00:00.000Z' }), request: message({ id: 'm-0', runId: 'run-0' }), notes: [] },
+      { kind: 'work', run: run({ runId: 'run-1', reply: 'The second digest.' }), request: message({}), notes: [] },
+    ]
+    renderChat()
+    const older = await waitFor(() => {
+      const piece = document.querySelector<HTMLElement>('.tc-piece[data-run="run-0"]')
+      expect(piece).not.toBeNull()
+      return piece!
+    })
+    const line = await within(older).findByRole('button', { name: '2 replies' })
+    expect(line).toHaveAttribute('aria-expanded', 'false')
+    expect(older).not.toHaveTextContent('Which outlet?')
+    fireEvent.click(line)
+    expect(older.querySelector('.tc-said')).toHaveTextContent('Which outlet?')
+  })
+
+  it('answers a review on the message that asks, so the screen has one Approve', async () => {
     const waitingOn = { node: 'review', name: 'Your review', kind: 'review_stop' as const, since: '2026-10-06T02:03:00.000Z', question: 'Check it', context: 'Three stories', handoverFrom: 'researcher', park: 'reloadable' as const, parkNote: '', sendBackAvailable: true }
     said.messages = [
       said_({ id: 'a1', kind: 'ask', from: 'writer', to: 'researcher', text: 'Which outlet broke the chip story?', reply: answered('Reuters, at 9:02.') }),
       said_({ id: 'h1', kind: 'handover', from: 'researcher', to: 'review', text: 'Three stories, with sources.', seq: 4, state: 'pending' }),
     ]
     page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null, waitingOn }), request: message({}), notes: [] }]
-    const pane = slot()
-    renderChat({ onReplies: vi.fn(), repliesRunId: 'run-1', repliesSlot: pane })
-    await waitFor(() => expect(pane).toHaveTextContent('Which outlet broke the chip story?'))
-    expect(pane).toHaveTextContent('Reuters, at 9:02.')
-    const log = screen.getByRole('log', { name: 'Messages' })
-    expect(log).not.toHaveTextContent('Which outlet broke the chip story?')
-    expect(within(log).getByRole('button', { name: /^\d+ replies$/ })).toHaveAttribute('aria-pressed', 'true')
-    // One Approve on the screen, on the chat's card; the replies say what waits, without buttons.
+    renderChat()
+    await waitFor(() => expect(talk()).toHaveTextContent('Three stories, with sources.'))
     expect(screen.getAllByRole('button', { name: 'Approve' })).toHaveLength(1)
-    expect(within(log).getByRole('button', { name: 'Approve' })).toBeInTheDocument()
-    expect(within(pane).queryByRole('button', { name: 'Approve' })).toBeNull()
-    pane.remove()
+    expect(within(talk()!).getByRole('button', { name: 'Approve' })).toBeInTheDocument()
   })
 
   it('keeps what you answered in the chat once the work is done', async () => {
     said.messages = [said_({ id: 'q1', kind: 'question', from: 'writer', to: 'operator', text: 'Which market?', reply: { ...answered('Europe only, please.'), from: 'operator' } })]
     page = [{ kind: 'work', run: run({}), request: message({}), notes: [] }]
-    renderChat({ onReplies: vi.fn() })
+    renderChat()
     const log = await screen.findByRole('log', { name: 'Messages' })
     await waitFor(() => expect(within(log).getByText('Europe only, please.')).toBeInTheDocument())
     expect(log).not.toHaveTextContent('Which market?Which market?')
@@ -2571,44 +2629,59 @@ describe('replies beside the chat', () => {
 
   it('says Replies, with no count, until the piece’s record is read', async () => {
     page = [{ kind: 'work', run: run({}), request: message({}), notes: [] }]
-    const onReplies = vi.fn()
-    renderChat({ onReplies })
+    renderChat()
     const line = await within(await screen.findByRole('log', { name: 'Messages' })).findByRole('button', { name: 'Replies' })
     expect(line).not.toHaveAttribute('title')
-    fireEvent.click(line)
-    expect(onReplies).toHaveBeenCalledWith('run-1')
   })
 
-  it('answers a permission the replies show on the chat’s card, not in the replies', async () => {
+  it('answers a permission on the message that asks, once on the screen', async () => {
     const asked = { id: 'p1', agent: 'researcher', name: 'Researcher', title: 'Run: ls -la', kind: 'execute', switch: 'commands' as const, since: '2026-10-06T02:01:00.000Z', expiresAt: new Date(Date.now() + 9 * 60000).toISOString() }
     said.messages = [said_({ id: 'permission:p1', kind: 'permission', from: 'researcher', to: 'operator', text: 'Run: ls -la', state: 'pending', permission: { requestId: 'p1', switch: 'commands', detail: 'ls -la', outcome: null, settled: null } })]
     page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null, working: ['researcher'], permissionRequests: [asked] }), request: message({}), notes: [] }]
-    const pane = slot()
-    renderChat({ onReplies: vi.fn(), repliesRunId: 'run-1', repliesSlot: pane })
-    await waitFor(() => expect(pane).toHaveTextContent('ls -la'))
+    renderChat()
+    await waitFor(() => expect(talk()).toHaveTextContent('ls -la'))
     expect(screen.getAllByRole('button', { name: 'Allow' })).toHaveLength(1)
-    expect(within(screen.getByRole('log', { name: 'Messages' })).getByRole('button', { name: 'Allow' })).toBeInTheDocument()
-    pane.remove()
+    expect(within(talk()!).getByRole('button', { name: 'Allow' })).toBeInTheDocument()
   })
 
-  it('opens the replies to show one of them, asked for from the record or a search', async () => {
+  it('opens an older piece’s replies to show one of them, asked for from the record or a search', async () => {
+    said.messages = [said_({ id: 'a1', kind: 'ask', from: 'writer', to: 'researcher', text: 'Which outlet?', reply: answered('Reuters.') })]
+    page = [
+      { kind: 'work', run: run({ runId: 'run-0', sessionId: 'run-0', createdAt: '2026-10-06T01:00:00.000Z' }), request: message({ id: 'm-0', runId: 'run-0' }), notes: [] },
+      { kind: 'work', run: run({ runId: 'run-1', reply: 'The second digest.' }), request: message({}), notes: [] },
+    ]
+    const { props, rerender } = renderChat()
+    await waitFor(() => expect(document.querySelector('.tc-piece[data-run="run-0"]')).not.toBeNull())
+    const older = document.querySelector<HTMLElement>('.tc-piece[data-run="run-0"]')!
+    await within(older).findByRole('button', { name: '2 replies' })
+    expect(older).not.toHaveTextContent('Which outlet?')
+    rerender(<TeamChat {...props} reveal={{ runId: 'run-0', id: 'a1', at: 1 }} />)
+    await waitFor(() => expect(older).toHaveTextContent('Which outlet?'))
+    expect(within(older).getByRole('button', { name: '2 replies' })).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  // ADR 0043: a stopped piece's record opens from its line; its card doesn't offer it again.
+  it('opens a stopped piece’s record from its line alone', async () => {
+    said.messages = [said_({ id: 'a1', kind: 'ask', from: 'writer', to: 'researcher', text: 'Which outlet?', reply: answered('Reuters.') })]
+    page = [{ kind: 'work', run: run({ status: 'failed', reply: null, error: 'pipeline node writer failed: LoomWatch couldn’t reach ChatGPT: error decoding response body' }), request: message({}), notes: [] }]
+    const { props } = renderChat()
+    await screen.findByText('The work stopped.')
+    await screen.findByRole('button', { name: '2 replies' })
+    expect(screen.queryByRole('button', { name: 'See what happened' })).toBeNull()
+    expect(screen.getAllByRole('button', { name: 'Details' })).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: 'Details' }))
+    expect(props.onDetails).toHaveBeenCalledWith('run-1')
+  })
+
+  it('marks the line’s Details pressed only while the pane beside the chat shows the record', async () => {
     said.messages = [said_({ id: 'a1', kind: 'ask', from: 'writer', to: 'researcher', text: 'Which outlet?', reply: answered('Reuters.') })]
     page = [{ kind: 'work', run: run({}), request: message({}), notes: [] }]
-    const onReplies = vi.fn()
-    // Coming back to the chat with one already shown opens nothing again.
-    const { props, rerender } = renderChat({ onReplies, reveal: { runId: 'run-1', id: 'a1', at: 0 } })
-    await screen.findByRole('button', { name: '2 replies' })
-    await new Promise((resolve) => setTimeout(resolve, 20))
-    expect(onReplies).not.toHaveBeenCalled()
-    rerender(<TeamChat {...props} reveal={{ runId: 'run-1', id: 'a1', at: 1 }} />)
-    await waitFor(() => expect(onReplies).toHaveBeenCalledWith('run-1', false))
-    // The answer, your request and your notes are in the chat already: showing them opens nothing.
-    for (const [id, at] of [['answer:run-1', 2], ['request:run-1', 3]] as const) {
-      onReplies.mockClear()
-      rerender(<TeamChat {...props} reveal={{ runId: 'run-1', id, at }} />)
-      await new Promise((resolve) => setTimeout(resolve, 20))
-      expect(onReplies).not.toHaveBeenCalled()
-    }
+    // The pane shows a file the work made.
+    const { props, rerender } = renderChat({ detailsRunId: 'run-1', recordRunId: null })
+    const details = await screen.findByRole('button', { name: 'Details' })
+    expect(details).toHaveAttribute('aria-pressed', 'false')
+    rerender(<TeamChat {...props} recordRunId="run-1" />)
+    expect(screen.getByRole('button', { name: 'Details' })).toHaveAttribute('aria-pressed', 'true')
   })
 
   it('hands over a file another agent made from that agent, before the answer that names it', async () => {
@@ -2619,7 +2692,7 @@ describe('replies beside the chat', () => {
     ]
     page = [{ kind: 'work', run: run({ reply: `Done. The digest is \`${folder}/writer/digest.md\`; the sources are \`${folder}/researcher/sources.md\`.` }), request: message({}), notes: [] }]
     const onHandOver = vi.fn()
-    renderChat({ onReplies: vi.fn(), onHandOver })
+    renderChat({ onHandOver })
     const fromResearcher = await screen.findByRole('group', { name: 'Files from Researcher' })
     expect(within(fromResearcher).getByText('sources.md')).toBeInTheDocument()
     const handed = fromResearcher.closest<HTMLElement>('.chat-msg')!
