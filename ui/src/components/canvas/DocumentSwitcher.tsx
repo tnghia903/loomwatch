@@ -27,8 +27,11 @@ export interface DocumentSwitcherProps {
   onSaveCopy: () => void
   onReload: () => void
   onDiscard: () => void
-  /** Rename the open team; absent while it cannot be edited. */
-  onRename?: (name: string) => void
+  /**
+   * Rename the open team, and its file with it (ADR 0099); absent while it cannot be edited.
+   * Resolves to why it was not renamed, or null.
+   */
+  onRename?: (name: string) => Promise<string | null> | void
   /** Ask to delete the open team (the confirmation is the caller's); absent while it has no file. */
   onDelete?: () => void
   onSelectProblem: (problem: ReviewProblem) => void
@@ -45,6 +48,9 @@ export function DocumentSwitcher(props: DocumentSwitcherProps) {
   const [switcherOpen, setSwitcherOpen] = useState(false)
   const [discardConfirm, setDiscardConfirm] = useState(false)
   const [renaming, setRenaming] = useState<string | null>(null)
+  // While the file moves, and why it didn't when it couldn't.
+  const [renameBusy, setRenameBusy] = useState(false)
+  const [renameRefused, setRenameRefused] = useState<string | null>(null)
   const chipRef = useRef<HTMLDivElement>(null)
 
   const problems = useMemo(() => reviewProblems(entrypointProblem, fieldProblemsByAgent, documentProblems, agentNames), [entrypointProblem, fieldProblemsByAgent, documentProblems, agentNames])
@@ -55,7 +61,7 @@ export function DocumentSwitcher(props: DocumentSwitcherProps) {
   useEffect(() => {
     if (!switcherOpen && !problemsOpen) return
     function onPointerDown(event: MouseEvent) {
-      if (chipRef.current && !chipRef.current.contains(event.target as Node)) { setSwitcherOpen(false); onProblemsOpenChange(false); setDiscardConfirm(false); setRenaming(null) }
+      if (chipRef.current && !chipRef.current.contains(event.target as Node)) { setSwitcherOpen(false); onProblemsOpenChange(false); setDiscardConfirm(false); setRenaming(null); setRenameRefused(null) }
     }
     window.addEventListener('mousedown', onPointerDown)
     return () => window.removeEventListener('mousedown', onPointerDown)
@@ -66,6 +72,17 @@ export function DocumentSwitcher(props: DocumentSwitcherProps) {
   const dirty = ['dirty', 'invalid', 'conflict', 'new'].includes(saveState)
   // Leaving the page after a delete would stop on the browser's "unsaved changes" prompt.
   const unsaved = dirty || saveState === 'saving' || saveState === 'error'
+  // A saved team's file moves at once, so its changes come first; a team not saved yet only
+  // changes the name it will be saved under.
+  const renameWaits = unsaved && saveState !== 'new'
+  const rename = async (name: string) => {
+    if (!onRename) return
+    setRenameBusy(true)
+    const refused = await onRename(name) ?? null
+    setRenameBusy(false)
+    setRenameRefused(refused)
+    if (!refused) setRenaming(null)
+  }
 
   let state: ChipState = 'clean'
   let l1 = teamName ?? filename
@@ -111,16 +128,17 @@ export function DocumentSwitcher(props: DocumentSwitcherProps) {
       {switcherOpen && (
         <div id="switcher-pop" className="pop e2" role="dialog" aria-label="Team menu" style={{ top: 'calc(var(--lw-chip-h) + 8px)', left: '50%', transform: 'translateX(-50%)', width: 'min(392px, calc(100vw - 32px))' }} onKeyDown={(event) => { if (event.key === 'Escape') setSwitcherOpen(false) }}>
           {renaming !== null && onRename && (
-            <form className="pop-inline t-meta" aria-label="Rename team" onSubmit={(event) => { event.preventDefault(); onRename(renaming); setRenaming(null) }}>
-              <input className="input" autoFocus aria-label="Team name" value={renaming} onChange={(event) => setRenaming(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); setRenaming(null) } }} style={{ flex: 1, minWidth: 0 }} />
-              <button type="submit" className="btn btn-primary" disabled={!renaming.trim()}>Rename</button>
-              <button type="button" className="btn" onClick={() => setRenaming(null)}>Cancel</button>
+            <form className="pop-inline t-meta" aria-label="Rename team" aria-busy={renameBusy} onSubmit={(event) => { event.preventDefault(); void rename(renaming) }}>
+              <input className="input" autoFocus aria-label="Team name" value={renaming} onChange={(event) => { setRenaming(event.target.value); setRenameRefused(null) }} onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); setRenaming(null); setRenameRefused(null) } }} style={{ flex: 1, minWidth: 0 }} />
+              <button type="submit" className="btn btn-primary" disabled={!renaming.trim() || renameBusy}>Rename</button>
+              <button type="button" className="btn" onClick={() => { setRenaming(null); setRenameRefused(null) }}>Cancel</button>
             </form>
           )}
+          {renaming !== null && renameRefused && <p className="pop-note t-meta" role="alert" style={{ margin: 0 }}>{renameRefused}</p>}
           <div className="pop-foot">
             <span className="path t-mono-sm selectable">{path}</span>
             <span className="acts">
-              {onRename && <button type="button" className="link" onClick={() => setRenaming(teamName ?? filename.replace(/\.ya?ml$/i, ''))}>Rename</button>}
+              {onRename && <button type="button" className="link" onClick={() => setRenaming(teamName ?? filename.replace(/\.ya?ml$/i, ''))} disabled={renameWaits} title={renameWaits ? 'Save or discard your changes first' : undefined}>Rename</button>}
               {onDelete && <button type="button" className="link alert" onClick={() => { setSwitcherOpen(false); onDelete() }} disabled={unsaved} title={unsaved ? 'Save or discard your changes first' : undefined}>Delete team…</button>}
               <button type="button" className="link" onClick={() => void navigator.clipboard?.writeText(path)}>Copy path</button>
               {/* Both read the file again (ADR 0043): with changes it is Discard, which asks first;

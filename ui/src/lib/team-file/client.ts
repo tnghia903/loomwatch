@@ -97,6 +97,21 @@ export async function saveTeamFile(path: string, yaml: string, revision: string 
   return readTeamFileResponse(response)
 }
 
+/**
+ * Rename a saved team and move its file to match (ADR 0099): `yaml` is the file as it is on disk
+ * with its new name, `stem` the name as a file name (`kyoto-week`). The daemon takes the next free
+ * name after it, moves the files kept beside the team with it, and files its history under the
+ * new path, which the answer names relative to the teams folder.
+ */
+export async function renameTeamFile(path: string, stem: string, yaml: string, revision: string): Promise<TeamFilePayload> {
+  const response = await daemonFetch('/api/team/rename', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'If-Match': `"${revision}"` },
+    body: JSON.stringify({ path, stem, yaml }),
+  })
+  return readTeamFileResponse(response)
+}
+
 // docs/CANVAS_SPEC.md §9.2: "Fetch it once at load; do not bundle a copy into the UI, because
 // a bundled copy is a second source of truth that silently drifts from the daemon that will
 // reject the save." `schemas/team.schema.yaml` embedded in the running binary is the only copy.
