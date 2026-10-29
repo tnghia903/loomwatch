@@ -5,27 +5,35 @@
 .lw-app-main { position: relative; flex: 1; min-width: 0; min-height: 0; }
 .lw-dock { flex: none; width: 72px; height: 100%; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between; padding: var(--sp-3) 0; background: var(--color-panel); border-right: 1px solid var(--color-hairline); z-index: 60; }
 .lw-dock-places { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; align-items: center; gap: var(--sp-1); }
-.lw-dock-place { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; width: 56px; min-height: 48px; padding: 6px 0; box-sizing: border-box; border: 0; border-radius: var(--r-md); background: transparent; color: var(--color-ink-2); text-decoration: none; cursor: pointer; font: inherit; }
+/* One height whether a place shows its name or not, so the column never jumps as names leave. */
+.lw-dock-place { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; width: 60px; height: 54px; padding: 0; box-sizing: border-box; border: 0; border-radius: var(--r-md); background: transparent; color: var(--color-ink-2); text-decoration: none; cursor: pointer; font: inherit; }
 .lw-dock-place:hover { background: color-mix(in srgb, var(--color-ink) 6%, transparent); color: var(--color-ink); }
-.lw-dock-place[aria-current='page'] { color: var(--color-ink); background: color-mix(in srgb, var(--color-ink) 8%, transparent); }
+.lw-dock-place[aria-current='page'] { color: var(--color-ink); background: color-mix(in srgb, var(--color-ink) 9%, transparent); }
+/* Ask open: pressed, with a hairline ring, so it never reads as "you are here". */
+.lw-dock-place[aria-pressed='true'] { color: var(--color-ink); background: color-mix(in srgb, var(--color-ink) 9%, transparent); box-shadow: inset 0 0 0 1px var(--color-hairline); }
 /* Where you are: the gold stitch beside the place, a line in the text gold, never a fill. */
-.lw-dock-place[aria-current='page']::before { content: ''; position: absolute; left: -8px; top: 12px; bottom: 12px; border-left: 3px dashed var(--color-accent); }
+.lw-dock-stitch { position: absolute; left: -3px; top: 50%; translate: 0 -50%; width: 4px; height: 28px; color: var(--color-accent); overflow: visible; }
 .lw-dock-icon { position: relative; display: inline-flex; }
-/* A newcomer's names, in the ink so 11 px still reads; they leave once each place is known. */
-.lw-dock-label { font-size: 11px; line-height: 13px; font-weight: 500; color: var(--color-ink); }
+/* A newcomer's names, in the ink so 11 px still reads; they leave once each place is known, and
+   come back on keyboard focus (Dock.tsx), where a hover's title never shows. */
+.lw-dock-label { max-width: 58px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; line-height: 13px; font-weight: 500; color: var(--color-ink); }
 .lw-dock-label[hidden] { display: none; }
 /* What needs you: a count on Home, in gold words on a ring, never a gold fill and never red. */
-.lw-dock-count { position: absolute; top: -7px; right: -12px; min-width: 18px; height: 18px; padding: 0 4px; box-sizing: border-box; border: 1.5px solid var(--color-accent); border-radius: var(--r-full); background: var(--color-ground); color: var(--color-accent); font-size: 11px; line-height: 15px; font-weight: 600; text-align: center; }
+.lw-dock-count { position: absolute; top: -7px; right: -12px; min-width: 18px; height: 18px; padding: 0 4px; box-sizing: border-box; border: 1.5px solid var(--color-accent); border-radius: var(--r-full); background: var(--color-panel-solid); color: var(--color-accent); font-size: 11px; line-height: 15px; font-weight: 600; text-align: center; font-variant-numeric: tabular-nums; }
 /* Ask at work: a small dot in the working blue, said in Ask's name as well. It holds still. */
-.lw-dock-live { position: absolute; top: -3px; right: -5px; width: 8px; height: 8px; border-radius: var(--r-full); background: var(--glow-working); box-shadow: 0 0 0 2px var(--color-panel); }
-.lw-dock-place[aria-pressed='true'] { color: var(--color-ink); background: color-mix(in srgb, var(--color-ink) 8%, transparent); }
+.lw-dock-live { position: absolute; top: -3px; right: -5px; width: 8px; height: 8px; border-radius: var(--r-full); background: var(--color-live); box-shadow: 0 0 0 2px var(--color-panel); }
 
-/* A phone: the dock lies along the top, as the rail did, and the stitch runs under the place. */
+/* A phone: the dock lies along the top, the seven places share the row at 44 px or more each, and
+   the stitch runs under the place. Nothing scrolls, so the focus ring and the count show whole. */
 @media (max-width: 767px) {
   .lw-app { --lw-rail-w: 0px; flex-direction: column; }
-  .lw-dock { width: 100%; height: auto; flex-direction: row; padding: 0 var(--sp-2); border-right: 0; border-bottom: 1px solid var(--color-hairline); overflow-x: auto; }
-  .lw-dock-places { flex-direction: row; }
-  .lw-dock-place[aria-current='page']::before { left: 12px; right: 12px; top: auto; bottom: -1px; border-left: 0; border-bottom: 3px dashed var(--color-accent); }
+  .lw-dock { width: 100%; height: auto; flex-direction: row; gap: 0; padding: 4px var(--sp-2); border-right: 0; border-bottom: 1px solid var(--color-hairline); overflow: visible; }
+  .lw-dock-places { flex-direction: row; gap: 0; flex: 5 1 0; justify-content: space-around; }
+  .lw-dock-foot { flex: 2 1 0; }
+  .lw-dock-places > li { flex: 1 1 0; min-width: 44px; display: flex; justify-content: center; }
+  .lw-dock-place { width: 100%; max-width: 60px; min-width: 44px; height: 52px; }
+  .lw-dock-label { max-width: 100%; font-size: 10px; letter-spacing: -0.01em; }
+  .lw-dock-stitch { left: 50%; top: auto; bottom: -17px; translate: -50% 0; rotate: 90deg; }
 }
 
 /* The first run is one conversation with your first agent: no dock until it is done. */

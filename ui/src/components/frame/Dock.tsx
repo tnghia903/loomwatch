@@ -1,4 +1,4 @@
-import { useEffect, useState, useSyncExternalStore, type MouseEvent } from 'react'
+import { useEffect, useState, useSyncExternalStore, type FocusEvent, type MouseEvent } from 'react'
 
 import { useNeedsYou } from '../../lib/story/useNeedsYou'
 import { Icon, type IconName } from '../ui/icon'
@@ -10,7 +10,7 @@ import { countUse, LABEL_USES, placeOf, readUses, toggleAsk, useAskShown, type P
 const PLACES: readonly { place: Place; label: string; icon: IconName; href?: string }[] = [
   { place: 'home', label: 'Home', icon: 'home', href: '/' },
   { place: 'projects', label: 'Projects', icon: 'projects', href: '/projects' },
-  { place: 'agents', label: 'Agents', icon: 'agent', href: '/agents' },
+  { place: 'agents', label: 'My agents', icon: 'agent', href: '/agents' },
   { place: 'skills', label: 'Skills', icon: 'skills', href: '/skills' },
   { place: 'quests', label: 'Quests', icon: 'quests', href: '/quests' },
 ]
@@ -48,6 +48,8 @@ export function Dock() {
   const { tickets } = useNeedsYou()
   const [uses] = useState(readUses)
   const asking = useAskShown()
+  // The place keyboard focus is on shows its name again, where a hover's title never shows.
+  const [focused, setFocused] = useState<Place | null>(null)
   const here = useSyncExternalStore(subscribePlace, placeHere, () => 'home' as Place)
   const needs = tickets.length
   useEffect(() => {
@@ -64,7 +66,7 @@ export function Dock() {
   const item = ({ place, label, icon, href }: (typeof PLACES)[number]) => {
     const learned = (uses[place] ?? 0) >= LABEL_USES
     const said = place === 'home' && needs > 0 ? `${label}, ${needs} need${needs === 1 ? 's' : ''} you`
-      : place === 'ask' && asking.activity ? `${label} (${asking.activity})`
+      : place === 'ask' ? `Ask LoomWatch${asking.here ? '' : ', on Home'}${asking.activity ? ` (${asking.activity})` : ''}`
       : label
     const body = (
       <>
@@ -73,14 +75,19 @@ export function Dock() {
           {place === 'home' && needs > 0 && <span className="lw-dock-count" aria-hidden="true">{needs > 99 ? '99+' : needs}</span>}
           {place === 'ask' && asking.activity && <i className="lw-dock-live" aria-hidden="true" />}
         </span>
-        <span className="lw-dock-label" aria-hidden="true" hidden={learned || undefined}>{label}</span>
+        <span className="lw-dock-label" aria-hidden="true" hidden={(learned && focused !== place) || undefined}>{label}</span>
+        {here === place && <svg className="lw-dock-stitch" viewBox="0 0 4 28" aria-hidden="true"><path d="M2 2V26" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeDasharray="4 4" fill="none" /></svg>}
       </>
     )
+    const focus = {
+      onFocus: (event: FocusEvent<HTMLElement>) => { if (event.currentTarget.matches(':focus-visible')) setFocused(place) },
+      onBlur: () => setFocused((current) => (current === place ? null : current)),
+    }
     return (
       <li key={place}>
         {href
-          ? <a className="lw-dock-place" href={href} aria-label={said} title={said} aria-current={here === place ? 'page' : undefined} data-tour={place === 'home' ? 'dock-home' : undefined} onClick={(event) => follow(place, href, event)}>{body}</a>
-          : <button type="button" className="lw-dock-place" aria-label={said} aria-pressed={asking.open} title={`${said} (${keys('⌘J')})`} onClick={() => { countUse(place); toggleAsk() }}>{body}</button>}
+          ? <a className="lw-dock-place" href={href} aria-label={said} title={said} aria-current={here === place ? 'page' : undefined} data-tour={place === 'home' ? 'dock-home' : undefined} onClick={(event) => follow(place, href, event)} {...focus}>{body}</a>
+          : <button type="button" className="lw-dock-place" aria-label={said} aria-pressed={asking.open} title={`${said} (${keys('⌘J')})`} onClick={() => { countUse(place); toggleAsk() }} {...focus}>{body}</button>}
       </li>
     )
   }

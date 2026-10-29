@@ -46,7 +46,7 @@ function aheadOn(screen: Screen, index: number): number {
  * a team can be left behind like that: Your agents comes before both, so leaving it moves the guide on.
  */
 const RESUME = {
-  home: { title: 'Go to My team to carry on', body: 'The next step is on Home. Go to My team to carry on.', advance: 'next' },
+  home: { title: 'Go Home to carry on', body: 'The next step is on Home.', advance: 'next' },
   workspace: { title: 'Open a team to carry on', body: 'The rest of the guide happens inside a team. Open a project and one of its teams, or press Start again.', advance: 'next' },
 } satisfies Partial<Record<Screen, TourStepView>>
 
@@ -190,7 +190,7 @@ export function GettingStarted({ keyReady, keyLoading }: GettingStartedProps) {
         target={null}
         viewport={snapshot.viewport}
         actions={home
-          ? <a className="btn" href="/">My team</a>
+          ? <a className="btn" href="/">Home</a>
           : <button type="button" className="btn" onClick={() => goToStep('new-team')}>Start again</button>}
       />
     )

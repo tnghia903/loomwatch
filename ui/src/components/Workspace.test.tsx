@@ -158,7 +158,7 @@ describe('Workspace', () => {
     const ask = () => screen.queryByRole('complementary', { name: 'Ask LoomWatch' })
     // Ask is the dock's, on every screen: the team's header has no button of its own for it.
     expect(within(document.querySelector('.workspace-chrome') as HTMLElement).queryByRole('button', { name: /Ask/ })).toBeNull()
-    const dockAsk = screen.getByRole('button', { name: 'Ask' })
+    const dockAsk = screen.getByRole('button', { name: 'Ask LoomWatch' })
     fireEvent.click(dockAsk)
     // At once: the panel comes with the app, so nothing waits for its code.
     expect(screen.getByRole('complementary', { name: 'Ask LoomWatch' })).toBeInTheDocument()
@@ -183,7 +183,7 @@ describe('Workspace', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Run team' }))
     const chat = screen.getByRole('region', { name: /chat$/ })
     expect(cascaded(chat, ['inset', 'right'])).not.toMatch(/inspector/)
-    fireEvent.click(screen.getByRole('button', { name: 'Ask' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Ask LoomWatch' }))
     expect(screen.getByRole('complementary', { name: 'Ask LoomWatch' })).toBeInTheDocument()
     expect(cascaded(chat, ['inset', 'right'])).toBe('calc(var(--lw-inspector-w) + 2 * var(--lw-panel-inset))')
     // On a phone Ask is a sheet at the bottom, and the chat keeps the whole width.

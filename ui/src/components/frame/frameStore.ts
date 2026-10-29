@@ -23,7 +23,8 @@ const ASK_OPEN_KEY = 'loomwatch:ask:open'
 /** A screen's own Ask panel: the dock's Ask toggles it while the screen is shown. */
 export function registerAskToggle(toggle: () => void): () => void {
   askToggles = [...askToggles, toggle]
-  return () => { askToggles = askToggles.filter((one) => one !== toggle) }
+  publish()
+  return () => { askToggles = askToggles.filter((one) => one !== toggle); publish() }
 }
 
 export function toggleAsk() {
@@ -33,17 +34,24 @@ export function toggleAsk() {
   window.location.assign('/')
 }
 
-/** Whether the screen's Ask panel is open, and what it is doing, for the dock's Ask to show. */
-export interface AskShown { open: boolean; activity: string | null }
-const ASK_CLOSED: AskShown = { open: false, activity: null }
+/** Whether the screen has an Ask panel of its own, whether it is open, and what Ask is doing, for
+    the dock's Ask to show. */
+export interface AskShown { here: boolean; open: boolean; activity: string | null }
+const ASK_CLOSED: AskShown = { here: false, open: false, activity: null }
 let askShown = ASK_CLOSED
+let askState = { open: false, activity: null as string | null }
 const askWatchers = new Set<() => void>()
+function publish() {
+  const here = askToggles.length > 0
+  if (here === askShown.here && askState.open === askShown.open && askState.activity === askShown.activity) return
+  askShown = { here, ...askState }
+  askWatchers.forEach((watch) => watch())
+}
 
 /** A screen with an Ask panel says how it is; it says closed when it goes. */
-export function showAsk(next: AskShown) {
-  if (next.open === askShown.open && next.activity === askShown.activity) return
-  askShown = next.open || next.activity ? next : ASK_CLOSED
-  askWatchers.forEach((watch) => watch())
+export function showAsk(next: { open: boolean; activity: string | null }) {
+  askState = next
+  publish()
 }
 
 export function useAskShown(): AskShown {
@@ -59,11 +67,12 @@ export function useAskShown(): AskShown {
 export const LABEL_USES = 5
 const USES_KEY = 'loomwatch:dock:uses'
 
-export function readUses(): Partial<Record<Place, number>> {
-  try { return JSON.parse(window.localStorage.getItem(USES_KEY) ?? '{}') as Partial<Record<Place, number>> } catch { return {} }
+/** How many times each place has been used, by its name: the dock's places, and You's tabs. */
+export function readUses(): Partial<Record<string, number>> {
+  try { return JSON.parse(window.localStorage.getItem(USES_KEY) ?? '{}') as Partial<Record<string, number>> } catch { return {} }
 }
 
-export function countUse(place: Place) {
+export function countUse(place: string) {
   const uses = readUses()
   uses[place] = (uses[place] ?? 0) + 1
   try { window.localStorage.setItem(USES_KEY, JSON.stringify(uses)) } catch { /* a private window keeps its labels */ }

@@ -27,9 +27,6 @@
 }
 /* Wraps rather than scroll sideways when the bell and an update badge are long. */
 .home-top-acts { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: var(--sp-2); }
-/* The menu stands in the row, and stays on a phone, where it is the only way to Feedback and the
-   theme. */
-.home-top-acts .prototype-workspace-menu { display: flex; position: relative; right: auto; top: auto; }
 
 .home-main {
   position: relative; flex: 1; width: min(1180px, 100%); margin: 0 auto;

@@ -1,8 +1,8 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { Dock } from './Dock'
-import { LABEL_USES, placeOf, registerAskToggle } from './frameStore'
+import { LABEL_USES, placeOf, registerAskToggle, showAsk } from './frameStore'
 
 const waiting = {
   runId: 'run-1', sessionId: 'run-1', teamPath: 'demo.yaml', prompt: 'Find suppliers', status: 'running', mode: 'pipeline',
@@ -29,8 +29,8 @@ describe('the dock', () => {
     window.history.replaceState({}, '', '/agents/researcher')
     render(<Dock />)
     const dock = screen.getByRole('navigation', { name: 'LoomWatch' })
-    expect(within(dock).getAllByRole('listitem').map((item) => item.textContent)).toEqual(['Home', 'Projects', 'Agents', 'Skills', 'Quests', 'Ask', 'You'])
-    expect(within(dock).getByRole('link', { name: 'Agents' })).toHaveAttribute('aria-current', 'page')
+    expect(within(dock).getAllByRole('listitem').map((item) => item.textContent)).toEqual(['Home', 'Projects', 'My agents', 'Skills', 'Quests', 'Ask', 'You'])
+    expect(within(dock).getByRole('link', { name: 'My agents' })).toHaveAttribute('aria-current', 'page')
     expect(within(dock).getByRole('link', { name: 'Home' })).not.toHaveAttribute('aria-current')
     expect(within(dock).getByRole('link', { name: 'Projects' })).toHaveAttribute('href', '/projects')
   })
@@ -48,25 +48,52 @@ describe('the dock', () => {
     render(<Dock />)
     const label = (name: string) => screen.getByRole('link', { name }).querySelector('.lw-dock-label')
     expect(label('Home')).not.toBeVisible()
-    expect(label('Agents')).toBeVisible()
-    fireEvent.click(screen.getByRole('link', { name: 'Agents' }))
+    expect(label('My agents')).toBeVisible()
+    fireEvent.click(screen.getByRole('link', { name: 'My agents' }))
     expect(JSON.parse(localStorage.getItem('loomwatch:dock:uses') ?? '{}')).toMatchObject({ agents: LABEL_USES })
+    // Keyboard focus brings a learned name back, where a hover's title never shows.
+    const home = screen.getByRole('link', { name: 'Home' })
+    const homeName = label('Home')
+    const matches = home.matches.bind(home)
+    vi.spyOn(home, 'matches').mockImplementation((selector) => selector === ':focus-visible' || matches(selector))
+    fireEvent.focus(home)
+    expect(homeName).toBeVisible()
+    fireEvent.blur(home)
+    expect(homeName).not.toBeVisible()
   })
 
-  it('opens the screen’s own Ask, or Home’s when the screen has none', () => {
+  it('opens the screen’s own Ask, or Home’s when the screen has none, and says which', () => {
     daemon([])
     const toggle = vi.fn()
     const unregister = registerAskToggle(toggle)
     render(<Dock />)
-    fireEvent.click(screen.getByRole('button', { name: 'Ask' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Ask LoomWatch' }))
     expect(toggle).toHaveBeenCalledTimes(1)
-    unregister()
+    fireEvent.keyDown(window, { key: 'j', metaKey: true })
+    expect(toggle).toHaveBeenCalledTimes(2)
+    act(() => unregister())
     const assign = vi.fn()
     vi.stubGlobal('location', { ...window.location, assign, pathname: '/skills', search: '' })
-    fireEvent.click(screen.getByRole('button', { name: 'Ask' }))
-    expect(toggle).toHaveBeenCalledTimes(1)
+    fireEvent.click(screen.getByRole('button', { name: 'Ask LoomWatch, on Home' }))
+    expect(toggle).toHaveBeenCalledTimes(2)
     expect(sessionStorage.getItem('loomwatch:ask:open')).toBe('true')
     expect(assign).toHaveBeenCalledWith('/')
+  })
+})
+
+describe('Ask in the dock', () => {
+  it('says when Ask is at work, and whether the screen’s panel is open', () => {
+    daemon([])
+    const unregister = registerAskToggle(vi.fn())
+    act(() => showAsk({ open: false, activity: 'Drafting the team' }))
+    render(<Dock />)
+    const ask = screen.getByRole('button', { name: 'Ask LoomWatch (Drafting the team)' })
+    expect(ask).toHaveAttribute('aria-pressed', 'false')
+    expect(ask.querySelector('.lw-dock-live')).not.toBeNull()
+    act(() => showAsk({ open: true, activity: null }))
+    expect(screen.getByRole('button', { name: 'Ask LoomWatch' })).toHaveAttribute('aria-pressed', 'true')
+    expect(ask.querySelector('.lw-dock-live')).toBeNull()
+    act(() => { showAsk({ open: false, activity: null }); unregister() })
   })
 })
 

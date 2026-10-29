@@ -68,7 +68,7 @@ import { BuildResourceInspector } from './canvas/BuildResourceInspector'
 import { NotionPagePicker } from './canvas/NotionPagePicker'
 import { BuildInspector } from './canvas/BuildInspector'
 import { ComponentPalette } from './library/ComponentPalette'
-import { MessageSquareText, MessagesSquare, Network, UserRound, X } from './ui/icon'
+import { Bot, MessageSquareText, MessagesSquare, Network, X } from './ui/icon'
 import { Composer, type ComposerState } from './composer/Composer'
 import { RoutineNote } from './composer/RoutineNote'
 import { CAPABILITY_DRAG_MIME, CONNECTION_DRAG_MIME, LIBRARY_DRAG_MIME } from './library'
@@ -2726,7 +2726,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
           <nav className="workspace-view-tabs" aria-label="Workspace view" data-tour="view-tabs">
             <SegmentThumb />
             {/* In the order a team is made: its agents, then its workflow, then its chat. */}
-            <button type="button" aria-pressed={!runView && !runSetup && agentsView} onClick={() => { const chosen = inspectedNode?.id ?? null; clearSelection(); closeRun(); showAgents(chosen) }} data-tour="tab-agents"><UserRound size={15} />Agents</button>
+            <button type="button" aria-pressed={!runView && !runSetup && agentsView} onClick={() => { const chosen = inspectedNode?.id ?? null; clearSelection(); closeRun(); showAgents(chosen) }} data-tour="tab-agents"><Bot size={15} />Agents</button>
             <button type="button" aria-pressed={!runView && !runSetup && !agentsView} onClick={() => { clearSelection(); closeRun(); showWorkflow() }} data-tour="tab-workflow"><Network size={15} />Workflow</button>
             <button type="button" aria-pressed={runView || runSetup} onClick={() => { clearSelection(); if (!activeRunId) setRunSetup(true) }} data-tour="tab-chat"><MessagesSquare size={15} />Chat</button>
           </nav>

@@ -69,7 +69,7 @@ export function Home({ notice = null, onPalette, topActions, runs = [], ask, par
 
   // What the footer says about the one thing every run needs: a way to pay for its models.
   let status: { state: 'dirty' | 'saved' | 'incomplete' | 'invalid'; text: string; action?: ReactNode }
-  const manage = <a className="link" href="/connections">{sources.length ? 'Manage' : 'Connect'}</a>
+  const manage = <a className="link" href="/connections">{sources.length ? 'Connections' : 'Connect'}</a>
   const usage = <a className="link" href="/usage">Usage</a>
   // A connected source that said something is wrong, named, so the person knows which to fix.
   const problem = ai && [

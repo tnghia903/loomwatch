@@ -335,7 +335,7 @@ describe('Home, the studio (ADR 0097)', () => {
     renderHome()
     expect(await screen.findByText('Agents can run on OpenRouter')).toBeInTheDocument()
     expect(screen.queryByRole('region', { name: 'First, choose how your agents’ models are paid' })).toBeNull()
-    expect(screen.getByRole('link', { name: 'Manage' })).toHaveAttribute('href', '/connections')
+    expect(screen.getByRole('link', { name: 'Connections' })).toHaveAttribute('href', '/connections')
     expect(screen.getByRole('link', { name: 'Usage' })).toHaveAttribute('href', '/usage')
   })
 

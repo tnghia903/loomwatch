@@ -340,8 +340,8 @@ on the models you've connected. Nothing is saved until you click **Apply**.
 ### 🎓 Guided first run
 
 Your first agent asks what to make first, and asks which AI should answer only when you send.
-**Just look around** skips to Home. **Getting started guide** in the ☰ menu shows the rest in three
-minutes.
+**Just look around** skips to Home. **Getting started guide**, under **You** in the dock on the left,
+shows the rest in three minutes.
 
 </td>
 <td valign="top">
@@ -504,7 +504,7 @@ longer need it.
 
 - **A Mac** with macOS 11 or newer, or **a Windows PC** with 64-bit Windows 10 or 11.
 - **For real runs, one way to pay for models.** Connect any of these on Home, or on
-  **Connections…** in the ☰ menu. Each model you pick says which one pays for it.
+  **Connections**, under **You** in the dock. Each model you pick says which one pays for it.
   - **Your ChatGPT Plus or Pro plan.** Click **Continue with ChatGPT** and allow LoomWatch on
     ChatGPT's own page. Agents on ChatGPT models count against your plan's limits, at no extra
     charge. LoomWatch never sees your password.
@@ -598,7 +598,7 @@ hour. Each try starts the work over, and costs what it uses. For scheduled runs 
 
 ### Remove LoomWatch
 
-1. Disconnect what you connected: choose **Connections…** from the ☰ menu, click **Remove key** on
+1. Disconnect what you connected: open **Connections**, under **You** in the dock, click **Remove key** on
    **Your Claude API credit** and **OpenRouter (pay per use)**, and **Sign out** on
    **Your ChatGPT plan**. Otherwise the OpenRouter key stays in your Keychain as
    `LoomWatch.OpenRouter`, and the Claude key and ChatGPT sign-in as `LoomWatch.Plans` (on Windows,
@@ -715,7 +715,7 @@ language and length you want. Then it answers again, made for you. **Keep this a
 agents, and **Go to Home** leaves it there. **Just look around**, at the top, goes to Home at any
 time.
 
-For a tour of the rest, choose **Getting started guide** from the ☰ menu at the top right, or press
+For a tour of the rest, choose **Getting started guide** under **You** in the dock, or press
 <kbd>⌘</kbd><kbd>K</kbd> and pick it. It walks you through building an agent, trying it on its own, putting it in a team and running it.
 
 <details>
@@ -752,10 +752,10 @@ with what should change; under its new version, **Continue with the team** runs 
 
 ## Run your own agents
 
-1. Connect a way to pay for models, on Home or on **Connections…** (☰ menu): click
+1. Connect a way to pay for models, on Home or in **Connections** (under **You** in the dock): click
    **Continue with ChatGPT**, or paste a Claude API key or an OpenRouter key. LoomWatch checks each
-   with its company. **Usage…** in the ☰ menu shows what LoomWatch has used on each.
-2. Open **My agents** (☰ menu, or **Build an agent** on Home before you have one) and start from a job, such as Researcher or Writer, or from
+   with its company. **Usage**, under **You**, shows what LoomWatch has used on each.
+2. Open **My agents** (in the dock, or **Build an agent** on Home before you have one) and start from a job, such as Researcher or Writer, or from
    **Blank**. Give it a name, change its instructions, model and how hard it thinks to fit your work,
    give it the skills it needs and **Allow** what it may do without asking. Pick it a face, then
    open its **Chat** tab and give it a real request: it runs on its model, and asks you before
@@ -789,7 +789,7 @@ with what should change; under its new version, **Continue with the team** runs 
 In the chat, **Reply** under anything an agent said, such as a handover, a question or the answer:
 the agent is told which message you mean, and a reply to an agent at work joins its next turn. Put
 a face on what an agent said, such as **Good**, **Not sure** or **Wrong**, and the team's next run
-reads what it meant. Tell your agents about you once, with **About you…** in the ☰ menu: every agent
+reads what it meant. Tell your agents about you once, with **About you**, under **You** in the dock: every agent
 reads your name and what you wrote before it works, including the language, length and tone you ask
 for.
 
@@ -812,10 +812,10 @@ you've connected that offers that model, or else through OpenRouter.
 <details>
 <summary><strong>Keep the pipeline easy to follow</strong></summary>
 
-Choose **Organize** from the ☰ menu at the top right (or press <kbd>⌥</kbd><kbd>⌘</kbd><kbd>L</kbd>,
+Choose **Organize** in the canvas's view bar (or press <kbd>⌥</kbd><kbd>⌘</kbd><kbd>L</kbd>,
 or choose **Organize pipeline** in <kbd>⌘</kbd><kbd>K</kbd>) to arrange stages from left to right
 and group skills and sources below their agents. The view then fits the arranged team. **Undo
-organize**, in the same menu, restores the previous arrangement. Positions are saved with the canvas
+organize**, beside it, restores the previous arrangement. Positions are saved with the canvas
 layout; organizing does not change the workflow or start a run.
 
 </details>
@@ -859,7 +859,7 @@ delivered to agents yet" at the top of Workflow, click **Deliver on the next run
 <details>
 <summary><strong>Give the team context and review its work</strong></summary>
 
-Choose **Team memory** from the ☰ menu to add shared instructions or reference files to the
+Choose **Team memory** from a team's ⋯ menu to add shared instructions or reference files to the
 **Brief**. Use the **Notebook** to review reusable notes and checkpoints.
 
 Select an agent in Workflow to see its **Context**: its place in the team (for example "Step 2 of 3 ·
@@ -956,7 +956,7 @@ It depends on how each agent's model is paid:
 - **Through OpenRouter,** OpenRouter bills your key for each call at that model's price, and the
   receipt shows the exact cost it reported.
 
-**Usage…** in the ☰ menu shows what LoomWatch used on each over the last 30 days, with a link to
+**Usage**, under **You**, shows what LoomWatch used on each over the last 30 days, with a link to
 where you see the exact figure.
 
 </details>
@@ -1139,7 +1139,7 @@ delete its folder from `.trash`.
 <details>
 <summary>Reusing an agent with My agents</summary>
 
-Build an agent in **My agents** (☰ menu). It appears under **My agents** in
+Build an agent in **My agents** (in the dock). It appears under **My agents** in
 every team's add panel, with its instructions, model, skills and what it may do without asking.
 
 Every agent a team has is one of My agents, and it is the same agent in every team it's in. A
@@ -1184,7 +1184,7 @@ whose agent was behind a newer save of it in My agents says so once in its chat.
 | Team file not found | Confirm the file is in your teams folder (`~/LoomWatch/teams` unless you set `LOOMWATCH_TEAMS_ROOT`). The demo link uses `?path=operator-stop.yaml`, relative to that folder. |
 | "OpenRouter refused the API key" | The key was deleted or mistyped. Make a new one at [openrouter.ai/keys](https://openrouter.ai/keys) and paste it into **OpenRouter (pay per use)** in **Connections…**. |
 | "Anthropic refused the Claude API key" | The key was deleted or mistyped. Make a new one in the Claude Console, in the organization linked to your Claude plan, and paste it into **Your Claude API credit** in **Connections…**. A key starting `sk-ant-oat` is a Claude sign-in, which LoomWatch can't use. |
-| "Your Claude API credit is used up" | It comes back when your plan renews. Until then, add credits in the Claude Console, or choose the agent a model paid another way. **Usage…** in the ☰ menu shows what LoomWatch spent. |
+| "Your Claude API credit is used up" | It comes back when your plan renews. Until then, add credits in the Claude Console, or choose the agent a model paid another way. **Usage**, under **You**, shows what LoomWatch spent. |
 | "LoomWatch has reached a usage limit on your ChatGPT plan" | Click **Manage usage** to see your plan's limit and LoomWatch's share of it. Wait until the plan's limit resets, raise LoomWatch's share there, or choose the agent a model paid another way. |
 | "LoomWatch couldn't reach ChatGPT" (or OpenRouter, Anthropic) | This computer was offline, or that company didn't answer. Check the internet, then click **Try again**. A scheduled run tries again by itself first. |
 | "LoomWatch's sign-in with ChatGPT has ended" | Click **Continue with ChatGPT** on **Your ChatGPT plan** in **Connections…**. |

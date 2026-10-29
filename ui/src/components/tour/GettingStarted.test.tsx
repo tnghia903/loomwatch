@@ -280,12 +280,12 @@ describe('GettingStarted', () => {
     expect(screen.getByRole('heading', { name: 'Open a project' })).toBeInTheDocument()
   })
 
-  it('waits in My agents for the operator to go back to My team', () => {
+  it('waits in My agents for the operator to go back Home', () => {
     showPage(builder(true))
     goToStep('new-team')
     renderGuide()
-    expect(screen.getByRole('heading', { name: 'Go to My team to carry on' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'My team' })).toHaveAttribute('href', '/')
+    expect(screen.getByRole('heading', { name: 'Go Home to carry on' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Home' })).toHaveAttribute('href', '/')
   })
 
   it('skips New team without landing on the dialog it would have opened', () => {

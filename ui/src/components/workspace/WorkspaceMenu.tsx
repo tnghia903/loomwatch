@@ -32,7 +32,7 @@ export function WorkspaceMenu({ runView = false, onMemory }: WorkspaceMenuProps)
   const item = (action: () => void) => () => { setOpen(false); action() }
   return (
     <div ref={root} className="prototype-workspace-menu" onKeyDown={(event) => { if (event.key === 'Escape' && open) { event.stopPropagation(); setOpen(false); toggle.current?.focus() } }}>
-      <button ref={toggle} aria-label="More" title="More" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}><MoreHorizontal size={15} aria-hidden="true" /></button>
+      <button ref={toggle} aria-label="More" title="More" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}><MoreHorizontal size={20} strokeWidth={2.25} aria-hidden="true" /></button>
       {open && (
         <div role="menu">
           {onMemory && <button role="menuitem" onClick={item(onMemory)}>Team memory</button>}

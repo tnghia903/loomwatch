@@ -183,9 +183,9 @@ export const TOUR_STEPS: readonly TourStep[] = [
     view: () => present('[data-tour="agent-builder"][data-tour-saved]')
       ? {
           title: 'Now put it in a team',
-          body: 'It is in My agents now, ready for any team. Click Home to go there.',
+          body: 'It is in My agents now, ready for any team. Click Home, on the left, to put it in a team.',
           target: ['[data-tour="dock-home"]'],
-          sides: ['bottom', 'left'],
+          sides: ['right', 'bottom'],
           advance: 'action',
         }
       : {
@@ -392,7 +392,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
     screen: 'any',
     view: () => ({
       title: 'You’re all set',
-      body: `That is the whole loop: build an agent, put it in a team’s workflow, and give the team work in its chat. When a team needs you, for an answer or an approval, it asks in its chat and says so at the top of every screen. To see this guide again, choose Getting started guide from the menu at the top right, or press ${keys('⌘K')}.`,
+      body: `That is the whole loop: build an agent, put it in a team’s workflow, and give the team work in its chat. When a team needs you, for an answer or an approval, it asks in its chat, and Home on the left counts it. To see this guide again, choose Getting started guide under You, or press ${keys('⌘K')}.`,
       advance: 'finish',
     }),
   },
