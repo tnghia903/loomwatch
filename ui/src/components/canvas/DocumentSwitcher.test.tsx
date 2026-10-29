@@ -43,7 +43,10 @@ it('says why a rename was refused and keeps the new name to try again', async ()
   fireEvent.change(within(form).getByLabelText('Team name'), { target: { value: 'Japan trip' } })
   fireEvent.click(within(form).getByRole('button', { name: 'Rename' }))
   expect(await screen.findByRole('alert')).toHaveTextContent('This team is working right now.')
-  expect(within(screen.getByRole('form', { name: 'Rename team' })).getByLabelText('Team name')).toHaveValue('Japan trip')
+  const field = within(screen.getByRole('form', { name: 'Rename team' })).getByLabelText('Team name')
+  expect(field).toHaveValue('Japan trip')
+  expect(field).toHaveAccessibleDescription(/This team is working right now\./)
+  expect(field).toBeInvalid()
 })
 
 // The file moves while the button waits, so a second press can't start a second move.

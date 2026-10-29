@@ -1,5 +1,5 @@
 import { ChevronDown } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 
 import { baseName } from '../../lib/files/paths'
 import { reviewProblems, type ReviewProblem } from '../../lib/team-file/problems'
@@ -51,6 +51,7 @@ export function DocumentSwitcher(props: DocumentSwitcherProps) {
   // While the file moves, and why it didn't when it couldn't.
   const [renameBusy, setRenameBusy] = useState(false)
   const [renameRefused, setRenameRefused] = useState<string | null>(null)
+  const refusedId = useId()
   const chipRef = useRef<HTMLDivElement>(null)
 
   const problems = useMemo(() => reviewProblems(entrypointProblem, fieldProblemsByAgent, documentProblems, agentNames), [entrypointProblem, fieldProblemsByAgent, documentProblems, agentNames])
@@ -129,13 +130,13 @@ export function DocumentSwitcher(props: DocumentSwitcherProps) {
         <div id="switcher-pop" className="pop e2" role="dialog" aria-label="Team menu" style={{ top: 'calc(var(--lw-chip-h) + 8px)', left: '50%', transform: 'translateX(-50%)', width: 'min(392px, calc(100vw - 32px))' }} onKeyDown={(event) => { if (event.key === 'Escape') setSwitcherOpen(false) }}>
           {renaming !== null && onRename && (
             <form className="pop-inline t-meta" aria-label="Rename team" aria-busy={renameBusy} onSubmit={(event) => { event.preventDefault(); void rename(renaming) }}>
-              <input className="input" autoFocus aria-label="Team name" value={renaming} onChange={(event) => { setRenaming(event.target.value); setRenameRefused(null) }} onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); setRenaming(null); setRenameRefused(null) } }} style={{ flex: 1, minWidth: 0 }} />
+              <input className="input" autoFocus aria-label="Team name" aria-invalid={renameRefused ? true : undefined} aria-describedby={renameRefused ? refusedId : undefined} value={renaming} onChange={(event) => { setRenaming(event.target.value); setRenameRefused(null) }} onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); setRenaming(null); setRenameRefused(null) } }} style={{ flex: 1, minWidth: 0 }} />
               <button type="submit" className="btn btn-primary" disabled={!renaming.trim() || renameBusy}>Rename</button>
               <button type="button" className="btn" onClick={() => { setRenaming(null); setRenameRefused(null) }}>Cancel</button>
             </form>
           )}
           <div className="pop-foot">
-            {renaming !== null && renameRefused && <p className="t-meta" role="alert" style={{ margin: 0, color: 'var(--color-ink-2)' }}>{renameRefused}</p>}
+            {renaming !== null && renameRefused && <p id={refusedId} className="pop-refused t-meta" role="alert">{renameRefused}</p>}
             <span className="path t-mono-sm selectable">{path}</span>
             <span className="acts">
               {onRename && <button type="button" className="link" onClick={() => setRenaming(teamName ?? filename.replace(/\.ya?ml$/i, ''))} disabled={renameWaits} title={renameWaits ? 'Save or discard your changes first' : undefined}>Rename</button>}
