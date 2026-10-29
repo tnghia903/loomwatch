@@ -112,10 +112,13 @@ export async function fetchJobs(): Promise<JobList | null> {
  */
 export async function saveJob(id: string, spec: JobSpec, { replace = false, expectedVersion }: { replace?: boolean; expectedVersion?: number } = {}): Promise<SavedJob> {
   const precondition: Record<string, string> = !replace ? { 'If-None-Match': '*' } : expectedVersion ? { 'If-Match': `"${expectedVersion}"` } : {}
+  // A job as `GET /api/jobs` listed it, changed and saved back (a team's edit to one of My agents is),
+  // still carries its `id` and `file`. The daemon sets those and refuses them in a body.
+  const { id: _id, file: _file, ...fields } = spec as Partial<SavedJob>
   const response = await daemonFetch(`/api/jobs/${encodeURIComponent(id)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...precondition },
-    body: JSON.stringify(spec),
+    body: JSON.stringify(fields),
   })
   if (!response.ok) throw await failure(response)
   window.dispatchEvent(new Event(JOBS_CHANGED_EVENT))

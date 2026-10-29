@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { JobSpec, SavedJob } from '../library/jobs'
+import { saveJob, type JobSpec, type SavedJob } from '../library/jobs'
 import { TeamFileModel } from './document'
 import { editedSpec, fillModel, filledAgent, placeInMyAgents, pointerEntry, pointsAt, runsDifferently, settleAgents, specOf, teamOfMyAgents } from './myAgents'
 import type { AgentConfig } from './types'
@@ -106,6 +106,23 @@ describe('saving a team settles each agent into My agents', () => {
     const save = saving()
     await settleAgents(model, [researcher], filled, 'Blog', save)
     expect(save).toHaveBeenCalledWith('researcher', { ...researcher, name: 'Fact finder' }, { replace: true, expectedVersion: 2 })
+  })
+
+  afterEach(() => { vi.unstubAllGlobals() })
+
+  it('sends the daemon only the agent’s own fields, not the id and file a listed agent comes with', async () => {
+    // The daemon refuses a body with a field it doesn't know, so the whole team save failed.
+    const model = TeamFileModel.parse(team('  - id: researcher\n    name: Researcher\n    role: An older copy.\n    model: fake/offline\n    from: {agent: researcher, version: 1}\n'))
+    const filled = fillModel(model, [researcher])
+    model.setAgentField('researcher', 'allow', { edits: true })
+    const sent: unknown[] = []
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      sent.push(JSON.parse(String(init?.body)))
+      return new Response(JSON.stringify({ ...researcher, allow: { edits: true }, version: 3 }), { status: 200 })
+    }))
+    await settleAgents(model, [researcher], filled, 'Blog', saveJob)
+    const { id: _id, file: _file, ...fields } = researcher
+    expect(sent).toEqual([{ ...fields, allow: { edits: true } }])
   })
 
   it('takes an edit made to an agent just added from My agents to the agent', async () => {
