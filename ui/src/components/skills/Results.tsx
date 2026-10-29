@@ -1,4 +1,4 @@
-import { ArrowLeft, Check, ExternalLink, Lock, Plus } from 'lucide-react'
+import { ArrowLeft, Check, ExternalLink, Lock, Plus } from '../ui/icon'
 import { useState } from 'react'
 
 import { compactCount, displayName, ownerOf, publisherOf, resultKey, skillNameOf, sourceName, type SearchResult, type SearchSource } from '../../lib/library/skillStore'

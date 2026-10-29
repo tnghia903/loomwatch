@@ -1,4 +1,4 @@
-import { ArrowUpCircle, Check, Copy, ExternalLink } from 'lucide-react'
+import { ArrowUpCircle, Check, Copy, ExternalLink } from '../ui/icon'
 import { useEffect, useId, useState } from 'react'
 
 import { relativeTime } from '../../lib/format'

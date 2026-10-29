@@ -1,4 +1,4 @@
-import { AtSign } from 'lucide-react'
+import { AtSign } from '../ui/icon'
 import { useId, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 

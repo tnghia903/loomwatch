@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, X } from '../ui/icon'
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 
 import { placeCard, type Box } from '../../lib/tour/place'

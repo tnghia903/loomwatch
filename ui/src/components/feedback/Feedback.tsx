@@ -1,4 +1,4 @@
-import { Check, Copy, ExternalLink } from 'lucide-react'
+import { Check, Copy, ExternalLink } from '../ui/icon'
 import { useEffect, useId, useState } from 'react'
 
 import { useAiStatus, useKeyStatus } from '../../lib/ai/useKeyStatus'

@@ -1,4 +1,4 @@
-import { SmilePlus } from 'lucide-react'
+import { SmilePlus } from '../ui/icon'
 import { useEffect, useId, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react'
 
 import { useAppear } from '../../lib/chat/appear'

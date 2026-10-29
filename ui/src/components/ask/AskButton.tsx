@@ -1,4 +1,4 @@
-import { MessageSquareText } from 'lucide-react'
+import { MessageSquareText } from '../ui/icon'
 
 import type { AskController } from '../../lib/ask/useAsk'
 import { keys } from '../../lib/platform'

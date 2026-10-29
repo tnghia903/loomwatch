@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { CircleSlash, Undo2, X } from 'lucide-react'
+import { CircleSlash, Undo2, X } from '../ui/icon'
 
 import { checkerWords, triesShown, type DoneWhen } from '../../lib/chat/doneWhen'
 import { setDoneWhen } from '../../lib/runs/client'

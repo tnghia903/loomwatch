@@ -1,4 +1,4 @@
-import { NotebookText, Search } from 'lucide-react'
+import { NotebookText, Search } from '../ui/icon'
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 

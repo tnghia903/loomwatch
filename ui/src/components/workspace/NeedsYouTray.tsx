@@ -1,4 +1,4 @@
-import { ArrowUpRight, BellDot, Check, CornerDownLeft, X } from 'lucide-react'
+import { ArrowUpRight, BellDot, Check, CornerDownLeft, X } from '../ui/icon'
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react'
 
 import { plainWords } from '../../lib/chat/findWords'

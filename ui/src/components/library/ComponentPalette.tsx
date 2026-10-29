@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { BookmarkCheck, Box, ChartColumn, ChartSpline, Clapperboard, Code2, ExternalLink, FileText, Folder, GripVertical, Info, LayoutDashboard, LocateFixed, NotebookText, PanelLeftClose, PanelLeftOpen, PenLine, Plug, Plus, Presentation, Puzzle, RefreshCw, ScanEye, Scissors, ScrollText, Search, Shapes, Sheet, Telescope, Trash2, UserCheck, UserRound, type LucideIcon } from 'lucide-react'
+import { BookmarkCheck, Box, ChartColumn, ChartSpline, Clapperboard, Code2, ExternalLink, FileText, Folder, GripVertical, Info, LayoutDashboard, LocateFixed, NotebookText, PanelLeftClose, PanelLeftOpen, PenLine, Plug, Plus, Presentation, Puzzle, RefreshCw, ScanEye, Scissors, ScrollText, Search, Shapes, Sheet, Telescope, Trash2, UserCheck, UserRound, type IconComponent } from '../ui/icon'
 import { DEFAULT_MODEL, modelNameFromId } from '../../lib/ai/modelIds'
 import { OPERATOR_SOURCE } from '../../lib/library/fixtures'
 import { benchChatOwner, removeJob, savedJobPreset, useSavedJobs } from '../../lib/library/jobs'
@@ -19,7 +19,7 @@ import { keys } from '../../lib/platform'
 import { InlineMarkdown } from '../ui/Markdown'
 import { plainWords } from '../../lib/chat/findWords'
 
-const ROLE_ICONS: Record<RoleIcon, LucideIcon> = { research: Telescope, write: PenLine, edit: Scissors, review: ScanEye, code: Code2, design: Shapes, analyse: ChartColumn, slides: Presentation, document: ScrollText, sheet: Sheet, chart: ChartSpline, dashboard: LayoutDashboard, video: Clapperboard }
+const ROLE_ICONS: Record<RoleIcon, IconComponent> = { research: Telescope, write: PenLine, edit: Scissors, review: ScanEye, code: Code2, design: Shapes, analyse: ChartColumn, slides: Presentation, document: ScrollText, sheet: Sheet, chart: ChartSpline, dashboard: LayoutDashboard, video: Clapperboard }
 
 const YOURS = 'My agents'
 const STEPS = 'Workflow steps'
@@ -95,7 +95,7 @@ interface PaletteItem {
   /** A third line: the model a job runs on, or where a capability comes from. */
   engine?: string
   quiet?: boolean
-  Icon: LucideIcon
+  Icon: IconComponent
   mime: string
   event: string
   disabled: boolean
@@ -111,7 +111,7 @@ interface PaletteItem {
   /** What a click does instead of adding: a folder or file already has a card, so it is found. */
   onActivate?: () => void
   /** The icon at the end of the row, when a click does not add. */
-  Trailing?: LucideIcon
+  Trailing?: IconComponent
   /** `false` for a row that can be clicked but not dragged: Notion before it is connected. */
   draggable?: boolean
   /** Listed under the row before it: a Notion page under Notion. */

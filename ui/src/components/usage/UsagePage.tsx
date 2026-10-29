@@ -1,4 +1,4 @@
-import { ArrowLeft, ExternalLink } from 'lucide-react'
+import { ArrowLeft, ExternalLink } from '../ui/icon'
 import { useEffect, useMemo, useState } from 'react'
 
 import { sourceMaker } from '../../lib/ai/makers'

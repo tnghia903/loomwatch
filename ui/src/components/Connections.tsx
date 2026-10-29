@@ -1,4 +1,4 @@
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft } from './ui/icon'
 
 import { ConnectedTools } from './connections/ConnectedTools'
 import { Sources } from './connections/Sources'

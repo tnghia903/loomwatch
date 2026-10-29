@@ -1,4 +1,4 @@
-import { AlertCircle, ArrowUp, Check, RotateCcw, X } from 'lucide-react'
+import { AlertCircle, ArrowUp, Check, RotateCcw, X } from '../ui/icon'
 import { useEffect, useId, useRef, type KeyboardEvent } from 'react'
 
 import type { AskContext } from '../../lib/ask/client'

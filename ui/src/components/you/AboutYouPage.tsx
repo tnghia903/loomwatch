@@ -1,4 +1,4 @@
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft } from '../ui/icon'
 
 import { AboutYou } from './AboutYou'
 

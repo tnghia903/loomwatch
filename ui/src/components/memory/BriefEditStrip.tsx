@@ -1,4 +1,4 @@
-import { X } from 'lucide-react'
+import { X } from '../ui/icon'
 
 /**
  * The mid-run Brief-edit strip (docs/TEAM_MEMORY.md → "The Memory panel", During a run).

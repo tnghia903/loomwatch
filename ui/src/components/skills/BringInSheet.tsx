@@ -1,4 +1,4 @@
-import { Check, Undo2 } from 'lucide-react'
+import { Check, Undo2 } from '../ui/icon'
 import { useEffect, useState } from 'react'
 
 import {

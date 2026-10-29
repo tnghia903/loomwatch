@@ -1,4 +1,4 @@
-import { Plus, X } from 'lucide-react'
+import { Plus, X } from '../ui/icon'
 import { useState } from 'react'
 
 /** The schema's limits (`Agent.doneWhen`): a few short lines, never a requirements document. */

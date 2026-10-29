@@ -1,4 +1,4 @@
-import { ExternalLink, Send } from 'lucide-react'
+import { ExternalLink, Send } from '../ui/icon'
 
 import { useNotionSend, type NotionSendRun, type NotionSendState } from '../../lib/notion/useNotionSend'
 

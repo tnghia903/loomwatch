@@ -1,5 +1,5 @@
 import { getNodesBounds, useReactFlow, useStore } from '@xyflow/react'
-import { Moon, Sun, Workflow, Undo2 } from 'lucide-react'
+import { Moon, Sun, Workflow, Undo2 } from '../ui/icon'
 
 import { useTheme } from '../../lib/theme'
 import { DEPTHS, DEPTH_LABEL, DEPTH_ZOOM, depthForZoom, type Depth } from '../../lib/story/depth'

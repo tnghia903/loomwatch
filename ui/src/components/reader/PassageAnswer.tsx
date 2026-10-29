@@ -1,4 +1,4 @@
-import { MessagesSquare, Reply, X } from 'lucide-react'
+import { MessagesSquare, Reply, X } from '../ui/icon'
 import { useLayoutEffect, useRef, type CSSProperties, type Ref } from 'react'
 
 import { clockTime, dayLabel } from '../../lib/chat/format'

@@ -1,4 +1,4 @@
-import { Check, ChevronDown, ChevronRight, CircleAlert, Square } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, CircleAlert, Square } from '../ui/icon'
 import { useId, useState, type CSSProperties } from 'react'
 
 import { plainWords } from '../../lib/chat/findWords'

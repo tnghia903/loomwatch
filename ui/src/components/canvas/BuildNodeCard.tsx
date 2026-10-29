@@ -1,6 +1,6 @@
 import { useStore, type NodeProps } from '@xyflow/react'
 import { createElement } from 'react'
-import { Bot, Box, Circle, FileText, Folder, NotebookText, Puzzle, Wrench } from 'lucide-react'
+import { Bot, Box, Circle, FileText, Folder, NotebookText, Puzzle, Wrench } from '../ui/icon'
 import { KIND_LABEL } from '../../lib/composer-layout/types'
 import { chosenIsFile } from '../../lib/knowledge/chosen'
 import { middleTruncate } from '../../lib/format'

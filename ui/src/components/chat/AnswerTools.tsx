@@ -1,4 +1,4 @@
-import { ArrowRight, CheckCircle2, ChevronDown, CircleAlert, CircleDot, Copy, Download, Reply, Share2 } from 'lucide-react'
+import { ArrowRight, CheckCircle2, ChevronDown, CircleAlert, CircleDot, Copy, Download, Reply, Share2 } from '../ui/icon'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 import { answerFileName } from '../../lib/chat/format'

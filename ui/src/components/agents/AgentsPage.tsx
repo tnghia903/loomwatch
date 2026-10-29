@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, type ReactNode } from 'react'
-import { Moon, Plus, Sun, UserRound } from 'lucide-react'
+import { Moon, Plus, Sun, UserRound } from '../ui/icon'
 
 import { modelNameFromId } from '../../lib/ai/modelIds'
 import type { DetectedCapability } from '../../lib/library/client'

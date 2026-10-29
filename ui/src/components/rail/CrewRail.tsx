@@ -1,4 +1,4 @@
-import { Plus, Search } from 'lucide-react'
+import { Plus, Search } from '../ui/icon'
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 
 import { PRESENCE_WORDS, type Presence } from '../../lib/rail/presence'

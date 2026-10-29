@@ -2,7 +2,7 @@
 // something is dragged near, what went in waiting for a job, its answer with Copy, its request to
 // start one of your teams in its own words, and the team it started at work under the notch as its
 // crew.
-import { Check, Copy, Mail, X } from 'lucide-react'
+import { Check, Copy, Mail, X } from '../components/ui/icon'
 import { useEffect, useRef, useState } from 'react'
 
 import { FigureStill } from '../components/agents/FigureStill'

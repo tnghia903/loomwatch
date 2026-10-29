@@ -1,4 +1,4 @@
-import { BookOpenText, Check, Copy, ExternalLink, FolderOpen } from 'lucide-react'
+import { BookOpenText, Check, Copy, ExternalLink, FolderOpen } from './icon'
 import { createElement } from 'react'
 
 import { baseName, extensionOf, fileLabel, fileNoun, fileTitle, folderWords, formatBytes, workspaceAgent } from '../../lib/files/fileRefs'

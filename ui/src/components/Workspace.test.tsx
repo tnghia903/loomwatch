@@ -506,7 +506,7 @@ describe('Workspace', () => {
       await waitFor(() => expect(within(pane).getByRole('tab', { name: 'market.md' })).toHaveAttribute('aria-selected', 'true'))
       const mark = () => within(pane).getByRole('tab', { name: 'market.md' }).querySelector('svg')?.getAttribute('class')
       const itsMark = mark()
-      expect(itsMark).toContain('lucide-file-text')
+      expect(itsMark).toContain('lw-icon-page')
       // Read, then left for the record: still read.
       fireEvent.click(within(pane).getByRole('tab', { name: 'Details' }))
       fireEvent.click(screen.getByRole('button', { name: 'Read sales.md here' }))
@@ -514,7 +514,7 @@ describe('Workspace', () => {
       expect(within(pane).getByRole('tab', { name: 'sales.md' })).toHaveAttribute('aria-selected', 'true')
       expect(window.location.search).toContain('run=run-1')
       expect(tabs()).toEqual(['Details', 'sales.md', 'market.md'])
-      await waitFor(() => expect(within(pane).getByRole('tab', { name: 'sales.md' }).querySelector('svg')?.getAttribute('class')).toContain('lucide-file-text'))
+      await waitFor(() => expect(within(pane).getByRole('tab', { name: 'sales.md' }).querySelector('svg')?.getAttribute('class')).toContain('lw-icon-page'))
       expect(tabs()).toEqual(['Details', 'sales.md', 'market.md'])
       // Its kind's mark, as when its own work was on screen.
       expect(mark()).toBe(itsMark)

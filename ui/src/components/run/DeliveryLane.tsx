@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowRight } from 'lucide-react'
+import { ArrowRight } from '../ui/icon'
 import { capabilityEvidence, hadSkill } from '../../lib/runs/capabilityEvidence'
 import type { Evidence, RunEvent, RunPhase, RunProjection } from '../../lib/watch/events'
 import { cardActivity, linkedIn, asUse, USE_NAMES, WEB_KINDS, type Use, type UseKind } from '../../lib/watch/cardActivity'

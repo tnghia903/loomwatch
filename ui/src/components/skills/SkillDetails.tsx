@@ -1,4 +1,4 @@
-import { ExternalLink, Plus } from 'lucide-react'
+import { ExternalLink, Plus } from '../ui/icon'
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 

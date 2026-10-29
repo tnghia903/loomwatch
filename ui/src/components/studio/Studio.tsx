@@ -1,4 +1,4 @@
-import { Plus, Search } from 'lucide-react'
+import { Plus, Search } from '../ui/icon'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { FileReaderContext, type FileToRead } from '../../lib/files/reader'

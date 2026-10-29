@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft } from '../ui/icon'
 
 import { filesTouched, filesWritten } from '../../lib/files/fileRefs'
 import { FileReaderContext } from '../../lib/files/reader'

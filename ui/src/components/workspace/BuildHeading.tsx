@@ -1,4 +1,4 @@
-import { Check, Clock3, Lightbulb, Play, X } from 'lucide-react'
+import { Check, Clock3, Lightbulb, Play, X } from '../ui/icon'
 import { useEffect, useRef, useState } from 'react'
 
 import type { CheckupFinding } from '../../lib/team-file/checkup'

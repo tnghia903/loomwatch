@@ -1,4 +1,4 @@
-import { ChevronRight, FileText, MessageSquareText } from 'lucide-react'
+import { ChevronRight, FileText, MessageSquareText } from '../ui/icon'
 
 import type { FigureChoice } from '../../lib/library/figures'
 import type { AgentPlace, PlaceLink } from '../../lib/team-file/agentPlace'

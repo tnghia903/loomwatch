@@ -1,5 +1,5 @@
 import { useId } from 'react'
-import { ArrowRight, Lock } from 'lucide-react'
+import { ArrowRight, Lock } from '../ui/icon'
 
 import { COLOR_HEX, COLOR_NAMES, FIGURE_COLORS, FIGURE_KINDS, FIGURE_NAMES, figureStill, STARTER_KINDS, wornBy, type FigureChoice, type FigureKind } from '../../lib/library/figures'
 import { ACCESSORIES, GARMENTS, isGarment, QUESTS, questFor, type Accessory } from '../../lib/quests/catalog'

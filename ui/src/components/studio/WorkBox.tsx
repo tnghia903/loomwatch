@@ -1,4 +1,4 @@
-import { ArrowUp, Paperclip, X } from 'lucide-react'
+import { ArrowUp, Paperclip, X } from '../ui/icon'
 import { useRef, useState } from 'react'
 
 import { useChatAttachments } from '../../lib/chat/attachments'

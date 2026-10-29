@@ -1,6 +1,6 @@
 // ADR 0035, 0050: how a knowledge entry the operator chose reads in the Context list.
 
-import { CircleAlert, FileText, Folder, NotebookText, type LucideIcon } from 'lucide-react'
+import { CircleAlert, FileText, Folder, NotebookText, type IconComponent } from '../../components/ui/icon'
 
 import type { CapabilityRef } from '../team-file/types'
 import { baseName, isAbsolutePath } from '../files/paths'
@@ -12,7 +12,7 @@ import { baseName, isAbsolutePath } from '../files/paths'
  * so here rather than failing the run unannounced. `null` for a skill or tool, which keeps its
  * kind's own label.
  */
-export function chosenKnowledge(capability: CapabilityRef): { Icon: LucideIcon; label: string } | null {
+export function chosenKnowledge(capability: CapabilityRef): { Icon: IconComponent; label: string } | null {
   if (capability.kind !== 'knowledge') return null
   if (capability.notion) return { Icon: NotebookText, label: 'Notion page · read when each run starts · its text is supplied' }
   if (!capability.path) return { Icon: CircleAlert, label: 'No folder or file · disconnect it and add one below' }

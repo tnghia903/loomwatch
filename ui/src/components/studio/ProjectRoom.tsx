@@ -1,4 +1,4 @@
-import { ChevronLeft, Folder, MoreHorizontal, Plus, X } from 'lucide-react'
+import { ChevronLeft, Folder, MoreHorizontal, Plus, X } from '../ui/icon'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { FileReaderContext, type FileToRead } from '../../lib/files/reader'

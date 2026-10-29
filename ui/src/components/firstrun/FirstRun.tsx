@@ -1,4 +1,4 @@
-import { ArrowUp } from 'lucide-react'
+import { ArrowUp } from '../ui/icon'
 import { Fragment, useCallback, useEffect, useId, useMemo, useState } from 'react'
 
 import type { AiStatus } from '../../lib/ai/client'

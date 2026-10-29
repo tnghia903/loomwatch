@@ -1,4 +1,4 @@
-import { ChevronDown } from 'lucide-react'
+import { ChevronDown } from '../ui/icon'
 import { useEffect, useRef, useState } from 'react'
 
 import { shortName } from '../../lib/ai/client'

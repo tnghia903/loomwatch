@@ -9,7 +9,7 @@ import { createPortal } from 'react-dom'
 
 import { AgentFigure } from '../components/agents/benchFigure'
 import { FigureStill } from '../components/agents/FigureStill'
-import { ArrowUp, CornerDownLeft, Plus } from 'lucide-react'
+import { ArrowUp, CornerDownLeft, Plus } from '../components/ui/icon'
 
 import { LoomMark, StatusGlyph } from '../components/ui/glyphs'
 import { dropped } from '../lib/chat/attachments'

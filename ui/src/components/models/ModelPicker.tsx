@@ -1,4 +1,4 @@
-import { Check, ChevronDown, Plug, Sparkles } from 'lucide-react'
+import { Check, ChevronDown, Plug, Sparkles } from '../ui/icon'
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 
 import { type Catalog, type Model, contextSize, price, shortName } from '../../lib/ai/client'

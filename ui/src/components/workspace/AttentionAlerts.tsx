@@ -1,4 +1,4 @@
-import { ArrowRight } from 'lucide-react'
+import { ArrowRight } from '../ui/icon'
 
 import type { Attention } from '../../lib/watch/events'
 

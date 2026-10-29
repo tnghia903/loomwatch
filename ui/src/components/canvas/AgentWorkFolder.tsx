@@ -1,4 +1,4 @@
-import { Folder } from 'lucide-react'
+import { Folder } from '../ui/icon'
 import { useState } from 'react'
 
 import { isAbsolutePath } from '../../lib/files/paths'

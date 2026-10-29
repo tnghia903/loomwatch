@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowLeft, ExternalLink, MessagesSquare, Trash2, Wrench } from 'lucide-react'
+import { ArrowLeft, ExternalLink, MessagesSquare, Trash2, Wrench } from '../ui/icon'
 
 import { shortName } from '../../lib/ai/client'
 import { effortWord, modelEfforts, placeEffort } from '../../lib/ai/efforts'

@@ -1,4 +1,4 @@
-import { Menu as MenuIcon } from 'lucide-react'
+import { Menu as MenuIcon } from '../ui/icon'
 import { useEffect, useRef, useState } from 'react'
 
 import { openFeedback, type FeedbackScreen } from '../../lib/feedback/report'

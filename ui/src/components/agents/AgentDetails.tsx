@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft } from '../ui/icon'
 
 import { guestsOf } from '../../lib/chat/guests'
 import { alwaysAllowGuest } from '../../lib/library/bringIn'

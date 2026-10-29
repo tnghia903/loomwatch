@@ -1,4 +1,4 @@
-import { Check, Plus, X } from 'lucide-react'
+import { Check, Plus, X } from '../ui/icon'
 import { Fragment, useEffect, useState } from 'react'
 
 import { KIND_LABEL, RELATION, type CapabilityKind } from '../../lib/composer-layout/types'

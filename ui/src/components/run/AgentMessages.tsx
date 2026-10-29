@@ -1,4 +1,4 @@
-import { FileSearch, FileText, Info, Reply, ShieldQuestionMark } from 'lucide-react'
+import { FileSearch, FileText, Info, Reply, ShieldQuestionMark } from '../ui/icon'
 import { Fragment, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import { bubbles as layOut, callsWhileWaiting, converse, fold, handedWork, waited, type Bubble, type Party } from '../../lib/story/conversation'

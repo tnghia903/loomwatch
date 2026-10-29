@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
-import { Network, Plus, UserRoundPlus, X } from 'lucide-react'
+import { Network, Plus, UserRoundPlus, X } from '../ui/icon'
 
 import type { DetectedCapability } from '../../lib/library/client'
 import type { AgentDraft } from '../../lib/library/draft'

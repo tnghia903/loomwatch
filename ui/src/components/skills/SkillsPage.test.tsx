@@ -122,9 +122,9 @@ describe('finding skills', () => {
     render(<SkillsPage />)
     const results = await searchFor()
     const icons = within(results).getAllByRole('listitem').map((card) => card.querySelector('.lw-skills-glyph svg')?.getAttribute('class'))
-    expect(icons[0]).toMatch(/file-text/)
-    expect(icons[1]).toMatch(/megaphone/)
-    expect(icons[2]).toMatch(/book-open-text/)
+    expect(icons[0]).toMatch(/lw-icon-page$/)
+    expect(icons[1]).toMatch(/lw-icon-megaphone$/)
+    expect(icons[2]).toMatch(/lw-icon-know$/)
   })
 
   it('shows one site’s results when the other doesn’t answer', async () => {

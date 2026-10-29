@@ -1,4 +1,4 @@
-import { Search } from 'lucide-react'
+import { Search } from '../ui/icon'
 import { useEffect, useState, type ReactNode } from 'react'
 
 import { useAiStatus } from '../../lib/ai/useKeyStatus'

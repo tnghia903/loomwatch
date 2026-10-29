@@ -1,4 +1,4 @@
-import { CircleHelp } from 'lucide-react'
+import { CircleHelp } from './icon'
 import { useId, useState, type ReactNode } from 'react'
 
 export interface SectionHeadProps {

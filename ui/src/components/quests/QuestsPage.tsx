@@ -1,4 +1,4 @@
-import { ArrowRight, Check, Lock, Moon, Sun } from 'lucide-react'
+import { ArrowRight, Check, Lock, Moon, Sun } from '../ui/icon'
 
 import { figureStill, type FigureKind } from '../../lib/library/figures'
 import { AREA_NAMES, AREAS, isAccessory, isGarment, QUESTS, type Quest } from '../../lib/quests/catalog'
