@@ -27,6 +27,7 @@ pub mod helpers;
 mod intent;
 mod jobs;
 pub mod lessons;
+pub(crate) mod made;
 pub mod marketplace;
 pub mod memory;
 pub mod message_done;

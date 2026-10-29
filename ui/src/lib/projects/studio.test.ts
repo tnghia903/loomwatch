@@ -46,7 +46,7 @@ describe('the studio (ADR 0097)', () => {
     expect((teamShapeOf('p.yaml', 'schemaVersion: 1\nname: Desk\nentrypoint: lead\nschedule: {cron: "0 8 * * *", enabled: false}\nagents:\n  - {id: lead, name: Lead}\nedges: []\n') as TeamShape).schedule).toBeNull()
   })
 
-  it('draws an agent where it is now: waiting at your desk, working where it works', () => {
+  it('draws an agent where it is now: lit at its desk where it waits for you or works, faint elsewhere', () => {
     const gate = teamShapeOf('gate.yaml', PIPELINE, JOBS) as TeamShape
     const brief: TeamShape = { path: 'brief.yaml', name: 'Market brief', project: 'market', seats: [{ kind: 'agent', id: 'w', name: 'Writer', agent: 'writer' }, { kind: 'agent', id: 'r', name: 'Researcher', agent: 'researcher' }], schedule: null }
     const runs = [
@@ -56,12 +56,17 @@ describe('the studio (ADR 0097)', () => {
     const [sutd, market] = roomsOf([project('sutd', ['gate.yaml']), project('market', ['brief.yaml'])], [gate, brief], runs, null)
     expect(sutd.state).toBe('waiting')
     expect(sutd.line).toBe('Researcher is waiting for you')
-    expect(sutd.teams[0].seats[0]).toMatchObject({ name: 'Researcher', state: 'waiting', away: 'at your desk' })
-    expect(seatWords(sutd.teams[0].seats[0])).toBe('Researcher is at your desk')
+    // Waiting for you, it stands lit at its own desk, as the tiles above say it waits.
+    expect(sutd.teams[0].seats[0]).toMatchObject({ name: 'Researcher', state: 'waiting', away: null })
+    expect(seatWords(sutd.teams[0].seats[0])).toBe('Researcher is waiting for you')
     expect(market.state).toBe('working')
     expect(market.line).toBe('Writer is working')
-    // The Researcher waits for you in the SUTD room, so its desk in Market brief is an outline too.
-    expect(market.teams[0].seats[1]).toMatchObject({ name: 'Researcher', away: 'at your desk' })
+    // The Researcher waits for you in Research and design, so its desk in Market brief is faint, saying where.
+    expect(market.teams[0].seats[1]).toMatchObject({ name: 'Researcher', away: 'in Research and design' })
+    // Waiting here and working there at once, it is lit in both, each where it is busy.
+    const both = roomsOf([project('sutd', ['gate.yaml']), project('market', ['brief.yaml'])], [gate, brief], [...runs, run('brief.yaml', { working: ['r'] })], null)
+    expect(both[0].teams[0].seats[0]).toMatchObject({ name: 'Researcher', state: 'waiting', away: null })
+    expect(both[1].teams[0].seats[1]).toMatchObject({ name: 'Researcher', state: 'working', away: null })
   })
 
   it('names the team an agent works in when it is elsewhere, and draws it in each room it works in', () => {

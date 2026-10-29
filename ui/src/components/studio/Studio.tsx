@@ -1,22 +1,32 @@
 import { Plus, Search } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
+import { FileReaderContext, type FileToRead } from '../../lib/files/reader'
 import { figureFor, type FigureChoice } from '../../lib/library/figures'
 import type { SavedJob } from '../../lib/library/jobs'
 import { useProjects, type ProjectEntry } from '../../lib/projects/client'
-import { AT_YOUR_DESK, deskItems, roomsOf, studioLayout, type Room, type Seat } from '../../lib/projects/studio'
+import { costWords, finishedToday, lastFinished, madeHere, monthCost, monthSpend, needsYou, workingNow } from '../../lib/projects/glance'
+import { roomsOf, studioLayout, type Room } from '../../lib/projects/studio'
+import { useMonthUsage } from '../../lib/projects/useMonthUsage'
+import { loadDismissed } from '../../lib/story/useNeedsYou'
 import { useTeamShapes } from '../../lib/projects/useTeamShapes'
 import { benchChatId } from '../../lib/rail/presence'
+import { historyRunUrl } from '../../lib/runs/history'
 import type { RunRecord } from '../../lib/runs/client'
 import { teamDisplayName, type TeamSummary } from '../../lib/team-file/client'
 import { openTeam, useTeamList } from '../../lib/team-file/useTeamList'
+import { formatCost } from '../../lib/watch/usage'
 import { KnowYou } from '../you/KnowYou'
 import { relativeTime } from '../../lib/format'
 import { FigureStill } from '../agents/FigureStill'
-import { defaultFigureOf, roomHref } from '../../lib/projects/studioUi'
+import { goToRun } from '../agents/route'
+import { defaultFigureOf, openNeedsYou, roomHref } from '../../lib/projects/studioUi'
+import { GlanceTiles } from './GlanceTiles'
+import { PickUp } from './PickUp'
+import { ReaderSheet } from './ReaderSheet'
 import { RoomCard, RoomWords, ProjectMark } from './RoomCard'
 import { SetUpProject, type ProjectStart } from './SetUpProject'
-import { YourDesk } from './YourDesk'
+import { WorkBox, type BoxTeam } from './WorkBox'
 
 const VIEW_KEY = 'loomwatch:studio-view'
 
@@ -117,10 +127,26 @@ export function Studio({ runs, onSetUp, setUpUnavailable, asking = false }: {
     () => (list && shapes ? roomsOf([...list.projects, ...looseProjects(list.loose)], shapes, runs, root) : null),
     [list, shapes, runs, root],
   )
-  const desk = useMemo(() => deskItems(runs, shapes ?? [], root), [runs, shapes, root])
+  const teamShapes = useMemo(() => shapes ?? [], [shapes])
+  // At a glance, across every project: what needs you, who works, what finished today, this month.
+  // By the bell's rules, so the two always count alike: the failures dismissed there left out.
+  const needs = useMemo(() => needsYou(runs, teamShapes, root, null, loadDismissed()), [runs, teamShapes, root])
+  const working = useMemo(() => workingNow(runs, teamShapes, root), [runs, teamShapes, root])
+  const made = useMemo(() => madeHere(runs, root), [runs, root])
+  const usage = useMonthUsage()
+  const [reading, setReading] = useState<FileToRead | null>(null)
+  const read = useCallback((file: FileToRead) => setReading(file), [])
+  const names = useMemo(() => new Map(teamShapes.flatMap((shape) => shape.seats.map((seat) => [seat.id, seat.name] as const))), [teamShapes])
+  const nameOf = useCallback((agent: string) => names.get(agent) ?? agent, [names])
   // Your agents' own chats, newest first.
   const chats = useMemo(() => [...runs].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map((run) => benchChatId(run.teamPath)).filter((id): id is string => Boolean(id)), [runs])
   const used = useMemo(() => new Set((shapes ?? []).flatMap((shape) => shape.seats.flatMap((seat) => (seat.agent ? [seat.agent] : [])))), [shapes])
+  // Every team the box can give work to, under its project.
+  const boxTeams = useMemo((): BoxTeam[] => (rooms ?? []).filter((room) => !room.putAway).flatMap((room) => room.teams.map((team) => ({
+    path: team.path,
+    name: team.name,
+    ...(room.id.startsWith('team:') ? {} : { project: { id: room.id, name: room.name } }),
+  }))), [rooms])
 
   // ⌘N and the palette's New team reach Home through this event: a new team starts as a project.
   useEffect(() => {
@@ -137,25 +163,31 @@ export function Studio({ runs, onSetUp, setUpUnavailable, asking = false }: {
     if (room.id.startsWith('team:')) openTeam(room.id.slice('team:'.length))
     else window.location.assign(roomHref(room.id))
   }
-  // An agent at your desk is faint in its rooms; pressing it there goes to Your desk.
-  const onAway = (seat: Seat) => {
-    const still = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-    if (seat.away === AT_YOUR_DESK) document.getElementById('your-desk-title')?.scrollIntoView({ behavior: still ? 'auto' : 'smooth', block: 'center' })
+  const openRun = (run: Pick<RunRecord, 'runId' | 'teamPath'>) => goToRun(historyRunUrl({ id: run.runId, teamPath: run.teamPath }))
+  // Where to ask about a file read here: the chat of the work that made it. A file opened from a
+  // chip comes with no run, so the run is the one that made it.
+  const chatOf = (file: FileToRead) => {
+    const maker = made.find((candidate) => candidate.path === file.path) ?? runs.find((candidate) => candidate.runId === file.runId)
+    return maker ? historyRunUrl({ id: maker.runId, teamPath: maker.teamPath }) : null
   }
 
   if (error) return <p role="alert" className="home-empty alert">Couldn’t list your projects. {error} <button type="button" className="link" onClick={reload}>Try again</button></p>
   if (!rooms) return <p role="status" className="home-empty">Loading your projects…</p>
 
   const setUp = (start: ProjectStart) => { setCreating(false); onSetUp(start) }
-  const deskSection = <YourDesk items={desk} jobs={jobs} chats={chats} figures={figures} />
+  const pickUp = <PickUp files={made} chats={chats} jobs={jobs} figures={figures} />
+  const reader = reading && <ReaderSheet file={reading} name={nameOf} chat={chatOf(reading)} onClose={() => setReading(null)} />
   if (rooms.length === 0) {
     return (
+      <FileReaderContext.Provider value={read}>
       <div className="studio studio-empty">
         <SetUpProject onSetUp={setUp} unavailable={setUpUnavailable} asking={asking} />
-        {deskSection}
+        {pickUp}
         <CantBeOpened teams={problems} />
         <NotInAProject jobs={jobs} rooms={rooms} used={used} />
       </div>
+      {reader}
+      </FileReaderContext.Provider>
     )
   }
 
@@ -163,9 +195,40 @@ export function Studio({ runs, onSetUp, setUpUnavailable, asking = false }: {
   const found = needle ? rooms.filter((room) => room.name.toLowerCase().includes(needle)) : rooms
   const { open, quiet, putAway } = studioLayout(found)
   const shown = showPutAway ? [...open, ...quiet, ...putAway] : [...open, ...quiet]
+  // What each room shows of its own: the newest thing made there, and what this month cost, by
+  // where it was paid when the usage report could be read.
+  const roomFacts = (room: Room) => {
+    const scope = room.teams.map((team) => team.path)
+    const spend = monthSpend(runs, root, scope)
+    const cost = monthCost(usage, room.teams.map((team) => team.name))
+    const words = cost ? (cost.usd > 0 || cost.plan ? costWords(cost) : null) : spend.runs > 0 ? `${spend.atLeast ? 'at least ' : ''}${formatCost(spend.usd)}` : null
+    return {
+      newest: madeHere(runs, root, scope, 1)[0]?.path ?? null,
+      spend: words ? `${words} this month` : null,
+    }
+  }
   return (
+    <FileReaderContext.Provider value={read}>
     <div className="studio">
-      {deskSection}
+      <div id="your-desk" className="studio-desk">
+        <GlanceTiles
+          label="Your desk"
+          needs={needs}
+          last={lastFinished(runs, root)}
+          working={working}
+          finishedToday={finishedToday(runs, root)}
+          spend={monthSpend(runs, root)}
+          cost={monthCost(usage, null)}
+          figureOf={figureOf}
+          // Home's Review opens the bell's tray at that item, where each thing waiting is answered
+          // in turn (ADR 0043); "Show N more" opens it at the first.
+          onReview={(item) => openNeedsYou(item.runId)}
+          onOpenRun={openRun}
+          onMore={() => openNeedsYou()}
+        />
+        {boxTeams.length > 0 && <WorkBox teams={boxTeams} primary={needs.length === 0} />}
+      </div>
+      {pickUp}
       <section className="studio-projects" aria-labelledby="studio-projects-title" data-tour="projects">
         <div className="studio-projects-head">
           <h2 id="studio-projects-title" className="studio-head">Projects</h2>
@@ -179,7 +242,7 @@ export function Studio({ runs, onSetUp, setUpUnavailable, asking = false }: {
         </div>
         {view === 'rooms' ? (
           <div className="room-grid">
-            {open.map((room) => <RoomCard key={room.id} room={room} figureOf={figureOf} onOpen={() => openRoom(room)} onAway={onAway} />)}
+            {open.map((room) => <RoomCard key={room.id} room={room} figureOf={figureOf} onOpen={() => openRoom(room)} {...roomFacts(room)} />)}
             {quiet.map((room) => (
               <button key={room.id} type="button" className="room-tile" onClick={() => openRoom(room)}>
                 <span className="room-tile-name"><ProjectMark id={room.id} mark={room.mark} />{room.name}</span>
@@ -197,7 +260,7 @@ export function Studio({ runs, onSetUp, setUpUnavailable, asking = false }: {
             <button type="button" className="room-new" onClick={() => setCreating(true)}><Plus size={20} aria-hidden="true" />New project</button>
           </div>
         ) : (
-          <ul className="room-list">
+          <ul className="room-list" aria-label="Projects">
             {shown.map((room) => (
               <li key={room.id}>
                 <button type="button" onClick={() => openRoom(room)}>
@@ -217,5 +280,7 @@ export function Studio({ runs, onSetUp, setUpUnavailable, asking = false }: {
       <NotInAProject jobs={jobs} rooms={rooms} used={used} />
       {creating && <SetUpProject onSetUp={setUp} unavailable={setUpUnavailable} asking={asking} onClose={() => setCreating(false)} />}
     </div>
+    {reader}
+    </FileReaderContext.Provider>
   )
 }

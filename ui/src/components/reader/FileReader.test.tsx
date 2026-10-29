@@ -5,6 +5,7 @@ import type { AgentFacts } from '../../lib/chat/faces'
 import { forgetAnswersRead } from '../../lib/files/answersRead'
 import { openPdf } from '../../lib/files/pdf'
 import { askKey, partId, passageId, type AskedPassage, type PassageAnswer } from '../../lib/files/passage'
+import { isGoldFill } from '../../test/cascade'
 import { EXPLAIN_WORDS, FileReader } from './FileReader'
 
 // PDF.js stands in as a PDF of a few pages, each 600 by 800 at scale 1, saying which page it is.
@@ -113,6 +114,10 @@ describe('reading a file an agent made', () => {
     expect(document.querySelector('.rd-from')).toHaveTextContent('Writer')
     expect(screen.getByRole('button', { name: 'Open market-report.md in its own app' })).toBeEnabled()
     expect(screen.getByText('Mark any words')).toBeInTheDocument()
+    // Its kind is a label on the sheet's paper, not a second gold fill beside the chat's.
+    const kind = document.querySelector('.rd-sheet b')!
+    expect(kind).toHaveTextContent('MD')
+    expect(isGoldFill(kind)).toBe(false)
   })
 
   it('shows the pictures a report links to beside it, as they were when it was read, and never one from the web', async () => {

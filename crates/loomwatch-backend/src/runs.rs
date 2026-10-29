@@ -281,6 +281,11 @@ pub struct RunRecord {
     /// and stored, so a finished run still shows it. `None` for runs recorded before it was kept.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spend: Option<crate::spend::RunSpend>,
+    /// The files the run's agents made (`made.rs`), worked out from the archive once the run
+    /// ends and stored, so a page listing many runs shows what they made without replaying each.
+    /// `None` until then, and for a run from before it was kept until the daemon fills it in.
+    #[serde(default, skip_serializing_if = "crate::made::none_made")]
+    pub made: Option<Vec<String>>,
     /// Spend stops waiting for the operator: the run, or one agent, used what it may spend (ADR
     /// 0068). Live only, like `permission_requests`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -441,6 +446,7 @@ impl RunRecord {
             team_name: team_name(team),
             agent_names: agent_names(team),
             spend: Some(crate::spend::RunSpend::for_team(team)),
+            made: None,
             spend_stops: Vec::new(),
             next_try_at: None,
             try_again_after: None,
@@ -600,15 +606,20 @@ impl RunStore {
             .spend
             .as_ref()
             .and_then(|spend| serde_json::to_value(spend).ok());
+        let made = record
+            .made
+            .as_ref()
+            .and_then(|made| serde_json::to_value(made).ok());
         sqlx::query(
             "INSERT INTO runs
              (run_id, session_id, team_path, prompt, status, mode, entrypoint, responder,
               agent_ids, created_at, started_at, finished_at, error, exit_code, error_code,
               stop_reason, event_count, reply, trigger, delivery, follows_run_id, start_at,
               retry_of_run_id, waiting_on, start_key, start_fingerprint, team_key, only_agent,
-              team_revision, team_name, agent_names, spend)
+              team_revision, team_name, agent_names, spend, made)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
-                     $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32)
+                     $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32,
+                     $33)
              ON CONFLICT (run_id) DO UPDATE SET
                status = EXCLUDED.status,
                started_at = EXCLUDED.started_at,
@@ -625,6 +636,8 @@ impl RunStore {
                retry_of_run_id = EXCLUDED.retry_of_run_id,
                waiting_on = EXCLUDED.waiting_on,
                spend = EXCLUDED.spend,
+               -- Worked out once, from the archive: a write from before it was must not undo it.
+               made = COALESCE(EXCLUDED.made, runs.made),
                -- Never cleared by a later write: the key binds for the lifetime of the run, and a
                -- transition that carries no key must not unbind it.
                start_key = COALESCE(EXCLUDED.start_key, runs.start_key),
@@ -670,6 +683,7 @@ impl RunStore {
         .bind(&record.team_name)
         .bind(&agent_names)
         .bind(&spend)
+        .bind(&made)
         .execute(self.db.writer())
         .await?;
         Ok(())
@@ -779,6 +793,9 @@ pub(crate) fn decode_run(row: &sqlx::sqlite::SqliteRow) -> Result<StoredRun, sql
             spend: row
                 .try_get::<Option<Value>, _>("spend")?
                 .and_then(|spend| serde_json::from_value(spend).ok()),
+            made: row
+                .try_get::<Option<Value>, _>("made")?
+                .and_then(|made| serde_json::from_value(made).ok()),
             spend_stops: Vec::new(),
             next_try_at: None,
             try_again_after: None,
@@ -1064,7 +1081,10 @@ impl RunRegistry {
         for run_id in &interrupted {
             record_abandoned_checkpoints(archive, run_id, &crate::RunLineage::default()).await;
             forget_parked_agents(archive, run_id).await;
+            note_files_made(self, archive, run_id).await;
+            persist_or_log(self, run_id).await;
         }
+        self.fill_in_made(archive);
         // From here on the chat's search keeps up with what is written (ADR 0081), starting with
         // whatever an older version left unindexed.
         if let Some(index) = self.work_index() {
@@ -1227,6 +1247,41 @@ impl RunRegistry {
     pub fn get(&self, run_id: &str) -> Option<RunRecord> {
         let inner = self.inner.read().unwrap_or_else(PoisonError::into_inner);
         inner.runs.get(run_id).map(|entry| entry.record.clone())
+    }
+
+    /// Keep the files a finished run made ([`RunRecord::made`]). Unlike a transition this writes
+    /// to a finished record, since it is worked out from the archive once the run is over. A run
+    /// still going is left alone: it may make more.
+    pub(crate) fn set_made(&self, run_id: &str, made: Vec<String>) -> bool {
+        let mut inner = self.inner.write().unwrap_or_else(PoisonError::into_inner);
+        match inner.runs.get_mut(run_id) {
+            Some(entry) if entry.record.status.is_terminal() => {
+                entry.record.made = Some(made);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Fill in what older runs made, once each: a run recorded before runs kept it has none
+    /// stored. In the background and one run at a time, so the daemon answers while it reads.
+    fn fill_in_made(&self, archive: &EventArchive) {
+        let missing: Vec<String> = self
+            .list()
+            .into_iter()
+            .filter(|run| run.status.is_terminal() && run.made.is_none())
+            .map(|run| run.run_id)
+            .collect();
+        if missing.is_empty() {
+            return;
+        }
+        let (registry, archive) = (self.clone(), archive.clone());
+        tokio::spawn(async move {
+            for run_id in missing {
+                note_files_made(&registry, &archive, &run_id).await;
+                persist_or_log(&registry, &run_id).await;
+            }
+        });
     }
 
     /// Every run, newest first.
@@ -3577,7 +3632,20 @@ async fn execute(
             )
         }
     };
+    // Boxed: `execute` is already near clippy's future-size limit on Windows.
+    Box::pin(note_files_made(&registry, &archive, &run_id)).await;
     persist_or_log(&registry, &run_id).await;
+}
+
+/// Work out and keep the files a finished run made, from its archive. Logged, never propagated:
+/// how a run ended must not change because this could not be read.
+async fn note_files_made(registry: &RunRegistry, archive: &EventArchive, run_id: &str) {
+    match crate::made::files_made(archive, run_id).await {
+        Ok(made) => {
+            registry.set_made(run_id, made);
+        }
+        Err(error) => eprintln!("warning: could not list the files run {run_id} made: {error:#}"),
+    }
 }
 
 /// End a run that stopped at its spool (ADR 0068). Its checkpoints are kept either way, so it can
@@ -4486,6 +4554,9 @@ async fn cancel_run(
 
 /// What follows a cancel: the record written through, and the run's checkpoints.
 async fn settle_cancelled(registry: &RunRegistry, archive: Option<&EventArchive>, run_id: &str) {
+    if let Some(archive) = archive {
+        note_files_made(registry, archive, run_id).await;
+    }
     persist_or_log(registry, run_id).await;
     // A cancelled run used to leave nothing to continue from. `cancel` aborts the run task, so
     // `execute` never reaches its abnormal-end sweep — the sweep has to be run from here instead.
@@ -7496,6 +7567,287 @@ pub(crate) mod tests {
                     && event.payload["phase"] == "turn_purpose"
                     && event.payload["purpose"] == "checkpoint")
         );
+    }
+
+    /// A run keeps the files its agents made (`made.rs`) when it ends, and the run list sends them,
+    /// so a page listing many runs shows them without replaying each.
+    #[tokio::test]
+    async fn a_finished_run_keeps_the_files_its_agents_made() {
+        use crate::agent::ToolCall;
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        let writes = demo_model(Demo::scripted(vec![
+            Completion::calls(
+                "I'll write it.",
+                vec![ToolCall {
+                    id: "c1".into(),
+                    name: "write_file".into(),
+                    arguments: r##"{"path":"out/report.md","content":"# Report\n"}"##.into(),
+                }],
+            ),
+            Completion::text("Done: out/report.md is written."),
+        ]));
+        dir.write_team("team.yaml", &writes);
+        let archive = EventArchive::new(pool);
+        let registry = RunRegistry::durable(archive.run_store());
+        let app = router(Some(archive.clone()), dir.0.clone(), registry.clone());
+
+        let run = start(&app, "team.yaml").await;
+        // Writing a file asks first, as in a real run.
+        let asking = wait_for(&registry, &run.run_id, |r| {
+            !r.permission_requests.is_empty()
+        })
+        .await;
+        registry
+            .answer_permission(
+                &run.run_id,
+                &asking.permission_requests[0].id,
+                crate::permissions::PermissionDecision::AllowOnce,
+                None,
+            )
+            .expect("answered");
+        let done = wait_for(&registry, &run.run_id, |r| r.made.is_some()).await;
+        assert_eq!(done.status, RunStatus::Succeeded, "{done:?}");
+        let made = done.made.clone().unwrap_or_default();
+        assert_eq!(made.len(), 1, "{made:?}");
+        assert!(
+            std::path::Path::new(&made[0]).ends_with(std::path::Path::new("out").join("report.md")),
+            "{made:?}"
+        );
+
+        // Listed as `made`, and stored: the boot after reads it without the archive.
+        let listed = json_body(
+            app.clone()
+                .oneshot(get_local("/api/runs?preview=true"))
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(listed[0]["made"], json!(made));
+        let next = RunRegistry::durable(archive.run_store());
+        next.reload().await.expect("reload");
+        assert_eq!(next.get(&run.run_id).and_then(|r| r.made), Some(made));
+    }
+
+    /// A cancelled run keeps the files its agents made before it was stopped: `cancel` aborts the
+    /// run's task, so its end is settled where the cancel is.
+    #[tokio::test]
+    async fn a_cancelled_run_keeps_the_files_its_agents_made_before() {
+        use crate::agent::ToolCall;
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        // Writes a file, then holds on its next request until it is stopped.
+        let (demo, _hold) = Demo::responder_holding(
+            |_| {
+                Some(Completion::calls(
+                    "Writing.",
+                    vec![ToolCall {
+                        id: "c1".into(),
+                        name: "write_file".into(),
+                        arguments: r##"{"path":"draft.md","content":"# Draft\n"}"##.into(),
+                    }],
+                ))
+            },
+            crate::agent::SeenRequest::after_tool,
+            "",
+        );
+        dir.write_team("team.yaml", &demo_model(demo));
+        let archive = EventArchive::new(pool);
+        let registry = RunRegistry::durable(archive.run_store());
+        let app = router(Some(archive.clone()), dir.0.clone(), registry.clone());
+
+        let run = start(&app, "team.yaml").await;
+        let asking = wait_for(&registry, &run.run_id, |r| {
+            !r.permission_requests.is_empty()
+        })
+        .await;
+        registry
+            .answer_permission(
+                &run.run_id,
+                &asking.permission_requests[0].id,
+                crate::permissions::PermissionDecision::AllowOnce,
+                None,
+            )
+            .expect("answered");
+        // The file is written once its call is done; the next request then holds.
+        tokio::time::timeout(Duration::from_secs(15), async {
+            while !dir.0.join(".loomwatch").exists()
+                || archive
+                    .tool_events(&run.run_id)
+                    .await
+                    .unwrap_or_default()
+                    .iter()
+                    .all(|(_, kind, payload)| {
+                        kind != "tool_update" || payload["status"] != "completed"
+                    })
+            {
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        })
+        .await
+        .expect("the file was written");
+        let response = app
+            .clone()
+            .oneshot(post_json(
+                &format!("/api/runs/{}/cancel", run.run_id),
+                &json!({}),
+            ))
+            .await
+            .unwrap();
+        assert!(response.status().is_success(), "{}", response.status());
+        let done = wait_for(&registry, &run.run_id, |r| r.made.is_some()).await;
+        assert_eq!(done.status, RunStatus::Cancelled);
+        let made = done.made.unwrap_or_default();
+        assert_eq!(made.len(), 1, "{made:?}");
+        assert!(
+            std::path::Path::new(&made[0]).ends_with("draft.md"),
+            "{made:?}"
+        );
+    }
+
+    /// What a run made is kept only once it has ended, sent only when there is something, and never
+    /// undone by a write from a record that hasn't worked it out.
+    #[tokio::test]
+    async fn what_a_run_made_is_kept_once_it_ends_and_sent_only_when_there_is_something() {
+        let pool = crate::db::Db::temp().await;
+        let team = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: x\n      cwd: .\n    model: m\n",
+        )
+        .expect("a valid team");
+        let archive = EventArchive::new(pool);
+        let registry = RunRegistry::durable(archive.run_store());
+        let record = RunRecord::queued("t.yaml".into(), "go".into(), &team, RunTrigger::Manual)
+            .expect("queued");
+        let id = record.run_id.clone();
+        registry.insert(record);
+        assert!(registry.mark_starting(&id));
+        // Still going: it may make more, so nothing is kept yet.
+        assert!(!registry.set_made(&id, vec!["/w/early.md".into()]));
+        assert_eq!(registry.get(&id).and_then(|r| r.made), None);
+
+        assert!(registry.mark_succeeded(
+            &id,
+            &SessionOutcome {
+                session_id: id.clone(),
+                event_count: 1,
+                exit_code: 0,
+                reply: "answer".into(),
+            },
+            None,
+        ));
+        assert!(registry.set_made(&id, Vec::new()));
+        let nothing = registry.get(&id).expect("the run");
+        assert_eq!(nothing.made, Some(Vec::new()));
+        // Worked out, and nothing made: the list leaves it out.
+        assert!(
+            serde_json::to_value(&nothing)
+                .unwrap()
+                .get("made")
+                .is_none()
+        );
+
+        let made = vec!["/w/brief.md".to_owned()];
+        assert!(registry.set_made(&id, made.clone()));
+        let kept = registry.get(&id).expect("the run");
+        assert_eq!(serde_json::to_value(&kept).unwrap()["made"], json!(made));
+        let store = archive.run_store();
+        store.upsert(&kept, None, None).await.expect("stored");
+        // A write from a record that hasn't worked it out (one read before it was) keeps it.
+        let stale = RunRecord { made: None, ..kept };
+        store.upsert(&stale, None, None).await.expect("stored");
+        let stored = store.recent().await.expect("read back");
+        assert_eq!(stored[0].record.made, Some(made));
+    }
+
+    /// A run a restart cut off keeps the files its agents made before, worked out as the daemon
+    /// comes back; and a finished run recorded before runs kept them gets them filled in.
+    #[tokio::test]
+    async fn a_restart_works_out_what_cut_off_and_older_runs_made() {
+        let pool = crate::db::Db::temp().await;
+        let team = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: x\n      cwd: .\n    model: m\n",
+        )
+        .expect("a valid team");
+        let archive = EventArchive::new(pool);
+        let first = RunRegistry::durable(archive.run_store());
+        let report = std::env::temp_dir()
+            .join("report.md")
+            .to_string_lossy()
+            .into_owned();
+        let older = std::env::temp_dir()
+            .join("older.md")
+            .to_string_lossy()
+            .into_owned();
+
+        let cut_off = RunRecord::queued("t.yaml".into(), "go".into(), &team, RunTrigger::Manual)
+            .expect("queued");
+        let cut_off_id = cut_off.run_id.clone();
+        first.insert(cut_off);
+        assert!(first.mark_starting(&cut_off_id));
+        assert!(first.mark_running(&cut_off_id));
+        first.persist(&cut_off_id).await.expect("persist");
+
+        let finished = RunRecord::queued("t.yaml".into(), "go".into(), &team, RunTrigger::Manual)
+            .expect("queued");
+        let finished_id = finished.run_id.clone();
+        first.insert(finished);
+        assert!(first.mark_starting(&finished_id));
+        assert!(first.mark_succeeded(
+            &finished_id,
+            &SessionOutcome {
+                session_id: finished_id.clone(),
+                event_count: 1,
+                exit_code: 0,
+                reply: "answer".into(),
+            },
+            None,
+        ));
+        first.persist(&finished_id).await.expect("persist");
+
+        for (run_id, path) in [(&cut_off_id, &report), (&finished_id, &older)] {
+            archive
+                .append(&crate::RunEvent {
+                    id: format!("{run_id}:0"),
+                    session_id: run_id.clone(),
+                    agent_id: "a".into(),
+                    seq: 0,
+                    ts: now(),
+                    kind: EventKind::ToolCall,
+                    payload: json!({ "callId": "c1", "title": "Write", "toolKind": "edit", "status": "completed", "locations": [{ "path": path }] }),
+                    raw: None,
+                })
+                .await
+                .expect("append");
+        }
+
+        let next = RunRegistry::durable(archive.run_store());
+        next.recover(&archive).await.expect("recover");
+        let recovered = next.get(&cut_off_id).expect("recovered");
+        assert_eq!(recovered.status, RunStatus::Failed);
+        assert_eq!(recovered.made, Some(vec![report.clone()]));
+        // The older run's comes in the background, once.
+        let filled = wait_for(&next, &finished_id, |r| r.made.is_some()).await;
+        assert_eq!(filled.made, Some(vec![older.clone()]));
+
+        // Both stored, so the boot after neither reads the archive nor loses them.
+        let third = RunRegistry::durable(archive.run_store());
+        third.reload().await.expect("reload");
+        assert_eq!(
+            third.get(&cut_off_id).and_then(|r| r.made),
+            Some(vec![report])
+        );
+        tokio::time::timeout(Duration::from_secs(15), async {
+            loop {
+                let fresh = RunRegistry::durable(archive.run_store());
+                fresh.reload().await.expect("reload");
+                if fresh.get(&finished_id).and_then(|r| r.made).is_some() {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        })
+        .await
+        .expect("the filled-in files were stored");
     }
 
     /// A model that plans twice and then answers `done`, each call costing `cost`: three calls in

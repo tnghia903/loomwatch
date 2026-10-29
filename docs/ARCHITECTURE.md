@@ -317,6 +317,12 @@ which is what makes a run replayable. How it stays fast as history grows:
   recorded from. A tool update's frame carries its output again, which the projected payload
   already holds. So `raw` is stored as the frame minus the values it shares with `payload`,
   compressed when that is smaller (`archive/codec.rs`). It is read back byte for byte.
+- **What a run made.** When a run ends, however it ends (finished, cancelled, cut off by a
+  restart), the daemon reads its tool calls once, payloads only, and keeps the full paths its
+  edit calls named in the run's `made` column (`made.rs`): calls that failed or that the person
+  refused are left out, the same rule as the app's `filesWritten`, at most 100 per run. The run
+  list sends it as `made`, so Home and a project's room show what the agents made without
+  replaying any run. Runs recorded before it get theirs once, in the background, after a start.
 - **Search** in the Notebook is SQLite FTS5 with English stemming.
 - **Finding in a team's chat** (`chat_find.rs`, ADR 0081) searches every request, answer, note and
   line of the agents' talk (handovers, check verdicts, questions, Team Bus messages), cut into
@@ -418,15 +424,33 @@ adds the person's note. The daemon keeps a copy of every team file once before t
 team into a project of its own (`/api/move-into-projects`), through its normal save. Moving a
 team to another project later is the same save, with only its `project` changed.
 
-In the app, Home is the studio (`components/studio/`, `lib/projects/studio.ts`): Your desk first,
-with whoever waits for the person (its Review opens the bell's tray), then a room per project with
-its busiest team's agents at their desks in the order work moves, then the person's agents in no
-project. A project's teams stand waiting first, then working, then stopped, then the next to run on
-a schedule, and its room keeps the order it opened with while the person is in it. When there is
-more than one, the card names the team it shows and up to two other teams at work. An agent is lit only where it is now: elsewhere its figure is faint and unlit, with words
-saying it is at the person's desk or naming the team it works in. Where the person checks, the desk
-holds the review step's ring, as on the canvas. A project's room is `/projects/<id>`: its wall (About,
-folders, notes), its teams, Add an agent, New team, and Ask about the project.
+In the app, Home is the studio (`components/studio/`, `lib/projects/studio.ts`). Home and a
+project's room open the same way, at a glance (`lib/projects/glance.ts`, `GlanceTiles`): four tiles
+that keep their places. Needs you counts by the bell's own rules (`ticketsFrom`), so the two never
+differ: what waits for the person, then work that stopped in the last day that the schedule won't
+try again and that wasn't dismissed. Each has the one press that answers it: Review for work to
+check, Answer for a question, a permission or a limit (on Home both open the bell's tray at that
+item; in a room, the work itself); for stopped work, the fix LoomWatch knows for why it stopped
+(`problemAction`, such as adding credits), or See why, which opens it in its chat. With nothing
+waiting it shows the last work that went well. Then Working now; Next on a schedule in a room,
+Finished today on Home; and This month, from the usage report (ADR 0073) so a ChatGPT plan is said as
+a plan and a list-price estimate with "≈". Under the tiles a box gives a team work as its chat's box
+does (`WorkBox`, `POST /api/chat/messages` to the team with `work`), named for the team it goes to,
+with "To" when there is more than one. The first thing to do is the screen's one gold fill: the
+first item's answer, or Start while nothing waits.
+
+Home then has where the person left off (the newest things made, their chats with one agent, and
+Chat with one agent), a card per project, and their agents in no project. A card lists the
+project's teams, one per line, waiting first, then working, then stopped, then the next to run on a
+schedule: a shape and words for how each is, its agents' figures, and its name opening its chat;
+then the newest thing made there and this month's cost. A room (`/projects/<id>`) has its teams as
+cards in the same order, kept while the person is in it, each with its desks, Move to and its
+newest file; then Made here, everything its agents made, newest first, narrowed to one team by a
+row of teams; and beside them the wall (About, folders, notes), Add an agent, New team and Ask
+about the project. A made file opens in the reader over the page, with a link to ask about it in
+its chat. An agent is lit only where it is now, gold at its own desk while it waits for the person:
+where it is busy in another team, its figure is faint and unlit, naming that team. Where the person
+checks, the desk holds the review step's ring, as on the canvas.
 
 ### Ask LoomWatch
 

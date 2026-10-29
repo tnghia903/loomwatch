@@ -15,15 +15,33 @@ const room = (teams: RoomTeam[], line: string): Room => ({ id: 'shop', name: 'Sh
 const figureOf = () => figureFor('writer')
 
 describe('a room card on Home (ADR 0097)', () => {
-  it('names the team its desks are, and every other team at work, when the project has more than one', () => {
-    const shop = room([team('gate.yaml', 'Research and design', 'waiting'), team('pages.yaml', 'Product pages', 'working'), team('weekly.yaml', 'Weekly report', 'ready')], 'Researcher is waiting for you')
-    const { container } = render(<RoomCard room={shop} figureOf={figureOf} onOpen={() => {}} />)
-    // Above the desks, before the agent at them.
-    expect(container.querySelector('.room-card-floor')).toHaveTextContent(/^Research and designAnn/)
-    expect(container.querySelector('.room-line')).toHaveTextContent('Researcher is waiting for you · Product pages is working · 1 other team ready')
-    // The other team's name is plain; what it is doing is in its colour, and stays on one line with it.
-    expect(screen.getByText('is working')).toHaveClass('room-state', 'working')
-    expect(screen.getByText('is working').closest('.room-other')).toHaveTextContent(/^Product pages is working$/)
+  it('lists each team on a line, most pressing first, saying what it is doing in words as well as colour', () => {
+    const scheduled = { ...team('weekly.yaml', 'Weekly report', 'ready'), schedule: 'Every Monday at 9:00' }
+    const shop = room([team('gate.yaml', 'Research and design', 'waiting'), team('pages.yaml', 'Product pages', 'working'), team('fix.yaml', 'Fixes', 'failed'), scheduled], 'Researcher is waiting for you')
+    render(<RoomCard room={shop} figureOf={figureOf} onOpen={() => {}} />)
+    const lines = screen.getAllByRole('listitem')
+    expect(lines.map((line) => line.textContent)).toEqual([
+      'Research and designwaiting for you',
+      'Product pagesAnn is working',
+      'FixesDidn’t finish',
+      'Weekly reportRuns every Monday at 9:00',
+    ])
+    expect(screen.getByText('Ann is working')).toHaveClass('room-state', 'working')
+    // The whole line opens the team's chat.
+    expect(screen.getByText('Product pages').closest('a')).toHaveAttribute('href', '/?path=pages.yaml&view=chat')
+    expect(screen.getByText('Ann is working').closest('a')).toBe(screen.getByText('Product pages').closest('a'))
+    // Each team's agents stand on its line, named for a screen reader.
+    expect(screen.getByRole('group', { name: 'Product pages: Ann is working' })).toBeInTheDocument()
+    expect(screen.getByText('4 teams')).toBeInTheDocument()
+  })
+
+  it('lists four teams at most, and counts the rest; with the newest thing made here and this month’s cost', () => {
+    const many = room(['A', 'B', 'C', 'D', 'E', 'F'].map((name) => team(`${name}.yaml`, name, 'ready')), 'Ready')
+    render(<RoomCard room={many} figureOf={figureOf} onOpen={() => {}} newest="/teams/post.md" spend="$1.20 this month" />)
+    expect(screen.getAllByRole('listitem')).toHaveLength(4)
+    expect(screen.getByText('2 more teams')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /post\.md/ })).toBeInTheDocument()
+    expect(screen.getByText('$1.20 this month')).toBeInTheDocument()
   })
 
   it('counts the quiet teams as more when every team is quiet, and the list, which names them all, leaves the count out', () => {
@@ -39,9 +57,10 @@ describe('a room card on Home (ADR 0097)', () => {
     expect(render(<p><RoomWords room={busy} /></p>).container).toHaveTextContent(/^Ann is waiting for you · Beta is working · Gamma is working · 3 more teams$/)
   })
 
-  it('leaves a project with one team as it was: its desks and its line, no team name', () => {
-    const { container } = render(<RoomCard room={room([team('blog.yaml', 'Blog', 'ready')], 'Ready')} figureOf={figureOf} onOpen={() => {}} />)
-    expect(container.querySelector('.room-card-team')).toBeNull()
-    expect(container.querySelector('.room-line')).toHaveTextContent(/^Ready$/)
+  it('says nothing about a count, a file or a cost it doesn’t have', () => {
+    render(<RoomCard room={room([team('blog.yaml', 'Blog', 'ready')], 'Ready')} figureOf={figureOf} onOpen={() => {}} />)
+    expect(screen.getByRole('listitem')).toHaveTextContent(/^BlogReady$/)
+    expect(screen.queryByText(/teams$/)).toBeNull()
+    expect(screen.queryByText(/this month/)).toBeNull()
   })
 })

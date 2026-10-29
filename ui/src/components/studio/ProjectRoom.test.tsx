@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { cascaded } from '../../test/cascade'
 import { ProjectRoom } from './ProjectRoom'
 
 let fetchMock: ReturnType<typeof vi.fn>
@@ -33,6 +34,8 @@ function daemon(url: string, init?: RequestInit) {
   if (url.startsWith('/api/team?')) return respond({ path: 'sutd/gate.yaml', yaml: GATE, revision: 'r' })
   if (url === '/api/team' && init?.method === 'PUT') return respond({ path: 'sutd/gate.yaml', yaml: '', revision: 'r2' })
   if (url === '/api/runs?preview=true') return respond([])
+  if (url === '/api/schedules') return respond([])
+  if (url === '/api/chat/messages' && init?.method === 'POST') return respond({ route: 'team', message: { id: 'm1' }, run: null })
   return respond({ root: '/teams', files: ['sutd/gate.yaml'], teams: [{ path: 'sutd/gate.yaml', name: 'Research and design', agentCount: 1 }], trashed: ['sutd/old.yaml'] })
 }
 
@@ -175,6 +178,155 @@ describe('a project’s room (ADR 0097)', () => {
     // The team keeps its own Researcher and gains the one added, under an id of its own.
     expect(yaml).toContain('id: researcher\n')
     expect(yaml).toMatch(/- id: researcher-2\n(?:\s+\w+: .*\n)*\s+from:\n\s+agent: researcher\n/)
+  })
+
+  describe('at a glance', () => {
+    const BLOG = 'schemaVersion: 1\nid: blog\nname: Blog\nproject: sutd\nentrypoint: writer\nagents:\n  - {id: writer, name: Writer}\nedges: []\n'
+    const record = (extra: Record<string, unknown>) => ({ runId: 'r', sessionId: 'r', teamPath: 'sutd/gate.yaml', prompt: 'p', status: 'succeeded', mode: 'pipeline', entrypoint: 'researcher', responder: 'researcher', agentIds: [], createdAt: new Date().toISOString(), startedAt: null, finishedAt: new Date().toISOString(), error: null, exitCode: null, eventCount: null, reply: null, ...extra })
+    function twoTeams(runs: unknown[], schedules: unknown[] = []) {
+      project = { ...SUTD, teams: ['sutd/gate.yaml', 'sutd/blog.yaml'] }
+      fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+        if (url === '/api/runs?preview=true') return respond(runs)
+        if (url === '/api/schedules') return respond(schedules)
+        if (url.startsWith('/api/team?') && url.includes('blog')) return respond({ path: 'sutd/blog.yaml', yaml: BLOG, revision: 'r' })
+        if (url === '/api/teams') return respond({ root: '/teams', files: project.teams, teams: [{ path: 'sutd/gate.yaml', name: 'Research and design', agentCount: 1 }, { path: 'sutd/blog.yaml', name: 'Blog', agentCount: 1 }], trashed: [] })
+        return daemon(url, init)
+      })
+    }
+    const posted = () => fetchMock.mock.calls.filter(([url, init]) => url === '/api/chat/messages' && init?.method === 'POST').map(([, init]) => JSON.parse(String(init?.body)) as Record<string, unknown>)
+
+    it('puts what waits for you first, each answered where it waits, and work that stopped with why and its fix', async () => {
+      twoTeams([
+        record({ runId: 'w1', teamPath: 'sutd/blog.yaml', status: 'running', finishedAt: null, waitingOn: { node: 'writer', name: 'Writer', kind: 'question', since: '2026-10-28T09:00:00Z', question: 'Which tone?', handoverFrom: null, park: 'none', parkNote: '', sendBackAvailable: false } }),
+        record({ runId: 'f1', status: 'failed', error: 'Your OpenRouter account is out of credits. Add credits on openrouter.ai, then try again.' }),
+        record({ runId: 'f2', teamPath: 'sutd/blog.yaml', status: 'failed', responder: 'writer', finishedAt: new Date(Date.now() + 1000).toISOString() }),
+      ])
+      render(<ProjectRoom id="sutd" />)
+      const tile = await screen.findByRole('region', { name: 'Needs you · 3' })
+      // A question is answered, not reviewed; it opens where it waits.
+      fireEvent.click(within(tile).getByRole('button', { name: 'Answer: Writer has a question for you' }))
+      expect(assign).toHaveBeenCalledWith('/?path=sutd%2Fblog.yaml&run=w1')
+      // The room has no bell: the rest show here.
+      fireEvent.click(within(tile).getByRole('button', { name: 'Show 1 more' }))
+      // Out of credits: the fix, not a try that would fail the same way; and why, in words.
+      expect(within(tile).getByRole('link', { name: 'Add OpenRouter credits' })).toHaveAttribute('href', 'https://openrouter.ai/settings/credits')
+      expect(within(tile).getByText(/Research and design · .*out of credits/)).toBeInTheDocument()
+      // No known fix: See why opens it where it stopped, where its chat's Try again is.
+      fireEvent.click(within(tile).getByRole('button', { name: 'See why Blog didn’t finish' }))
+      expect(assign).toHaveBeenCalledWith('/?path=sutd%2Fblog.yaml&run=f2')
+      expect(posted()).toEqual([])
+      // The first thing to do is the screen's one gold fill; the box's Start is plain meanwhile.
+      expect(within(tile).getByRole('button', { name: /^Answer/ })).toHaveClass('btn-primary')
+      expect(screen.getByRole('button', { name: 'Start' })).not.toHaveClass('btn-primary')
+    })
+
+    it('gives the gold fill to the first thing to do, whatever it is: a fix, or See why', async () => {
+      twoTeams([record({ runId: 'f1', status: 'failed', error: 'Your OpenRouter account is out of credits. Add credits on openrouter.ai, then try again.' })])
+      render(<ProjectRoom id="sutd" />)
+      const tile = await screen.findByRole('region', { name: 'Needs you · 1' })
+      expect(within(tile).getByRole('link', { name: 'Add OpenRouter credits' })).toHaveClass('btn-primary')
+      cleanup()
+      twoTeams([record({ runId: 'f2', status: 'failed' })])
+      render(<ProjectRoom id="sutd" />)
+      expect(await screen.findByRole('button', { name: 'See why Research and design didn’t finish' })).toHaveClass('btn-primary')
+    })
+
+    it('keeps your words and says why when the team has to be looked over before it starts', async () => {
+      twoTeams([])
+      const review = { error: 'Look over this team first.', code: 'team_needs_review', teamPath: 'sutd/blog.yaml', teamRevision: 'r', review: [] }
+      fetchMock.mockImplementation(((next) => (url: string, init?: RequestInit) => (url === '/api/chat/messages' && init?.method === 'POST' ? respond(review, 409) : next(url, init)))(fetchMock.getMockImplementation() as typeof daemon))
+      render(<ProjectRoom id="sutd" />)
+      const box = await screen.findByRole('form', { name: 'Give work' })
+      fireEvent.change(within(box).getByRole('combobox', { name: 'To' }), { target: { value: 'sutd/blog.yaml' } })
+      fireEvent.change(within(box).getByRole('textbox'), { target: { value: 'Write the launch post.' } })
+      fireEvent.click(within(box).getByRole('button', { name: 'Start' }))
+      const said = await within(box).findByRole('alert')
+      expect(said).toHaveTextContent('Blog changed since it last ran. Look it over in its chat before it starts.')
+      expect(within(said).getByRole('link', { name: 'Open its chat' })).toHaveAttribute('href', '/?path=sutd%2Fblog.yaml&view=chat')
+      expect(within(box).getByRole('textbox')).toHaveValue('Write the launch post.')
+      expect(assign).not.toHaveBeenCalled()
+      localStorage.removeItem('loomwatch:work-box-team')
+    })
+
+    it('reads a made file over the room, links to ask about it in its chat, and gives focus back on close', async () => {
+      twoTeams([record({ runId: 'm1', teamPath: 'sutd/blog.yaml', responder: 'writer', made: ['/teams/launch post.md'] })])
+      fetchMock.mockImplementation(((next) => (url: string, init?: RequestInit) => {
+        if (url.startsWith('/api/files/stat')) return respond({ path: '/teams/launch post.md', name: 'launch post.md', exists: true, isDir: false, sizeBytes: 12, modifiedAt: null, kind: 'markdown', folder: '/teams', openable: true })
+        if (url.startsWith('/api/files/read')) return respond({ path: '/teams/launch post.md', text: '# Launch\n', kind: 'markdown' })
+        return next(url, init)
+      })(fetchMock.getMockImplementation() as typeof daemon))
+      render(<ProjectRoom id="sutd" />)
+      const made = await screen.findByRole('region', { name: 'Made here' })
+      const chip = await within(made).findByRole('button', { name: /^Read launch post\.md/ })
+      chip.focus()
+      fireEvent.click(chip)
+      const sheet = await screen.findByRole('dialog', { name: 'launch post.md' })
+      expect(within(sheet).getByRole('link', { name: 'Ask about it in its chat' })).toHaveAttribute('href', '/?path=sutd%2Fblog.yaml&run=m1')
+      fireEvent.keyDown(window, { key: 'Escape' })
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'launch post.md' })).toBeNull())
+      expect(chip).toHaveFocus()
+    })
+
+    it('says who is working, what runs next and what this month cost', async () => {
+      twoTeams(
+        [record({ runId: 'a', teamPath: 'sutd/blog.yaml', status: 'running', finishedAt: null, working: ['writer'], startedAt: new Date().toISOString(), responder: 'writer' }), record({ runId: 'b', spend: { spentUsd: 0.4 } }), record({ runId: 'c', spend: { spentUsd: 0.12 } })],
+        [{ teamPath: 'sutd/gate.yaml', teamName: 'Research and design', cron: '0 17 * * 5', timezone: null, describe: '', prompt: '', enabled: true, nextAt: new Date(Date.now() + 3 * 86_400_000).toISOString(), lastRunId: null, lastStatus: null, lastFiredAt: null, lastDelivery: null, deliver: null, problem: null }],
+      )
+      render(<ProjectRoom id="sutd" />)
+      expect(await screen.findByRole('button', { name: /Writer is working/ })).toHaveTextContent('Blog')
+      expect(screen.getByRole('region', { name: 'Next' })).toHaveTextContent('Research and design')
+      const month = screen.getByRole('region', { name: 'This month' })
+      // The run still at work counted nothing yet: what it spends is added as it ends.
+      expect(month).toHaveTextContent('at least $0.52')
+      expect(month).toHaveTextContent('3 pieces of work')
+    })
+
+    it('gives the team you pick work, as its chat would, and only asks which team when there are two', async () => {
+      twoTeams([])
+      render(<ProjectRoom id="sutd" />)
+      const box = await screen.findByRole('form', { name: 'Give work' })
+      fireEvent.change(within(box).getByRole('combobox', { name: 'To' }), { target: { value: 'sutd/blog.yaml' } })
+      fireEvent.change(within(box).getByRole('textbox'), { target: { value: 'Write the launch post.' } })
+      // Nothing waits for you, so Send is the one gold fill.
+      // The box names the team it gives work to, which tells it from Ask; Start, as the chat says.
+      expect(within(box).getByRole('textbox')).toHaveAttribute('placeholder', 'What should Blog do?')
+      expect(within(box).getByRole('button', { name: 'Start' })).toHaveClass('btn-primary')
+      fireEvent.click(within(box).getByRole('button', { name: 'Start' }))
+      await waitFor(() => expect(posted()).toEqual([expect.objectContaining({ teamPath: 'sutd/blog.yaml', text: 'Write the launch post.', work: true, to: { kind: 'team' } })]))
+      expect(await within(box).findByRole('status')).toHaveTextContent('Blog has it.')
+      expect(posted()[0].startKey).toEqual(expect.any(String))
+      cleanup()
+      project = { ...SUTD }
+      fetchMock.mockImplementation(daemon)
+      render(<ProjectRoom id="sutd" />)
+      expect(await screen.findByRole('textbox', { name: 'What should Research and design do?' })).toBeInTheDocument()
+      expect(screen.queryByRole('combobox', { name: 'To' })).toBeNull()
+    })
+
+    it('lists what each team made, newest first, narrowed to one team, and each team’s newest on its card', async () => {
+      twoTeams([
+        record({ runId: 'old', finishedAt: '2026-10-27T09:00:00Z', made: ['/teams/sources.csv', '/teams/build.py'] }),
+        record({ runId: 'new', teamPath: 'sutd/blog.yaml', responder: 'writer', finishedAt: '2026-10-28T09:00:00Z', made: ['/teams/launch post.md'] }),
+      ])
+      fetchMock.mockImplementation(((next) => (url: string, init?: RequestInit) => {
+        if (!url.startsWith('/api/files/stat')) return next(url, init)
+        const path = new URL(url, 'http://x').searchParams.get('path')!
+        return respond({ path, name: path.split('/').at(-1), exists: true, isDir: false, sizeBytes: 12, modifiedAt: null, kind: 'document', folder: '/teams', openable: true })
+      })(fetchMock.getMockImplementation() as typeof daemon))
+      render(<ProjectRoom id="sutd" />)
+      const made = await screen.findByRole('region', { name: 'Made here' })
+      const names = () => [...made.querySelectorAll('.file-chip-name')].map((name) => name.textContent)
+      // Code isn't something made to read: it stays in the chat.
+      expect(names()).toEqual(['launch post.md', 'sources.csv'])
+      // In a list a file is a plain card: its kind a hairline, not the gold line of a file an answer names.
+      const chip = made.querySelector('.file-chip')!
+      await waitFor(() => expect(chip).not.toHaveClass('muted'))
+      expect(cascaded(chip.querySelector('.file-chip-ext')!, 'box-shadow')).toBe('inset 0 0 0 1px var(--color-hairline)')
+      fireEvent.click(within(made).getByRole('button', { name: 'Research and design' }))
+      expect(names()).toEqual(['sources.csv'])
+      expect(within(made).getByRole('button', { name: 'Research and design' })).toHaveAttribute('aria-pressed', 'true')
+      expect(within(screen.getByRole('article', { name: 'Blog' })).getByRole('button', { name: /launch post\.md/ })).toBeInTheDocument()
+    })
   })
 
   it('says so when there is no such project', async () => {

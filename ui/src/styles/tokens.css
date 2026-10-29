@@ -194,6 +194,10 @@
   --color-bubble-dark-gold:    var(--lw-gold-400);
   --color-bubble-dark-live:    var(--lw-blue-300);
   --color-bubble-dark-alert:   var(--lw-red-400);
+  /* What is drawn on a file's sheet of paper (FileCard, the reader's bar): the paper is light in
+     both themes, so what is drawn on it stays the same in both. */
+  --color-paper-gold:          var(--lw-gold-600);
+  --color-paper-ink:           var(--lw-ink-950);
 
   --lw-node-fill:        var(--color-panel-solid);
   --lw-node-border:      var(--color-hairline);

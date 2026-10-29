@@ -29,9 +29,15 @@
   display: inline-flex; flex-direction: column; align-items: center; gap: 4px; flex: 0 1 78px; width: 78px; min-width: 52px;
   padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: center;
 }
-button.desk { cursor: pointer; border-radius: var(--r-sm); }
-button.desk:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
-.desk-top { display: block; width: 80%; max-width: 62px; height: 12px; border-radius: 3px; background: var(--color-hairline); }
+/* The desk itself: a table top drawn in front of the figure's feet, on two legs. A filled grey bar
+   read as something still loading. */
+.desk-top {
+  position: relative; z-index: 1; display: block; width: 84%; max-width: 64px; height: 7px; margin: -8px 0 7px;
+  box-sizing: border-box; border: 1px solid var(--color-warp); border-radius: 2px; background: var(--color-panel-solid);
+}
+.desk-top::before, .desk-top::after { content: ''; position: absolute; top: 5px; width: 1px; height: 7px; background: var(--color-warp); }
+.desk-top::before { left: 12%; }
+.desk-top::after { right: 12%; }
 .desk-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--color-ink-2); }
 .desk-state { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 14px; color: var(--color-ink-3); }
 .desk-state.waiting { color: var(--color-accent); }
@@ -48,27 +54,7 @@ button.desk:focus-visible { outline: 2px solid var(--color-accent); outline-offs
 .desk-more { align-self: center; margin-left: var(--sp-2); font-size: 13px; color: var(--color-ink-3); }
 .desk-empty { color: var(--color-ink-3); font-size: 13px; }
 
-/* ---------- Your desk: first, opaque (nothing breathes under a blur) ---------- */
-.your-desk {
-  display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-5);
-  padding: var(--sp-4) var(--sp-5); border: 1px solid var(--color-hairline); border-radius: var(--r-lg);
-  background: var(--color-panel-solid);
-}
-.your-desk h2 { margin: 0; width: 92px; font: 600 15px/20px var(--font-sans); color: var(--color-ink); }
-.desk-waiting { display: flex; align-items: center; gap: var(--sp-3); flex: 1 1 380px; min-width: 0; }
-.desk-crowd { display: inline-flex; align-items: flex-end; }
-.desk-crowd .desk-figure + .desk-figure { margin-left: -12px; }
-.desk-says { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
-.desk-says b { font-weight: 600; color: var(--color-ink); }
-.desk-waiting-line { font-size: 13px; color: var(--color-accent); }
-.desk-quiet { color: var(--color-ink-3); }
-.desk-waiting .btn { min-height: 44px; padding: 0 18px; }
-.desk-divider { width: 1px; align-self: stretch; background: var(--color-hairline); }
-.desk-chat { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); flex: 1 1 260px; }
-.desk-chat .btn { min-height: 44px; }
-.desk-chat-open { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; color: var(--color-ink); text-decoration: none; }
-.desk-chat-open > span:last-child { display: flex; flex-direction: column; }
-.desk-chat-says { font-size: 13px; color: var(--color-ink-3); }
+/* ---------- Menus: chat with one agent, an agent in no project ---------- */
 .desk-chat-menu, .idle-agent-menu {
   position: absolute; z-index: 5; top: calc(100% + 6px); right: 0; min-width: 200px; max-height: 320px; overflow-y: auto;
   display: flex; flex-direction: column; padding: 6px; border: 1px solid var(--color-hairline); border-radius: var(--r-md);
@@ -99,11 +85,71 @@ button.desk:focus-visible { outline: 2px solid var(--color-accent); outline-offs
 .project-mark[data-mark="oat"] { --mark: var(--color-fig-oat); }
 .project-mark[data-mark="butter"] { --mark: var(--color-fig-butter); }
 
-.room-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--sp-4); }
+.room-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); gap: var(--sp-4); }
+/* Your desk on Home: the tiles, then the box to give any team work. */
+.studio-desk { display: flex; flex-direction: column; gap: var(--sp-3); scroll-margin: var(--sp-6); }
+
+/* A room card lists its teams, each on a line: its state as a shape, its name over what it is doing,
+   then its agents' figures alone, small. */
+.room-card-top { display: flex; align-items: center; gap: var(--sp-2); }
+.room-card-top .room-card-name { flex: 1; min-width: 0; }
+.room-card-count { flex: none; font-size: 12px; color: var(--color-ink-3); }
+.room-card-teams { list-style: none; margin: var(--sp-2) 0 0; padding: 0; display: flex; flex-direction: column; }
+/* The whole line opens the team's chat, above the card's own link to the room. */
+.room-card-teams li + li { border-top: 1px solid var(--color-hairline); }
+.room-card-team {
+  position: relative; z-index: 1; display: flex; align-items: center; gap: var(--sp-2); min-height: 48px; padding: 4px 0;
+  color: var(--color-ink); text-decoration: none;
+}
+.room-card-team:hover b { text-decoration: underline; text-underline-offset: 3px; }
+.room-card-team:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; border-radius: var(--r-sm); }
+.room-card-team > .glance-shape, .room-card-team > .glance-dot, .room-card-noshape { flex: none; width: 12px; }
+.room-card-team > .glance-dot { height: 8px; width: 8px; margin: 0 2px; }
+.room-card-team-words { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.room-card-team-words b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 13.5px/18px var(--font-sans); }
+.room-card-team-words small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 16px; color: var(--color-ink-2); }
+/* The figures in a line pass the press to the line. */
+.room-card-team .desk { pointer-events: none; }
+.room-card-more { margin: 0; font-size: 12.5px; color: var(--color-ink-3); }
+.room-card-foot { display: flex; align-items: center; gap: var(--sp-3); margin-top: auto; padding-top: var(--sp-3); border-top: 1px solid var(--color-hairline); }
+.room-card-file { position: relative; z-index: 1; flex: 1; min-width: 0; }
+.room-card-spend { flex: none; margin-left: auto; font-size: 12px; color: var(--color-ink-2); font-variant-numeric: tabular-nums; }
+
+/* In a list of files (where you left off, a card, Made here, a tile) a file is a plain card, with
+   gold only to point at or focus it: a list of gilt tabs would make gold mean "a file". */
+:is(.pick-up-file, .room-card-file, .team-card-made, .made-here-files, .glance-tile) .file-chip {
+  min-height: 32px; padding: 4px 6px 4px 9px; border-color: var(--color-hairline); background: var(--color-panel-solid); font-weight: 500;
+}
+:is(.pick-up-file, .room-card-file, .team-card-made, .made-here-files, .glance-tile) .file-chip svg { color: var(--color-ink-3); }
+:is(.pick-up-file, .room-card-file, .team-card-made, .made-here-files, .glance-tile) .file-chip-ext { box-shadow: inset 0 0 0 1px var(--color-hairline); color: var(--color-ink-3); }
+:is(.pick-up-file, .room-card-file, .team-card-made, .made-here-files, .glance-tile) .file-chip:hover:not(:disabled) { border-color: var(--color-accent-dim); background: var(--color-panel-solid); }
+
+/* The figures alone, in a line of words: no desk, no names (each still says who it is, and where). */
+.team-desks.compact { flex: none; gap: 0; }
+.team-desks.compact .desk { width: auto; min-width: 0; flex: none; }
+.team-desks.compact .desk-you { width: var(--fig); height: var(--fig); }
+.team-desks.compact .desk-onward { width: 10px; margin: calc(var(--fig) / 2 - 5px) 1px 0; }
+.team-desks.compact .desk-more { margin-left: 4px; font-size: 12px; }
+
+/* ---------- Pick up where you left off ---------- */
+.pick-up { display: flex; flex-direction: column; gap: var(--sp-2); }
+.pick-up-row { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.pick-up-file { display: inline-flex; min-width: 0; max-width: 260px; }
+.pick-up-chat {
+  display: inline-flex; align-items: center; gap: var(--sp-2); min-height: 44px; padding: 4px 12px 4px 6px;
+  border: 1px solid var(--color-hairline); border-radius: var(--r-md); background: var(--color-panel-solid); color: var(--color-ink); text-decoration: none;
+}
+.pick-up-chat > span:last-child { display: flex; flex-direction: column; }
+.pick-up-chat b { font: 500 13px/17px var(--font-sans); }
+.pick-up-chat small { font-size: 12px; line-height: 16px; color: var(--color-ink-3); }
+.pick-up-chat:hover { border-color: var(--color-accent-dim); }
+.pick-up-choose { position: relative; }
+.pick-up-choose .btn { min-height: 44px; }
+.pick-up-choose .desk-chat-menu { left: 0; right: auto; }
 /* The whole card opens the room: its name's button stretches over it, and an agent at your desk
    stays pressable above that, to go to it. */
 .room-card {
-  position: relative; display: flex; flex-direction: column; min-height: 228px; padding: 14px 16px; box-sizing: border-box;
+  position: relative; display: flex; flex-direction: column; min-height: 168px; padding: 14px 16px; box-sizing: border-box;
   border: 1px solid var(--color-hairline); border-radius: var(--r-lg); background: var(--color-panel-solid);
 }
 .room-card-name button::after { content: ''; position: absolute; inset: 0; border-radius: var(--r-lg); }
@@ -119,9 +165,6 @@ button.desk:focus-visible { outline: 2px solid var(--color-accent); outline-offs
 }
 .room-card-name button span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .room-card-name button:hover span:last-child { text-decoration: underline; text-underline-offset: 3px; }
-.room-card-floor { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-2); padding: var(--sp-3) 0 6px; }
-/* Which team the desks are, when the room has more than one. */
-.room-card-team { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-ink-2); font: 400 12px/16px var(--font-sans); }
 .room-line { margin: 0; font-size: 13px; color: var(--color-ink-3); }
 .room-line.waiting, .room-state.waiting { color: var(--color-accent); }
 .room-line.working, .room-state.working { color: var(--color-live); }
@@ -141,7 +184,7 @@ button.desk:focus-visible { outline: 2px solid var(--color-accent); outline-offs
 .room-tile.put-away button { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .room-tile.put-away button.room-tile-name { font-weight: 600; }
 .room-tile-when { font-size: 13px; color: var(--color-ink-3); }
-.room-new { align-items: center; color: var(--color-ink-2); border-style: dashed; min-height: 228px; font-weight: 500; }
+.room-new { align-items: center; color: var(--color-ink-2); border-style: dashed; min-height: 168px; font-weight: 500; }
 .room-tile:hover, .room-new:hover { border-color: var(--color-accent-dim); }
 .room-tile:focus-visible, .room-new:focus-visible, .room-card-name button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 
@@ -199,12 +242,12 @@ button.desk:focus-visible { outline: 2px solid var(--color-accent); outline-offs
   .studio-view button, .room-team-name, .room-marks button, .desk-chat-menu a, .idle-agent-menu a, .idle-agent-menu button { min-height: 44px; }
   .room-marks button { min-width: 44px; }
   .room-card-name button { min-height: 44px; }
+  :is(.pick-up-file, .room-card-file, .team-card-made, .made-here-files, .glance-tile) .file-chip, .glance-ask { min-height: 44px; }
+  .glance-more, .made-here > .link { display: inline-flex; align-items: center; min-height: 44px; }
+  .reader-sheet-top .iconbtn { width: 44px; height: 44px; }
 }
 
 @media (max-width: 640px) {
-  .your-desk { padding: var(--sp-4); }
-  .your-desk h2 { width: auto; }
-  .desk-divider { display: none; }
   .set-up-card { padding: var(--sp-6) var(--sp-4); }
   .room-list li > button:not(.btn):not(.link) { grid-template-columns: minmax(0, 1fr); padding: var(--sp-2); }
 }
@@ -260,21 +303,151 @@ button.wall-paper:focus-visible { outline: 2px solid var(--color-accent); outlin
 }
 .wall-folder svg { color: var(--color-ink-3); }
 
-.room-floor { display: flex; flex-direction: column; gap: var(--sp-5); padding: var(--sp-2) 0; }
-/* A team's whole row opens it, as its name does; its ⋯ stays pressable above that. */
-.room-team { position: relative; display: flex; flex-direction: column; gap: var(--sp-3); }
-.room-team-name::after { content: ''; position: absolute; inset: 0; }
-.room-team-move { position: absolute; top: -8px; right: 0; z-index: 1; }
-.room-team-move .iconbtn { width: 44px; height: 44px; }
-.room-team-move-head { padding: 4px var(--sp-3) 2px; font-size: 12px; color: var(--color-ink-3); }
-.room-team-name { align-self: flex-start; display: inline-flex; align-items: baseline; gap: var(--sp-2); min-height: 28px; color: var(--color-ink); text-decoration: none; }
+/* ---------- Inside a room, at a glance: tiles, the box, then teams and what they made beside the wall ---------- */
+.room-body { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--sp-6); }
+.room-main { flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: var(--sp-6); }
+.room-side { flex: 1 1 280px; max-width: 380px; min-width: 0; display: flex; flex-direction: column; gap: var(--sp-4); }
+.room-side .room-wall-board { flex-direction: column; align-items: stretch; gap: var(--sp-3); }
+.room-side .wall-paper, .room-side .wall-paper.note, .room-side .wall-paper.editing { width: 100%; }
+.room-side .wall-folder { display: flex; }
+.room-side .wall-folder span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.room-floor { display: flex; flex-direction: column; gap: var(--sp-3); }
+.room-floor-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
+.room-floor-head .studio-head { flex: 1; }
+.room-floor-acts { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.room-floor-acts .btn { min-height: 40px; }
+
+/* A team's card opens its chat, as its name does; its ⋯ and its newest file stay pressable above that. */
+/* Wide enough for four desks and their names, whole, before a row wraps. */
+.team-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr)); gap: var(--sp-3); }
+.team-grid.one { grid-template-columns: minmax(0, 1fr); }
+.team-card {
+  position: relative; display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; padding: 12px 14px 14px;
+  border: 1px solid var(--color-hairline); border-radius: var(--r-lg); background: var(--color-panel-solid);
+}
+/* Waiting for you is a gold line; pointing at a card is a quieter one, so the two never look alike. */
+.team-card:hover { border-color: var(--color-ink-3); }
+.team-card[data-state="waiting"] { border-color: var(--color-accent); }
+.team-card-head { display: flex; align-items: flex-start; gap: var(--sp-2); min-width: 0; }
+.team-card .team-desks { flex-wrap: wrap; row-gap: var(--sp-3); }
+/* "waiting for you" and "in Launch posts" say where an agent is: whole, on two lines if they must. */
+.team-card .desk-state { white-space: normal; overflow: visible; text-align: center; }
+/* A figure's light (a filter) or fade would lift it above the card's link and swallow the click. */
+.team-card span.desk { pointer-events: none; }
+.team-card-made { position: relative; z-index: 2; min-width: 0; }
+.room-team-name::after { content: ''; position: absolute; inset: 0; border-radius: var(--r-lg); }
+.room-team-name { flex: 1; min-width: 0; display: inline-flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--sp-2); min-height: 28px; color: var(--color-ink); text-decoration: none; }
 .room-team-name b { font-weight: 600; }
 .room-team-name span { font-size: 13px; color: var(--color-ink-3); }
 .room-team-name:hover b { text-decoration: underline; text-underline-offset: 3px; }
-.room-team .desk { width: 92px; flex-basis: 92px; }
-.room-team .desk-top { max-width: 70px; height: 13px; }
-.room-floor-acts { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
-.room-floor-acts .btn { min-height: 44px; }
+.room-team-name:focus-visible { outline: none; }
+.room-team-name:focus-visible::after { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.room-team-move { position: relative; z-index: 2; flex: none; margin: -8px -8px 0 0; }
+/* An open menu stays over the cards after it, whose own ⋯ would otherwise paint over it. */
+.room-team-move:has([aria-expanded="true"]) { z-index: 3; }
+.room-team-move .iconbtn { width: 44px; height: 44px; }
+.room-team-move-head { padding: 4px var(--sp-3) 2px; font-size: 12px; color: var(--color-ink-3); }
+
+/* ---------- The tiles a room and Home open with ---------- */
+.glance { display: grid; grid-template-columns: minmax(280px, 1.5fr) repeat(3, minmax(150px, 1fr)); gap: var(--sp-3); }
+.glance-tile {
+  display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; padding: 14px 16px;
+  border: 1px solid var(--color-hairline); border-radius: var(--r-lg); background: var(--color-panel-solid);
+}
+.glance-tile.needs { border-color: var(--color-accent-dim); }
+.glance-label { margin: 0; font: 500 12px/16px var(--font-sans); color: var(--color-ink-3); }
+.glance-tile.needs .glance-label { color: var(--color-accent); }
+.glance-needs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.glance-needs li { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
+.glance-needs .btn { flex: none; min-height: 40px; }
+.glance-need-words { flex: 1; min-width: 0; display: flex; flex-direction: column; font-size: 13px; line-height: 18px; color: var(--color-ink); }
+.glance-need-words > span { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.glance-need-words small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--color-ink-2); }
+.glance-shape { width: 12px; height: 12px; flex: none; fill: none; stroke-width: 2; stroke-linecap: round; }
+/* Sixteen even dashes round the ring, so it has no seam. */
+.glance-shape.waiting { stroke: var(--color-accent); stroke-dasharray: 2.16 2.16; }
+.glance-shape.failed { stroke: var(--color-alert); }
+.glance-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--color-live); }
+.glance-agent { display: flex; align-items: center; gap: var(--sp-3); min-height: 44px; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.glance-agent:hover .glance-need-words > span { text-decoration: underline; text-underline-offset: 3px; }
+.glance-main { margin: 0; font: 500 14px/19px var(--font-sans); color: var(--color-ink); overflow-wrap: anywhere; }
+.glance-number { margin: 0; font: 600 26px/32px var(--font-sans); font-variant-numeric: tabular-nums; color: var(--color-ink); }
+.glance-number small { font: 500 12px var(--font-sans); color: var(--color-ink-3); }
+.glance-sub { margin: 0; font-size: 12.5px; line-height: 17px; color: var(--color-ink-2); }
+.glance-quiet { margin: 0; font-size: 13px; color: var(--color-ink-3); }
+.glance-ask {
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 38px; padding: 0;
+  border: 0; background: none; color: var(--color-ink); font: 500 14px/19px var(--font-sans); text-align: left; cursor: pointer;
+}
+.glance-ask:hover { text-decoration: underline; text-underline-offset: 3px; }
+.glance-more { align-self: flex-start; font-size: 13px; }
+.glance-agent:focus-visible, .glance-ask:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; border-radius: var(--r-sm); }
+
+/* ---------- Give a team work, as its chat's box does ---------- */
+.work-box { display: flex; flex-direction: column; gap: var(--sp-2); }
+.work-box-row {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); padding: 6px;
+  border: 1px solid var(--color-hairline); border-radius: var(--r-lg); background: var(--color-panel-solid);
+}
+.work-box-row:focus-within { border-color: var(--color-accent-dim); outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.work-box-to { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 4px 0 12px; border-radius: var(--r-md); background: var(--color-ground); font-size: 13px; color: var(--color-ink-3); }
+.work-box-to select { min-height: 40px; max-width: 240px; border: 0; background: transparent; color: var(--color-ink); font: 500 13px var(--font-sans); cursor: pointer; }
+.work-box-to select:focus { outline: none; }
+.work-box-words { flex: 1 1 240px; display: flex; min-width: 0; }
+.work-box-words input { flex: 1; min-width: 0; height: 44px; padding: 0 var(--sp-2); border: 0; outline: 0; background: transparent; color: var(--color-ink); font: 400 15px var(--font-sans); }
+.work-box-attach { width: 44px; height: 44px; }
+.work-box-send { min-height: 44px; padding: 0 18px; }
+.work-box-files { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.work-box-files li { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 4px 0 10px; border: 1px solid var(--color-hairline); border-radius: var(--r-full); font-size: 12.5px; }
+.work-box-files li.failed { border-color: var(--color-alert); }
+.work-box-files small { color: var(--color-ink-3); }
+.work-box-said { margin: 0; font-size: 13px; color: var(--color-ink-2); }
+.work-box-said.alert { color: var(--color-alert); }
+
+/* ---------- What the agents made, and reading one where you are ---------- */
+.made-here { display: flex; flex-direction: column; gap: var(--sp-3); }
+.made-here-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
+.made-here-teams { display: flex; flex-wrap: wrap; gap: 6px; }
+.made-here-teams button {
+  min-height: 32px; padding: 0 12px; border: 1px solid var(--color-hairline); border-radius: var(--r-full);
+  background: transparent; color: var(--color-ink-2); font: 500 12.5px var(--font-sans); cursor: pointer;
+}
+.made-here-teams button[aria-pressed="true"] { background: var(--color-hairline); color: var(--color-ink); }
+.made-here-files { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--sp-3) var(--sp-4); }
+.made-here-files li { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; }
+.made-here-files li .file-chip-wrap { max-width: 100%; }
+.made-here-files small { padding-left: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; font-size: 12px; color: var(--color-ink-2); }
+.made-here > .link { align-self: flex-start; font-size: 13px; }
+
+.reader-sheet-backdrop { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; padding: var(--sp-4); background: color-mix(in srgb, var(--color-ground) 60%, transparent); }
+.reader-sheet {
+  display: flex; flex-direction: column; width: min(900px, 100%); height: min(88vh, 1000px); overflow: hidden;
+  border: 1px solid var(--color-hairline); border-radius: var(--r-lg); background: var(--color-panel-solid); box-shadow: var(--e2-shadow);
+}
+.reader-sheet-top { flex: none; display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-3); padding: 4px 4px 4px var(--sp-4); border-bottom: 1px solid var(--color-hairline); }
+.reader-sheet-top .link { margin-right: auto; font-size: 13px; }
+.reader-sheet-top .iconbtn { width: 40px; height: 40px; }
+.reader-sheet-body { position: relative; flex: 1; min-height: 0; }
+
+@media (max-width: 1000px) {
+  .glance { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .room-side { max-width: none; }
+}
+@media (max-width: 767px) {
+  .made-here-teams button, .work-box-files li { min-height: 44px; }
+}
+@media (max-width: 560px) {
+  /* What needs you and this month across the width, the other two side by side, so the box is in
+     reach; the box's words and Start on one line under "To". */
+  .glance { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .glance > .glance-tile:first-child, .glance > .glance-tile:last-child { grid-column: 1 / -1; }
+  .glance-tile { padding: 12px 14px; }
+  .glance-number { font-size: 22px; line-height: 28px; }
+  .work-box-to { flex: 1 1 100%; }
+  .work-box-to select { max-width: none; flex: 1; }
+  .work-box-words { flex: 1 1 0; }
+}
 
 .add-agent h2 { margin: 0 0 var(--sp-3); font: 600 18px/24px var(--font-sans); }
 .add-agent-pick { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-bottom: var(--sp-4); }

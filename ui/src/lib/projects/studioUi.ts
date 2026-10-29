@@ -30,13 +30,16 @@ export function roomHref(id: string): string {
   return `/projects/${encodeURIComponent(id)}`
 }
 
-/** Ask the bell's tray to open, where each waiting thing is answered in turn (one control, ADR 0043). */
-export function openNeedsYou(): void {
-  window.dispatchEvent(new Event('loomwatch:open-needs-you'))
+/**
+ * Ask the bell's tray to open, where each waiting thing is answered in turn (one control, ADR 0043):
+ * at the given run's item, or at the first.
+ */
+export function openNeedsYou(runId?: string): void {
+  window.dispatchEvent(new CustomEvent('loomwatch:open-needs-you', { detail: runId }))
 }
 
 /** The figure each agent wears, by its id in My agents (or its id in the team). */
-export type FigureOf = (seat: Seat) => FigureChoice
+export type FigureOf = (seat: Pick<Seat, 'id' | 'agent'>) => FigureChoice
 
 export function defaultFigureOf(figures: ReadonlyMap<string, FigureChoice | undefined>): FigureOf {
   return (seat) => figureFor(seat.agent ?? seat.id, seat.agent ? figures.get(seat.agent) : undefined)
