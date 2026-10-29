@@ -142,7 +142,25 @@ describe('verbFor', () => {
 })
 
 describe('scheduleWords', () => {
-  it('keeps a cron the editor cannot express', () => {
-    expect(scheduleWords({ cron: '*/5 * * * *' })).toBe('On its schedule (*/5 * * * *)')
+  it('says a schedule on days of the week, a date each month, or every so often in words', () => {
+    expect(scheduleWords({ cron: '0 8 * * *' })).toMatch(/^Every day at 8:00/)
+    expect(scheduleWords({ cron: '0 8 * * MON-FRI' })).toMatch(/^Every weekday at 8:00/)
+    expect(scheduleWords({ cron: '0 9 * * 1' })).toMatch(/^Every Monday at 9:00/)
+    expect(scheduleWords({ cron: '30 17 * * mon,thu' })).toMatch(/^Every Monday and Thursday at 5:30/)
+    expect(scheduleWords({ cron: '0 9 * * 5,1,3' })).toMatch(/^Every Monday, Wednesday and Friday at 9:00/)
+    expect(scheduleWords({ cron: '0 10 * * 6,7' })).toMatch(/^Every Saturday and Sunday at 10:00/)
+    expect(scheduleWords({ cron: '0 17,9 * * *' })).toMatch(/^Every day at 9:00 AM and 5:00 PM$/)
+    expect(scheduleWords({ cron: '0 9 1 * *' })).toMatch(/^Every month on the 1st at 9:00/)
+    expect(scheduleWords({ cron: '0 9 22 * *' })).toMatch(/^Every month on the 22nd at/)
+    expect(scheduleWords({ cron: '0 9 13 * *' })).toMatch(/^Every month on the 13th at/)
+    expect(scheduleWords({ cron: '*/5 * * * *' })).toBe('Every 5 minutes')
+    expect(scheduleWords({ cron: '0 * * * *' })).toBe('Every hour')
+    expect(scheduleWords({ cron: '0 */2 * * *' })).toBe('Every 2 hours')
+  })
+
+  it('keeps a cron too rich for words', () => {
+    for (const cron of ['0 9 1-7 * 1', '0 9 * 1 *', '15 */2 * * *', '0 9 * * 1/2', '0 25 * * 1', '0 9,24 * * *', '0 9-17 * * *', '0 9 * * 5-1']) {
+      expect(scheduleWords({ cron })).toBe(`On its schedule (${cron})`)
+    }
   })
 })

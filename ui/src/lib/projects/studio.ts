@@ -89,7 +89,8 @@ export function teamShapeOf(path: string, yaml: string, jobs: readonly { id: str
     name: doc.name?.trim() || fileName,
     project: typeof doc.project === 'string' && doc.project.trim() ? doc.project.trim() : null,
     seats,
-    schedule: doc.schedule?.cron ? scheduleWords(doc.schedule) : null,
+    // A paused routine doesn't run, so it says nothing here (its team's chat says it is paused).
+    schedule: doc.schedule?.cron && doc.schedule.enabled !== false ? scheduleWords(doc.schedule) : null,
   }
 }
 
@@ -145,7 +146,7 @@ export function roomsOf(
     }
   }
   return projects.map((project) => {
-    const teams: RoomTeam[] = project.teams.flatMap((path) => {
+    const teams = project.teams.flatMap((path): RoomTeam[] => {
       const shape = shapes.find((candidate) => candidate.path === path)
       if (!shape) return []
       const here = states.get(path) ?? new Map<string, Presence>()
@@ -166,8 +167,8 @@ export function roomsOf(
           ? 'working'
           : failed ? 'failed' : 'ready'
       return [{ path, name: shape.name, seats, state, schedule: shape.schedule }]
-    })
-    const state = teams.reduce<Presence>((found, team) => (RANK[team.state] < RANK[found] ? team.state : found), 'ready')
+    }).sort(byTeamRank)
+    const state = teams[0]?.state ?? 'ready'
     return {
       id: project.id,
       name: project.name,
@@ -181,21 +182,73 @@ export function roomsOf(
   })
 }
 
+/**
+ * A room's teams: waiting for you, then working, then stopped, then the next to run on a schedule,
+ * then the rest. Of two teams at work, the one with an agent lit at its desk goes first, so the card
+ * shows someone doing it.
+ */
+function byTeamRank(left: RoomTeam, right: RoomTeam): number {
+  return RANK[left.state] - RANK[right.state]
+    || Number(litAt(right)) - Number(litAt(left))
+    || Number(Boolean(right.schedule)) - Number(Boolean(left.schedule))
+}
+
+/** Whether one of a team's desks shows what the team is doing: an agent waiting or working there. */
+export function litAt(team: RoomTeam): boolean {
+  return team.state !== 'ready' && team.seats.some((seat) => seat.kind === 'agent' && seat.state === team.state)
+}
+
 function presenceOfNewest(runs: readonly RunRecord[]): Presence {
   const newest = runs.reduce<RunRecord | null>((found, run) => (!found || found.createdAt < run.createdAt ? run : found), null)
   return newest?.status === 'failed' && !newest.nextTryAt ? 'failed' : 'ready'
 }
 
-/** The room's one line: who is waiting, or working, or that it stopped, or when it runs. */
+/**
+ * The room's one line, about its first team, the one the card shows: who is waiting, or working, or
+ * that it stopped, or when it runs.
+ */
 export function roomLine(teams: readonly RoomTeam[], state: Presence): string {
-  const seat = teams.flatMap((team) => team.seats).find((candidate) => candidate.kind === 'agent' && candidate.state === state)
-  const team = teams.find((candidate) => candidate.state === state)
-  if (state === 'waiting') return seat ? `${seat.name} is waiting for you` : `${team?.name ?? 'A team'} is waiting for you`
-  if (state === 'working') return seat ? `${seat.name} is working` : `${team?.name ?? 'A team'} is working`
-  if (state === 'failed') return `${team?.name ?? 'A team'} didn’t finish`
-  const scheduled = teams.find((candidate) => candidate.schedule)
-  if (scheduled?.schedule) return `Runs ${scheduled.schedule.charAt(0).toLowerCase()}${scheduled.schedule.slice(1)}`
-  return teams.length === 0 ? 'No team yet' : 'Ready'
+  const team = teams[0]
+  const seat = team?.seats.find((candidate) => candidate.kind === 'agent' && candidate.state === state)
+  if (state === 'waiting' || state === 'working') return seat ? `${seat.name} is ${PRESENCE_WORDS[state]}` : teamWords(team)
+  if (state === 'failed') return teamWords(team)
+  if (team?.schedule) return `Runs ${team.schedule.charAt(0).toLowerCase()}${team.schedule.slice(1)}`
+  return team ? 'Ready' : 'No team yet'
+}
+
+/** What a team is doing, after its name: "is working", "is waiting for you", "didn’t finish". */
+export function teamStateWords(state: Presence): string {
+  return state === 'failed' ? 'didn’t finish' : `is ${PRESENCE_WORDS[state] ?? 'ready'}`
+}
+
+/** A team at work, said by its name: "Product pages is working". */
+function teamWords(team: RoomTeam | undefined): string {
+  return `${team?.name ?? 'A team'} ${teamStateWords(team?.state ?? 'ready')}`
+}
+
+/** How many other teams at work a room card names; the rest it counts, so its line stays short. */
+export const OTHERS_NAMED = 2
+
+/**
+ * What a room card says after its line, when the room has more teams than the one it shows: the
+ * other teams at work or stopped, most urgent first, by name, then how many more, and whether
+ * those are all quiet.
+ */
+export function otherTeams(room: Room): { named: { path: string; name: string; state: Presence; words: string }[]; more: number; moreQuiet: boolean } {
+  const others = room.teams.slice(1)
+  const busy = others.filter((team) => team.state !== 'ready')
+  const named = busy.slice(0, OTHERS_NAMED).map((team) => ({ path: team.path, name: team.name, state: team.state, words: teamStateWords(team.state) }))
+  return { named, more: others.length - named.length, moreQuiet: busy.length <= OTHERS_NAMED }
+}
+
+/**
+ * A room's teams in the order they stood when the room opened, so one that starts or stops work
+ * doesn't slide under the pointer; a team new since then goes after them.
+ */
+export function inOpenedOrder<T extends { path: string }>(teams: readonly T[], opened: readonly string[] | null): T[] {
+  if (!opened) return [...teams]
+  const at = (team: T) => { const index = opened.indexOf(team.path); return index < 0 ? opened.length : index }
+  return [...teams].sort((left, right) => at(left) - at(right))
 }
 
 /** Rooms in the order the studio shows them: waiting for you, then working, then the rest, newest work first. */

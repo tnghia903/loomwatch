@@ -2,7 +2,7 @@
 // proposal is a whole file; the person reads the difference from what they have now.
 import { TeamFileModel } from '../team-file/document'
 import { pipelineOrder } from '../team-file/pipelineOrder'
-import { summarizeSchedule } from '../team-file/schedule'
+import { cronInWords, summarizeSchedule } from '../team-file/schedule'
 import type { AgentConfig, TeamDocument } from '../team-file/types'
 
 export interface ProposalChanges {
@@ -140,7 +140,9 @@ export function proposalChanges(currentYaml: string | null, proposedYaml: string
     if (!same(kept, orderBefore.filter((id) => orderAfter.includes(id)))) lines.push(`New order: ${order.join(' → ')}`)
   }
   if (!same(before?.schedule, after?.schedule)) {
-    if (after?.schedule) lines.push(`Runs on its own: ${summarizeSchedule(after.schedule).toLowerCase()}`)
+    // "every Monday at 9:00 AM": lowering the whole line would lower the day's name too.
+    const when = after?.schedule ? cronInWords(after.schedule.cron, true) ?? summarizeSchedule(after.schedule) : ''
+    if (after?.schedule) lines.push(`Runs on its own: ${when.charAt(0).toLowerCase()}${when.slice(1)}`)
     else if (before?.schedule) lines.push('Stops running on a schedule')
   }
   if (before && lines.length === 0) lines.push('Small changes to the team file')

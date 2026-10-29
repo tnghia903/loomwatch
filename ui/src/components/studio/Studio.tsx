@@ -14,7 +14,7 @@ import { KnowYou } from '../you/KnowYou'
 import { relativeTime } from '../../lib/format'
 import { FigureStill } from '../agents/FigureStill'
 import { defaultFigureOf, roomHref } from '../../lib/projects/studioUi'
-import { RoomCard, ProjectMark } from './RoomCard'
+import { RoomCard, RoomWords, ProjectMark } from './RoomCard'
 import { SetUpProject, type ProjectStart } from './SetUpProject'
 import { YourDesk } from './YourDesk'
 
@@ -202,7 +202,7 @@ export function Studio({ runs, onSetUp, setUpUnavailable, asking = false }: {
               <li key={room.id}>
                 <button type="button" onClick={() => openRoom(room)}>
                   <span className="room-tile-name"><ProjectMark id={room.id} mark={room.mark} />{room.name}</span>
-                  <span className={`room-line ${room.state}`}>{room.line}</span>
+                  <span className={`room-line ${room.state}`}><RoomWords room={room} count={false} /></span>
                   <span className="room-list-teams">{room.teams.map((team) => team.name).join(', ') || 'No team yet'}</span>
                 </button>
               </li>

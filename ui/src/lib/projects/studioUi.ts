@@ -20,9 +20,9 @@ export function markOf(id: string, mark?: string): MarkColor {
   return PICKED[hash % PICKED.length]
 }
 
-/** The team a room card shows: the one waiting for you or working, else its first. */
+/** The team a room card shows: its first, since a room puts the team waiting for you or working first. */
 export function leadTeam(room: Room): RoomTeam | null {
-  return room.teams.find((team) => team.state === 'waiting') ?? room.teams.find((team) => team.state === 'working') ?? room.teams[0] ?? null
+  return room.teams[0] ?? null
 }
 
 /** Where a project's room is. */
