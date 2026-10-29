@@ -7629,6 +7629,82 @@ pub(crate) mod tests {
         assert_eq!(next.get(&run.run_id).and_then(|r| r.made), Some(made));
     }
 
+    /// A cancelled run keeps the files its agents made before it was stopped: `cancel` aborts the
+    /// run's task, so its end is settled where the cancel is.
+    #[tokio::test]
+    async fn a_cancelled_run_keeps_the_files_its_agents_made_before() {
+        use crate::agent::ToolCall;
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        // Writes a file, then holds on its next request until it is stopped.
+        let (demo, _hold) = Demo::responder_holding(
+            |_| {
+                Some(Completion::calls(
+                    "Writing.",
+                    vec![ToolCall {
+                        id: "c1".into(),
+                        name: "write_file".into(),
+                        arguments: r##"{"path":"draft.md","content":"# Draft\n"}"##.into(),
+                    }],
+                ))
+            },
+            crate::agent::SeenRequest::after_tool,
+            "",
+        );
+        dir.write_team("team.yaml", &demo_model(demo));
+        let archive = EventArchive::new(pool);
+        let registry = RunRegistry::durable(archive.run_store());
+        let app = router(Some(archive.clone()), dir.0.clone(), registry.clone());
+
+        let run = start(&app, "team.yaml").await;
+        let asking = wait_for(&registry, &run.run_id, |r| {
+            !r.permission_requests.is_empty()
+        })
+        .await;
+        registry
+            .answer_permission(
+                &run.run_id,
+                &asking.permission_requests[0].id,
+                crate::permissions::PermissionDecision::AllowOnce,
+                None,
+            )
+            .expect("answered");
+        // The file is written once its call is done; the next request then holds.
+        tokio::time::timeout(Duration::from_secs(15), async {
+            while !dir.0.join(".loomwatch").exists()
+                || archive
+                    .tool_events(&run.run_id)
+                    .await
+                    .unwrap_or_default()
+                    .iter()
+                    .all(|(_, kind, payload)| {
+                        kind != "tool_update" || payload["status"] != "completed"
+                    })
+            {
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        })
+        .await
+        .expect("the file was written");
+        let response = app
+            .clone()
+            .oneshot(post_json(
+                &format!("/api/runs/{}/cancel", run.run_id),
+                &json!({}),
+            ))
+            .await
+            .unwrap();
+        assert!(response.status().is_success(), "{}", response.status());
+        let done = wait_for(&registry, &run.run_id, |r| r.made.is_some()).await;
+        assert_eq!(done.status, RunStatus::Cancelled);
+        let made = done.made.unwrap_or_default();
+        assert_eq!(made.len(), 1, "{made:?}");
+        assert!(
+            std::path::Path::new(&made[0]).ends_with("draft.md"),
+            "{made:?}"
+        );
+    }
+
     /// A run a restart cut off keeps the files its agents made before, worked out as the daemon
     /// comes back; and a finished run recorded before runs kept them gets them filled in.
     #[tokio::test]
