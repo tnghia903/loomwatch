@@ -29,14 +29,13 @@ impl Refile {
         format!("path:{}", self.from)
     }
 
-    /// `path` in its new place, when it is inside the team's own folder of files.
+    /// `path` in its new place, when it is inside the team's own folder of files, written with
+    /// this computer's separators whichever ones `path` used.
     pub fn moved_file(&self, path: &str) -> Option<String> {
         let rest = Path::new(path).strip_prefix(&self.files_from).ok()?;
-        let moved = if rest.as_os_str().is_empty() {
-            self.files_to.clone()
-        } else {
-            self.files_to.join(rest)
-        };
+        let moved = rest
+            .components()
+            .fold(self.files_to.clone(), |moved, part| moved.join(part));
         Some(moved.to_string_lossy().into_owned())
     }
 }
