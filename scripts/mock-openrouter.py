@@ -20,6 +20,12 @@ Replies are scripted from what the request says, so a run exercises real tool ca
                                          or in bullets, one about the person ("aboutYou") when they
                                          ask for Vietnamese, else no edits; an agent whose
                                          instructions hold the bullets lesson answers in three bullets
+- the read of what a message says done looks like (ADR 0098) -> its "at most <n> words" and
+                                         "<n> tries", quoted, else NONE
+- "at most <n> words" in the task     -> a draft <n> + 16 words long, and one 10 words under the
+                                         limit once the work is sent back
+- the Checker job (its role says so)  -> a Check block that counts the work's words for an
+                                         "at most <n> words" item, and meets every other item
 - "MOCK-LONG: <n>" in the task        -> an answer of about n words, streamed three words at a time
                                          as a real model streams (for measuring how the app keeps up)
 - "MOCK-HELPERS: <n>" in the task     -> n start_helper calls at once (ADR 0079); each helper lists
@@ -45,6 +51,7 @@ Usage: python3 scripts/mock-openrouter.py [port]   (default 4100)
 import hashlib
 import json
 import os
+import re
 import sys
 import tempfile
 import threading
@@ -199,6 +206,37 @@ def plan(body):
         return ("text", json.dumps({"edits": []}))
     if "## What you have learned" in system and "keep it to three short bullets" in system:
         return ("text", "- First point, short.\n- Second point, short.\n- Third point, short.")
+
+    # ADR 0098: the read of what a message says done looks like quotes its limit and its tries.
+    if "list what it says the finished work must satisfy" in system:
+        said = latest.split("<message>", 1)[-1].split("</message>", 1)[0]
+        limit = re.search(r"at most \d+ words", said, re.IGNORECASE)
+        tries = re.search(r"(\d+) tr(?:y|ies)\b", said, re.IGNORECASE)
+        if not limit:
+            return ("text", "NONE")
+        return ("text", "DONE WHEN\n- " + limit.group(0) + (f"\nTRIES {tries.group(1)}" if tries else ""))
+    # The Checker job counts the work's words for a word limit and meets the rest.
+    if "you are the team’s checker" in lower_system or "you are the team's checker" in lower_system:
+        work = latest.split("### Work from", 1)[-1].split("\n", 1)[-1]
+        work = work.split("\n### ", 1)[0] if "## The revised work" not in latest else work
+        count = len(work.split())
+        # Only the numbered items it is asked about: the first check's list, or a recheck's.
+        listed = re.search(r"work must satisfy\n((?:\d+\. .+\n?)+)", latest) or re.search(r"the revision changed:\n\n((?:\d+\. .+\n?)+)", latest)
+        lines = []
+        for number, item in re.findall(r"^(\d+)\. (.+?)(?: \((?:Not met|Not sure)\))?$", listed.group(1) if listed else "", re.MULTILINE):
+            limit = re.search(r"at most (\d+) words", item, re.IGNORECASE)
+            if limit:
+                verdict = "Met" if count <= int(limit.group(1)) else "Not met"
+                lines.append(f"{number}. {verdict} — {item} — {count} words")
+            else:
+                lines.append(f"{number}. Met — {item} — it is the update that was asked for")
+        return ("text", "## Check\n" + "\n".join(lines))
+    # An agent given a word limit runs long, and keeps to it once the work is sent back.
+    asked = re.search(r"at most (\d+) words", first, re.IGNORECASE)
+    if asked and "## Sent back by" in latest:
+        return ("text", long_answer(int(asked.group(1)) // 2))
+    if asked and "## Sent back by" not in latest and "## Direction from you" not in latest:
+        return ("text", long_answer(int(asked.group(1)) + 16))
 
     task = latest.rsplit("## Task", 1)[-1]
     if "## What the agents you started came back with" in latest:

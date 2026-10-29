@@ -378,12 +378,80 @@ pub struct CheckConfig {
     /// The most of what the checked agent was given that its check step is shown, in characters:
     /// what lets it trace a claim without opening the claim's source. 0 shows none of it.
     pub given_chars: u32,
+    /// What a person's message says done looks like, checked before the work becomes the answer
+    /// (ADR 0098).
+    pub from_message: FromMessage,
 }
 
 impl Default for CheckConfig {
     fn default() -> Self {
         // About 2,000 tokens: a research handover's findings and its sources, whole, in most runs.
-        Self { given_chars: 8_000 }
+        Self {
+            given_chars: 8_000,
+            from_message: FromMessage::default(),
+        }
+    }
+}
+
+/// How a message's own Done when is checked (ADR 0098): whether it is read at all, how many times
+/// the work may go back for it, and what happens when it is still not met.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
+pub struct FromMessage {
+    /// Read what each message says the finished work must satisfy. Off, a message's words are never
+    /// turned into checks, and every run is checked only as its team is built to be.
+    pub read: bool,
+    /// How many times the work may go back when the message names no number of tries.
+    pub rounds: u32,
+    /// The most times a message may send the work back, however many tries it asks for.
+    pub max_rounds: u32,
+    pub when_still_not_met: WhenStillNotMet,
+}
+
+/// The most a team file may set `fromMessage.maxRounds` to.
+pub const FROM_MESSAGE_MAX_ROUNDS: u32 = 10;
+
+impl Default for FromMessage {
+    fn default() -> Self {
+        // Two rounds, as a new check step (`SendBack::NEW`); up to five when the person asks, since
+        // they named the number for this one request and a round that fixes nothing stops the loop
+        // early; then the person decides rather than see work that missed.
+        Self {
+            read: true,
+            rounds: 2,
+            max_rounds: 5,
+            when_still_not_met: WhenStillNotMet::Ask,
+        }
+    }
+}
+
+impl FromMessage {
+    /// How the work goes back for a message that asked for `tries` tries, or named none. A try is
+    /// the first work or one revision, so five tries is four send-backs.
+    #[must_use]
+    pub fn send_back(self, tries: Option<u32>) -> SendBack {
+        let rounds = tries
+            .map_or(self.rounds, |tries| tries.saturating_sub(1))
+            .min(self.max_rounds);
+        SendBack {
+            rounds,
+            when_still_not_met: self.when_still_not_met,
+        }
+    }
+
+    /// Why this block can't be used, when it can't.
+    fn problem(self) -> Option<String> {
+        if !(1..=FROM_MESSAGE_MAX_ROUNDS).contains(&self.max_rounds) {
+            return Some(format!(
+                "conversation.check.fromMessage.maxRounds must be 1 to {FROM_MESSAGE_MAX_ROUNDS}."
+            ));
+        }
+        if !(1..=self.max_rounds).contains(&self.rounds) {
+            return Some(
+                "conversation.check.fromMessage.rounds must be 1 to its maxRounds.".to_owned(),
+            );
+        }
+        None
     }
 }
 
@@ -1097,6 +1165,41 @@ impl CapabilityKind {
 }
 
 impl AgentConfig {
+    /// `LoomWatch`'s own check of an answer (ADR 0098): `role` on `model` at `effort`, with every
+    /// switch off and nothing given to it, learning nothing. Never one of the team's: `id` is one a
+    /// team file cannot give an agent.
+    #[must_use]
+    pub fn checker(
+        id: &str,
+        name: &str,
+        role: String,
+        model: String,
+        effort: Option<String>,
+    ) -> Self {
+        Self {
+            id: id.to_owned(),
+            name: name.to_owned(),
+            role,
+            kind: AgentKind::Harness,
+            spawn: SpawnConfig::default(),
+            model,
+            thinking_effort: effort,
+            allow_recruiting: false,
+            allow_my_agents: false,
+            capabilities: Vec::new(),
+            memory: None,
+            allow: AgentAllow::default(),
+            turned_off: Vec::new(),
+            done_when: Vec::new(),
+            part: None,
+            checks: None,
+            send_back: None,
+            spend: crate::spend::SpendConfig::default(),
+            from_agent: None,
+            learns: false,
+        }
+    }
+
     /// Whether this entry is a review stop rather than a harness.
     #[must_use]
     pub fn is_operator(&self) -> bool {
@@ -1643,6 +1746,9 @@ impl TeamConfig {
         // than as the incoming-edge violation it also happens to be.
         team.validate_operator_nodes()?;
         team.validate_check_steps()?;
+        if let Some(problem) = team.conversation.check.from_message.problem() {
+            bail!(problem);
+        }
         team.responder_id()?;
         for agent in &team.agents {
             for capability in &agent.capabilities {
@@ -2131,6 +2237,56 @@ mod tests {
     /// A check step's `sendBack` says how many times the work may go back (1 to 3) and what happens
     /// when its checks are still not met; an older file's `sendBackOnce` reads as what it always
     /// did, one round that shows the answer, and a file without either sends nothing back.
+    #[test]
+    fn from_message_reads_with_defaults_and_holds_its_rounds_to_its_cap() {
+        let team = |conversation: &str| {
+            TeamConfig::parse(&format!(
+                "schemaVersion: 1\nentrypoint: writer\nagents:\n  - id: writer\n    model: test/model\n{conversation}"
+            ))
+        };
+        let read = |conversation: &str| {
+            team(conversation)
+                .expect("valid")
+                .conversation
+                .check
+                .from_message
+        };
+        assert_eq!(read(""), FromMessage::default());
+        assert!(FromMessage::default().read);
+        assert_eq!(FromMessage::default().send_back(None).rounds, 2);
+        assert_eq!(
+            read("conversation:\n  check:\n    fromMessage: {read: false}\n"),
+            FromMessage {
+                read: false,
+                ..FromMessage::default()
+            }
+        );
+        let set = read(
+            "conversation:\n  check:\n    fromMessage: {rounds: 3, maxRounds: 4, whenStillNotMet: answer}\n",
+        );
+        assert_eq!(set.send_back(None).rounds, 3);
+        assert_eq!(set.send_back(Some(9)).rounds, 4, "never past maxRounds");
+        assert_eq!(set.send_back(Some(2)).rounds, 1, "two tries: one send-back");
+        assert_eq!(
+            set.send_back(None).when_still_not_met,
+            WhenStillNotMet::Answer
+        );
+        for (block, says) in [
+            ("{maxRounds: 0}", "maxRounds must be 1 to 10"),
+            ("{maxRounds: 11}", "maxRounds must be 1 to 10"),
+            ("{rounds: 6}", "rounds must be 1 to its maxRounds"),
+            ("{rounds: 0}", "rounds must be 1 to its maxRounds"),
+            ("{tries: 3}", "unknown field"),
+        ] {
+            let error = team(&format!(
+                "conversation:\n  check:\n    fromMessage: {block}\n"
+            ))
+            .expect_err(block);
+            let error = format!("{error:#}");
+            assert!(error.contains(says), "{block}: {error}");
+        }
+    }
+
     #[test]
     fn send_back_takes_one_to_three_rounds_and_send_back_once_is_one_that_answers() {
         let team = |fields: &str| {

@@ -354,7 +354,53 @@ depend on the document as a whole:
     - The editor sets the check step's effort from one table keyed by the checked agent's job:
       high for every job, for now.
   - **Verdict words.** A verdict word is read as a whole word, so "Metrics …" is not "Met".
+  - **A number is measured.** Met on an item with a number in digits ("At most 250 words") is
+    Not sure unless its evidence gives a number too; the check step is told to count, or to run what
+    measures it. A count in words ("names the three tools") is left to the check: naming them
+    meets it. An item that does not apply needs only its reason.
   - Operator nodes may not set either field.
+- `conversation.check.fromMessage` (ADR 0098) is what a person's message says done looks like:
+  "in a few lines", "at most 250 words", "exactly three sections", "stop after 5 tries".
+
+  ```yaml
+  conversation:
+    check:
+      fromMessage:
+        read: true             # false: a message's words are never turned into checks
+        rounds: 2              # send-backs when the message names no number of tries
+        maxRounds: 5           # the most a message may ask for (1–10)
+        whenStillNotMet: ask   # or answer
+  ```
+
+  - **The read.** When a run starts from a message a person wrote, one turn of the fast model, with
+    no tools, reads it with the conversation so far and lists the conditions it states, at most 5
+    of at most 160 characters, and how many tries it gives the work. It runs beside the work, so it
+    adds no wait and the working agent's prompt is unchanged. An item is kept only when its numbers
+    and most of its words are the message's own; a number of tries only when the message names it.
+    A routine's message, a team on stand-in models, and a daemon with no model settings are not
+    read. A read that fails or is slow checks nothing.
+  - **What it is checked by.** When a check step checks the agent whose reply is the answer, the
+    message's items come first in its items, then that agent's Done when, "Does what the request
+    asked" and the contradiction item, and the check step sends the work back as the message's
+    tries allow, even when it sets no `sendBack` of its own. Anywhere else (one agent, a team with
+    no fixed order, a pipeline whose last stage is not checked), LoomWatch checks the reply itself
+    against the message's items and "Does what the request asked": the built-in Checker job, at
+    its effort, on the `check` tier's model, or the `strong` tier's when that is another maker
+    than the checked agent's. It works in a folder of its own, with the work in `answer.md` to
+    count and measure; it runs commands that only read, and every other command is declined
+    without asking. What is not met goes back into the answering agent's still-open session, as a
+    check step sends it back. A pipeline that ends on a review stop is the person's own check, and
+    gets none.
+  - **Tries.** A try is the first work or one revision: "5 tries" is 4 send-backs, never more than
+    `maxRounds`. With no number, the work goes back `rounds` times. The stop and the chat count
+    tries when the message named them (`tries: true` on `check_stopped` and on the stop's `check`).
+  - **What is recorded.** Each change is a `done_when` event under the id `loomwatch:check`: the
+    items with whether each is still checked, the tries, the send-backs the check will allow, the
+    checker's model and whether its maker is the checked agent's, and whether the check has ended.
+    LoomWatch's own check records its rounds under the same id.
+  - **Taking an item off.** `POST /api/runs/{id}/done-when` with `{"item": 0, "checked": false}`
+    takes an item off the check from the next round on; `"checked": true` puts it back. Refused
+    once the check has ended.
 - `spend.perRun` (team level) is what one run may spend on model calls, in US dollars. Absent
   means no limit; new teams and the starter teams are written with `1.00`, and so is a new team Ask
 LoomWatch proposes, or `2.00` when it has three or more agents or a check step that sends work

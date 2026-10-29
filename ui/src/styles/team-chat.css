@@ -1297,3 +1297,32 @@ button.tc-reply-quote:hover, button.tc-reply-quote:focus-visible { border-left-c
   .tc-notice { align-items: center; }
   .tc-notice > .iconbtn { margin-top: 0; }
 }
+
+/* What the person's message said done looks like (ADR 0098), under the message, on its side: the
+   items in the person's words, each with one mark while the check can change; a dropped item is
+   struck through and dimmed, and its mark changes, so colour never says it alone. A long item wraps
+   in a rounded box, not a stadium. */
+.tc-done-when { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 4px 8px; max-width: min(560px, 100%); margin: 6px 4px 0 auto; font-size: 12px; line-height: 1.45; color: var(--color-ink-2); }
+.tc-done-when.failed { gap: 6px; }
+.tc-done-when.failed svg { flex: none; color: var(--color-ink-3); }
+.tc-done-label { font-weight: 600; color: var(--color-ink); cursor: help; }
+.tc-done-items { display: contents; margin: 0; padding: 0; list-style: none; }
+.tc-done-items li { display: inline-flex; align-items: center; gap: 2px; min-width: 0; padding: 2px 8px; border: 1px solid var(--color-hairline); border-radius: var(--r-md); }
+.tc-done-items q { overflow-wrap: anywhere; }
+.tc-done-items li.off q { color: var(--color-ink-3); text-decoration: line-through; }
+.tc-done-mark { display: inline-grid; flex: none; place-items: center; width: 18px; height: 18px; margin-right: -5px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--color-ink-3); cursor: pointer; }
+.tc-done-mark:hover, .tc-done-mark:focus-visible { color: var(--color-ink); background: var(--color-hairline); }
+.tc-done-mark:focus-visible { outline-offset: 0; }
+/* A finger needs a bigger target than the mark: 44 px, without growing the pill. */
+@media (pointer: coarse) {
+  .tc-done-when { row-gap: 12px; }
+  .tc-done-mark { position: relative; width: 28px; height: 28px; }
+  .tc-done-mark::after { content: ''; position: absolute; inset: -8px; }
+}
+.tc-done-hint { flex-basis: 100%; margin: 0; text-align: right; color: var(--color-ink-3); }
+/* LoomWatch's own check speaks under its face alone, in the text colour: no tile, no ring. */
+.chat-loomwatch { display: inline-flex; flex: none; align-items: center; justify-content: center; color: var(--color-ink-2); }
+.tc-react-head .lw-face { color: var(--color-ink-2); }
+/* An answer at a stop quotes its question on one line, cut with an ellipsis: without this the grid
+   column takes the whole unwrapped line and runs off the chat's edge. */
+.tc-decided .chat-stack { grid-template-columns: minmax(0, 1fr); }

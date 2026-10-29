@@ -20,11 +20,11 @@ import type { TeamView } from './WorkPiece'
 
 // The pieces read their own record and events only while live or shown; a still session here,
 // saying what the agents said when a test gives it messages.
-const said = vi.hoisted(() => ({ messages: [] as TeamMessage[], read: false, agents: [] as unknown[], events: [] as unknown[], evidence: [] as unknown[], record: null as RunRecord | null }))
+const said = vi.hoisted(() => ({ messages: [] as TeamMessage[], read: false, agents: [] as unknown[], events: [] as unknown[], evidence: [] as unknown[], record: null as RunRecord | null, doneWhen: null as unknown }))
 vi.mock('../../lib/runs/useRunSession', () => ({
   useRunSession: (runId: string | null) => ({
     record: said.record && said.record.runId === runId ? said.record : null, applyRecord: vi.fn(), missing: false, events: runId && said.events.length > 0 ? said.events : runId && (said.read || said.messages.length > 0) ? [{ id: 'e0' }] : [], error: null, connected: false,
-    projection: { agents: runId ? said.agents : [], evidence: runId ? said.evidence : [], messages: runId ? said.messages : [], delegations: [], attention: [], coverage: {}, prompt: null, promptAgentId: null, phase: said.read ? 'succeeded' : 'queued' },
+    projection: { agents: runId ? said.agents : [], evidence: runId ? said.evidence : [], messages: runId ? said.messages : [], delegations: [], attention: [], coverage: {}, prompt: null, promptAgentId: null, phase: said.read ? 'succeeded' : 'queued', doneWhen: runId ? said.doneWhen : null },
     latest: null, cursor: null, setCursor: vi.fn(), lastSeq: -1, mode: 'replay', terminal: true, evidenceComplete: true,
   }),
 }))
@@ -69,6 +69,7 @@ beforeEach(() => {
   said.evidence = []
   said.read = false
   said.record = null
+  said.doneWhen = null
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     if (url.startsWith('/api/chat?')) return new Response(JSON.stringify({ teamKey: 'news', teamPath: 'news.yaml', items: [...page].reverse(), more: false }), { status: 200 })
@@ -1420,8 +1421,9 @@ describe('a piece of work', () => {
     expect(within(card).getByText('Read Researcher’s work')).toBeInTheDocument()
     // Not the plain review's card.
     expect(screen.queryByText(/handed over its work for your review/)).not.toBeInTheDocument()
-    expect(within(card).getByRole('button', { name: 'Send back to Researcher' })).toBeDisabled()
-    expect(card).toHaveTextContent('Researcher revises, and Writer checks it again.')
+    // The checks still open say what is wrong, so it goes back without a note (ADR 0098).
+    expect(within(card).getByRole('button', { name: 'Send back to Researcher' })).toBeEnabled()
+    expect(card).toHaveTextContent('Send back has Researcher try again on what’s not met, and Writer checks it again; a note in the box below says more.')
     fireEvent.click(within(card).getByRole('button', { name: 'Approve as it is' }))
     await waitFor(() => expect(posted[0]).toMatchObject({ url: '/api/runs/run-1/answers', body: { node: 'writer', text: 'Approved. Continue as planned.' } }))
   })
@@ -1432,6 +1434,75 @@ describe('a piece of work', () => {
     expect(within(card).getByRole('button', { name: 'Approve with your note' })).toBeEnabled()
     fireEvent.click(within(card).getByRole('button', { name: 'Send back to Researcher' }))
     await waitFor(() => expect(posted[0]).toMatchObject({ url: '/api/runs/run-1/answers', body: { node: 'writer', text: 'Use the 2025 report.', sendBack: 'researcher' } }))
+  })
+
+  // ADR 0098: a newcomer whose likeliest wish is "try again" never meets a dead button.
+  it('sends the work back from a check step’s stop with no note, on the checks still open', async () => {
+    const card = await checkStop()
+    fireEvent.click(within(card).getByRole('button', { name: 'Send back to Researcher' }))
+    await waitFor(() => expect(posted[0]).toMatchObject({ url: '/api/runs/run-1/answers', body: { node: 'writer', text: '', sendBack: 'researcher' } }))
+  })
+
+  // ADR 0098: what the message said done looks like shows under it, in its own words, each item
+  // with one mark while the run works, and the same mark brings a dropped item back.
+  it('shows what the message said done looks like under it, and takes an item off the check', async () => {
+    said.doneWhen = { state: 'found', items: [{ text: 'At most 250 words', checked: true }, { text: 'Three sections', checked: false }], tries: 5, rounds: 2, checker: { model: 'openai/gpt-6.1-sol', sameMaker: false }, ended: false }
+    page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null }), request: message({}), notes: [] }]
+    answer = () => new Response(JSON.stringify({ phase: 'done_when', state: 'found', items: [{ text: 'At most 250 words', checked: false }, { text: 'Three sections', checked: false }], tries: 5, rounds: 2, ended: false }), { status: 200 })
+    renderChat()
+    const block = await screen.findByRole('group', { name: 'Done when' })
+    expect(block).toHaveTextContent('At most 250 words')
+    expect(block).toHaveTextContent('Up to 3 tries')
+    expect(block).toHaveTextContent('The work is checked against these.')
+    expect(within(block).getByText('Done when')).toHaveAttribute('title', 'Your message went to the team as you wrote it. LoomWatch only reads it, to check the work. Checked on GPT-6.1 Sol, by OpenAI.')
+    expect(within(block).getByRole('button', { name: 'Check “Three sections”' })).toBeInTheDocument()
+    fireEvent.click(within(block).getByRole('button', { name: 'Don’t check “At most 250 words”' }))
+    await waitFor(() => expect(posted[0]).toMatchObject({ url: '/api/runs/run-1/done-when', body: { item: 0, checked: false } }))
+    expect(await within(block).findByRole('button', { name: 'Check “At most 250 words”' })).toBeInTheDocument()
+  })
+
+  it('takes the marks away once the check has ended, and says when a read failed', async () => {
+    // Still running, so it is the check's end, not the run's, that takes the marks away.
+    said.doneWhen = { state: 'found', items: [{ text: 'At most 250 words', checked: true }, { text: 'Three sections', checked: false }], tries: null, rounds: null, checker: null, ended: true }
+    page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null }), request: message({}), notes: [] }]
+    renderChat()
+    const block = await screen.findByRole('group', { name: 'Done when' })
+    expect(within(block).queryByRole('button')).not.toBeInTheDocument()
+    expect(block).not.toHaveTextContent('tries')
+    expect(block).toHaveTextContent('The work was checked against these.')
+    expect(block).toHaveTextContent('Three sections (not checked)')
+    expect(block).not.toHaveTextContent('At most 250 words (not checked)')
+    cleanup()
+    said.doneWhen = { state: 'failed', items: [], tries: null, rounds: null, checker: null, ended: false }
+    renderChat()
+    expect(await screen.findByText('LoomWatch couldn’t read this message, so the work isn’t checked against it.')).toBeInTheDocument()
+    expect(screen.queryByRole('group', { name: 'Done when' })).not.toBeInTheDocument()
+  })
+
+  // ADR 0098: a send-back from a check's stop may carry no note; your answer then has no bubble.
+  it('draws no empty bubble for a send-back with no note', async () => {
+    said.messages = [{
+      id: 'check-stop:e1', kind: 'question', from: 'loomwatch:check', handedBy: null, to: 'operator', text: 'Writer’s work still misses 1 check after 1 try.', context: null,
+      eventId: 'e1', evidenceId: null, seq: 1, ts: '2026-10-06T02:02:00.000Z', offsetMs: 120_000, state: 'answered', error: null, carried: false,
+      reply: { from: 'operator', text: '', eventId: 'e2', seq: 2, ts: '2026-10-06T02:03:00.000Z', offsetMs: 180_000, source: null, sentBackTo: 'writer' },
+    }]
+    page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null }), request: message({}), notes: [] }]
+    renderChat()
+    // Folded, the piece keeps what you decided in view under its line.
+    const line = await screen.findByRole('button', { expanded: true, name: /replies/ })
+    fireEvent.click(line)
+    await waitFor(() => expect(document.querySelector('.tc-decided')).not.toBeNull())
+    expect(document.querySelector('.tc-decided')).toHaveTextContent('You → LoomWatch · your answer to “Writer’s work still misses 1 check after 1 try.”')
+    expect(document.querySelector('.tc-decided .chat-bubble')).toBeNull()
+  })
+
+  it('says nothing is checked when every item is off', async () => {
+    said.doneWhen = { state: 'found', items: [{ text: 'At most 250 words', checked: false }], tries: null, rounds: null, checker: null, ended: false }
+    page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null }), request: message({}), notes: [] }]
+    renderChat()
+    const block = await screen.findByRole('group', { name: 'Done when' })
+    expect(block).toHaveTextContent('At most 250 words (not checked)')
+    expect(block).not.toHaveTextContent('checked against these')
   })
 
   it('puts the review on the handover it decides, in what the agents said', async () => {

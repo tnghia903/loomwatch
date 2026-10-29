@@ -19,7 +19,8 @@ import { AvatarFace } from '../agents/AvatarFace'
 import { GuestNamesContext, TeamFiguresContext } from '../agents/figureContext'
 import { FIGURE_HUES, figureHue, type FigureChoice } from '../../lib/library/figures'
 import { InlineMarkdown, Markdown } from '../ui/Markdown'
-import { helperOf, wearerOf } from '../../lib/chat/helpers'
+import { LOOMWATCH_CHECK_ID, LOOMWATCH_NAME, helperOf, wearerOf } from '../../lib/chat/helpers'
+import { LoomFace } from '../ui/glyphs'
 
 interface AgentMessagesProps {
   messages: readonly TeamMessage[]
@@ -617,6 +618,14 @@ function Context({ text }: { text: string }) {
 function Avatar({ member, size, plain = false }: { member: Member; size: number; plain?: boolean }) {
   // In a team's chat an agent's face has its own card, and @mentions it when clicked.
   const faces = useAgentFaces()
+  // LoomWatch's own check (ADR 0098) wears LoomWatch's face: it is no agent, so it has no card.
+  if (member.id === LOOMWATCH_CHECK_ID) {
+    return (
+      <span className="chat-loomwatch" role="img" aria-label={LOOMWATCH_NAME} title={`${LOOMWATCH_NAME} checks the work itself when no checker is on the team.`}>
+        <LoomFace size={size} />
+      </span>
+    )
+  }
   const face = (
     <AvatarFace id={member.id} hue={member.hue} size={size} hidden={false} text={member.you ? 'You' : member.initials} title={faces && !member.you ? undefined : member.you ? 'You' : member.name}>
       {!plain && member.number !== null && !member.you && <span className="chat-avatar-number">{member.number}</span>}

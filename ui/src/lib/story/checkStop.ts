@@ -12,18 +12,26 @@ function timesWord(count: number): string {
   return count === 1 ? 'once' : `${count} times`
 }
 
+/** Tries, as the person's message counted them (ADR 0098): the first work is one. */
+function triesWord(rounds: number): string {
+  return rounds === 0 ? '1 try' : `${rounds + 1} tries`
+}
+
 /** One line: "Writer’s work still misses 2 checks after going back 2 times." */
 export function checkStopTitle(check: CheckWait, name: (id: string) => string, checker: string): string {
   const work = `${name(check.checked)}’s work`
   const misses = checksWord(check.items.length)
   switch (check.reason) {
     case 'no_progress':
-      return `${work} still misses ${misses}: the last round fixed none of them.`
+      return check.tries
+        ? `${work} still misses ${misses} after ${triesWord(check.rounds)}: the last try fixed none of them.`
+        : `${work} still misses ${misses}: the last round fixed none of them.`
     case 'unchecked':
       return `${checker} could not confirm ${misses} on ${work}.`
     case 'not_open':
       return `${work} still misses ${misses}, and ${name(check.checked)} has finished, so it can’t be sent back.`
     default:
+      if (check.tries) return `${work} still misses ${misses} after ${triesWord(check.rounds)}.`
       return check.rounds > 0 ? `${work} still misses ${misses} after going back ${timesWord(check.rounds)}.` : `${work} still misses ${misses}.`
   }
 }
@@ -33,7 +41,8 @@ export function checkStopLines(check: CheckWait): string[] {
   return check.items.map((item) => `${item.verdict === 'not_met' ? 'Not met' : 'Not sure'}: ${item.item}${item.evidence ? ` — ${item.evidence}` : ''}`)
 }
 
-/** What a send-back from the stop does, said where the person decides. */
+/** What a send-back from the stop does, said where the person decides. It needs no note: the checks
+ *  still open say what is wrong (ADR 0098). */
 export function checkStopTip(check: CheckWait, name: (id: string) => string, checker: string): string {
-  return `Approve keeps the work as it is. To send it back, write what to change in the box below: ${name(check.checked)} revises, and ${checker} checks it again.`
+  return `Approve keeps the work as it is. Send back has ${name(check.checked)} try again on what’s not met, and ${checker} checks it again; a note in the box below says more.`
 }

@@ -146,8 +146,9 @@ export interface CheckExchange {
   problems: string | null
   /** Your words, when it was you who sent the work back from the check step's stop. */
   direction?: string | null
-  /** Set on the round the check step stopped sending the work back at (`check_stopped`). */
-  stopped?: { reason: string; exit: string; sent: number } | null
+  /** Set on the round the check step stopped sending the work back at (`check_stopped`). `tries`:
+   *  the person's message named its tries, so the stop counts them, the first work one (ADR 0098). */
+  stopped?: { reason: string; exit: string; sent: number; tries?: boolean } | null
 }
 
 export interface TeamMessage {
@@ -250,6 +251,7 @@ function stopText(check: CheckExchange): string {
   const after = stopped.exit === 'ask' ? ' It asks you what to do.' : ' The answer shows with this marked.'
   if (stopped.reason === 'no_progress') return `_It stopped sending the work back: this round fixed none of what went back.${after}_`
   if (stopped.reason === 'unchecked') return `_It stopped: what is still open is what it could not check, which a revision can’t fix.${after}_`
+  if (stopped.reason === 'rounds' && stopped.tries) return `_It stopped after ${stopped.sent + 1} ${stopped.sent === 0 ? 'try' : 'tries'}, as many as you asked for.${after}_`
   if (stopped.reason === 'rounds') return `_It stopped after sending the work back ${stopped.sent === 1 ? 'once' : `${stopped.sent} times`}, as often as it may.${after}_`
   return ''
 }
@@ -568,7 +570,7 @@ export class Correspondence {
     const to = words(p.checked)
     const message = this.messages.findLast((candidate) => candidate.kind === 'check' && candidate.from === event.agentId && candidate.to === to)
     if (!message?.check) return
-    message.check.stopped = { reason: words(p.reason) ?? '', exit: words(p.exit) ?? 'answer', sent: typeof p.sent === 'number' ? p.sent : 0 }
+    message.check.stopped = { reason: words(p.reason) ?? '', exit: words(p.exit) ?? 'answer', sent: typeof p.sent === 'number' ? p.sent : 0, ...(p.tries === true ? { tries: true } : {}) }
     message.text = checkText(message.check)
   }
 

@@ -7,7 +7,7 @@ import { agentResolver, batonWords, passesOf, useBaton, type Baton } from '../..
 import { useFollow } from '../../lib/chat/follow'
 import { handedBackText, type ChatItem, type ChatMessage, type HandedBack, type ReplyTo } from '../../lib/chat/client'
 import { describeDocument, documentSize, isDocument } from '../../lib/chat/document'
-import { helperOf, helpersOf, nameWithHelpers, wearerOf, whoWorks } from '../../lib/chat/helpers'
+import { LOOMWATCH_CHECK_ID, helperOf, helpersOf, nameWithHelpers, wearerOf, whoWorks } from '../../lib/chat/helpers'
 import { handedBy, type HandOver } from '../../lib/chat/handed'
 import { clockTime, listNames, took } from '../../lib/chat/format'
 import { triesLine, tryingAgain } from '../../lib/chat/tries'
@@ -31,6 +31,7 @@ import type { AgentConfig } from '../../lib/team-file/types'
 import type { AlwaysAllowed } from '../../lib/tools/allow'
 import { AgentMessages } from '../run/AgentMessages'
 import { ChatFiles } from './ChatFiles'
+import { MessageDoneWhen } from './MessageDoneWhen'
 import { PermissionActions, PermissionPrompt } from '../run/PermissionPrompt'
 import { SpendStopCard } from '../run/SpendStopCard'
 import { InlineMarkdown, Markdown } from '../ui/Markdown'
@@ -331,7 +332,8 @@ export function WorkPiece({ item, newest = false, approveFilled = true, fixFille
   }, [session.projection.messages, team.parties, team.predecessors, guests])
   const speakers = useMemo(() => {
     const ids = [...said.flatMap((bubble) => bubble.from), ...(live ? working : []), ...(said.length > 0 && answer.trim() ? [run.responder] : [])]
-    const agents = [...new Set(ids)].filter((id) => !helperOf(id) && id !== OPERATOR_ID && !team.operators.has(id))
+    // LoomWatch's own check (ADR 0098) is no agent of the team: its rows say so, its face isn't here.
+    const agents = [...new Set(ids)].filter((id) => !helperOf(id) && id !== OPERATOR_ID && id !== LOOMWATCH_CHECK_ID && !team.operators.has(id))
     return (agents.length > 0 ? agents : workers).slice(0, FACES_SHOWN)
   }, [said, live, working, answer, run.responder, team.operators, workers])
   // An answer is drawn after what it answers, so the last drawn is not always the last said.
@@ -400,10 +402,10 @@ export function WorkPiece({ item, newest = false, approveFilled = true, fixFille
       <div className="tc-acts">
         <button type="button" className={approveClass} disabled={busy} onClick={approve}>{draft.trim() ? 'Approve with your note' : 'Approve'}</button>
         {waiting.sendBackAvailable && waiting.handoverFrom && (
-          <button type="button" className="btn" disabled={busy || !draft.trim()} onClick={sendBack}>Send back to {name(waiting.handoverFrom)}</button>
+          <button type="button" className="btn" disabled={busy || (!draft.trim() && !waiting.check)} onClick={sendBack}>Send back to {name(waiting.handoverFrom)}</button>
         )}
       </div>
-      {waiting.sendBackAvailable && !draft.trim() && <p className="tc-tip">To send it back, write what to change in the box below.</p>}
+      {waiting.sendBackAvailable && !draft.trim() && !waiting.check && <p className="tc-tip">To send it back, write what to change in the box below.</p>}
     </Appearing>
   ) : waiting?.kind === 'question' ? (
     <Appearing key={`turn:${waiting.since}`} reveal className="tc-turn question" role="group" aria-label={`${name(waiting.node)}'s question`}>
@@ -450,6 +452,10 @@ export function WorkPiece({ item, newest = false, approveFilled = true, fixFille
         // the team's time; and no face of yours, which the chat would read as on your own words.
         ? reactOn(targets.request, `${request.handedBack.teamName}'s answer`, onRequest.map(({ face, by, at }) => ({ face, by, at })), { shown: true })
         : reactOn(targets.request, run.trigger === 'schedule' ? "the schedule's request" : 'your request', onRequest, { mine: run.trigger !== 'schedule', own: true })} />
+      {/* What the message said done looks like, which the work is checked against (ADR 0098). */}
+      {session.projection.doneWhen && !continued && (
+        <MessageDoneWhen runId={run.runId} doneWhen={session.projection.doneWhen} live={live} to={run.onlyAgent ? name(run.onlyAgent) : team.solo ? name(team.solo) : 'the team'} />
+      )}
       {notes.map((note) => <Note key={note.id} note={note} flash={saidFlash?.id === `note:${note.id}`} live={live} name={name} onShowReplied={onShowReplied} reactions={reactOn(targets.note(note.id), note.handedBack ? `${note.handedBack.teamName}'s answer` : `your note to ${name(note.agentId ?? '')}`, note.deliveredAt && note.agentId ? [{ face: 'seen', by: note.agentId, at: note.deliveredAt }] : [], note.handedBack ? { shown: true } : { mine: true })} />)}
       {tries && !tryingAgain(ended) && <div className="chat-notice tc-tries"><span>{tries}</span></div>}
 
@@ -535,8 +541,9 @@ export function WorkPiece({ item, newest = false, approveFilled = true, fixFille
             <button type="button" className={approveClass} disabled={busy} onClick={approve}>
               {draft.trim() ? 'Approve with your note' : 'Approve as it is'}
             </button>
+            {/* The checks still open say what is wrong, so it goes back without a note (ADR 0098). */}
             {waiting.sendBackAvailable && waiting.handoverFrom && (
-              <button type="button" className="btn" disabled={busy || !draft.trim()} onClick={sendBack}>
+              <button type="button" className="btn" disabled={busy} onClick={sendBack}>
                 Send back to {name(waiting.handoverFrom)}
               </button>
             )}
@@ -682,7 +689,8 @@ function Decisions({ messages, autoRan = [], operators, name }: { messages: read
           : message.kind === 'question'
           ? <>You → {name(message.from ?? '')} · your answer to “<InlineMarkdown clickable={false}>{message.text.trim().split('\n')[0] ?? ''}</InlineMarkdown>”</>
           : reply.sentBackTo ? `You sent it back to ${name(reply.sentBackTo)}` : `You approved ${name(whose)}'s work`
-        const quiet = message.kind === 'permission' || (message.kind === 'handover' && !reply.sentBackTo && reply.text.trim() === APPROVAL_TEXT)
+        // A send-back from a check's stop may carry no words (ADR 0098): then there is nothing to show.
+        const quiet = message.kind === 'permission' || !reply.text.trim() || (message.kind === 'handover' && !reply.sentBackTo && reply.text.trim() === APPROVAL_TEXT)
         return (
           <Appearing key={message.id} className="chat-msg mine tc-decided">
             <div className="chat-stack">

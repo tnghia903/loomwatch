@@ -521,6 +521,9 @@ struct RegistryInner {
     /// The other half of each open spend stop (ADR 0068), keyed by stop id: every agent waiting at
     /// the stop watches it, and `POST /api/runs/{id}/spend` sends the operator's answer down it.
     spending: BTreeMap<String, tokio::sync::watch::Sender<Option<crate::spend::SpendAnswer>>>,
+    /// What each running run's message said done looks like (ADR 0098), keyed by run: where
+    /// `POST /api/runs/{id}/done-when` takes an item off the check or puts it back.
+    asked: BTreeMap<String, crate::message_done::MessageDone>,
 }
 
 /// One run parked on the operator.
@@ -807,6 +810,10 @@ pub struct RunRegistry {
     /// The model agents learn with (ADR 0078), set by a test. Unset, the daemon learns on the fast
     /// tier's model once model settings are installed, and a registry without them learns nothing.
     learner_model: Arc<OnceLock<String>>,
+    /// The models a message's Done when is read with and `LoomWatch` checks an answer on (ADR
+    /// 0098), set by a test. Unset, the read is the fast tier's and the check the Checker job's,
+    /// once model settings are installed; a registry without them reads nothing.
+    done_when_models: Arc<OnceLock<(String, String)>>,
 }
 
 /// Opaque: the records are the API's to report, and the REST router's state only needs to be
@@ -831,6 +838,7 @@ impl RunRegistry {
             publisher: Arc::default(),
             approvals: Arc::default(),
             learner_model: Arc::default(),
+            done_when_models: Arc::default(),
         }
     }
 
@@ -838,6 +846,102 @@ impl RunRegistry {
     /// wins.
     pub fn set_learner_model(&self, model: String) {
         let _first = self.learner_model.set(model);
+    }
+
+    /// Read what messages say done looks like with `reader`, and check answers on `checker` (ADR
+    /// 0098), instead of the fast tier's and the Checker job's: a test's stand-ins. The first call
+    /// wins.
+    pub fn set_done_when_models(&self, reader: String, checker: String) {
+        let _first = self.done_when_models.set((reader, checker));
+    }
+
+    /// A read of the message that starts a run of `team` (ADR 0098), not yet started: `None` when
+    /// nothing reads it. A team can turn it off; a team on stand-in models never calls a real
+    /// model, so neither does the read of its messages; and a routine's message is the same every
+    /// time it fires, so it isn't read on every fire, unseen.
+    pub(crate) fn message_done(
+        &self,
+        team: &TeamConfig,
+        trigger: RunTrigger,
+    ) -> Option<crate::message_done::MessageDone> {
+        let set = self.done_when_models.get();
+        reads_message(
+            team,
+            trigger,
+            set.is_some(),
+            crate::ai::installed().is_some(),
+        )
+        .then(|| {
+            crate::message_done::MessageDone::reading()
+                .checked_on(set.map(|(_, checker)| checker.clone()))
+        })
+    }
+
+    /// The model a message's Done when is read with.
+    fn reader_model(&self) -> String {
+        self.done_when_models.get().map_or_else(
+            || crate::control::tier_model("fast"),
+            |(reader, _)| reader.clone(),
+        )
+    }
+
+    /// Start reading `run_id`'s message beside its work, and keep what it reads where the API can
+    /// change it until the run ends ([`Self::forget_message`]).
+    fn read_message(
+        &self,
+        run_id: &str,
+        asked: &crate::message_done::MessageDone,
+        archive: &EventArchive,
+        teams_root: &Path,
+        prompt: &str,
+        conversation: Option<&str>,
+    ) {
+        self.inner
+            .write()
+            .unwrap_or_else(PoisonError::into_inner)
+            .asked
+            .insert(run_id.to_owned(), asked.clone());
+        let (asked, archive, teams_root, prompt, conversation, model) = (
+            asked.clone(),
+            archive.clone(),
+            teams_root.to_path_buf(),
+            prompt.to_owned(),
+            conversation.map(str::to_owned),
+            self.reader_model(),
+        );
+        tokio::spawn(async move {
+            let reading = crate::message_done::read(
+                &archive,
+                &teams_root,
+                &prompt,
+                conversation.as_deref(),
+                &model,
+            )
+            .await;
+            asked.finish(reading);
+        });
+    }
+
+    /// What `run_id`'s message said done looks like, while the run runs.
+    pub(crate) fn message(&self, run_id: &str) -> Option<crate::message_done::MessageDone> {
+        self.inner
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .asked
+            .get(run_id)
+            .cloned()
+    }
+
+    fn forget_message(&self, run_id: &str) {
+        let asked = self
+            .inner
+            .write()
+            .unwrap_or_else(PoisonError::into_inner)
+            .asked
+            .remove(run_id);
+        if let Some(asked) = asked {
+            asked.end();
+        }
     }
 
     /// What learning from feedback needs (ADR 0078), or `None` where nothing can learn: a registry
@@ -1936,6 +2040,7 @@ pub fn router(archive: Option<EventArchive>, teams_root: PathBuf, registry: RunR
         .route("/api/runs/{id}/deliver", post(deliver_run))
         .route("/api/runs/{id}/permissions", post(answer_permission))
         .route("/api/runs/{id}/spend", post(answer_spend))
+        .route("/api/runs/{id}/done-when", post(set_done_when))
         .route("/api/team/approve", post(approve_team))
         .route_layer(middleware::from_fn(local_evidence))
         .with_state(RunsState {
@@ -3081,6 +3186,9 @@ fn spawn_prepared(registry: &RunRegistry, prepared: PreparedRun, run_id: &str) {
     // A check step that finds work short and sees it fixed teaches the agent that did it (ADR
     // 0078). The CLI's run has no learner: nobody would see what it learned.
     lineage.learner = registry.learner(&prepared.teams_root);
+    // What the message says done looks like is read once the run has its conversation, beside the
+    // work (ADR 0098).
+    lineage.asked = registry.message_done(&prepared.team, prepared.record.trigger);
     let handle = tokio::spawn(execute(
         registry.clone(),
         prepared.archive,
@@ -3091,6 +3199,29 @@ fn spawn_prepared(registry: &RunRegistry, prepared: PreparedRun, run_id: &str) {
         Arc::new(lineage),
     ));
     registry.attach(run_id, handle);
+}
+
+/// Whether the message that starts a run of `team` is read for what it says done looks like (ADR
+/// 0098). Never when the team turned it off, and never for a routine, whose message is the same on
+/// every fire. Else when a test set the models to read and check with (`models_set`), or, with model
+/// settings `installed`, when some agent of the team runs on a real model: a team on stand-ins never
+/// calls one, so neither does the read of its messages.
+fn reads_message(
+    team: &TeamConfig,
+    trigger: RunTrigger,
+    models_set: bool,
+    installed: bool,
+) -> bool {
+    if !team.conversation.check.from_message.read || trigger == RunTrigger::Schedule {
+        return false;
+    }
+    models_set
+        || (installed
+            && team
+                .agents
+                .iter()
+                .filter(|agent| !agent.is_operator())
+                .any(|agent| !crate::intent::stand_in(&agent.model)))
 }
 
 fn team_revision(bytes: &[u8]) -> String {
@@ -3345,6 +3476,17 @@ async fn execute(
         conversation: crate::chat::conversation(&registry, &archive, &team_path, &run_id).await,
         ..(*lineage).clone()
     });
+    // ADR 0098: read with the conversation, so "again, but shorter" is read for what it means.
+    if let Some(asked) = &lineage.asked {
+        registry.read_message(
+            &run_id,
+            asked,
+            &archive,
+            &teams_root,
+            &prompt,
+            lineage.conversation.as_deref(),
+        );
+    }
     let run = crate::run_team_session_with_session_id(
         &team_path,
         Some(&teams_root),
@@ -3384,6 +3526,7 @@ async fn execute(
     // The run is over, however it ended. An agent it still has parked (a run that failed while a
     // stage waited behind a stop leaves one) has nothing left to reopen it.
     forget_parked_agents(&archive, &run_id).await;
+    registry.forget_message(&run_id);
     let responder = registry.get(&run_id).map(|record| record.responder);
     let _applied = match result {
         // CONTRACT §4: a normal turn with no response is `failed`
@@ -3986,12 +4129,6 @@ async fn answer_run(
             format!("invalid answer: {}", rejection.body_text()),
         )
     })?;
-    if request.text.trim().is_empty() {
-        return Err(ApiError::new(
-            StatusCode::BAD_REQUEST,
-            "An answer must say something. Type what the team should do.".to_owned(),
-        ));
-    }
     let desk = state.registry.operator_desk(state.archive.as_ref());
     let waiting = desk.waiting(&run_id).ok_or_else(|| {
         ApiError::new(
@@ -3999,6 +4136,15 @@ async fn answer_run(
             format!("Run {run_id} is not waiting for an answer."),
         )
     })?;
+    // Work sent back from a check's stop needs no note: the checks still open say what is wrong
+    // (ADR 0098). Every other answer has to say something.
+    let sent_back_from_checks = request.send_back.is_some() && waiting.check.is_some();
+    if request.text.trim().is_empty() && !sent_back_from_checks {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "An answer must say something. Type what the team should do.".to_owned(),
+        ));
+    }
     if waiting.node != request.node {
         return Err(ApiError::new(
             StatusCode::CONFLICT,
@@ -4040,6 +4186,41 @@ async fn answer_run(
     .await
     .map(|record| (StatusCode::ACCEPTED, Json(record)).into_response())
     .map_err(operator_status)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DoneWhenRequest {
+    /// The item's place in what was read from the message.
+    item: usize,
+    /// Check it, or take it off the check.
+    checked: bool,
+}
+
+/// `POST /api/runs/{id}/done-when` — take an item of what the run's message said done looks like
+/// off the check, or put it back (ADR 0098). Refused once the check has ended: the marks are gone
+/// from the chat by then.
+async fn set_done_when(
+    State(state): State<RunsState>,
+    RoutePath(run_id): RoutePath<String>,
+    body: Result<Json<DoneWhenRequest>, JsonRejection>,
+) -> Result<Response, ApiError> {
+    let Json(request) = body.map_err(|rejection| {
+        ApiError::new(
+            StatusCode::BAD_REQUEST,
+            format!("invalid Done when change: {}", rejection.body_text()),
+        )
+    })?;
+    let asked = state.registry.message(&run_id).ok_or_else(|| {
+        ApiError::new(
+            StatusCode::CONFLICT,
+            format!("Run {run_id} is not checking what its message asks."),
+        )
+    })?;
+    let now = asked
+        .set_checked(request.item, request.checked)
+        .map_err(|why| ApiError::new(StatusCode::CONFLICT, why.to_owned()))?;
+    Ok(Json(crate::message_done::payload(&now)).into_response())
 }
 
 /// What the person says at a review stop is about the work it reviews, so the stage that did it
@@ -7825,5 +8006,202 @@ pub(crate) mod tests {
         assert_eq!(spend.limit_usd, Some(2.5));
         assert_eq!(spend.agents["a"].limit_usd, Some(0.3));
         assert!((spend.agents["a"].spent_usd - 0.25).abs() < 1e-9);
+    }
+
+    /// ADR 0098: a run's message is read only when something can read it: not when the team turned it
+    /// off, not on every fire of a routine, and not with no model to read it with.
+    #[test]
+    fn a_message_is_read_only_when_something_can_read_it() {
+        let dir = TeamsDir::new();
+        dir.write_team("team.yaml", &completing());
+        let team = TeamConfig::load(&dir.0.join("team.yaml")).unwrap();
+        let registry = RunRegistry::default();
+        assert!(
+            registry.message_done(&team, RunTrigger::Manual).is_none(),
+            "no model settings: nothing reads it"
+        );
+        registry.set_done_when_models("reader".into(), "checker".into());
+        assert!(registry.message_done(&team, RunTrigger::Manual).is_some());
+        assert!(
+            registry.message_done(&team, RunTrigger::Schedule).is_none(),
+            "a routine is not read on every fire"
+        );
+        let mut off = team.clone();
+        off.conversation.check.from_message.read = false;
+        assert!(registry.message_done(&off, RunTrigger::Manual).is_none());
+
+        // Each gate on its own: a team on a real model is read once model settings are installed,
+        // never without them, and a team all on stand-ins never.
+        let mut real = team.clone();
+        real.agents[0].model = "anthropic/claude-sonnet-5.5".into();
+        assert!(reads_message(&real, RunTrigger::Manual, false, true));
+        assert!(
+            !reads_message(&real, RunTrigger::Manual, false, false),
+            "no model settings"
+        );
+        assert!(
+            !reads_message(&team, RunTrigger::Manual, false, true),
+            "a team on stand-ins calls no model"
+        );
+        assert!(!reads_message(&real, RunTrigger::Schedule, false, true));
+    }
+
+    /// ADR 0098: work sent back from a check's stop needs no note, since the checks say what is wrong,
+    /// while any other answer still has to say something; and an item of what the message said done
+    /// looks like comes off the check and goes back on through `POST /api/runs/{id}/done-when` until
+    /// the check ends.
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn a_check_stop_takes_a_bare_send_back_and_done_when_items_come_off() {
+        use crate::message_done::{CHECKER_ID, MessageDone};
+        use crate::operator::{CheckWait, ParkTier, StopKind, WaitingOn};
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        dir.write_team("team.yaml", &completing());
+        let team = TeamConfig::load(&dir.0.join("team.yaml")).unwrap();
+        let archive = EventArchive::new(pool);
+        let registry = RunRegistry::durable(archive.run_store());
+        let record =
+            RunRecord::queued("team.yaml".into(), "go".into(), &team, RunTrigger::Manual).unwrap();
+        let run_id = record.run_id.clone();
+        registry.insert(record);
+        assert!(registry.mark_starting(&run_id));
+        assert!(registry.mark_running(&run_id));
+        let desk = registry.operator_desk(Some(&archive));
+        let stop = desk
+            .park(
+                &run_id,
+                WaitingOn {
+                    node: CHECKER_ID.into(),
+                    name: "LoomWatch".into(),
+                    kind: StopKind::ReviewStop,
+                    since: now(),
+                    question: "Solo's work still misses 1 check after 2 tries.".into(),
+                    context: Some("the draft".into()),
+                    handover_from: Some("solo".into()),
+                    park: ParkTier::Reloadable,
+                    park_note: "Solo is waiting for your answer".into(),
+                    send_back_available: true,
+                    question_id: None,
+                    check: Some(CheckWait {
+                        checked: "solo".into(),
+                        rounds: 1,
+                        reason: "rounds".into(),
+                        items: Vec::new(),
+                        met: 0,
+                        problems: String::new(),
+                        tries: true,
+                    }),
+                },
+            )
+            .await
+            .unwrap();
+        let app = router(Some(archive.clone()), dir.0.clone(), registry.clone());
+        let answers = format!("/api/runs/{run_id}/answers");
+        let post = |endpoint: &str, body: serde_json::Value| {
+            let (app, endpoint) = (app.clone(), endpoint.to_owned());
+            async move { app.oneshot(post_json(&endpoint, &body)).await.unwrap() }
+        };
+        assert_eq!(
+            post(&answers, json!({"node": CHECKER_ID, "text": ""}))
+                .await
+                .status(),
+            StatusCode::BAD_REQUEST,
+            "approving still says something"
+        );
+        assert_eq!(
+            post(
+                &answers,
+                json!({"node": CHECKER_ID, "text": "", "sendBack": "solo"})
+            )
+            .await
+            .status(),
+            StatusCode::ACCEPTED
+        );
+        let answered = stop.answer().await.unwrap();
+        assert_eq!(answered.send_back.as_deref(), Some("solo"));
+        assert_eq!(answered.text, "");
+
+        let done_when = format!("/api/runs/{run_id}/done-when");
+        assert_eq!(
+            post(&done_when, json!({"item": 0, "checked": false}))
+                .await
+                .status(),
+            StatusCode::CONFLICT,
+            "this run is not checking what its message asks"
+        );
+        let asked = MessageDone::found(&["At most 250 words", "Three sections"], None);
+        registry
+            .inner
+            .write()
+            .unwrap()
+            .asked
+            .insert(run_id.clone(), asked.clone());
+        let response = post(&done_when, json!({"item": 0, "checked": false})).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let shown = json_body(response).await;
+        assert_eq!(shown["items"][0]["checked"], false);
+        assert_eq!(asked.checked_items(), ["Three sections"]);
+        assert_eq!(
+            post(&done_when, json!({"item": 5, "checked": false}))
+                .await
+                .status(),
+            StatusCode::CONFLICT
+        );
+        let back = post(&done_when, json!({"item": 0, "checked": true})).await;
+        assert_eq!(back.status(), StatusCode::OK);
+        assert_eq!(json_body(back).await["items"][0]["checked"], true);
+        assert_eq!(
+            asked.checked_items(),
+            ["At most 250 words", "Three sections"],
+            "the same mark puts it back"
+        );
+        assert_eq!(
+            post(&done_when, json!({"item": 0, "checked": false}))
+                .await
+                .status(),
+            StatusCode::OK
+        );
+        asked.end();
+        assert_eq!(
+            post(&done_when, json!({"item": 0, "checked": true}))
+                .await
+                .status(),
+            StatusCode::CONFLICT,
+            "once the check has ended nothing changes"
+        );
+        assert_eq!(asked.checked_items(), ["Three sections"]);
+
+        // A plain review stop still needs words, even to send the work back.
+        let review = desk
+            .park(
+                &run_id,
+                WaitingOn {
+                    node: "review".into(),
+                    name: "You".into(),
+                    kind: StopKind::ReviewStop,
+                    since: now(),
+                    question: "Approve the draft?".into(),
+                    context: Some("the draft".into()),
+                    handover_from: Some("solo".into()),
+                    park: ParkTier::Reloadable,
+                    park_note: "Solo is waiting for your answer".into(),
+                    send_back_available: true,
+                    question_id: None,
+                    check: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            post(
+                &answers,
+                json!({"node": "review", "text": "", "sendBack": "solo"})
+            )
+            .await
+            .status(),
+            StatusCode::BAD_REQUEST
+        );
+        drop(review);
     }
 }
