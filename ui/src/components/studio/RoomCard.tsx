@@ -1,6 +1,6 @@
 import { Fragment } from 'react'
 
-import { otherTeams, type Room, type RoomTeam, type Seat } from '../../lib/projects/studio'
+import { otherTeams, type Room, type RoomTeam } from '../../lib/projects/studio'
 import { markOf, type FigureOf } from '../../lib/projects/studioUi'
 import { PRESENCE_WORDS } from '../../lib/rail/presence'
 import { teamHref } from '../../lib/team-file/teamHref'
@@ -41,7 +41,7 @@ const TEAMS_LISTED = 4
 function teamLine(team: RoomTeam): string {
   const seat = team.seats.find((candidate) => candidate.kind === 'agent' && candidate.state === team.state)
   if (team.state === 'waiting' || team.state === 'working') return seat ? `${seat.name} is ${PRESENCE_WORDS[team.state]}` : `${PRESENCE_WORDS[team.state]}`
-  if (team.state === 'failed') return 'didn’t finish'
+  if (team.state === 'failed') return 'Didn’t finish'
   if (team.schedule) return `Runs ${team.schedule.charAt(0).toLowerCase()}${team.schedule.slice(1)}`
   return 'Ready'
 }
@@ -56,14 +56,14 @@ function StateShape({ state }: { state: RoomTeam['state'] }) {
 
 /**
  * A project's room on Home (ADR 0097), at a glance: each team on a line, most pressing first, with
- * its agents' figures and what it is doing, each opening its chat; then the newest thing made here,
- * one press from being read, and what this month cost. The rest of the card opens the room.
+ * what it is doing and its agents' figures, the whole line opening its chat; then the newest thing
+ * made here, one press from being read, and what this month cost. The rest of the card opens the
+ * room.
  */
-export function RoomCard({ room, figureOf, onOpen, onAway, newest = null, spend = null }: {
+export function RoomCard({ room, figureOf, onOpen, newest = null, spend = null }: {
   room: Room
   figureOf: FigureOf
   onOpen: () => void
-  onAway?: (seat: Seat) => void
   /** The newest file the agents here made. */
   newest?: string | null
   /** What this month cost here, in words. */
@@ -84,13 +84,15 @@ export function RoomCard({ room, figureOf, onOpen, onAway, newest = null, spend 
       {room.teams.length === 0 ? <p className="desk-empty">No team yet</p> : (
         <ul className="room-card-teams" aria-label={`${room.name}’s teams`}>
           {room.teams.slice(0, TEAMS_LISTED).map((team) => (
-            <li key={team.path} className="room-card-team">
-              <StateShape state={team.state} />
-              <span className="room-card-team-words">
-                <a href={teamHref(team.path, 'chat')}>{team.name}</a>
-                <small className={`room-state ${team.state}`}>{teamLine(team)}</small>
-              </span>
-              <TeamDesks team={team} figureOf={figureOf} size={26} compact onAway={onAway} />
+            <li key={team.path}>
+              <a className="room-card-team" href={teamHref(team.path, 'chat')}>
+                <StateShape state={team.state} />
+                <span className="room-card-team-words">
+                  <b>{team.name}</b>
+                  <small className={`room-state ${team.state}`}>{teamLine(team)}</small>
+                </span>
+                <TeamDesks team={team} figureOf={figureOf} size={26} compact />
+              </a>
             </li>
           ))}
         </ul>

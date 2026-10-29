@@ -194,22 +194,29 @@ describe('a project’s room (ADR 0097)', () => {
     }
     const posted = () => fetchMock.mock.calls.filter(([url, init]) => url === '/api/chat/messages' && init?.method === 'POST').map(([, init]) => JSON.parse(String(init?.body)) as Record<string, unknown>)
 
-    it('puts what waits for you first, with Review taking you to it, and a team that stopped with Try again', async () => {
+    it('puts what waits for you first, each answered where it waits, and work that stopped with why and its fix', async () => {
       twoTeams([
         record({ runId: 'w1', teamPath: 'sutd/blog.yaml', status: 'running', finishedAt: null, waitingOn: { node: 'writer', name: 'Writer', kind: 'question', since: '2026-10-28T09:00:00Z', question: 'Which tone?', handoverFrom: null, park: 'none', parkNote: '', sendBackAvailable: false } }),
-        record({ runId: 'f1', status: 'failed', prompt: 'Find three sources on gates.' }),
+        record({ runId: 'f1', status: 'failed', error: 'Your OpenRouter account is out of credits. Add credits on openrouter.ai, then try again.' }),
+        record({ runId: 'f2', teamPath: 'sutd/blog.yaml', status: 'failed', responder: 'writer', finishedAt: new Date(Date.now() + 1000).toISOString() }),
       ])
       render(<ProjectRoom id="sutd" />)
-      const tile = await screen.findByRole('region', { name: 'Needs you · 2' })
-      fireEvent.click(within(tile).getByRole('button', { name: 'Review: Writer has a question for you' }))
+      const tile = await screen.findByRole('region', { name: 'Needs you · 3' })
+      // A question is answered, not reviewed; it opens where it waits.
+      fireEvent.click(within(tile).getByRole('button', { name: 'Answer: Writer has a question for you' }))
       expect(assign).toHaveBeenCalledWith('/?path=sutd%2Fblog.yaml&run=w1')
-      fireEvent.click(within(tile).getByRole('button', { name: 'Try again: Research and design' }))
-      // Asked again as it was, in its team's chat, as work for the team: a message to no one is
-      // only a note, and starts nothing.
-      await waitFor(() => expect(posted()).toEqual([expect.objectContaining({ teamPath: 'sutd/gate.yaml', text: 'Find three sources on gates.', work: true, to: { kind: 'team' } })]))
-      // What waits for you is the screen's one gold fill; the box's Send is plain meanwhile.
-      expect(within(tile).getByRole('button', { name: /^Review/ })).toHaveClass('btn-primary')
-      expect(screen.getByRole('button', { name: 'Send' })).not.toHaveClass('btn-primary')
+      // The room has no bell: the rest show here.
+      fireEvent.click(within(tile).getByRole('button', { name: 'Show 1 more' }))
+      // Out of credits: the fix, not a try that would fail the same way; and why, in words.
+      expect(within(tile).getByRole('link', { name: 'Add OpenRouter credits' })).toHaveAttribute('href', 'https://openrouter.ai/settings/credits')
+      expect(within(tile).getByText(/Research and design · .*out of credits/)).toBeInTheDocument()
+      // No known fix: See why opens it where it stopped, where its chat's Try again is.
+      fireEvent.click(within(tile).getByRole('button', { name: 'See why Blog didn’t finish' }))
+      expect(assign).toHaveBeenCalledWith('/?path=sutd%2Fblog.yaml&run=f2')
+      expect(posted()).toEqual([])
+      // The first thing to do is the screen's one gold fill; the box's Start is plain meanwhile.
+      expect(within(tile).getByRole('button', { name: /^Answer/ })).toHaveClass('btn-primary')
+      expect(screen.getByRole('button', { name: 'Start' })).not.toHaveClass('btn-primary')
     })
 
     it('says who is working, what runs next and what this month cost', async () => {
@@ -233,8 +240,10 @@ describe('a project’s room (ADR 0097)', () => {
       fireEvent.change(within(box).getByRole('combobox', { name: 'To' }), { target: { value: 'sutd/blog.yaml' } })
       fireEvent.change(within(box).getByRole('textbox'), { target: { value: 'Write the launch post.' } })
       // Nothing waits for you, so Send is the one gold fill.
-      expect(within(box).getByRole('button', { name: 'Send' })).toHaveClass('btn-primary')
-      fireEvent.click(within(box).getByRole('button', { name: 'Send' }))
+      // The box names the team it gives work to, which tells it from Ask; Start, as the chat says.
+      expect(within(box).getByRole('textbox')).toHaveAttribute('placeholder', 'What should Blog do?')
+      expect(within(box).getByRole('button', { name: 'Start' })).toHaveClass('btn-primary')
+      fireEvent.click(within(box).getByRole('button', { name: 'Start' }))
       await waitFor(() => expect(posted()).toEqual([expect.objectContaining({ teamPath: 'sutd/blog.yaml', text: 'Write the launch post.', work: true, to: { kind: 'team' } })]))
       expect(await within(box).findByRole('status')).toHaveTextContent('Blog has it.')
       expect(posted()[0].startKey).toEqual(expect.any(String))
@@ -242,7 +251,7 @@ describe('a project’s room (ADR 0097)', () => {
       project = { ...SUTD }
       fetchMock.mockImplementation(daemon)
       render(<ProjectRoom id="sutd" />)
-      expect(await screen.findByRole('textbox', { name: 'What should Research and design do next?' })).toBeInTheDocument()
+      expect(await screen.findByRole('textbox', { name: 'What should Research and design do?' })).toBeInTheDocument()
       expect(screen.queryByRole('combobox', { name: 'To' })).toBeNull()
     })
 

@@ -5,8 +5,10 @@ import { FileReaderContext, type FileToRead } from '../../lib/files/reader'
 import { figureFor, type FigureChoice } from '../../lib/library/figures'
 import type { SavedJob } from '../../lib/library/jobs'
 import { useProjects, type ProjectEntry } from '../../lib/projects/client'
-import { finishedToday, lastFinished, madeHere, monthSpend, needsYou, workingNow } from '../../lib/projects/glance'
-import { AT_YOUR_DESK, roomsOf, studioLayout, type Room, type Seat } from '../../lib/projects/studio'
+import { costWords, finishedToday, lastFinished, madeHere, monthCost, monthSpend, needsYou, workingNow } from '../../lib/projects/glance'
+import { roomsOf, studioLayout, type Room } from '../../lib/projects/studio'
+import { useMonthUsage } from '../../lib/projects/useMonthUsage'
+import { loadDismissed } from '../../lib/story/useNeedsYou'
 import { useTeamShapes } from '../../lib/projects/useTeamShapes'
 import { benchChatId } from '../../lib/rail/presence'
 import { historyRunUrl } from '../../lib/runs/history'
@@ -18,7 +20,7 @@ import { KnowYou } from '../you/KnowYou'
 import { relativeTime } from '../../lib/format'
 import { FigureStill } from '../agents/FigureStill'
 import { goToRun } from '../agents/route'
-import { defaultFigureOf, openNeedsYou, roomHref, tryAgain } from '../../lib/projects/studioUi'
+import { defaultFigureOf, openNeedsYou, roomHref } from '../../lib/projects/studioUi'
 import { GlanceTiles } from './GlanceTiles'
 import { PickUp } from './PickUp'
 import { ReaderSheet } from './ReaderSheet'
@@ -127,11 +129,12 @@ export function Studio({ runs, onSetUp, setUpUnavailable, asking = false }: {
   )
   const teamShapes = useMemo(() => shapes ?? [], [shapes])
   // At a glance, across every project: what needs you, who works, what finished today, this month.
-  const needs = useMemo(() => needsYou(runs, teamShapes, root), [runs, teamShapes, root])
+  // By the bell's rules, so the two always count alike: the failures dismissed there left out.
+  const needs = useMemo(() => needsYou(runs, teamShapes, root, null, loadDismissed()), [runs, teamShapes, root])
   const working = useMemo(() => workingNow(runs, teamShapes, root), [runs, teamShapes, root])
   const made = useMemo(() => madeHere(runs, root), [runs, root])
+  const usage = useMonthUsage()
   const [reading, setReading] = useState<FileToRead | null>(null)
-  const [problem, setProblem] = useState<string | null>(null)
   const read = useCallback((file: FileToRead) => setReading(file), [])
   const names = useMemo(() => new Map(teamShapes.flatMap((shape) => shape.seats.map((seat) => [seat.id, seat.name] as const))), [teamShapes])
   const nameOf = useCallback((agent: string) => names.get(agent) ?? agent, [names])
@@ -160,19 +163,19 @@ export function Studio({ runs, onSetUp, setUpUnavailable, asking = false }: {
     if (room.id.startsWith('team:')) openTeam(room.id.slice('team:'.length))
     else window.location.assign(roomHref(room.id))
   }
-  // An agent at your desk is faint in its rooms; pressing it there goes to Your desk.
-  const onAway = (seat: Seat) => {
-    const still = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-    if (seat.away === AT_YOUR_DESK) document.getElementById('your-desk')?.scrollIntoView({ behavior: still ? 'auto' : 'smooth', block: 'center' })
-  }
   const openRun = (run: Pick<RunRecord, 'runId' | 'teamPath'>) => goToRun(historyRunUrl({ id: run.runId, teamPath: run.teamPath }))
+  // Where to ask about a file read here: the chat of the work that made it.
+  const chatOf = (file: FileToRead) => {
+    const run = runs.find((candidate) => candidate.runId === file.runId)
+    return run ? historyRunUrl({ id: run.runId, teamPath: run.teamPath }) : null
+  }
 
   if (error) return <p role="alert" className="home-empty alert">Couldn’t list your projects. {error} <button type="button" className="link" onClick={reload}>Try again</button></p>
   if (!rooms) return <p role="status" className="home-empty">Loading your projects…</p>
 
   const setUp = (start: ProjectStart) => { setCreating(false); onSetUp(start) }
   const pickUp = <PickUp files={made} chats={chats} jobs={jobs} figures={figures} />
-  const reader = reading && <ReaderSheet file={reading} name={nameOf} onClose={() => setReading(null)} />
+  const reader = reading && <ReaderSheet file={reading} name={nameOf} chat={chatOf(reading)} onClose={() => setReading(null)} />
   if (rooms.length === 0) {
     return (
       <FileReaderContext.Provider value={read}>
@@ -191,13 +194,16 @@ export function Studio({ runs, onSetUp, setUpUnavailable, asking = false }: {
   const found = needle ? rooms.filter((room) => room.name.toLowerCase().includes(needle)) : rooms
   const { open, quiet, putAway } = studioLayout(found)
   const shown = showPutAway ? [...open, ...quiet, ...putAway] : [...open, ...quiet]
-  // What each room shows of its own: the newest thing made there, and what this month cost.
+  // What each room shows of its own: the newest thing made there, and what this month cost, by
+  // where it was paid when the usage report could be read.
   const roomFacts = (room: Room) => {
     const scope = room.teams.map((team) => team.path)
     const spend = monthSpend(runs, root, scope)
+    const cost = monthCost(usage, room.teams.map((team) => team.name))
+    const words = cost ? (cost.usd > 0 || cost.plan ? costWords(cost) : null) : spend.runs > 0 ? `${spend.atLeast ? 'at least ' : ''}${formatCost(spend.usd)}` : null
     return {
       newest: madeHere(runs, root, scope, 1)[0]?.path ?? null,
-      spend: spend.runs > 0 ? `${spend.atLeast ? 'at least ' : ''}${formatCost(spend.usd)} this month` : null,
+      spend: words ? `${words} this month` : null,
     }
   }
   return (
@@ -211,15 +217,14 @@ export function Studio({ runs, onSetUp, setUpUnavailable, asking = false }: {
           working={working}
           finishedToday={finishedToday(runs, root)}
           spend={monthSpend(runs, root)}
+          cost={monthCost(usage, null)}
           figureOf={figureOf}
-          // Home's Review opens the bell's tray, where each thing waiting is answered in turn (ADR 0043).
-          onReview={openNeedsYou}
-          onTryAgain={(item) => { setProblem(null); tryAgain(item).catch((caught: unknown) => setProblem(caught instanceof Error ? caught.message : String(caught))) }}
-          onOpenLast={openRun}
-          onOpenWork={openRun}
-          onMore={openNeedsYou}
+          // Home's Review opens the bell's tray at that item, where each thing waiting is answered
+          // in turn (ADR 0043); "Show N more" opens it at the first.
+          onReview={(item) => openNeedsYou(item.runId)}
+          onOpenRun={openRun}
+          onMore={() => openNeedsYou()}
         />
-        {problem && <p role="alert" className="home-empty alert">{problem}</p>}
         {boxTeams.length > 0 && <WorkBox teams={boxTeams} primary={needs.length === 0} />}
       </div>
       {pickUp}
@@ -236,7 +241,7 @@ export function Studio({ runs, onSetUp, setUpUnavailable, asking = false }: {
         </div>
         {view === 'rooms' ? (
           <div className="room-grid">
-            {open.map((room) => <RoomCard key={room.id} room={room} figureOf={figureOf} onOpen={() => openRoom(room)} onAway={onAway} {...roomFacts(room)} />)}
+            {open.map((room) => <RoomCard key={room.id} room={room} figureOf={figureOf} onOpen={() => openRoom(room)} {...roomFacts(room)} />)}
             {quiet.map((room) => (
               <button key={room.id} type="button" className="room-tile" onClick={() => openRoom(room)}>
                 <span className="room-tile-name"><ProjectMark id={room.id} mark={room.mark} />{room.name}</span>

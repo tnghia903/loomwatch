@@ -12,7 +12,8 @@ const DISMISSED_KEY = 'loomwatch.needsYou.dismissed'
 
 let lastRecords: RunRecord[] = []
 
-function loadDismissed(): Set<string> {
+/** The stopped runs the person dismissed from the tray, by run id: Home and a room leave them out too. */
+export function loadDismissed(): Set<string> {
   try { return new Set(JSON.parse(localStorage.getItem(DISMISSED_KEY) ?? '[]') as string[]) } catch { return new Set() }
 }
 

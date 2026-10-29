@@ -34,6 +34,18 @@ describe('a permission ticket in the tray (ADR 0040)', () => {
   })
 })
 
+describe('opened from a Review on Home (ADR 0097)', () => {
+  it('opens at the item whose Review was pressed, and at the first when it names none', () => {
+    const second: Ticket = { ...ticket, id: 'r2:question', kind: 'question', runId: 'r2', teamName: 'Blog', text: 'Which tone?', requestId: undefined }
+    render(<NeedsYouTray tickets={[ticket, second]} working={0} onAnswer={vi.fn()} onPermission={vi.fn(() => Promise.resolve())} onDismiss={vi.fn()} />)
+    const active = () => document.querySelector('li.active')?.textContent ?? ''
+    act(() => { window.dispatchEvent(new CustomEvent('loomwatch:open-needs-you', { detail: 'r2' })) })
+    expect(active()).toMatch(/Which tone\?/)
+    act(() => { window.dispatchEvent(new CustomEvent('loomwatch:open-needs-you')) })
+    expect(active()).toMatch(/Researcher wants to use the web/)
+  })
+})
+
 // A review's context is what the step before wrote, in Markdown, starting with a check's open lines.
 describe('what a review ticket quotes', () => {
   it('shows the agent’s Markdown formatted, and its tooltip as plain words', () => {

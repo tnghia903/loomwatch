@@ -23,11 +23,13 @@ describe('a room card on Home (ADR 0097)', () => {
     expect(lines.map((line) => line.textContent)).toEqual([
       'Research and designwaiting for you',
       'Product pagesAnn is working',
-      'Fixesdidn’t finish',
+      'FixesDidn’t finish',
       'Weekly reportRuns every Monday at 9:00',
     ])
     expect(screen.getByText('Ann is working')).toHaveClass('room-state', 'working')
-    expect(screen.getByRole('link', { name: 'Product pages' })).toHaveAttribute('href', '/?path=pages.yaml&view=chat')
+    // The whole line opens the team's chat.
+    expect(screen.getByText('Product pages').closest('a')).toHaveAttribute('href', '/?path=pages.yaml&view=chat')
+    expect(screen.getByText('Ann is working').closest('a')).toBe(screen.getByText('Product pages').closest('a'))
     // Each team's agents stand on its line, named for a screen reader.
     expect(screen.getByRole('group', { name: 'Product pages: Ann is working' })).toBeInTheDocument()
     expect(screen.getByText('4 teams')).toBeInTheDocument()

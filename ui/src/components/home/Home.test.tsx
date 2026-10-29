@@ -126,9 +126,9 @@ describe('Home, the studio (ADR 0097)', () => {
     expect(rooms.map((room) => within(room).getByRole('heading').textContent)).toEqual(['SUTD final project', 'Blog'])
     // The guide's "Open a project" points at the rooms, New project with them.
     expect(rooms[0].closest('[data-tour="projects"]')).toContainElement(screen.getByRole('button', { name: 'New project' }))
-    // The Researcher stands at Your desk, so its desk in the room is its outline, saying where it is.
-    expect(within(rooms[0]).getByTitle('Researcher is at your desk')).toBeInTheDocument()
-    expect(within(rooms[0]).getByRole('group', { name: /Research and design: Researcher is at your desk, then You check, then Designer/ })).toBeInTheDocument()
+    // The Researcher waits for you at its own desk, lit, saying so.
+    expect(within(rooms[0]).getByTitle('Researcher is waiting for you')).toBeInTheDocument()
+    expect(within(rooms[0]).getByRole('group', { name: /Research and design: Researcher is waiting for you, then You check, then Designer/ })).toBeInTheDocument()
     expect(rooms[1]).toHaveTextContent('Ready')
     fireEvent.click(within(rooms[0]).getByRole('button', { name: 'SUTD final project' }))
     expect(assign).toHaveBeenCalledWith('/projects/sutd')
@@ -145,6 +145,8 @@ describe('Home, the studio (ADR 0097)', () => {
     expect(within(needs).getByText('Research and design')).toBeInTheDocument()
     fireEvent.click(within(needs).getByRole('button', { name: 'Review: Researcher brought work for you to check' }))
     expect(opened).toHaveBeenCalledTimes(1)
+    // At that item: the tray opens on the work whose Review was pressed.
+    expect((opened.mock.calls[0][0] as CustomEvent<string>).detail).toBe(waitingOnTheResearcher.runId)
     // One gold fill on the screen: Review. The box beside it gives work with a plain Send meanwhile,
     // even with words in it (an empty box's Send is off, and off is never gold).
     fireEvent.change(within(screen.getByRole('form', { name: 'Give work' })).getByRole('textbox'), { target: { value: 'Draw the gate.' } })
@@ -164,8 +166,8 @@ describe('Home, the studio (ADR 0097)', () => {
     fireEvent.change(to, { target: { value: 'sutd/gate.yaml' } })
     fireEvent.change(within(box).getByRole('textbox'), { target: { value: 'Find three gate designs.' } })
     // Nothing waits for you: Send is the one gold fill.
-    expect(goldFilled()).toEqual(['Send'])
-    fireEvent.click(within(box).getByRole('button', { name: 'Send' }))
+    expect(goldFilled()).toEqual(['Start'])
+    fireEvent.click(within(box).getByRole('button', { name: 'Start' }))
     await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/chat/messages')).toBe(true))
     const [, init] = fetchMock.mock.calls.find(([url]) => url === '/api/chat/messages') as [string, RequestInit]
     expect(JSON.parse(String(init.body))).toMatchObject({ teamPath: 'sutd/gate.yaml', text: 'Find three gate designs.', work: true, to: { kind: 'team' } })
@@ -177,7 +179,7 @@ describe('Home, the studio (ADR 0097)', () => {
     render(<Home onPalette={vi.fn()} runs={[waitingOnTheResearcher, run('blog.yaml', { runId: 'b1', status: 'succeeded', finishedAt: new Date().toISOString(), made: ['/teams/post.md'], spend: { spentUsd: 0.25 }, createdAt: new Date().toISOString() })]} />)
     const [sutd, blog] = await screen.findAllByRole('article')
     const teams = within(sutd).getByRole('list', { name: 'SUTD final project’s teams' })
-    expect(within(teams).getByRole('link', { name: 'Research and design' })).toHaveAttribute('href', '/?path=sutd%2Fgate.yaml&view=chat')
+    expect(within(teams).getByRole('link', { name: /^Research and design/ })).toHaveAttribute('href', '/?path=sutd%2Fgate.yaml&view=chat')
     expect(teams).toHaveTextContent('Researcher is waiting for you')
     // The newest thing made here, one press from being read, and what this month cost; each card
     // its own project's.
@@ -201,12 +203,18 @@ describe('Home, the studio (ADR 0097)', () => {
     expect(await within(row).findByRole('link', { name: 'Tell them about you' })).toHaveAttribute('href', '/you')
   })
 
-  it('opens a chat with one of your agents from where you left off', async () => {
+  it('opens a chat with one of your agents, under where you left off once there is something to pick up', async () => {
     fetchMock.mockImplementation(studio)
     renderHome()
+    // Nothing made and no chat yet: the way to chat stands alone, under no heading.
+    fireEvent.click(await screen.findByRole('button', { name: 'Chat with one agent' }))
+    expect(await screen.findByRole('menuitem', { name: /Researcher/ })).toHaveAttribute('href', '/agents/researcher?view=chat')
+    expect(screen.queryByRole('region', { name: 'Pick up where you left off' })).toBeNull()
+    cleanup()
+    render(<Home onPalette={vi.fn()} runs={[run('.jobs/.bench/writer.yaml', { runId: 'c1', status: 'succeeded', finishedAt: new Date().toISOString(), made: ['/teams/notes.md'] })]} />)
     const row = await screen.findByRole('region', { name: 'Pick up where you left off' })
-    fireEvent.click(within(row).getByRole('button', { name: 'Chat with one agent' }))
-    expect(await within(row).findByRole('menuitem', { name: /Researcher/ })).toHaveAttribute('href', '/agents/researcher?view=chat')
+    expect(within(row).getByRole('link', { name: /Writer/ })).toHaveAttribute('href', '/agents/writer?view=chat')
+    expect(within(row).getByRole('button', { name: /notes\.md/ })).toBeInTheDocument()
   })
 
   it('starts a new project from New project, and from New team, since every team works in one', async () => {

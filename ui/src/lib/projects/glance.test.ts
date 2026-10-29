@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
 import type { RunRecord, ScheduleEntry } from '../runs/client'
-import { finishedToday, isMadeThing, lastFinished, madeHere, monthSpend, needsYou, nextWork, workingNow } from './glance'
+import type { UsageReport } from '../usage/client'
+import { costWords, finishedToday, isMadeThing, lastFinished, madeHere, monthCost, monthSpend, needsYou, nextWork, workingNow, type MonthCost } from './glance'
 import type { TeamShape } from './studio'
 
 const ROOT = '/teams'
@@ -24,34 +25,39 @@ const SHAPES = [LAUNCH, LANDING, WATCH]
 const ROOM = SHAPES.map((team) => team.path)
 
 describe('what a room shows at a glance', () => {
-  it('puts what waits for you first, then each team that stopped, and keeps to the room', () => {
+  const NOW = Date.parse('2026-10-28T12:00:00Z')
+  const NONE = new Set<string>()
+
+  it('puts what waits for you first, then the work that stopped, says why and the fix, and keeps to the room', () => {
     const waitingOn = (since: string) => ({ node: 'check', name: 'You', kind: 'review_stop' as const, since, question: 'Check it', handoverFrom: 'illustrator', park: 'none' as const, parkNote: '', sendBackAvailable: true })
-    // Two teams of another project: one whose run waits for you, one whose newest run stopped.
+    // Two teams of another project: one whose run waits for you, one whose run stopped.
     const OTHERS = [shape('wait.yaml', 'Elsewhere', [{ kind: 'agent', id: 'illustrator', name: 'Illustrator' }]), shape('stop.yaml', 'Stopped elsewhere', [{ kind: 'agent', id: 'writer', name: 'Writer' }])]
     const runs = [
-      run('watch.yaml', { status: 'failed', createdAt: '2026-10-28T07:00:00Z', finishedAt: '2026-10-28T07:02:00Z', prompt: 'What changed on their pricing pages?', responder: 'scout' }),
+      run('watch.yaml', { status: 'failed', createdAt: '2026-10-28T07:00:00Z', finishedAt: '2026-10-28T07:02:00Z', responder: 'scout', error: 'Your OpenRouter account is out of credits. Add credits on openrouter.ai, then try again.' }),
       run('/teams/landing.yaml', { waitingOn: waitingOn('2026-10-28T09:20:00Z') }),
       run('wait.yaml', { waitingOn: waitingOn('2026-10-28T08:00:00Z') }),
       run('stop.yaml', { status: 'failed', createdAt: '2026-10-28T06:00:00Z' }),
     ]
     // Home sees them all; the room only its own.
-    expect(needsYou(runs, [...SHAPES, ...OTHERS], ROOT, null).map((item) => item.teamName)).toEqual(['Elsewhere', 'Landing page', 'Stopped elsewhere', 'Competitor watch'])
-    const items = needsYou(runs, [...SHAPES, ...OTHERS], ROOT, ROOM)
-    expect(items.map((item) => [item.kind, item.teamName, item.seat.name, item.says])).toEqual([
-      ['waiting', 'Landing page', 'Illustrator', 'brought work for you to check'],
-      ['failed', 'Competitor watch', 'Scout', 'didn’t finish'],
+    expect(needsYou(runs, [...SHAPES, ...OTHERS], ROOT, null, NONE, NOW).map((item) => item.teamName)).toEqual(['Elsewhere', 'Landing page', 'Stopped elsewhere', 'Competitor watch'])
+    const items = needsYou(runs, [...SHAPES, ...OTHERS], ROOT, ROOM, NONE, NOW)
+    expect(items.map((item) => [item.kind, item.teamName, item.seat.name, item.says, item.asks])).toEqual([
+      ['waiting', 'Landing page', 'Illustrator', 'brought work for you to check', 'check'],
+      ['failed', 'Competitor watch', 'Scout', 'didn’t finish', undefined],
     ])
-    // The stopped run's words come along, so it can be asked again as it was.
-    expect(items[1].prompt).toBe('What changed on their pricing pages?')
+    // Why it stopped, in plain words, and the fix LoomWatch knows for it.
+    expect(items[1].reason).toMatch(/out of credits/)
+    expect(items[1].fix).toMatchObject({ label: 'Add OpenRouter credits', external: true })
   })
 
-  it('leaves a team out once its newest run went well, or while the schedule tries again', () => {
+  it('counts stopped work as the bell does: not after a day, not once dismissed, not while it is tried again', () => {
     const runs = [
-      run('watch.yaml', { status: 'failed', createdAt: '2026-10-28T07:00:00Z' }),
-      run('watch.yaml', { status: 'succeeded', createdAt: '2026-10-28T08:00:00Z' }),
-      run('landing.yaml', { status: 'failed', nextTryAt: '2026-10-28T10:00:00Z' }),
+      run('watch.yaml', { runId: 'old', status: 'failed', createdAt: '2026-10-27T07:00:00Z', finishedAt: '2026-10-27T07:00:00Z' }),
+      run('watch.yaml', { runId: 'dismissed', status: 'failed', finishedAt: '2026-10-28T08:00:00Z' }),
+      run('landing.yaml', { runId: 'routine', status: 'failed', finishedAt: '2026-10-28T09:00:00Z', nextTryAt: '2026-10-28T10:00:00Z' }),
+      run('launch.yaml', { runId: 'shown', status: 'failed', finishedAt: '2026-10-28T11:00:00Z' }),
     ]
-    expect(needsYou(runs, SHAPES, ROOT, ROOM)).toEqual([])
+    expect(needsYou(runs, SHAPES, ROOT, ROOM, new Set(['dismissed']), NOW).map((item) => item.runId)).toEqual(['shown'])
   })
 
   it('names who is working and in which team, and a run that is starting by its first agent', () => {
@@ -90,6 +96,28 @@ describe('what a room shows at a glance', () => {
     expect(spend.atLeast).toBe(false)
     expect(spend.byTeam.get('launch.yaml')).toEqual({ usd: 0.52, runs: 2 })
     expect(monthSpend([...runs, run('watch.yaml', { createdAt: new Date(2026, 9, 28).toISOString() })], ROOT, ROOM, now).atLeast).toBe(true)
+  })
+
+  it('says this month’s cost by where it was paid: a ChatGPT plan as a plan, a list-price estimate as one', () => {
+    const tally = (costUsd: number, calls = 1, costEstimated = false) => ({ calls, inputTokens: 0, cachedTokens: 0, outputTokens: 0, costUsd, costEstimated })
+    const report = {
+      since: '2026-10-01',
+      days: [],
+      sources: [{ source: 'openrouter', total: tally(0.4) }, { source: 'anthropic', total: tally(0.2, 1, true) }, { source: 'chatgpt', total: tally(0, 12) }],
+      agents: [
+        { ...tally(0.4), team: 'Launch posts', ask: false, agentId: 'writer', source: 'openrouter', runs: 2 },
+        { ...tally(0, 12), team: 'Landing page', ask: false, agentId: 'illustrator', source: 'chatgpt', runs: 1 },
+        { ...tally(0.2, 1, true), team: 'Elsewhere', ask: false, agentId: 'x', source: 'anthropic', runs: 1 },
+      ],
+    } as unknown as UsageReport
+    const home = monthCost(report, null)
+    expect(home).toEqual({ usd: 0.6000000000000001, estimated: true, plan: true })
+    expect(costWords(home as MonthCost)).toBe('≈ $0.6 + ChatGPT plan')
+    expect(costWords(monthCost(report, ['Launch posts']) as MonthCost)).toBe('$0.4')
+    // Never "$0" for work a plan paid for.
+    expect(costWords(monthCost(report, ['Landing page']) as MonthCost)).toBe('ChatGPT plan')
+    expect(costWords({ usd: 0, estimated: false, plan: false })).toBe('$0')
+    expect(monthCost(null, null)).toBeNull()
   })
 
   it('lists what the agents made, newest work first, each file once, and leaves out code and logs', () => {

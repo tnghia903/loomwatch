@@ -34,12 +34,9 @@ export interface TeamShape {
 }
 
 /** A desk as drawn now: who is at it, or where they are instead. */
-/** Where an agent waiting for you is: at Your desk, where pressing its faint figure takes you. */
-export const AT_YOUR_DESK = 'at your desk'
-
 export interface Seat extends SeatSpec {
   state: Presence
-  /** Where the agent is instead of this desk: "at your desk", or the team it is working in. */
+  /** Where the agent is instead of this desk: the team it is working in, or waiting for you in. */
   away: string | null
 }
 
@@ -122,9 +119,9 @@ function lastOf(runs: readonly RunRecord[]): string | null {
 
 /**
  * Every project as a room: its teams' desks, each with who is there now. An agent is lit only
- * where it is now: one waiting for you stands at Your desk, so here it is faint, saying so; one
- * working in another team, and not here, is faint, naming that team. One working in two projects
- * at once is drawn in each.
+ * where it is now: one waiting for you is lit gold at its desk, saying so, as the tiles above say
+ * it; one working or waiting in another team, and not here, is faint, naming that team. One working
+ * in two projects at once is drawn in each.
  */
 export function roomsOf(
   projects: readonly ProjectEntry[],
@@ -134,15 +131,13 @@ export function roomsOf(
 ): Room[] {
   const runsOf = (path: string) => runs.filter((run) => isOpenTeam(path, run.teamPath, root))
   const states = new Map(shapes.map((shape) => [shape.path, agentStates(runsOf(shape.path))]))
-  // Where each of My agents is working, by its id there (the teams' names), and which wait for you.
-  const workingIn = new Map<string, string[]>()
-  const atYourDesk = new Set<string>()
+  // Where each of My agents is busy, working or waiting for you, by its id there (the teams' names).
+  const busyIn = new Map<string, string[]>()
   for (const shape of shapes) {
     for (const seat of shape.seats) {
       const state = states.get(shape.path)?.get(seat.id)
       if (!seat.agent) continue
-      if (state === 'waiting') atYourDesk.add(seat.agent)
-      if (state === 'working') workingIn.set(seat.agent, [...(workingIn.get(seat.agent) ?? []), shape.name])
+      if (state === 'waiting' || state === 'working') busyIn.set(seat.agent, [...(busyIn.get(seat.agent) ?? []), shape.name])
     }
   }
   return projects.map((project) => {
@@ -154,10 +149,8 @@ export function roomsOf(
       const seats = shape.seats.map((spec): Seat => {
         if (spec.kind === 'you') return { ...spec, state: 'ready', away: null }
         const state = here.get(spec.id) ?? 'ready'
-        if (state === 'waiting') return { ...spec, state, away: AT_YOUR_DESK }
-        if (state === 'working' || !spec.agent) return { ...spec, state, away: null }
-        if (atYourDesk.has(spec.agent)) return { ...spec, state, away: AT_YOUR_DESK }
-        const elsewhere = (workingIn.get(spec.agent) ?? []).filter((name) => name !== shape.name)
+        if (state === 'waiting' || state === 'working' || !spec.agent) return { ...spec, state, away: null }
+        const elsewhere = (busyIn.get(spec.agent) ?? []).filter((name) => name !== shape.name)
         return { ...spec, state, away: elsewhere.length > 0 ? `in ${elsewhere[0]}` : null }
       })
       const failed = teamRuns.length > 0 && presenceOfNewest(teamRuns) === 'failed'
@@ -284,6 +277,8 @@ export interface DeskItem {
   /** The agent, as its seat in its team is: its figure and name. */
   seat: SeatSpec
   says: string
+  /** What it asks of you: to check its work, or to answer a question, a permission or a limit. */
+  asks: 'check' | 'question' | 'permission' | 'spend'
 }
 
 /**
@@ -301,12 +296,12 @@ export function deskItems(runs: readonly RunRecord[], shapes: readonly TeamShape
       const seat = shape?.seats.find((candidate) => candidate.id === id) ?? (id ? undefined : shape?.seats.find((candidate) => candidate.kind === 'agent'))
       return seat ?? { kind: 'agent', id: id ?? 'team', name: name || (id ? run.agentNames?.[id] : null) || teamName }
     }
-    const add = (key: string, seat: SeatSpec, says: string, since: string) => items.push({ key: `${run.runId}:${key}`, runId: run.runId, teamPath: run.teamPath, teamName, seat, says, since })
+    const add = (key: string, seat: SeatSpec, says: string, asks: DeskItem['asks'], since: string) => items.push({ key: `${run.runId}:${key}`, runId: run.runId, teamPath: run.teamPath, teamName, seat, says, asks, since })
     const waiting = run.waitingOn
-    if (waiting?.kind === 'question') add(waiting.node, seatOf(waiting.node, waiting.name), 'has a question for you', waiting.since)
-    else if (waiting) add(waiting.node, seatOf(waiting.handoverFrom), 'brought work for you to check', waiting.since)
-    for (const request of run.permissionRequests ?? []) add(request.id, seatOf(request.agent, request.name), 'asks you before it goes on', request.since)
-    for (const stop of run.spendStops ?? []) add(stop.id, seatOf(stop.agent, stop.name), 'reached its spending limit', stop.since)
+    if (waiting?.kind === 'question') add(waiting.node, seatOf(waiting.node, waiting.name), 'has a question for you', 'question', waiting.since)
+    else if (waiting) add(waiting.node, seatOf(waiting.handoverFrom), 'brought work for you to check', 'check', waiting.since)
+    for (const request of run.permissionRequests ?? []) add(request.id, seatOf(request.agent, request.name), 'asks you before it goes on', 'permission', request.since)
+    for (const stop of run.spendStops ?? []) add(stop.id, seatOf(stop.agent, stop.name), 'reached its spending limit', 'spend', stop.since)
   }
   return items.sort((left, right) => left.since.localeCompare(right.since)).map(({ since: _since, ...item }) => item)
 }

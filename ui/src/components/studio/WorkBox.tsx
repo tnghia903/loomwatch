@@ -4,7 +4,6 @@ import { useRef, useState } from 'react'
 import { useChatAttachments } from '../../lib/chat/attachments'
 import { sendChatMessage } from '../../lib/chat/client'
 import { newStartKey, RunApiError, TEAM_NEEDS_REVIEW, type RunRecord } from '../../lib/runs/client'
-import { goToTeam } from '../../lib/team-file/teamPage'
 import { teamHref } from '../../lib/team-file/teamHref'
 
 /** A team the box can give work to, under its project on Home. */
@@ -34,9 +33,9 @@ export function WorkBox({ teams, primary, onSent }: { teams: readonly BoxTeam[];
   const [sending, setSending] = useState(false)
   const [said, setSaid] = useState<{ ok: boolean; words: string; team: BoxTeam } | null>(null)
   if (!team) return null
-  // Under their projects when they have them; a team in none yet goes under "Other teams".
+  // Under their projects when they have them; a team in none yet goes under "Not in a project".
   const grouped = teams.some((candidate) => candidate.project)
-  const projects = [...new Map(teams.map((candidate) => [candidate.project?.id ?? '', candidate.project?.name ?? 'Other teams'] as const)).entries()]
+  const projects = [...new Map(teams.map((candidate) => [candidate.project?.id ?? '', candidate.project?.name ?? 'Not in a project'] as const)).entries()]
   const trimmed = text.trim()
   const choose = (path: string) => {
     setChosen(path)
@@ -55,9 +54,10 @@ export function WorkBox({ teams, primary, onSent }: { teams: readonly BoxTeam[];
       setSaid({ ok: true, words: `${team.name} has it.`, team })
       onSent?.(result.run ?? null)
     } catch (caught) {
-      // A team file nobody has looked at yet is checked in its chat first (ADR 0048), where the words wait.
-      if (caught instanceof RunApiError && caught.code === TEAM_NEEDS_REVIEW) goToTeam(teamHref(team.path, 'chat'))
-      else setSaid({ ok: false, words: caught instanceof Error ? caught.message : String(caught), team })
+      // A team file changed since it last ran is looked over in its chat first (ADR 0048): the words
+      // and files stay here, and nothing starts until then.
+      if (caught instanceof RunApiError && caught.code === TEAM_NEEDS_REVIEW) setSaid({ ok: false, words: `${team.name} changed since it last ran. Look it over in its chat before it starts.`, team })
+      else setSaid({ ok: false, words: `Couldn’t give ${team.name} the work. ${caught instanceof Error ? caught.message : String(caught)}`, team })
     } finally {
       setSending(false)
     }
@@ -80,8 +80,9 @@ export function WorkBox({ teams, primary, onSent }: { teams: readonly BoxTeam[];
           </label>
         )}
         <label className="work-box-words">
-          <span className="visually-hidden">What should {team.name} do next?</span>
-          <input value={text} onChange={(event) => setText(event.target.value)} placeholder={teams.length > 1 ? 'What should they do next?' : `What should ${team.name} do next?`} maxLength={8000} />
+          <span className="visually-hidden">What should {team.name} do?</span>
+          {/* The team's name in the box is what tells it from Ask, which answers questions. */}
+          <input value={text} onChange={(event) => setText(event.target.value)} placeholder={`What should ${team.name} do?`} maxLength={8000} />
         </label>
         <input ref={chooser} type="file" multiple hidden tabIndex={-1} aria-hidden="true" onChange={(event) => {
           const files = Array.from(event.target.files ?? [])
@@ -89,8 +90,9 @@ export function WorkBox({ teams, primary, onSent }: { teams: readonly BoxTeam[];
           if (files.length > 0) attachments.add(files)
         }} />
         <button type="button" className="iconbtn work-box-attach" onClick={() => chooser.current?.click()} aria-label="Add pictures or files" title="Add pictures or files"><Paperclip size={16} aria-hidden="true" /></button>
-        <button type="submit" className={`btn${primary ? ' btn-primary' : ''} work-box-send`} disabled={!trimmed || sending || attachments.busy} title={attachments.busy ? 'Waits for your files' : undefined}>
-          <ArrowUp size={15} aria-hidden="true" />{sending ? 'Sending…' : 'Send'}
+        {/* "Start", as the team chat's box says when what it sends starts work. */}
+        <button type="submit" className={`btn${primary ? ' btn-primary' : ''} work-box-send`} disabled={!trimmed || sending || attachments.busy} title={attachments.busy ? 'Waiting for your files to save' : undefined}>
+          <ArrowUp size={15} aria-hidden="true" />{sending ? 'Starting…' : 'Start'}
         </button>
       </div>
       {attachments.items.length > 0 && (

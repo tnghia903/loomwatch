@@ -1,5 +1,5 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it } from 'vitest'
 
 import { figureFor, figureStill } from '../../lib/library/figures'
 import type { RoomTeam } from '../../lib/projects/studio'
@@ -13,7 +13,7 @@ const team: RoomTeam = {
   state: 'waiting',
   schedule: null,
   seats: [
-    { kind: 'agent', id: 'researcher', name: 'Researcher', agent: 'researcher', state: 'waiting', away: 'at your desk' },
+    { kind: 'agent', id: 'researcher', name: 'Researcher', agent: 'researcher', state: 'ready', away: 'in Website' },
     { kind: 'you', id: 'review', name: 'You', state: 'ready', away: null },
     { kind: 'agent', id: 'designer', name: 'Designer', agent: 'designer', state: 'ready', away: null },
   ],
@@ -28,7 +28,7 @@ describe('a team’s desks (ADR 0097)', () => {
     const away = desk('Researcher').querySelector('img')
     expect(away).toHaveAttribute('src', figureStill(figureFor('researcher')))
     expect(away?.closest('[data-glow]')).toBeNull()
-    expect(desk('Researcher')).toHaveTextContent('at your desk')
+    expect(desk('Researcher')).toHaveTextContent('in Website')
     // At its desk, an agent glows with its state.
     expect(desk('Designer').querySelector('[data-glow="ready"]')?.querySelector('img')).toHaveAttribute('src', figureStill(figureFor('designer')))
 
@@ -38,13 +38,17 @@ describe('a team’s desks (ADR 0097)', () => {
     expect(container.querySelector('.desk-outline')).toBeNull()
   })
 
-  it('lets you press only an agent at your desk, to go to it; one in another team leaves the click to its room', () => {
-    const elsewhere: RoomTeam = { ...team, seats: [...team.seats, { kind: 'agent', id: 'writer', name: 'Writer', agent: 'writer', state: 'ready', away: 'in Website' }] }
-    const onAway = vi.fn()
-    render(<TeamDesks team={elsewhere} figureOf={(seat) => figureFor(seat.agent ?? seat.id)} onAway={onAway} />)
-    fireEvent.click(screen.getByRole('button', { name: /Researcher/ }))
-    expect(onAway).toHaveBeenCalledWith(expect.objectContaining({ id: 'researcher' }))
-    expect(screen.getAllByRole('button')).toHaveLength(1)
-    expect(screen.getByText('in Website')).toBeInTheDocument()
+  it('lights an agent waiting for you gold at its own desk, saying so, and leaves every press to what holds the desks', () => {
+    const waiting: RoomTeam = { ...team, seats: [{ kind: 'agent', id: 'writer', name: 'Writer', agent: 'writer', state: 'waiting', away: null }] }
+    render(<TeamDesks team={waiting} figureOf={(seat) => figureFor(seat.agent ?? seat.id)} />)
+    expect(screen.getByText('Writer').closest('.desk')?.querySelector('[data-glow="waiting"]')).not.toBeNull()
+    expect(screen.getByText('waiting for you')).toHaveClass('desk-state', 'waiting')
+    expect(screen.queryAllByRole('button')).toHaveLength(0)
+  })
+
+  it('draws the figures alone in a line of words, each named to a screen reader by the row', () => {
+    render(<TeamDesks team={team} figureOf={(seat) => figureFor(seat.agent ?? seat.id)} compact />)
+    expect(screen.queryByText('Designer')).toBeNull()
+    expect(screen.getByRole('group', { name: 'Research and design: Researcher is in Website, then You check, then Designer' })).toBeInTheDocument()
   })
 })

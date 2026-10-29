@@ -70,9 +70,17 @@ export function NeedsYouTray({ tickets, working, onAnswer, onPermission, onSpend
   // One gold fill per screen: only the active ticket's main action is filled; J and K move it.
   const main = (index: number) => (index === shown ? 'btn btn-primary' : 'btn')
 
-  // Your desk's Review on Home opens this tray at the first one waiting (ADR 0097): one control.
+  // A Review or Answer on Home opens this tray at its own item, "Show N more" at the first (ADR
+  // 0097): one control answers them all.
+  const ticketsNow = useRef(tickets)
+  useEffect(() => { ticketsNow.current = tickets })
   useEffect(() => {
-    const show = () => { setOpen(true); setActive(0); setSaid('') }
+    const show = (event: Event) => {
+      const runId = (event as CustomEvent<string | undefined>).detail
+      setOpen(true)
+      setActive(Math.max(0, runId ? ticketsNow.current.findIndex((ticket) => ticket.runId === runId) : 0))
+      setSaid('')
+    }
     window.addEventListener('loomwatch:open-needs-you', show)
     return () => window.removeEventListener('loomwatch:open-needs-you', show)
   }, [])

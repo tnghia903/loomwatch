@@ -5,7 +5,9 @@ import { FileReaderContext, type FileToRead } from '../../lib/files/reader'
 import { figureFor, type FigureChoice } from '../../lib/library/figures'
 import { fetchJobs, saveJob, type SavedJob } from '../../lib/library/jobs'
 import { addProjectNote, NOTE_CHARS, ABOUT_CHARS, projectsChanged, saveProject, useProjects, type Project, type ProjectEntry } from '../../lib/projects/client'
-import { lastFinished, madeHere, monthSpend, needsYou, nextWork, workingNow, type MadeFile, type NeedsYouItem } from '../../lib/projects/glance'
+import { lastFinished, madeHere, monthCost, monthSpend, needsYou, nextWork, workingNow, type MadeFile } from '../../lib/projects/glance'
+import { useMonthUsage } from '../../lib/projects/useMonthUsage'
+import { loadDismissed } from '../../lib/story/useNeedsYou'
 import { inOpenedOrder, roomsOf } from '../../lib/projects/studio'
 import { useTeamShapes } from '../../lib/projects/useTeamShapes'
 import { historyRunUrl } from '../../lib/runs/history'
@@ -23,7 +25,7 @@ import { goToRun } from '../agents/route'
 import { FolderPicker } from '../canvas/FolderPicker'
 import { NewTeamDialog } from '../home/NewTeamDialog'
 import { SectionHead } from '../ui/SectionHead'
-import { MARKS, MARK_NAMES, defaultFigureOf, markOf, roomHref, tryAgain } from '../../lib/projects/studioUi'
+import { MARKS, MARK_NAMES, defaultFigureOf, markOf, roomHref } from '../../lib/projects/studioUi'
 import { GlanceTiles } from './GlanceTiles'
 import { MadeHere } from './MadeHere'
 import { ReaderSheet } from './ReaderSheet'
@@ -258,7 +260,9 @@ export function ProjectRoom({ id }: { id: string }) {
   const scope = project?.teams ?? null
   const shown = useMemo(() => shapes ?? [], [shapes])
   const all = useMemo(() => runs ?? [], [runs])
-  const needs = useMemo(() => (scope ? needsYou(all, shown, root, scope) : []), [all, shown, root, scope])
+  // By the bell's rules, the failures dismissed there left out (read again with each poll of the runs).
+  const needs = useMemo(() => (scope ? needsYou(all, shown, root, scope, loadDismissed()) : []), [all, shown, root, scope])
+  const usage = useMonthUsage()
   const working = useMemo(() => (scope ? workingNow(all, shown, root, scope) : []), [all, shown, root, scope])
   const made = useMemo(() => (scope ? madeHere(all, root, scope) : []), [all, root, scope])
   const newest = useMemo(() => {
@@ -269,9 +273,10 @@ export function ProjectRoom({ id }: { id: string }) {
   const names = useMemo(() => new Map(shown.flatMap((shape) => shape.seats.map((seat) => [seat.id, seat.name] as const))), [shown])
   const nameOf = useCallback((agent: string) => names.get(agent) ?? agent, [names])
 
-  const again = (item: NeedsYouItem) => {
-    setProblem(null)
-    tryAgain(item).then(readRuns, (caught: unknown) => setProblem(`Couldn’t start ${item.teamName} again. ${caught instanceof Error ? caught.message : String(caught)}`))
+  // Where to ask about a file read here: the chat of the work that made it.
+  const chatOf = (file: FileToRead) => {
+    const run = all.find((candidate) => candidate.runId === file.runId)
+    return run ? historyRunUrl({ id: run.runId, teamPath: run.teamPath }) : null
   }
 
   if (error) return <main className="project-room"><p role="alert" className="home-empty alert">Couldn’t open the project. {error}</p></main>
@@ -314,21 +319,24 @@ export function ProjectRoom({ id }: { id: string }) {
       <FileReaderContext.Provider value={read}>
       <main className="project-room">
         {problem && <p role="alert" className="home-empty alert">{problem}</p>}
-        {/* Only once the teams, the runs and the schedules are read: a count or "nothing" said too early is wrong. */}
-        {shapes && runs && (schedules || scheduleError) && <GlanceTiles
-          needs={needs}
-          last={lastFinished(all, root, scope)}
-          working={working}
-          next={nextWork(schedules ?? [], root, scope)}
-          spend={monthSpend(all, root, scope)}
-          figureOf={figureOf}
-          onReview={openRun}
-          onTryAgain={again}
-          onOpenLast={openRun}
-          onOpenWork={openRun}
-          onMore={() => { if (needs[2]) openRun(needs[2]) }}
-        />}
-        {teams.length > 0 && <WorkBox teams={teams} primary={needs.length === 0} onSent={readRuns} />}
+        {/* Only once the teams, the runs and the schedules are read: a count or "nothing" said too
+            early is wrong, and the box beside them would jump down as they came. */}
+        {shapes && runs && (schedules || scheduleError) && (
+          <>
+            <GlanceTiles
+              needs={needs}
+              last={lastFinished(all, root, scope)}
+              working={working}
+              next={nextWork(schedules ?? [], root, scope)}
+              spend={monthSpend(all, root, scope)}
+              cost={monthCost(usage, teams.map((team) => team.name))}
+              figureOf={figureOf}
+              onReview={openRun}
+              onOpenRun={openRun}
+            />
+            {teams.length > 0 && <WorkBox teams={teams} primary={needs.length === 0} onSent={readRuns} />}
+          </>
+        )}
 
         <div className="room-body">
         <div className="room-main">
@@ -401,7 +409,7 @@ export function ProjectRoom({ id }: { id: string }) {
         </div>
       </main>
       </FileReaderContext.Provider>
-      {reading && <ReaderSheet file={reading} name={nameOf} onClose={() => setReading(null)} />}
+      {reading && <ReaderSheet file={reading} name={nameOf} chat={chatOf(reading)} onClose={() => setReading(null)} />}
 
       {picking && (
         <FolderPicker

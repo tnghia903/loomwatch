@@ -2,7 +2,11 @@ import { extensionOf } from '../files/fileRefs'
 import { readerFormat } from '../files/reader'
 import { isOpenTeam } from '../library/uses'
 import { isTerminalRun, type RunRecord, type ScheduleEntry } from '../runs/client'
-import { deskItems, type SeatSpec, type TeamShape } from './studio'
+import { problemAction, type ProblemAction } from '../runs/errors'
+import { ticketsFrom } from '../story/needsYou'
+import type { UsageReport } from '../usage/client'
+import { formatCost } from '../watch/usage'
+import { deskItems, type DeskItem, type SeatSpec, type TeamShape } from './studio'
 
 /**
  * What a project's room and Home show at a glance (ADR 0097): what needs you, who is working,
@@ -20,7 +24,7 @@ function teamIn(scope: Scope, run: Pick<RunRecord, 'teamPath'>, root: string | n
 
 const newestFirst = (left: RunRecord, right: RunRecord) => (right.finishedAt ?? right.createdAt).localeCompare(left.finishedAt ?? left.createdAt)
 
-/** Something that needs you: work brought for you to check or a question, or a team that stopped. */
+/** Something that needs you: work brought for you to check or a question, or work that stopped. */
 export interface NeedsYouItem {
   key: string
   kind: 'waiting' | 'failed'
@@ -31,31 +35,33 @@ export interface NeedsYouItem {
   /** Who to draw: the agent waiting, or the one whose answer the run that stopped was to give. */
   seat: SeatSpec
   says: string
-  /** What was asked, so a stopped run can be asked again. */
-  prompt: string
+  /** What a waiting agent asks of you, which names its button: check its work, or answer. */
+  asks?: DeskItem['asks']
+  /** Why the work stopped, in plain words. */
+  reason?: string
+  /** The fix LoomWatch knows for why it stopped, such as adding credits. */
+  fix?: ProblemAction | null
 }
 
 /**
- * What needs you, most pressing first: whoever waits for you, oldest first, as Your desk had them;
- * then each team whose newest run stopped and won't be tried again by itself.
+ * What needs you, by the bell's own rules so the two never count differently: whoever waits for
+ * you, oldest first; then the work that stopped in the last day, which the schedule won't try again
+ * and the person hasn't dismissed in the bell's list.
  */
-export function needsYou(runs: readonly RunRecord[], shapes: readonly TeamShape[], root: string | null, scope: Scope = null): NeedsYouItem[] {
+export function needsYou(runs: readonly RunRecord[], shapes: readonly TeamShape[], root: string | null, scope: Scope = null, dismissed: ReadonlySet<string> = new Set(), now = Date.now()): NeedsYouItem[] {
   const waiting = deskItems(runs, shapes, root)
     .filter((item) => teamIn(scope, item, root) !== null)
-    .map((item): NeedsYouItem => {
-      const run = runs.find((candidate) => candidate.runId === item.runId)
-      return { key: item.key, kind: 'waiting', runId: item.runId, teamPath: item.teamPath, teamName: item.teamName, seat: item.seat, says: item.says, prompt: run?.prompt ?? '' }
+    .map((item): NeedsYouItem => ({ key: item.key, kind: 'waiting', runId: item.runId, teamPath: item.teamPath, teamName: item.teamName, seat: item.seat, says: item.says, asks: item.asks }))
+  const names = new Map(shapes.map((shape) => [shape.path, shape.name]))
+  const stopped = ticketsFrom(runs, names, dismissed, now)
+    .filter((ticket) => ticket.kind === 'failed' && teamIn(scope, ticket, root) !== null)
+    .map((ticket): NeedsYouItem => {
+      const run = runs.find((candidate) => candidate.runId === ticket.runId)
+      const shape = shapes.find((candidate) => isOpenTeam(candidate.path, ticket.teamPath, root))
+      const responder = run?.responder ?? ''
+      const seat = shape?.seats.find((candidate) => candidate.id === responder) ?? shape?.seats.find((candidate) => candidate.kind === 'agent') ?? { kind: 'agent', id: responder, name: ticket.teamName }
+      return { key: ticket.id, kind: 'failed', runId: ticket.runId, teamPath: ticket.teamPath, teamName: shape?.name ?? ticket.teamName, seat, says: 'didn’t finish', reason: ticket.text, fix: problemAction(run?.error) }
     })
-  const stopped = shapes
-    .filter((shape) => !scope || scope.includes(shape.path))
-    .flatMap((shape): (NeedsYouItem & { since: string })[] => {
-      const newest = runs.filter((run) => isOpenTeam(shape.path, run.teamPath, root)).sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0]
-      if (!newest || newest.status !== 'failed' || newest.nextTryAt) return []
-      const seat = shape.seats.find((candidate) => candidate.id === newest.responder) ?? shape.seats.find((candidate) => candidate.kind === 'agent') ?? { kind: 'agent', id: newest.responder, name: shape.name }
-      return [{ key: `${newest.runId}:stopped`, kind: 'failed', runId: newest.runId, teamPath: newest.teamPath, teamName: shape.name, seat, says: 'didn’t finish', prompt: newest.prompt, since: newest.finishedAt ?? newest.createdAt }]
-    })
-    .sort((left, right) => left.since.localeCompare(right.since))
-    .map(({ since: _since, ...item }) => item)
   return [...waiting, ...stopped]
 }
 
@@ -129,6 +135,39 @@ export function monthSpend(runs: readonly RunRecord[], root: string | null, scop
     spend.byTeam.set(team, { usd: counted.usd + usd, runs: counted.runs + 1 })
   }
   return spend
+}
+
+/** What this month cost by where it was paid, as the Usage page counts it (ADR 0073). */
+export interface MonthCost {
+  /** Dollars through OpenRouter and the Claude credit. */
+  usd: number
+  /** Some of it was worked out from list prices (a Claude key reports no cost). */
+  estimated: boolean
+  /** Some work ran on a ChatGPT plan, which has no price per call. */
+  plan: boolean
+}
+
+/**
+ * This month's cost from the usage report, for the teams named (`null`: every team, and Ask). The
+ * report counts what each call cost where it was paid, so a ChatGPT plan is said as a plan rather
+ * than as $0, and a list-price estimate as one.
+ */
+export function monthCost(report: UsageReport | null, teams: readonly string[] | null): MonthCost | null {
+  if (!report) return null
+  const tallies = teams ? report.agents.filter((agent) => agent.team && teams.includes(agent.team)) : report.sources.map((source) => ({ ...source.total, source: source.source }))
+  return {
+    usd: tallies.reduce((sum, tally) => sum + tally.costUsd, 0),
+    estimated: tallies.some((tally) => tally.costEstimated && tally.costUsd > 0),
+    plan: tallies.some((tally) => tally.source === 'chatgpt' && tally.calls > 0),
+  }
+}
+
+/** A month's cost in words: "$0.42", "≈ $0.42", "$0.42 + ChatGPT plan", "ChatGPT plan", "$0". */
+export function costWords(cost: MonthCost): string {
+  const dollars = cost.usd > 0 ? `${cost.estimated ? '≈ ' : ''}${formatCost(cost.usd)}` : null
+  if (dollars && cost.plan) return `${dollars} + ChatGPT plan`
+  if (cost.plan) return 'ChatGPT plan'
+  return dollars ?? '$0'
 }
 
 /** Whether a file the agents made is worth showing as made: what a person reads, not code or a log. */
