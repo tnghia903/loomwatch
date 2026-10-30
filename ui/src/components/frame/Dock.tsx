@@ -52,6 +52,11 @@ export function Dock() {
   const [focused, setFocused] = useState<Place | null>(null)
   const here = useSyncExternalStore(subscribePlace, placeHere, () => 'home' as Place)
   const needs = tickets.length
+  // Each time more need you, the count is drawn again so it pops (motion.css); fewer, or a page
+  // that opens on the same count, says nothing new and holds still.
+  const [counted, setCounted] = useState({ needs, rose: 0 })
+  if (counted.needs !== needs) setCounted({ needs, rose: needs > counted.needs ? counted.rose + 1 : counted.rose })
+  const rose = counted.rose
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'j') {
@@ -72,7 +77,7 @@ export function Dock() {
       <>
         <span className="lw-dock-icon">
           <Icon name={icon} size={22} />
-          {place === 'home' && needs > 0 && <span className="lw-dock-count" aria-hidden="true">{needs > 99 ? '99+' : needs}</span>}
+          {place === 'home' && needs > 0 && <span key={rose} className={`lw-dock-count${rose > 0 ? ' rose' : ''}`} aria-hidden="true">{needs > 99 ? '99+' : needs}</span>}
           {place === 'ask' && asking.activity && <i className="lw-dock-live" aria-hidden="true" />}
         </span>
         <span className="lw-dock-label" aria-hidden="true" hidden={(learned && focused !== place) || undefined}>{label}</span>
