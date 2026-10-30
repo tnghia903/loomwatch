@@ -4,6 +4,7 @@ import type { MadeFile } from '../../lib/projects/glance'
 import { litAt, type RoomTeam } from '../../lib/projects/studio'
 import type { FigureOf } from '../../lib/projects/studioUi'
 import { PRESENCE_WORDS } from '../../lib/rail/presence'
+import { listNames } from '../../lib/format'
 import { teamHref } from '../../lib/team-file/teamHref'
 import { FileChip } from '../ui/FileChip'
 import { TeamDesks } from './TeamDesks'
@@ -44,6 +45,8 @@ export function TeamGrid({ teams, figureOf, newest, menu }: {
               </a>
               {menu?.(team)}
             </div>
+            {/* The same team works in other projects too, each with its own work (ADR 0103). */}
+            {team.alsoIn?.length ? <span className="team-card-also">Also in {listNames(team.alsoIn.map((project) => project.name))}</span> : null}
             <TeamDesks team={team} figureOf={figureOf} size={one ? 56 : 40} all />
             {file && <div className="team-card-made"><FileChip path={file.path} /></div>}
           </article>

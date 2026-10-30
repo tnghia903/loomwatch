@@ -472,14 +472,14 @@ describe('Home, the studio (ADR 0097)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Rooms' }))
     localStorage.removeItem('loomwatch:studio-view')
     // One pick: the button opens your projects, and the one picked takes the team.
-    fireEvent.click(within(row).getByRole('button', { name: 'Move to a project: Weekly posts' }))
+    fireEvent.click(within(row).getByRole('button', { name: 'Add to a project: Weekly posts' }))
     // In a narrow window the list hangs under the whole row, so a long name never runs off the left.
-    const list = screen.getByRole('menu', { name: 'Move to a project: Weekly posts' })
+    const list = screen.getByRole('menu', { name: 'Add to a project: Weekly posts' })
     expect(cascaded(list, 'left', PHONE)).toBe('0')
     expect(cascaded(list, 'right', PHONE)).toBe('0')
     expect(cascaded(list, 'width', PHONE)).toBe('auto')
     expect(cascaded(list, 'width', DESKTOP)).toBe('max-content')
-    fireEvent.click(within(screen.getByRole('menu', { name: 'Move to a project: Weekly posts' })).getByRole('menuitem', { name: 'SUTD final project' }))
+    fireEvent.click(within(screen.getByRole('menu', { name: 'Add to a project: Weekly posts' })).getByRole('menuitem', { name: 'SUTD final project' }))
     await waitFor(() => expect(calls).toEqual(['PUT /api/team']))
     expect(saved).toContain('project: sutd')
     expect(await screen.findByText(/works in/)).toHaveTextContent('Weekly posts works in SUTD final project now.')
@@ -499,11 +499,34 @@ describe('Home, the studio (ADR 0097)', () => {
     })
     render(<Home onPalette={vi.fn()} runs={[]} />)
     const teams = await screen.findByRole('list', { name: 'Teams in no project' })
-    fireEvent.click(within(teams).getByRole('button', { name: 'Move to a project: Weekly posts' }))
-    fireEvent.click(within(screen.getByRole('menu', { name: 'Move to a project: Weekly posts' })).getByRole('menuitem', { name: 'SUTD final project' }))
+    fireEvent.click(within(teams).getByRole('button', { name: 'Add to a project: Weekly posts' }))
+    fireEvent.click(within(screen.getByRole('menu', { name: 'Add to a project: Weekly posts' })).getByRole('menuitem', { name: 'SUTD final project' }))
     const said = await screen.findByText(/Couldn’t move/)
     expect(said).toHaveTextContent('Couldn’t move Weekly posts. It changed just now. Reload the page and try again.')
     expect(said.closest('section')).toBe(teams.closest('section'))
+  })
+
+  // ADR 0103: one team set up once works in two projects, each with a place of its own.
+  it('says on each project’s card where else a team works, and that deleting one project leaves it working in the other', async () => {
+    const place = (id: string, project: string) => `schemaVersion: 1\nid: ${id}\nshares: prices\nname: Prices\nproject: ${project}\nentrypoint: a\nagents:\n  - {id: a, name: Writer, model: fake/offline, role: Write.}\nedges: []\n`
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === '/api/projects') return respond({ projects: [{ id: 'coffee', name: 'Coffee shop', teams: ['coffee.yaml'] }, { id: 'bikes', name: 'Bike rental', teams: ['bikes.yaml'] }], loose: [], missing: [], removed: [] })
+      if (url === '/api/runs') return respond([])
+      if (url === '/api/teams') return respond({ root: '/teams', files: ['bikes.yaml', 'coffee.yaml'], teams: [{ path: 'bikes.yaml', name: 'Prices', agentCount: 1 }, { path: 'coffee.yaml', name: 'Prices', agentCount: 1 }] })
+      if (url === '/api/team?path=coffee.yaml') return respond({ path: 'coffee.yaml', yaml: place('prices', 'coffee'), revision: 'c' })
+      if (url === '/api/team?path=bikes.yaml') return respond({ path: 'bikes.yaml', yaml: place('prices-bikes', 'bikes'), revision: 'b' })
+      if (init?.method === 'DELETE') return respond({ id: 'coffee', teams: [], placesRemoved: ['coffee.yaml'] })
+      return studio(url)
+    })
+    render(<Home onPalette={vi.fn()} runs={[]} />)
+    const card = (name: string) => screen.getAllByRole('article').find((room) => within(room).queryByRole('heading', { name })) as HTMLElement
+    await waitFor(() => expect(card('Coffee shop')).toHaveTextContent('Also in Bike rental'))
+    expect(card('Bike rental')).toHaveTextContent('Also in Coffee shop')
+    fireEvent.click(within(card('Coffee shop')).getByRole('button', { name: 'Project settings for Coffee shop' }))
+    fireEvent.click(within(screen.getByRole('menu', { name: 'Project settings for Coffee shop' })).getByRole('menuitem', { name: 'Delete project…' }))
+    const dialog = screen.getByRole('alertdialog', { name: 'Delete the project “Coffee shop”?' })
+    expect(dialog).toHaveTextContent('Prices keeps working in Bike rental; its work here goes with the project.')
+    expect(dialog).not.toHaveTextContent('Not in a project')
   })
 
   it('offers no move for a team in no project while there is no project to move it to', async () => {
@@ -515,7 +538,7 @@ describe('Home, the studio (ADR 0097)', () => {
     })
     render(<Home onPalette={vi.fn()} runs={[]} />)
     const teams = await screen.findByRole('list', { name: 'Teams in no project' })
-    expect(within(teams).queryByRole('button', { name: /Move to a project/ })).toBeNull()
+    expect(within(teams).queryByRole('button', { name: /Add to a project/ })).toBeNull()
     expect(within(teams).getByRole('button', { name: 'Team settings for Weekly posts' })).toBeInTheDocument()
     // The desk still shows: a team in no project is a team like any other.
     expect(screen.getByRole('button', { name: 'New project' })).toBeInTheDocument()

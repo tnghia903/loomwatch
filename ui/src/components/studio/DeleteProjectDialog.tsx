@@ -7,12 +7,14 @@ export interface DeleteProjectDialogProps {
   project: { id: string; name: string }
   /** Its teams' names: they stay, in no project (ADR 0100). */
   teams: readonly string[]
+  /** Its teams that work in other projects too: only their place here goes (ADR 0103). */
+  working?: readonly { name: string; in: readonly string[] }[]
   onDeleted: () => void
   onClose: () => void
 }
 
 /** The one confirmation for deleting a project, from Home and from the project alike. */
-export function DeleteProjectDialog({ project, teams, onDeleted, onClose }: DeleteProjectDialogProps) {
+export function DeleteProjectDialog({ project, teams, working = [], onDeleted, onClose }: DeleteProjectDialogProps) {
   const titleId = useId()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -36,6 +38,7 @@ export function DeleteProjectDialog({ project, teams, onDeleted, onClose }: Dele
         <h2 id={titleId}>Delete the project “{project.name}”?</h2>
         {teams.length === 1 && <p>Its team, {teams[0]}, stays on Home, under Not in a project.</p>}
         {teams.length > 1 && <p>Its teams stay on Home, under Not in a project: {listNames(teams)}.</p>}
+        {working.map((team) => <p key={team.name}>{team.name} keeps working in {listNames(team.in)}; its work here goes with the project.</p>)}
         <p title=".projects/.removed, inside your teams folder">Its About and notes go too. LoomWatch keeps a copy in your teams folder. Your own folders aren’t touched.</p>
         {error && <p role="alert" className="dt-alert">{error}</p>}
         <div className="dt-acts">

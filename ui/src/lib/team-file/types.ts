@@ -249,6 +249,9 @@ export interface TeamDocument {
   name: string
   /** The project this team works in (ADR 0097): `<teams root>/.projects/<id>.yaml`. */
   project?: string
+  /** The team this file is one place of (ADR 0103): every file naming the same id shares its
+      setup, and keeps its own id, project, schedule, delivery and Brief. */
+  shares?: string
   entrypoint: string
   /** Optional explicit owner of the canonical team output. */
   responder?: string

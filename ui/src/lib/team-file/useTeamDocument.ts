@@ -1834,6 +1834,8 @@ export function useTeamDocument() {
     responder: documentSnapshot?.responder ?? null,
     /** The team's display `name`, for chrome that should not show a file path. */
     teamName: documentSnapshot?.name?.trim() || null,
+    /** The team this file is one place of, when it works in several projects (ADR 0103). */
+    shares: documentSnapshot?.shares?.trim() || null,
     /** The daemon's teams folder, once a load or save has learned it; null before. */
     teamsRoot,
     renameTeam,

@@ -165,7 +165,7 @@ export function Studio({ runs, onSetUp, setUpUnavailable, asking = false, part =
   const [showPutAway, setShowPutAway] = useState(false)
   // A project's "…" on Home (ADR 0100): the one being renamed or deleted, and what a change hit.
   const [renaming, setRenaming] = useState<ProjectEntry | null>(null)
-  const [deleting, setDeleting] = useState<{ project: ProjectEntry; teams: string[] } | null>(null)
+  const [deleting, setDeleting] = useState<{ project: ProjectEntry; teams: string[]; working: { name: string; in: string[] }[] } | null>(null)
   const [deletingTeam, setDeletingTeam] = useState<{ path: string; name: string } | null>(null)
   const [problem, setProblem] = useState<string | null>(null)
   // A team just moved out of "Not in a project": where it went, or why it couldn't, said there.
@@ -230,7 +230,12 @@ export function Studio({ runs, onSetUp, setUpUnavailable, asking = false, part =
         putAway={project.putAway}
         onRename={() => setRenaming(project)}
         onHide={() => void keep(project, { putAway: !project.putAway }).catch((caught: unknown) => setProblem(`Couldn’t change ${project.name}. ${caught instanceof Error ? caught.message : String(caught)}`))}
-        onDelete={() => setDeleting({ project, teams: room.teams.map((team) => team.name) })}
+        onDelete={() => setDeleting({
+          project,
+          // A team in other projects too keeps working there (ADR 0103); the rest stay in none.
+          teams: room.teams.filter((team) => !team.alsoIn?.length).map((team) => team.name),
+          working: room.teams.flatMap((team) => (team.alsoIn?.length ? [{ name: team.name, in: team.alsoIn.map((other) => other.name) }] : [])),
+        })}
       />
     )
   }
@@ -377,7 +382,7 @@ export function Studio({ runs, onSetUp, setUpUnavailable, asking = false, part =
       <NotInAProject jobs={jobs} rooms={rooms} used={used} figureOf={figureOf} said={movedSaid} {...loose} />
       {creating && <SetUpProject onSetUp={setUp} unavailable={setUpUnavailable} asking={asking} onClose={() => setCreating(false)} />}
       {renaming && <RenameProjectDialog name={renaming.name} onSave={(name) => keep(renaming, { name }).then(() => setRenaming(null))} onClose={() => setRenaming(null)} />}
-      {deleting && <DeleteProjectDialog project={deleting.project} teams={deleting.teams} onDeleted={() => setDeleting(null)} onClose={() => setDeleting(null)} />}
+      {deleting && <DeleteProjectDialog project={deleting.project} teams={deleting.teams} working={deleting.working} onDeleted={() => setDeleting(null)} onClose={() => setDeleting(null)} />}
       {deletingTeam && <DeleteTeamDialog path={deletingTeam.path} name={deletingTeam.name} onDeleted={() => { setDeletingTeam(null); projectsChanged() }} onClose={() => setDeletingTeam(null)} />}
     </div>
     {reader}

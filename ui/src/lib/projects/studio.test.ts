@@ -78,6 +78,20 @@ describe('the studio (ADR 0097)', () => {
     expect(rooms.map((room) => room.state)).toEqual(['working', 'working', 'ready'])
   })
 
+  // ADR 0103: a team set up once works in several projects, each place a file of its own.
+  it('says which other projects a team works in, by name, and not the one it is in nor a place in none', () => {
+    const here = teamShapeOf('gate.yaml', PIPELINE.replace('id: gate\n', 'id: gate\nshares: gate\n'), JOBS) as TeamShape
+    const there = teamShapeOf('gate-thesis.yaml', PIPELINE.replace('id: gate\n', 'id: gate-thesis\nshares: gate\n').replace('project: sutd', 'project: thesis'), JOBS) as TeamShape
+    const loose = teamShapeOf('gate-2.yaml', PIPELINE.replace('id: gate\n', 'id: gate-2\nshares: gate\n').replace('project: sutd\n', ''), JOBS) as TeamShape
+    const other = teamShapeOf('blog.yaml', PIPELINE.replace('id: gate\n', 'id: blog\nshares: blog\n').replace('project: sutd', 'project: thesis'), JOBS) as TeamShape
+    expect(here.shares).toBe('gate')
+    const [sutd] = roomsOf([project('sutd', ['gate.yaml'])], [here, there, loose, other], [], null, [project('sutd', []), project('thesis', [])])
+    expect(sutd.teams[0].alsoIn).toEqual([{ id: 'thesis', name: 'THESIS' }])
+    // A team in one project says nothing more.
+    const [alone] = roomsOf([project('thesis', ['blog.yaml'])], [here, there, loose, other], [], null)
+    expect(alone.teams[0].alsoIn).toBeUndefined()
+  })
+
   it('says when a quiet room runs, and that a stopped team stopped', () => {
     const scheduled: TeamShape = { path: 's.yaml', name: 'News', project: 'n', seats: [], schedule: 'Every day at 8:00 AM' }
     const broken: TeamShape = { path: 'f.yaml', name: 'Blog', project: 'b', seats: [], schedule: null }

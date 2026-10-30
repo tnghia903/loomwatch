@@ -1,15 +1,16 @@
 import { Folder, MoreHorizontal, Plus, X } from '../ui/icon'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import { FileReaderContext, type FileToRead } from '../../lib/files/reader'
+import { listNames } from '../../lib/format'
 import { figureFor, type FigureChoice } from '../../lib/library/figures'
 import { fetchJobs, saveJob, type SavedJob } from '../../lib/library/jobs'
-import { addProjectNote, NOTE_CHARS, ABOUT_CHARS, projectFile, projectsChanged, saveProject, useProjects, type Project, type ProjectEntry } from '../../lib/projects/client'
+import { addProjectNote, addTeamToProject, NOTE_CHARS, ABOUT_CHARS, projectFile, projectsChanged, saveProject, takeTeamOut, useProjects, type Project, type ProjectEntry } from '../../lib/projects/client'
 import { crewOf, doneByOf, lastFinished, madeHere, monthCost, monthSpend, monthSpenders, needsYou, nextWork, workingNow, type MadeFile } from '../../lib/projects/glance'
 import { useMonthUsage } from '../../lib/projects/useMonthUsage'
 import { approveRun, loadDismissed } from '../../lib/story/useNeedsYou'
 import { moveTeam } from '../../lib/projects/move'
-import { inOpenedOrder, roomsOf } from '../../lib/projects/studio'
+import { inOpenedOrder, roomsOf, type RoomTeam, type TeamShape } from '../../lib/projects/studio'
 import { useTeamShapes } from '../../lib/projects/useTeamShapes'
 import { historyRunUrl } from '../../lib/runs/history'
 import { fetchRuns, useSchedules, type RunRecord } from '../../lib/runs/client'
@@ -24,12 +25,14 @@ import { useTheme } from '../../lib/theme'
 import { FigureStill } from '../agents/FigureStill'
 import { goToRun } from '../agents/route'
 import { FolderPicker } from '../canvas/FolderPicker'
+import { DeleteTeamDialog } from '../home/DeleteTeamDialog'
 import { NewTeamDialog } from '../home/NewTeamDialog'
 import { SectionHead } from '../ui/SectionHead'
 import { MARKS, MARK_NAMES, defaultFigureOf, markOf, roomHref } from '../../lib/projects/studioUi'
 import { GlanceTiles } from './GlanceTiles'
 import { DeleteProjectDialog } from './DeleteProjectDialog'
 import { MadeHere } from './MadeHere'
+import { CardMenu, TakeOutDialog, TeamPlacesMenu } from './ProjectCardMenu'
 import { ReaderSheet } from './ReaderSheet'
 import { RoomAsk } from './RoomAsk'
 import { ProjectMark } from './RoomCard'
@@ -80,31 +83,30 @@ function About({ project, onSave }: { project: ProjectEntry; onSave: (about: str
   )
 }
 
-/** A team's way into another of your projects, from its row in the room. */
-function MoveTeam({ team, projects, onMove }: { team: { path: string; name: string }; projects: readonly ProjectEntry[]; onMove: (to: ProjectEntry) => void }) {
-  const [open, setOpen] = useState(false)
-  const box = useRef<HTMLSpanElement>(null)
-  useEffect(() => {
-    if (!open) return
-    const away = (event: PointerEvent) => { if (!box.current?.contains(event.target as Node)) setOpen(false) }
-    window.addEventListener('pointerdown', away)
-    return () => window.removeEventListener('pointerdown', away)
-  }, [open])
-  if (projects.length === 0) return null
+/**
+ * A team you have, put into this project as well (ADR 0103): one line per team, with where it works
+ * now. A team in no project moves in; one in another project gets a place of its own here.
+ */
+function AddATeam({ here, shapes, projects, onAdd }: { here: string; shapes: readonly TeamShape[]; projects: readonly ProjectEntry[]; onAdd: (team: TeamShape, alone: boolean) => void }) {
+  const groups = new Map<string, TeamShape[]>()
+  for (const shape of shapes) groups.set(shape.shares ?? `path:${shape.path}`, [...(groups.get(shape.shares ?? `path:${shape.path}`) ?? []), shape])
+  const teams = [...groups.values()]
+    .filter((places) => !places.some((place) => place.project === here))
+    .map((places) => {
+      const first = places.find((place) => place.project) ?? places[0]
+      const where = places.flatMap((place) => projects.find((project) => project.id === place.project)?.name ?? [])
+      return { first, where, alone: where.length === 0 }
+    })
+    .sort((a, b) => a.first.name.localeCompare(b.first.name))
+  if (teams.length === 0) return null
   return (
-    <span className="room-team-move" ref={box}>
-      <button type="button" className="iconbtn" aria-label={`Move ${team.name} to another project`} title="Move to another project" aria-expanded={open} aria-haspopup="menu" onClick={() => setOpen((value) => !value)}><MoreHorizontal size={16} aria-hidden="true" /></button>
-      {open && (
-        <span className="idle-agent-menu" role="menu" aria-label={`Move ${team.name} to`}>
-          <span className="room-team-move-head" aria-hidden="true">Move to</span>
-          {projects.map((other) => (
-            <button key={other.id} type="button" role="menuitem" onClick={() => { setOpen(false); onMove(other) }}>
-              <ProjectMark id={other.id} mark={other.mark} />{other.name}
-            </button>
-          ))}
-        </span>
-      )}
-    </span>
+    <CardMenu label="Add a team" title={null} face={<>Add a team</>} className="move-to-project add-a-team">
+      {(pick) => teams.map(({ first, where, alone }) => (
+        <button key={first.path} type="button" role="menuitem" onClick={pick(() => onAdd(first, alone))}>
+          <span className="add-a-team-name">{first.name}<small>{alone ? 'In no project' : `In ${listNames(where)}`}</small></span>
+        </button>
+      ))}
+    </CardMenu>
   )
 }
 
@@ -212,12 +214,21 @@ export function ProjectRoom({ id }: { id: string }) {
   const [newTeam, setNewTeam] = useState(false)
   const [adding, setAdding] = useState<string | null | false>(() => new URLSearchParams(window.location.search).get('add') ?? false)
   const [problem, setProblem] = useState<string | null>(null)
-  const [moved, setMoved] = useState<{ team: string; to: ProjectEntry } | null>(null)
+  // What a change to one of its teams did, said under them (ADR 0103).
+  const [said, setSaid] = useState<ReactNode>(null)
+  const [takingOut, setTakingOut] = useState<RoomTeam | null>(null)
+  const [deletingTeam, setDeletingTeam] = useState<RoomTeam | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const project = list?.projects.find((candidate) => candidate.id === id) ?? null
   const figures = useMemo(() => new Map<string, FigureChoice | undefined>(jobs.map((job) => [job.id, job.figure])), [jobs])
   const figureOf = useMemo(() => defaultFigureOf(figures), [figures])
-  const room = useMemo(() => (project && shapes ? roomsOf([project], shapes, runs ?? [], root)[0] : null), [project, shapes, runs, root])
+  const room = useMemo(() => (project && shapes && list ? roomsOf([project], shapes, runs ?? [], root, list.projects)[0] : null), [project, shapes, runs, root, list])
+  // A team's places in other projects (ADR 0103): Delete team deletes it there too.
+  const othersOf = (team: RoomTeam) => {
+    const shares = shapes?.find((shape) => shape.path === team.path)?.shares
+    if (!shares || !shapes || !list) return []
+    return shapes.filter((shape) => shape.shares === shares && shape.path !== team.path).map((shape) => ({ path: shape.path, project: list.projects.find((other) => other.id === shape.project)?.name ?? 'Not in a project' }))
+  }
   // The order the teams stood in once the runs were read, kept while you are here: the room puts
   // the team waiting for you first, but a team that starts work never slides under your pointer.
   const [opened, setOpened] = useState<string[] | null>(null)
@@ -339,6 +350,21 @@ export function ProjectRoom({ id }: { id: string }) {
             <h2 id="room-floor-title" className="studio-head">{teams.length > 1 ? `Teams · ${teams.length}` : 'Team'}</h2>
             <span className="room-floor-acts">
               <button type="button" className="btn" onClick={() => setAdding(null)}>Add an agent</button>
+              {shapes && (
+                <AddATeam
+                  here={project.id}
+                  shapes={shapes}
+                  projects={list.projects}
+                  onAdd={(team, alone) => {
+                    setProblem(null)
+                    setSaid(null)
+                    ;(alone ? moveTeam(team.path, project.id) : addTeamToProject(team.path, project.id).then(() => undefined)).then(
+                      () => { setSaid(alone ? <>{team.name} works here now.</> : <>{team.name} works here too, with its own chat and work here.</>); reload() },
+                      (caught: unknown) => setProblem(`Couldn’t add ${team.name}. ${caught instanceof Error ? caught.message : String(caught)}`),
+                    )
+                  }}
+                />
+              )}
               <button type="button" className="btn" data-tour="new-team" onClick={() => setNewTeam(true)}>New team</button>
             </span>
           </div>
@@ -347,17 +373,34 @@ export function ProjectRoom({ id }: { id: string }) {
             figureOf={figureOf}
             newest={newest}
             menu={(team) => (
-              <MoveTeam
-                team={team}
-                projects={list.projects.filter((other) => other.id !== project.id)}
-                onMove={(to) => {
+              <TeamPlacesMenu
+                name={team.name}
+                here={project.name}
+                projects={list.projects.filter((other) => other.id !== project.id && !(team.alsoIn ?? []).some((also) => also.id === other.id))}
+                onAdd={(to) => {
+                  const target = list.projects.find((other) => other.id === to)
                   setProblem(null)
-                  moveTeam(team.path, to.id).then(() => { setMoved({ team: team.name, to }); reload() }, (caught: unknown) => setProblem(`Couldn’t move ${team.name}. ${caught instanceof Error ? caught.message : String(caught)}`))
+                  setSaid(null)
+                  addTeamToProject(team.path, to).then(
+                    () => { if (target) setSaid(<>{team.name} works in <a className="link" href={roomHref(target.id)}>{target.name}</a> too, with its own chat and work there.</>); reload() },
+                    (caught: unknown) => setProblem(`Couldn’t add ${team.name} to ${target?.name ?? 'that project'}. ${caught instanceof Error ? caught.message : String(caught)}`),
+                  )
                 }}
+                onTakeOut={() => {
+                  // In other projects too, it loses its work here: asked first. Alone, it only moves.
+                  if (team.alsoIn?.length) { setTakingOut(team); return }
+                  setProblem(null)
+                  setSaid(null)
+                  takeTeamOut(team.path).then(
+                    () => { setSaid(<>{team.name} is in no project now. It waits on <a className="link" href="/">Home</a>, under Not in a project.</>); reload() },
+                    (caught: unknown) => setProblem(`Couldn’t take ${team.name} out. ${caught instanceof Error ? caught.message : String(caught)}`),
+                  )
+                }}
+                onDelete={() => setDeletingTeam(team)}
               />
             )}
           />
-          {moved && <p role="status" className="studio-quiet">{moved.team} works in <a className="link" href={roomHref(moved.to.id)}>{moved.to.name}</a> now.</p>}
+          {said && <p role="status" className="studio-quiet">{said}</p>}
           {room && room.teams.length === 0 && <p className="studio-quiet">No team works here yet.</p>}
         </section>
         <MadeHere files={made} teams={teams} />
@@ -415,7 +458,29 @@ export function ProjectRoom({ id }: { id: string }) {
       )}
       {adding !== false && <AddAnAgent jobs={jobs} project={project} teams={teams} initial={adding} onClose={() => { setAdding(false); reload() }} />}
       {/* Every team it has, named, even before the room has read them all. */}
-      {deleting && <DeleteProjectDialog project={project} teams={project.teams.map((path) => teams.find((team) => team.path === path)?.name ?? (listed ?? []).find((team) => team.path === path)?.name ?? teamDisplayName({ path }))} onDeleted={() => window.location.assign('/')} onClose={() => setDeleting(false)} />}
+      {deleting && <DeleteProjectDialog project={project} teams={project.teams.filter((path) => !room?.teams.find((team) => team.path === path)?.alsoIn?.length).map((path) => teams.find((team) => team.path === path)?.name ?? (listed ?? []).find((team) => team.path === path)?.name ?? teamDisplayName({ path }))} working={(room?.teams ?? []).flatMap((team) => (team.alsoIn?.length ? [{ name: team.name, in: team.alsoIn.map((other) => other.name) }] : []))} onDeleted={() => window.location.assign('/')} onClose={() => setDeleting(false)} />}
+      {takingOut && (
+        <TakeOutDialog
+          name={takingOut.name}
+          here={project.name}
+          others={(takingOut.alsoIn ?? []).map((other) => other.name)}
+          onTakeOut={() => takeTeamOut(takingOut.path).then(() => {
+            setSaid(<>{takingOut.name} is out of {project.name}. It works on in {listNames((takingOut.alsoIn ?? []).map((other) => other.name))}.</>)
+            setTakingOut(null)
+            reload()
+          })}
+          onClose={() => setTakingOut(null)}
+        />
+      )}
+      {deletingTeam && (
+        <DeleteTeamDialog
+          path={deletingTeam.path}
+          name={deletingTeam.name}
+          places={othersOf(deletingTeam).length > 0 ? { here: project.name, others: othersOf(deletingTeam) } : undefined}
+          onDeleted={() => { setDeletingTeam(null); projectsChanged(); reload() }}
+          onClose={() => setDeletingTeam(null)}
+        />
+      )}
       {newTeam && (
         <NewTeamDialog
           existingPaths={[...(listed ?? []).map((team) => team.path), ...trashed]}

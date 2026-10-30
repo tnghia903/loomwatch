@@ -868,9 +868,29 @@ project: sutd-final-project
   finds without one): the team's Brief becomes the About (one for some agents only stays the
   team's), and every folder or file connected to its agents becomes one of the project's folders,
   while the agents keep their own. The daemon keeps a copy of every team file in
-  `<state dir>/backups/<date>-before-projects-<key>/` before the first move. To put teams together
-  in one project afterwards, open a team's ⋯ in its project's room and choose the other project:
-  the team's `project` changes and nothing else does.
+  `<state dir>/backups/<date>-before-projects-<key>/` before the first move.
+- **One team in several projects** (ADR 0103). A team set up once can work in more than one
+  project, each with a place of its own: a team file of its own in each, all naming the same
+  `shares:` id.
+
+  ```yaml
+  # coffee.yaml                      # coffee-bikes.yaml
+  id: market-research                id: market-research-bikes
+  shares: market-research            shares: market-research
+  project: coffee                    project: bikes
+  name: Market research              name: Market research
+  # …the same agents and edges…      # …the same agents and edges…
+  ```
+
+  Each place keeps its own `id`, `project`, `schedule`, `deliver` and `memory` (the Brief beside
+  its file), so its chat, run history, files and Notebook are that project's. Everything else is
+  the team's setup: saving any place in LoomWatch writes it into the others, from their next run,
+  and keeps each approved. In a room, a team's ⋯ has **Add to another project** (a new place beside
+  its file, with no schedule or delivery yet), **Take out of** the project (that place goes to the
+  trash when the team works elsewhere; a last place stays, in no project) and **Delete team…**
+  (every place). **Add a team** in a room lists your teams that aren't there yet. Deleting a project
+  removes only the places there of teams that work elsewhere. Edit a place's file by hand and the
+  others keep their setup until the next save in LoomWatch.
 - **Limits.** A name of at most 80 characters, an About of at most 4,000, each note at most 500
   and 40 notes (the oldest goes first); folders by full path or from `~/`.
 

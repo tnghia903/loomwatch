@@ -108,6 +108,8 @@
 .room-card-team-words { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .room-card-team-words b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 13.5px/18px var(--font-sans); }
 .room-card-team-words small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 16px; color: var(--color-ink-2); }
+/* The other projects it works in: quieter than what it is doing. */
+.room-card-team-words .room-card-also { color: var(--color-ink-3); }
 /* The figures in a line pass the press to the line. */
 .room-card-team .desk { pointer-events: none; }
 .room-card-more { margin: 0; font-size: 12.5px; color: var(--color-ink-3); }
@@ -565,3 +567,11 @@ button.wall-paper:focus-visible { outline: 2px solid var(--color-accent); outlin
   .loose-team > .move-to-project > .idle-agent-menu { left: 0; right: 0; width: auto; }
 }
 .not-in-project > :is(.loose-moved, .alert) { flex-basis: 100%; margin: 0; }
+
+/* ---------- One team in several projects (ADR 0103) ---------- */
+.team-card-also { margin-top: calc(-1 * var(--sp-1)); font-size: 12px; line-height: 16px; color: var(--color-ink-3); }
+/* Add a team: each of yours, its name over where it works now. */
+.add-a-team .idle-agent-menu { min-width: 240px; }
+.add-a-team-name { display: flex; flex-direction: column; gap: 2px; padding: var(--sp-1) 0; }
+.add-a-team-name small { font-size: 12px; font-weight: 400; color: var(--color-ink-3); }
+.add-a-team .idle-agent-menu button { min-height: 48px; }

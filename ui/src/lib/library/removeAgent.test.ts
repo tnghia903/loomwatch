@@ -106,6 +106,16 @@ describe('Removing one of My agents in one step (ADR 0100)', () => {
     expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual(['GET /api/team?path=solo.yaml', 'DELETE /api/team?path=solo.yaml', 'DELETE /api/jobs/writer'])
   })
 
+  // ADR 0103: a team in several projects is one team; a save at one place writes the others.
+  it('saves a team in several projects once, and sends every place of an emptied one to the trash', async () => {
+    await removeFromMyAgents('writer', [{ teamPath: 'blog.yaml', teamName: 'Blog', agentId: 'writer', places: ['blog-site.yaml'] }])
+    expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual(['GET /api/team?path=blog.yaml', 'PUT /api/team', 'DELETE /api/jobs/writer'])
+    calls.length = 0
+    yaml = 'schemaVersion: 1\nid: solo\nshares: solo\nname: Solo\nentrypoint: writer\nagents:\n  - {id: writer, from: {agent: writer, version: 1}, model: fake/offline, role: Write.}\nedges: []\n'
+    await removeFromMyAgents('writer', [{ teamPath: 'solo.yaml', teamName: 'Solo', agentId: 'writer', places: ['solo-site.yaml'] }])
+    expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual(['GET /api/team?path=solo.yaml', 'DELETE /api/team?path=solo.yaml', 'DELETE /api/team?path=solo-site.yaml', 'DELETE /api/jobs/writer'])
+  })
+
   it('reads every team before it saves any, so one that can’t tell who starts changes none', async () => {
     const choose = LINE.replace('entrypoint: researcher', 'entrypoint: writer').replace(/  - \{from: researcher.*\n/, '  - {from: writer, to: researcher, layer: configured, kind: sequence, ts: "2026-10-29T00:00:00Z"}\n')
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

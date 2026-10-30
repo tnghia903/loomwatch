@@ -3,6 +3,7 @@ import { Fragment, type ReactNode } from 'react'
 import { otherTeams, type Room, type RoomTeam } from '../../lib/projects/studio'
 import { markOf, type FigureOf } from '../../lib/projects/studioUi'
 import { PRESENCE_WORDS } from '../../lib/rail/presence'
+import { listNames } from '../../lib/format'
 import { teamHref } from '../../lib/team-file/teamHref'
 import { FileChip } from '../ui/FileChip'
 import { TeamDesks } from './TeamDesks'
@@ -62,6 +63,8 @@ export function TeamLine({ team, figureOf }: { team: RoomTeam; figureOf: FigureO
       <span className="room-card-team-words">
         <b>{team.name}</b>
         <small className={`room-state ${team.state}`}>{teamLine(team)}</small>
+        {/* The same team works in other projects too, each with its own work (ADR 0103). */}
+        {team.alsoIn?.length ? <small className="room-card-also">Also in {listNames(team.alsoIn.map((project) => project.name))}</small> : null}
       </span>
       <TeamDesks team={team} figureOf={figureOf} size={26} compact />
     </a>

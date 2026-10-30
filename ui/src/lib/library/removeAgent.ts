@@ -13,11 +13,11 @@ import type { AgentUse } from './uses'
  * them still can't tell who starts, nothing changes. A team that then can't be saved stops it there,
  * the teams before it already changed: the daemon still refuses to remove an agent a team uses.
  */
-export async function removeFromMyAgents(id: string, uses: readonly Pick<AgentUse, 'teamPath' | 'teamName' | 'agentId'>[], starts: Readonly<Record<string, string>> = {}): Promise<void> {
-  const cards = new Map<string, { name: string; ids: string[] }>()
-  for (const use of uses) cards.set(use.teamPath, { name: use.teamName, ids: [...(cards.get(use.teamPath)?.ids ?? []), use.agentId] })
-  const changes: { path: string; yaml: string | null; revision: string }[] = []
-  for (const [path, { name, ids }] of cards) {
+export async function removeFromMyAgents(id: string, uses: readonly Pick<AgentUse, 'teamPath' | 'teamName' | 'agentId' | 'places'>[], starts: Readonly<Record<string, string>> = {}): Promise<void> {
+  const cards = new Map<string, { name: string; ids: string[]; places: readonly string[] }>()
+  for (const use of uses) cards.set(use.teamPath, { name: use.teamName, ids: [...(cards.get(use.teamPath)?.ids ?? []), use.agentId], places: use.places ?? [] })
+  const changes: { path: string; yaml: string | null; revision: string; places: readonly string[] }[] = []
+  for (const [path, { name, ids, places }] of cards) {
     const file = await fetchTeamFile(path)
     const team = TeamFileModel.parse(file.yaml)
     const there = new Set((team.snapshot().agents ?? []).map((agent) => agent.id))
@@ -25,10 +25,12 @@ export async function removeFromMyAgents(id: string, uses: readonly Pick<AgentUs
     if (off.length === 0) continue
     const outcome = takeAgentOff(team, off, starts[path])
     if (outcome.chooseStart) throw new Error(`${name} starts with this agent: choose who starts it instead.`)
-    changes.push({ path, yaml: outcome.empty ? null : team.toYaml(), revision: file.revision ?? await hashTeamYaml(file.yaml) })
+    changes.push({ path, yaml: outcome.empty ? null : team.toYaml(), revision: file.revision ?? await hashTeamYaml(file.yaml), places })
   }
   for (const change of changes) {
-    if (change.yaml === null) await deleteTeamFile(change.path)
+    // A team in several projects (ADR 0103): one save writes the others' setup too; a team left
+    // with no agent goes from every project.
+    if (change.yaml === null) for (const path of [change.path, ...change.places]) await deleteTeamFile(path)
     else await saveTeamFile(change.path, change.yaml, change.revision)
   }
   await removeJob(id)

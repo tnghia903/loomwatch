@@ -777,6 +777,11 @@ with what should change; under its new version, **Continue with the team** runs 
 
    Ready-made teams are saved straight away, each agent on the model its job suits, so you can run
    them immediately.
+
+   One team can work in several projects. In a room, open a team's **⋯** and choose **Add to
+   another project**, or click **Add a team** to bring in one you already have. Each project keeps
+   its own chat, history, files and schedule for it, and a change you save to the team reaches it in
+   every project. **Take out of** the project removes it from just that one.
 4. A team has two tabs: **Team** and **Chat**. On **Team**, add agents from **My agents** in the
    panel on the left; to make a new one, choose **Build a new agent** and start from a job such as
    Researcher or Writer. Select a card and press its **Edit** button, such as **Edit Writer**, to change its name,
@@ -1136,8 +1141,10 @@ delete its folder from `.trash`.
 
 To delete a project, open the **⋯** on its card on Home, or in its room, and choose **Delete
 project…**. Its teams stay on Home, under **Not in a project**: only the `project:` line leaves each
-team's file, and your own folders stay where they are. There, **Move to a project** beside a team
-opens your projects, and the one you pick takes it; its **⋯** has **Delete team…**. The project's file, with its About and notes, moves to
+team's file, and your own folders stay where they are. There, **Add to a project** beside a team
+opens your projects, and the one you pick takes it; its **⋯** has **Delete team…**. A team that
+also works in another project keeps working there; only its place in the deleted one goes. The
+project's file, with its About and notes, moves to
 `.projects/.removed` inside your teams folder. To bring a project back, move its file from
 `.projects/.removed` back into `.projects`; its teams don't go back into it with it.
 

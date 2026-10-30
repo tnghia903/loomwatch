@@ -2,6 +2,7 @@ import { ChevronDown } from '../ui/icon'
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 
 import { baseName } from '../../lib/files/paths'
+import { listNames } from '../../lib/format'
 import { reviewProblems, type ReviewProblem } from '../../lib/team-file/problems'
 import type { EntrypointProblem, SaveState } from '../../lib/team-file/useTeamDocument'
 import type { AgentFieldProblems, DocumentProblem } from '../../lib/team-file/validation'
@@ -12,6 +13,8 @@ export interface DocumentSwitcherProps {
   path: string | null
   /** The team's display name; the chip leads with it and keeps the file name as detail. */
   teamName?: string | null
+  /** The other projects the same team works in (ADR 0103): a save changes it there too. */
+  alsoIn?: readonly string[]
   saveState: SaveState
   saveError: string | null
   entrypointProblem: EntrypointProblem | null
@@ -44,7 +47,7 @@ export interface DocumentSwitcherProps {
 // the only place file state is expressed; its menu is what is done to the file. Other teams, and a
 // new one, are reached from the team rail beside the page (ADR 0043: one control per action).
 export function DocumentSwitcher(props: DocumentSwitcherProps) {
-  const { path, teamName = null, saveState, saveError, entrypointProblem, documentProblems, fieldProblemsByAgent, agentNames, isValid, readOnlyReason, fileGone = false, editingDisabled = false, onSave, onSaveCopy, onReload, onDiscard, onRename, onDelete, onSelectProblem, problemsOpen, onProblemsOpenChange } = props
+  const { path, teamName = null, alsoIn = [], saveState, saveError, entrypointProblem, documentProblems, fieldProblemsByAgent, agentNames, isValid, readOnlyReason, fileGone = false, editingDisabled = false, onSave, onSaveCopy, onReload, onDiscard, onRename, onDelete, onSelectProblem, problemsOpen, onProblemsOpenChange } = props
   const [switcherOpen, setSwitcherOpen] = useState(false)
   const [discardConfirm, setDiscardConfirm] = useState(false)
   const [renaming, setRenaming] = useState<string | null>(null)
@@ -106,7 +109,8 @@ export function DocumentSwitcher(props: DocumentSwitcherProps) {
   else if (!isValid && errors.length > 0) { state = 'invalid'; l2 = scheduleErrors.length === errors.length ? 'Schedule needs attention' : `${errors.length} problem${errors.length === 1 ? '' : 's'} to fix`; action = review }
   else if (!isValid && incomplete.length > 0) { state = 'incomplete'; l2 = `${incomplete.length} thing${incomplete.length === 1 ? '' : 's'} to finish`; action = review }
   else if (saveState === 'new') { state = 'new'; l2 = 'Not saved yet'; action = save }
-  else if (saveState === 'dirty') { state = 'dirty'; l2 = 'Unsaved changes'; action = save }
+  // A team in several projects: what a save reaches, before it is pressed (ADR 0103).
+  else if (saveState === 'dirty') { state = 'dirty'; l2 = alsoIn.length > 0 ? `Saving changes it in ${listNames(alsoIn)} too` : 'Unsaved changes'; action = save }
   else if (editingDisabled) { l2 = 'Editing needs a wider window' }
 
   const ledger = saveState === 'saving' ? 'saving' : saveState === 'saved' ? 'saved' : saveState === 'error' ? 'failed' : ''

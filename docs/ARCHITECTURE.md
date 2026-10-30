@@ -476,14 +476,17 @@ first item's answer, or Start while nothing waits.
 
 Home then has where the person left off (the newest things made, their chats with one agent, and
 Chat with one agent), a card per project, and what is in no project: each team in none on its line,
-as a card has it, with Move to a project (one pick moves it, ADR 0100) and a "…" with Delete team…,
-then the agents in no team. A card lists the
+as a card has it, with Add to a project (one pick moves it, ADR 0100) and a "…" with Delete team…,
+then the agents in no team. One team can work in several projects (ADR 0103): each project has a
+place of its own for it, a team file naming the same `shares:` id with its own id, project,
+schedule, delivery and Brief, and `PUT /api/team` writes the rest, the setup, into the other places
+(`team_places.rs`). Its line says "Also in" the others. A card lists the
 project's teams, one per line, waiting first, then working, then stopped, then the next to run on a
 schedule: a shape and words for how each is, its agents' figures, and its name opening its chat;
 then the newest thing made there and this month's cost. A room (`/projects/<id>`) has its teams as
-cards in the same order, kept while the person is in it, each with its desks, Move to and its
-newest file; then Made here, everything its agents made, newest first, narrowed to one team by a
-row of teams; and beside them the wall (About, folders, notes), Add an agent, New team and Ask
+cards in the same order, kept while the person is in it, each with its desks, its "…" (Add to
+another project, Take out of the project, Delete team…) and its newest file; then Made here, everything its agents made, newest first, narrowed to one team by a
+row of teams; and beside them the wall (About, folders, notes), Add an agent, Add a team, New team and Ask
 about the project. A made file opens in the reader over the page, with a link to ask about it in
 its chat. An agent is lit only where it is now, gold at its own desk while it waits for the person:
 where it is busy in another team, its figure is faint and unlit, naming that team. Where the person

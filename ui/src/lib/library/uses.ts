@@ -21,6 +21,9 @@ export interface AgentUse {
   /** What taking it off this team does beyond closing its place in the line (ADR 0100): only an
       agent that starts the team changes more. */
   takeOff?: { startsInstead?: TeamCard; withoutCheck?: boolean; empty?: boolean; chooseStart?: TeamCard[] }
+  /** The team's other places, in other projects (ADR 0103): one team, listed once, whose setup a
+      save at `teamPath` writes into each of these too. */
+  places?: string[]
 }
 
 /** An agent card in a team, as a person is told about it: its name in the team file, or the one of
@@ -82,6 +85,8 @@ export async function findTeamAgents(): Promise<{ uses: AgentUse[]; own: TeamOwn
   const files = await Promise.allSettled(teams.map(async (team) => ({ team, file: await fetchTeamFile(team.path) })))
   const uses: AgentUse[] = []
   const own: TeamOwnAgent[] = []
+  // A team in several projects is one team (ADR 0103): its agents are listed once, at its first place.
+  const shared = new Map<string, AgentUse[]>()
   for (const result of files) {
     if (result.status !== 'fulfilled') continue
     const { team, file } = result.value
@@ -90,6 +95,13 @@ export async function findTeamAgents(): Promise<{ uses: AgentUse[]; own: TeamOwn
     const scheduled = Boolean(doc?.schedule?.cron) && doc?.schedule?.enabled !== false
     const teamName = doc?.name?.trim() || teamDisplayName(team)
     const cardsById = new Map((doc?.agents ?? []).map((agent) => [agent?.id, agent]))
+    const shares = typeof doc?.shares === 'string' && doc.shares.trim() ? doc.shares.trim() : null
+    const first = shares ? shared.get(shares) : undefined
+    if (first) {
+      for (const use of first) use.places = [...(use.places ?? []), team.path]
+      continue
+    }
+    const before = uses.length
     for (const agent of doc?.agents ?? []) {
       if (!agent?.id || agent.kind === 'operator') continue
       if (agent.from?.agent) {
@@ -104,6 +116,7 @@ export async function findTeamAgents(): Promise<{ uses: AgentUse[]; own: TeamOwn
         own.push({ teamPath: team.path, teamName, agentId: agent.id, agentName: agent.name?.trim() || agent.id, agent })
       }
     }
+    if (shares) shared.set(shares, uses.slice(before))
   }
   const byTeam = (a: { teamName: string }, b: { teamName: string }) => a.teamName.localeCompare(b.teamName)
   return { uses: uses.sort(byTeam), own: own.sort(byTeam), root: discovery.root }

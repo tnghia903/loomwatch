@@ -93,6 +93,36 @@ export async function deleteProject(id: string): Promise<string[]> {
   return body.teams ?? []
 }
 
+/**
+ * Put the team at `path` into `project` as well (ADR 0103): the daemon makes it a place of its own
+ * there, with the team's setup, and answers with that place's path.
+ */
+export async function addTeamToProject(path: string, project: string): Promise<string> {
+  const response = await daemonFetch('/api/team/places', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path, project }),
+  })
+  if (!response.ok) throw await failure(response)
+  const body = (await response.json()) as { path: string }
+  projectsChanged()
+  return body.path
+}
+
+/**
+ * Take the team at `path` out of its project (ADR 0103): a team in other projects too loses only
+ * this place (to the trash); a team's only place stays, in no project.
+ */
+export async function takeTeamOut(path: string): Promise<void> {
+  const response = await daemonFetch('/api/team/take-out', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path }),
+  })
+  if (!response.ok) throw await failure(response)
+  projectsChanged()
+}
+
 /** Keep project `id` as `project` says, whole. */
 export async function saveProject(id: string, project: Project): Promise<ProjectEntry> {
   const response = await daemonFetch(`/api/projects/${encodeURIComponent(id)}`, {
@@ -132,6 +162,12 @@ export function projectIdFor(name: string, taken: readonly string[] = []): strin
 /** Tell every open page the projects changed, so each reads them again. */
 export function projectsChanged(): void {
   window.dispatchEvent(new Event('loomwatch:projects-changed'))
+}
+
+/** Call `then` each time the projects change; the answer stops listening. */
+export function onProjectsChanged(then: () => void): () => void {
+  window.addEventListener('loomwatch:projects-changed', then)
+  return () => window.removeEventListener('loomwatch:projects-changed', then)
 }
 
 /** The projects as the daemon has them, read again whenever they change. `null` while loading. */
