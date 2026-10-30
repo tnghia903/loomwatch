@@ -7,6 +7,10 @@ import type { AgentConfig } from '../../lib/team-file/types'
 import { cascaded, goldFilled, heightOf, isGoldFill, PHONE } from '../../test/cascade'
 import type { AgentFigureProps } from '../agents/AgentFigure'
 import { TeamAgents, type TeamAgentsProps } from './TeamAgents'
+import { openBenchRows } from '../../test/benchRows'
+
+// Each setting is a row that opens; these tests are about the editors inside them.
+openBenchRows()
 
 // The bench is drawn with WebGL, which jsdom has none of: here it is only its labels, as buttons.
 vi.mock('../agents/AgentFigure', () => ({

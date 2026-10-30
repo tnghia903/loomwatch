@@ -124,7 +124,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
     view: () => present('[data-tour="agent-blocks"]')
       ? {
           title: 'Give it a name and a job',
-          body: 'Each block is one of its settings, in plain words: its name, its instructions, its model, its skills, and what it may do without asking. The figure at the bench shows the same things. Type a name, and in Instructions say what it does and what it replies with.',
+          body: 'Each row is one of its settings and says what it is set to: its name, its instructions, its model, its skills, and what it may do without asking. Press a row, or that part of the figure at the bench, to change it. Type a name, and in Instructions say what it does and what it replies with.',
           target: ['[data-tour="agent-blocks"]'],
           sides: ['left', 'right', 'top', 'bottom'],
           advance: 'next',

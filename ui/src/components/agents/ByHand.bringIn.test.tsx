@@ -5,6 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { forgetModels } from '../../lib/ai/useModels'
 import { BLANK_DRAFT, type AgentDraft } from '../../lib/library/draft'
 import { ByHand } from './ByHand'
+import { openBenchRows } from '../../test/benchRows'
+
+// Each setting is a row that opens; these tests are about the editors inside them.
+openBenchRows()
 
 // Once bringing in ships (ADR 0092): the agent's own switch is on its workbench.
 vi.mock('../../lib/library/bringIn', async (original) => ({ ...(await original<object>()), BRINGING_IN_SHIPPED: true }))

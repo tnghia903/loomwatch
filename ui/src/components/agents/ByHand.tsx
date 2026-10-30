@@ -1,5 +1,5 @@
 import { Suspense, useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
-import { ExternalLink, FilePlus2, FileText, Folder, FolderPlus, Network, NotebookText, Plug, Plus, Puzzle, Search, Store, Wrench, X } from '../ui/icon'
+import { ExternalLink, FilePlus2, FileText, Folder, FolderPlus, Icon, Network, NotebookText, Plug, Plus, Puzzle, Search, Store, Wrench, X, type IconName } from '../ui/icon'
 
 import { shortName } from '../../lib/ai/client'
 import { effortWord, modelEfforts, placeEffort } from '../../lib/ai/efforts'
@@ -44,6 +44,7 @@ import { benchLabels, readCount, readsSay, toolsSay, useFigureMood } from './ben
 import type { BenchView } from './workbenchScene'
 import { LearnedBlock } from './LearnedBlock'
 import { InlineMarkdown } from '../ui/Markdown'
+import { benchRows } from './benchRows'
 
 /**
  * BUILD BY HAND: every setting of the agent as a block of plain words and controls, always open,
@@ -111,6 +112,8 @@ export interface ByHandProps {
   onBuild?: () => void
   /** Laid over the bench while it is shown: an answer in the chat, read in full beside it. */
   cover?: ReactNode
+  /** A new agent, not saved yet: its name and instructions start open, where it starts. */
+  fresh?: boolean
 }
 
 /**
@@ -118,23 +121,30 @@ export interface ByHandProps {
  * picture, and a block never names the object it is drawn as, so nobody decodes a metaphor to set
  * one up. Picking a thing on the bench brings its block into view instead.
  */
-const BLOCKS: readonly { part: FigurePart; title: string }[] = [
-  { part: 'name', title: 'Name' },
-  { part: 'job', title: 'Instructions' },
-  { part: 'mind', title: 'Model' },
-  { part: 'skills', title: 'Skills' },
-  { part: 'reads', title: 'What it reads' },
-  { part: 'tools', title: 'Tools it can use' },
-  { part: 'keys', title: 'What it may do without asking' },
-  { part: 'reply', title: 'What it hands back' },
+const BLOCKS: readonly { part: FigurePart; title: string; icon: IconName }[] = [
+  { part: 'name', title: 'Name', icon: 'agent' },
+  { part: 'job', title: 'Instructions', icon: 'page' },
+  { part: 'mind', title: 'Model', icon: 'chip' },
+  { part: 'skills', title: 'Skills', icon: 'skills' },
+  { part: 'reads', title: 'What it reads', icon: 'folder' },
+  { part: 'tools', title: 'Tools it can use', icon: 'tools' },
+  { part: 'keys', title: 'What it may do without asking', icon: 'key' },
+  { part: 'reply', title: 'What it hands back', icon: 'send-back' },
 ]
 
 
-export function ByHand({ draft, set: write, skills, skillsLoading, roleField, figure, record, hideDoes = false, readOnly = false, reads: teamReads, teamOwn, onShowWorkflow, learned, suggestFor, following, chat, onBuild, cover }: ByHandProps) {
+export function ByHand({ draft, set: write, skills, skillsLoading, roleField, figure, record, hideDoes = false, readOnly = false, reads: teamReads, teamOwn, onShowWorkflow, learned, suggestFor, following, chat, onBuild, cover, fresh = false }: ByHandProps) {
   const chatting = chat !== undefined
   const set: ByHandProps['set'] = (key, value) => { if (!readOnly) write(key, value) }
   // The block you are working in: its thing on the bench is lit.
   const [focus, setFocus] = useState<FigurePart | null>(null)
+  // Its settings as rows (round 3): each shows what it is set to, and opens to change it. A new
+  // agent, or one with no name, opens on its name and instructions; the bench opens the row picked.
+  const [opened, setOpened] = useState<ReadonlySet<FigurePart>>(() => new Set(benchRows.allOpen ? BLOCKS.map((block) => block.part) : fresh || !draft.name.trim() ? ['name', 'job'] : []))
+  const openRow = (part: FigurePart) => setOpened((current) => (current.has(part) ? current : new Set([...current, part])))
+  const toggleRow = (part: FigurePart) => setOpened((current) => { const next = new Set(current); if (!next.delete(part)) next.add(part); return next })
+  /** What is set to be worked in is open: a part picked on the bench, or one just added to. */
+  const focusAndOpen = (part: FigurePart) => { setFocus(part); openRow(part) }
   const [flash, setFlash] = useState<{ part: FigurePart; at: number } | null>(null)
   const [dragging, setDragging] = useState<'skill' | null>(null)
   const [failed, setFailed] = useState<string | null>(null)
@@ -170,7 +180,7 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
     setFromMarket(fresh)
     if (!fresh.length) return
     set('skills', [...draft.skills, ...fresh])
-    setFocus('skills')
+    focusAndOpen('skills')
     setFlash((current) => ({ part: 'skills', at: (current?.at ?? 0) + 1 }))
   }
   const { catalog } = useModels()
@@ -204,7 +214,7 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
   const giveRead = (read: AgentRead) => {
     if (draft.reads.some((had) => readKey(had) === readKey(read))) return
     set('reads', [...draft.reads, { ...read, name: uniqueLabel(read.name, new Set(draft.reads.map((had) => had.name))) }])
-    setFocus('reads')
+    focusAndOpen('reads')
   }
 
   const kit = useMemo<BenchKit>(() => ({ skills: draft.skills, reads, tools: draft.tools }), [draft.skills, reads, draft.tools])
@@ -234,14 +244,15 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
   const goTo = (target: FigurePart) => {
     // The laptop shows the model, so it opens the Model block.
     const part = target === 'app' ? 'mind' : target
-    setFocus(part)
+    focusAndOpen(part)
     setFlash((current) => ({ part, at: (current?.at ?? 0) + 1 }))
     if (chatting) {
       picked.current = part
       onBuild?.()
       return
     }
-    showBlock(blocks.current.get(part))
+    // Once its row is open, so its first field can take the focus.
+    requestAnimationFrame(() => showBlock(blocks.current.get(part)))
   }
 
   const parts = INSTRUCTION_PARTS.filter((part) => shape[part]).length
@@ -262,11 +273,14 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
   const block = (part: Exclude<FigurePart, 'app'>, body: ReactNode, extra?: ReactNode) => {
     const meta = BLOCKS.find((item) => item.part === part)!
     const flashing = flash?.part === part
+    const open = opened.has(part)
+    // Closed, Name's row says the name itself and what it does; open, its boxes say them, once.
+    const summary = part === 'name' ? (open ? '' : [draft.name.trim() || 'No name yet', draft.does.trim()].filter(Boolean).join(' · ')) : says[part]
     return (
       <section
         key={part}
         ref={(element) => { if (element) blocks.current.set(part, element); else blocks.current.delete(part) }}
-        className={`byhand-block${focus === part ? ' focus' : ''}`}
+        className={`byhand-block${focus === part ? ' focus' : ''}${open ? ' open' : ''}`}
         aria-labelledby={`${ids}-${part}`}
         onFocus={() => setFocus(part)}
         onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocus((current) => (current === part ? null : current)) }}
@@ -274,12 +288,20 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
         onPointerLeave={(event) => { if (!event.currentTarget.contains(document.activeElement)) setFocus((current) => (current === part ? null : current)) }}
       >
         {flashing && <span key={flash.at} className="byhand-block-flash" aria-hidden="true" onAnimationEnd={() => setFlash(null)} />}
-        <header className="byhand-block-head">
-          <h3 id={`${ids}-${part}`}>{meta.title}</h3>
-        </header>
-        {says[part] && <p className="byhand-block-says">{says[part]}</p>}
-        {body}
-        {extra}
+        {/* A row: what it is, and what it is set to; pressing it opens the setting to change it. */}
+        <h3 className="byhand-row-head">
+          <button type="button" className="byhand-row" aria-expanded={open} aria-controls={`${ids}-${part}-body`} onClick={() => toggleRow(part)}>
+            <Icon name={meta.icon} size={18} className="byhand-row-icon" />
+            <span id={`${ids}-${part}`} className="byhand-row-title">{meta.title}</span>{' '}
+            <span className="byhand-row-says">{summary}</span>
+            <Icon name="chevron-down" size={14} className="byhand-row-chev" />
+          </button>
+        </h3>
+        {/* Closed, it is hidden, never taken away: what was being written in it is there when it opens. */}
+        <div id={`${ids}-${part}-body`} className="byhand-row-body" hidden={!open}>
+          {body}
+          {extra}
+        </div>
       </section>
     )
   }
@@ -297,8 +319,8 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
                   labels={labels}
                   open={focus}
                   onPart={goTo}
-                  onKey={(key, on) => { giveKey(key, on); setFocus('keys') }}
-                  onSkillDrop={(skill) => { setDragging(null); addSkill(skill); setFocus('skills') }}
+                  onKey={(key, on) => { giveKey(key, on); focusAndOpen('keys') }}
+                  onSkillDrop={(skill) => { setDragging(null); addSkill(skill); focusAndOpen('skills') }}
                   skillMime={SKILL_MIME}
                   onFail={setFailed}
                 />
@@ -435,7 +457,8 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
 function showBlock(block: HTMLElement | undefined) {
   if (!block) return
   block.scrollIntoView({ behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'nearest' })
-  block.querySelector<HTMLElement>('textarea, input, select, button')?.focus({ preventScroll: true })
+  // Its first field, not the row it opened from.
+  block.querySelector<HTMLElement>('.byhand-row-body :is(textarea, input, select, button)')?.focus({ preventScroll: true })
 }
 
 /** What the skills shelf says, in the words the tools block uses: a skill is given and taken away. */

@@ -40,7 +40,15 @@
 .agent-tile-mark.on { border-style: solid; border-color: color-mix(in srgb, var(--color-ink) 45%, transparent); color: var(--color-ink); }
 .agent-tile-mark.asks { border-style: dashed; }
 .agent-tile-mark.count { border-color: transparent; }
+@media (max-width: 560px) {
+  .agents-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .agent-tile { min-height: 216px; }
+  .agent-tile-figure :is(img, .figure-still) { width: 84px; height: 84px; }
+  .agent-tile-mark { min-width: 32px; height: 32px; }
+}
 .agent-card { min-height: 0; }
+/* The tile sizes its card: the older card's fixed height cut its row of marks off. */
+.agents-grid > li > .agent-card { height: auto; padding: 0; overflow: visible; }
 .agent-badge { display: flex; flex-direction: column; gap: 9px; min-width: 0; padding: var(--sp-4); border: 1px solid var(--color-hairline); border-radius: var(--r-lg); background: var(--color-panel-solid); }
 .agent-card .agent-badge { padding: 0; border: 0; background: none; }
 .agent-badge-head { display: flex; align-items: flex-start; gap: var(--sp-3); }
@@ -221,6 +229,20 @@
 .byhand-block-head h3 { margin: 0; font: 600 14.5px/1.3 var(--font-sans); color: var(--color-ink); }
 .byhand-block-where { font-size: 12px; color: var(--color-ink-3); white-space: nowrap; }
 .byhand-block-says { margin: 0 0 var(--sp-1); font-size: 13.5px; line-height: 1.45; color: var(--color-ink-2); overflow-wrap: anywhere; }
+/* Each setting a row (round 3): its mark, its name and what it is set to on one line; it opens to
+   change it. A closed block is the row alone. */
+.byhand-block:not(.open) { padding-block: var(--sp-1); }
+.byhand-row-head { margin: 0; font: inherit; }
+.byhand-row { display: flex; align-items: center; gap: var(--sp-3); width: 100%; min-height: 44px; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.byhand-row-icon { flex: none; color: var(--color-ink-2); }
+.byhand-row-title { flex: none; width: 128px; font: 500 13px/1.3 var(--font-sans); color: var(--color-ink-2); }
+.byhand-row-says { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 14px/1.35 var(--font-sans); color: var(--color-ink); }
+.byhand-block.open .byhand-row-says { white-space: normal; }
+.byhand-row-chev { flex: none; color: var(--color-ink-3); transition: rotate var(--t-quick) var(--ease-out); }
+.byhand-block.open .byhand-row-chev { rotate: 180deg; }
+.byhand-row-body { display: flex; flex-direction: column; gap: var(--sp-2); }
+@media (prefers-reduced-motion: reduce) { .byhand-row-chev { transition: none; } }
+@media (max-width: 560px) { .byhand-row-title { width: auto; } .byhand-row-says { display: none; } .byhand-block.open .byhand-row-says { display: block; } }
 .byhand-block > .t-meta { margin: 0; color: var(--color-ink-3); }
 /* What the agent learned from your feedback (ADR 0078): a lesson a line, where it came from under it. */
 .learned-list { display: grid; gap: var(--sp-2); margin: 0; padding: 0; list-style: none; }

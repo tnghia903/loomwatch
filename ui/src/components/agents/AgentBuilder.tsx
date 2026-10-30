@@ -246,6 +246,7 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
   const backToTeam = cameFrom && <a className="link agent-back" href={`/?path=${encodeURIComponent(cameFromUse?.teamPath ?? cameFrom)}&view=agents`}>Back to {cameFromUse?.teamName ?? 'the team'}</a>
   const bench = (
     <ByHand
+      fresh={!id}
       draft={draft} set={set} skills={skills} skillsLoading={skillsLoading} roleField={roleField} figure={figure} record={benchRecord} reads={inTeam?.reads} onShowWorkflow={inTeam?.onShowWorkflow}
       learned={saved ? { savedAgent: saved.id } : null}
       chat={view === 'chat' ? <AgentChat draft={draft} model={draft.model} chatId={chatId} figure={figure} onAllow={(what) => (typeof what === 'string' ? set('allow', { ...draft.allow, [what]: true }) : set('toolAllow', withAllowed(draft.toolAllow, what.tool, what.call)))} onRecord={setBenchRecord} answerRunId={answerRun} onOpenAnswer={(runId) => { setAnswerRun(runId); if (runId) details.close() }} knowledge={inTeam?.knowledge} file={benchFile.chat}
