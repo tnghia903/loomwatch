@@ -442,8 +442,6 @@ button.wall-paper:focus-visible { outline: 2px solid var(--color-accent); outlin
 .work-box-to select:focus { outline: none; }
 .work-box-words { flex: 1 1 240px; display: flex; min-width: 0; }
 .work-box-words input { flex: 1; min-width: 0; height: 44px; padding: 0 var(--sp-2); border: 0; outline: 0; background: transparent; color: var(--color-ink); font: 400 15px var(--font-sans); }
-.work-box-attach { width: 44px; height: 44px; }
-.work-box-send { min-height: 44px; padding: 0 18px; }
 .work-box-files { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
 .work-box-files li { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 4px 0 10px; border: 1px solid var(--color-hairline); border-radius: var(--r-full); font-size: 12.5px; }
 .work-box-files li.failed { border-color: var(--color-alert); }

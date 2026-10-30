@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { cascaded } from '../../test/cascade'
+import { cascaded, isGoldFill } from '../../test/cascade'
 import { ProjectRoom } from './ProjectRoom'
 
 let fetchMock: ReturnType<typeof vi.fn>
@@ -316,7 +316,7 @@ describe('a project’s room (ADR 0097)', () => {
       // Nothing waits for you, so Send is the one gold fill.
       // The box names the team it gives work to, which tells it from Ask; Start, as the chat says.
       expect(within(box).getByRole('textbox')).toHaveAttribute('placeholder', 'What should Blog do?')
-      expect(within(box).getByRole('button', { name: 'Start' })).toHaveClass('btn-primary')
+      expect(isGoldFill(within(box).getByRole('button', { name: 'Start' }))).toBe(true)
       fireEvent.click(within(box).getByRole('button', { name: 'Start' }))
       await waitFor(() => expect(posted()).toEqual([expect.objectContaining({ teamPath: 'sutd/blog.yaml', text: 'Write the launch post.', work: true, to: { kind: 'team' } })]))
       expect(await within(box).findByRole('status')).toHaveTextContent('Blog has it.')

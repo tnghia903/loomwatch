@@ -9,7 +9,7 @@ import { createPortal } from 'react-dom'
 
 import { AgentFigure } from '../components/agents/benchFigure'
 import { FigureStill } from '../components/agents/FigureStill'
-import { ArrowUp, CornerDownLeft, Plus } from '../components/ui/icon'
+import { Plus } from '../components/ui/icon'
 
 import { LoomMark, StatusGlyph } from '../components/ui/glyphs'
 import { dropped } from '../lib/chat/attachments'
@@ -27,6 +27,7 @@ import { useRunLimit } from './useRunLimit'
 import { ISLAND_WAITS } from './waits'
 import { InlineMarkdown } from '../components/ui/Markdown'
 import { STATE_WORDS } from '../lib/state/words'
+import { SendButton } from '../components/box/BoxButtons'
 
 /** Rows in the list before "N more teams in LoomWatch", as in the menu. */
 const LIST_ROWS = 5
@@ -681,7 +682,7 @@ function PinnedRow({ island, work, crews, firstPermission, watching, foot, flyin
           }}
         />
         {!startHere && (
-          <button type="submit" className="island-send" aria-label={island.pinnedWorking ? 'Send note' : 'Send'} disabled={island.sending || !island.draft.trim()}>{island.pinnedWorking ? <CornerDownLeft size={16} aria-hidden="true" /> : <ArrowUp size={17} aria-hidden="true" />}</button>
+          <SendButton label={island.pinnedWorking ? 'Send note' : 'Send'} icon={island.pinnedWorking ? 'enter' : 'send'} className="island-send" disabled={island.sending || !island.draft.trim()} />
         )}
         </span>
         {startHere && <StartTeam island={island} request={startHere} first={!firstPermission} limit={limit} />}

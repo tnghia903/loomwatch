@@ -1,8 +1,7 @@
-import { AlertCircle, ArrowUp, Check, RotateCcw, X } from '../ui/icon'
+import { AlertCircle, Check, RotateCcw, X } from '../ui/icon'
 import { useEffect, useId, useRef, type KeyboardEvent } from 'react'
 
 import type { AskContext } from '../../lib/ask/client'
-import { keys } from '../../lib/platform'
 import type { AskStep, AssistantTurn } from '../../lib/ask/thread'
 import type { AskController } from '../../lib/ask/useAsk'
 import { LoomMark, StatusGlyph } from '../ui/glyphs'
@@ -11,6 +10,7 @@ import { Sources } from '../connections/Sources'
 import { AskCardView, type CardActions } from './AskCards'
 import { AskModelPicker } from './AskModelPicker'
 import { SaidText } from '../chat/SaidText'
+import { SendButton } from '../box/BoxButtons'
 
 const SUGGESTIONS: Record<AskContext['view'], string[]> = {
   home: [
@@ -223,9 +223,7 @@ export function AskPanel({ ask, view, cards, hidden = false, onHome = false, tit
             maxLength={8000}
             disabled={Boolean(ask.unavailable)}
           />
-          <button type="submit" className="ask-send" aria-label="Send" title={`Send (${keys('↵')})`} disabled={!ask.draft.trim() || working || ask.sending || Boolean(ask.unavailable)}>
-            <ArrowUp size={16} aria-hidden="true" />
-          </button>
+          <SendButton label="Send" disabled={!ask.draft.trim() || working || ask.sending || Boolean(ask.unavailable)} />
         </div>
         <label className="ask-switch">
           <input type="checkbox" role="switch" checked={ask.askBeforeRun} onChange={(event) => ask.setAskBeforeRun(event.target.checked)} />

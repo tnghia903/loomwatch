@@ -1,10 +1,11 @@
-import { ArrowUp, Paperclip, X } from '../ui/icon'
+import { X } from '../ui/icon'
 import { useRef, useState } from 'react'
 
 import { useChatAttachments } from '../../lib/chat/attachments'
 import { sendChatMessage } from '../../lib/chat/client'
 import { newStartKey, RunApiError, TEAM_NEEDS_REVIEW, type RunRecord } from '../../lib/runs/client'
 import { teamHref } from '../../lib/team-file/teamHref'
+import { AttachButton, SendButton } from '../box/BoxButtons'
 
 /** A team the box can give work to, under its project on Home. */
 export interface BoxTeam {
@@ -89,11 +90,9 @@ export function WorkBox({ teams, primary, onSent }: { teams: readonly BoxTeam[];
           event.target.value = ''
           if (files.length > 0) attachments.add(files)
         }} />
-        <button type="button" className="iconbtn work-box-attach" onClick={() => chooser.current?.click()} aria-label="Add pictures or files" title="Add pictures or files"><Paperclip size={16} aria-hidden="true" /></button>
+        <AttachButton onClick={() => chooser.current?.click()} />
         {/* "Start", as the team chat's box says when what it sends starts work. */}
-        <button type="submit" className={`btn${primary ? ' btn-primary' : ''} work-box-send`} disabled={!trimmed || sending || attachments.busy} title={attachments.busy ? 'Waiting for your files to save' : undefined}>
-          <ArrowUp size={15} aria-hidden="true" />{sending ? 'Starting…' : 'Start'}
-        </button>
+        <SendButton label={sending ? 'Starting…' : 'Start'} primary={primary} disabled={!trimmed || sending || attachments.busy} title={attachments.busy ? 'Waiting for your files to save' : undefined} />
       </div>
       {attachments.items.length > 0 && (
         <ul className="work-box-files" aria-label="Files going with it">

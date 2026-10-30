@@ -1,0 +1,22 @@
+/* ---------- One box (round 3, ADR 0101): every box's send and attach are the same two buttons ---------- */
+/* Each box still places them (BoxButtons.tsx); their look is here, so it is the same everywhere. */
+.lw-send {
+  flex: none; display: inline-grid; place-items: center; width: 40px; height: 40px; padding: 0; box-sizing: border-box;
+  border: 1px solid var(--color-hairline); border-radius: var(--r-md); background: var(--color-panel-solid); color: var(--color-ink);
+  cursor: pointer; transition: background-color var(--t-quick) var(--ease-out), color var(--t-quick) var(--ease-out), border-color var(--t-quick) var(--ease-out);
+}
+.lw-send:hover:not(:disabled) { border-color: color-mix(in srgb, var(--color-ink) 32%, transparent); }
+/* The screen's main action: the one gold fill. */
+.lw-send.primary { border-color: transparent; background: var(--color-accent-fill); color: var(--color-accent-on-fill); }
+.lw-send.primary:hover:not(:disabled) { filter: brightness(1.06); }
+/* Off is never gold. */
+.lw-send:disabled { background: transparent; border-color: var(--color-hairline); color: var(--color-ink-3); cursor: not-allowed; }
+.lw-attach {
+  flex: none; display: inline-grid; place-items: center; width: 40px; height: 40px; padding: 0; border: 0;
+  border-radius: var(--r-md); background: none; color: var(--color-ink-2); cursor: pointer;
+}
+.lw-attach:hover:not(:disabled) { color: var(--color-ink); }
+.lw-attach:disabled { opacity: .45; cursor: default; }
+/* While the bell's tray shows its own fill, a box's gold steps back to a ring, as every page fill does. */
+[data-needs-you-fill] .lw-send.primary:not(:disabled) { background: transparent; color: var(--color-ink); border-color: var(--color-accent); filter: none; }
+@media (max-width: 767px) { .lw-send, .lw-attach { width: 44px; height: 44px; } }
