@@ -1027,8 +1027,9 @@ async fn post_team_place(
     }
     let shares =
         shares.unwrap_or_else(|| crate::team_places::free_shares(&state.teams_root, &config.id));
-    let (target, id) = place_file(&state, &team, project, &filed)
-        .ok_or_else(|| refuse(format!("{name} has too many places already.")))?;
+    let (target, id) = place_file(&state, &team, project, &filed).ok_or_else(|| {
+        refuse("Too many teams already have this name. Rename the team, then try again.".to_owned())
+    })?;
     let place = crate::team_places::new_place(&text, &id, project, &shares)
         .map_err(|error| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, error))?;
     TeamConfig::parse_in(&place, &state.teams_root)

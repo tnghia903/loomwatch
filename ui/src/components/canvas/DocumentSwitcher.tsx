@@ -13,7 +13,9 @@ export interface DocumentSwitcherProps {
   path: string | null
   /** The team's display name; the chip leads with it and keeps the file name as detail. */
   teamName?: string | null
-  /** The other projects the same team works in (ADR 0103): a save changes it there too. */
+  /** For a team in several projects (ADR 0103): the project this page is its place in. */
+  here?: string | null
+  /** The other projects an unsaved change to the team's setup reaches when saved (ADR 0103). */
   alsoIn?: readonly string[]
   saveState: SaveState
   saveError: string | null
@@ -47,7 +49,7 @@ export interface DocumentSwitcherProps {
 // the only place file state is expressed; its menu is what is done to the file. Other teams, and a
 // new one, are reached from the team rail beside the page (ADR 0043: one control per action).
 export function DocumentSwitcher(props: DocumentSwitcherProps) {
-  const { path, teamName = null, alsoIn = [], saveState, saveError, entrypointProblem, documentProblems, fieldProblemsByAgent, agentNames, isValid, readOnlyReason, fileGone = false, editingDisabled = false, onSave, onSaveCopy, onReload, onDiscard, onRename, onDelete, onSelectProblem, problemsOpen, onProblemsOpenChange } = props
+  const { path, teamName = null, here = null, alsoIn = [], saveState, saveError, entrypointProblem, documentProblems, fieldProblemsByAgent, agentNames, isValid, readOnlyReason, fileGone = false, editingDisabled = false, onSave, onSaveCopy, onReload, onDiscard, onRename, onDelete, onSelectProblem, problemsOpen, onProblemsOpenChange } = props
   const [switcherOpen, setSwitcherOpen] = useState(false)
   const [discardConfirm, setDiscardConfirm] = useState(false)
   const [renaming, setRenaming] = useState<string | null>(null)
@@ -91,7 +93,8 @@ export function DocumentSwitcher(props: DocumentSwitcherProps) {
   let state: ChipState = 'clean'
   let l1 = teamName ?? filename
   // Saved, as an agent's chip says it; the file's name and folder are in the menu.
-  let l2 = 'Saved'
+  // Which project's place this is, when the team works in more than one: each has its own chat.
+  let l2 = here ? `Saved · in ${here}` : 'Saved'
   let action: React.ReactNode = null
   // A gold ring, not the fill: the view's own action keeps the screen's one fill (Run team, which
   // saves first, Approve or Save schedule), and unsaved work is gold's "unfinished" edge (§5).
@@ -103,14 +106,14 @@ export function DocumentSwitcher(props: DocumentSwitcherProps) {
   if (fileGone) { state = 'failed'; l2 = 'The file was moved or deleted'; action = <button type="button" className="btn btn-primary" onClick={onSaveCopy}>Save a copy…</button> }
   else if (saveState === 'read-only') { state = 'readonly'; l2 = readOnlyReason ?? 'Read-only' }
   else if (saveState === 'saving') { state = 'saving'; l2 = 'Saving…' }
-  else if (saveState === 'saved') { state = 'saved'; l2 = 'Saved' }
+  else if (saveState === 'saved') { state = 'saved'; l2 = here ? `Saved · in ${here}` : 'Saved' }
   else if (saveState === 'error') { state = 'failed'; l2 = `Couldn't save: ${saveError ?? 'unknown error'}`; action = <button type="button" className="btn" onClick={onSave}>Retry</button> }
   else if (saveState === 'conflict') { state = 'failed'; l2 = 'Changed outside LoomWatch'; action = null }
   else if (!isValid && errors.length > 0) { state = 'invalid'; l2 = scheduleErrors.length === errors.length ? 'Schedule needs attention' : `${errors.length} problem${errors.length === 1 ? '' : 's'} to fix`; action = review }
   else if (!isValid && incomplete.length > 0) { state = 'incomplete'; l2 = `${incomplete.length} thing${incomplete.length === 1 ? '' : 's'} to finish`; action = review }
   else if (saveState === 'new') { state = 'new'; l2 = 'Not saved yet'; action = save }
   // A team in several projects: what a save reaches, before it is pressed (ADR 0103).
-  else if (saveState === 'dirty') { state = 'dirty'; l2 = alsoIn.length > 0 ? `Saving changes it in ${listNames(alsoIn)} too` : 'Unsaved changes'; action = save }
+  else if (saveState === 'dirty') { state = 'dirty'; l2 = alsoIn.length > 0 ? `Unsaved · ${listNames(alsoIn)} ${alsoIn.length === 1 ? 'gets' : 'get'} this too when you save` : 'Unsaved changes'; action = save }
   else if (editingDisabled) { l2 = 'Editing needs a wider window' }
 
   const ledger = saveState === 'saving' ? 'saving' : saveState === 'saved' ? 'saved' : saveState === 'error' ? 'failed' : ''

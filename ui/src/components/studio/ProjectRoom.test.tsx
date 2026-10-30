@@ -116,8 +116,8 @@ describe('a project’s room (ADR 0097)', () => {
       return daemon(url, init)
     })
     render(<ProjectRoom id="sutd" />)
-    fireEvent.click(await screen.findByRole('button', { name: 'Team settings for Research and design' }))
-    const menu = screen.getByRole('menu', { name: 'Team settings for Research and design' })
+    fireEvent.click(await screen.findByRole('button', { name: 'More for Research and design' }))
+    const menu = screen.getByRole('menu', { name: 'More for Research and design' })
     fireEvent.click(within(menu).getByRole('menuitem', { name: 'Add to another project' }))
     // Only the other projects: never the one it is in.
     expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['My thesis'])
@@ -127,14 +127,14 @@ describe('a project’s room (ADR 0097)', () => {
     expect(JSON.parse(String(post?.[1]?.body))).toEqual({ path: 'sutd/gate.yaml', project: 'thesis' })
     // Its file here is not touched: the daemon makes the new place.
     expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/team' && init?.method === 'PUT')).toBe(false)
-    expect(await screen.findByRole('status')).toHaveTextContent('Research and design works in My thesis too, with its own chat and work there.')
+    expect(await screen.findByRole('status')).toHaveTextContent('Research and design works in My thesis too, with a chat and work of its own there. It has no schedule there yet.')
     expect(within(screen.getByRole('status')).getByRole('link', { name: 'My thesis' })).toHaveAttribute('href', '/projects/thesis')
   })
 
   it('takes a team in no other project out of this one, to wait on Home', async () => {
     fetchMock.mockImplementation((url: string, init?: RequestInit) => (url === '/api/team/take-out' ? respond({ path: 'sutd/gate.yaml', project: null }) : daemon(url, init)))
     render(<ProjectRoom id="sutd" />)
-    fireEvent.click(await screen.findByRole('button', { name: 'Team settings for Research and design' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'More for Research and design' }))
     // No other project: nothing to add it to.
     expect(within(screen.getByRole('menu')).queryByRole('menuitem', { name: 'Add to another project' })).toBeNull()
     fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Take out of SUTD final project' }))
@@ -167,28 +167,41 @@ describe('a project’s room (ADR 0097)', () => {
       render(<ProjectRoom id="sutd" />)
       const card = await screen.findByRole('article', { name: 'Research and design' })
       await waitFor(() => expect(card).toHaveTextContent('Also in My thesis'))
-      fireEvent.click(within(card).getByRole('button', { name: 'Team settings for Research and design' }))
+      fireEvent.click(within(card).getByRole('button', { name: 'More for Research and design' }))
       // It is in every other project already.
       expect(within(screen.getByRole('menu')).queryByRole('menuitem', { name: 'Add to another project' })).toBeNull()
       fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Take out of SUTD final project' }))
       const dialog = screen.getByRole('alertdialog', { name: 'Take “Research and design” out of SUTD final project?' })
-      expect(dialog).toHaveTextContent('It keeps working in My thesis. Its chat and work in SUTD final project go with it.')
+      expect(dialog).toHaveTextContent('It keeps working in My thesis. Its chat and work leave SUTD final project.')
+      expect(dialog).toHaveTextContent('LoomWatch keeps a copy and its past runs, so they come back if you restore it.')
       expect(calls).toEqual([])
       fireEvent.click(within(dialog).getByRole('button', { name: 'Take out' }))
       await waitFor(() => expect(calls).toEqual(['POST /api/team/take-out']))
-      expect(await screen.findByRole('status')).toHaveTextContent('Research and design is out of SUTD final project. It works on in My thesis.')
+      expect(await screen.findByRole('status')).toHaveTextContent('Research and design is out of SUTD final project. It still works in My thesis.')
     })
 
     it('deletes it from every project with Delete team…, after naming them', async () => {
       render(<ProjectRoom id="sutd" />)
       const card = await screen.findByRole('article', { name: 'Research and design' })
       await waitFor(() => expect(card).toHaveTextContent('Also in My thesis'))
-      fireEvent.click(within(card).getByRole('button', { name: 'Team settings for Research and design' }))
+      fireEvent.click(within(card).getByRole('button', { name: 'More for Research and design' }))
       fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Delete team…' }))
       const dialog = screen.getByRole('alertdialog', { name: 'Delete “Research and design”?' })
-      expect(dialog).toHaveTextContent('It leaves SUTD final project and My thesis.')
+      expect(dialog).toHaveTextContent('It goes from every project it works in: SUTD final project and My thesis.')
       fireEvent.click(within(dialog).getByRole('button', { name: 'Delete team' }))
       await waitFor(() => expect(calls).toEqual(['DELETE /api/team?path=sutd%2Fgate.yaml', 'DELETE /api/team?path=thesis%2Fgate.yaml']))
+    })
+
+    // Newcomer review: the red Delete is the familiar control, so the smaller step is offered beside it.
+    it('offers to take it out of this project only, from Delete team…', async () => {
+      render(<ProjectRoom id="sutd" />)
+      const card = await screen.findByRole('article', { name: 'Research and design' })
+      await waitFor(() => expect(card).toHaveTextContent('Also in My thesis'))
+      fireEvent.click(within(card).getByRole('button', { name: 'More for Research and design' }))
+      fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Delete team…' }))
+      fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Only take out of SUTD final project' }))
+      await waitFor(() => expect(calls).toEqual(['POST /api/team/take-out']))
+      expect(await screen.findByRole('status')).toHaveTextContent('Research and design is out of SUTD final project. It still works in My thesis.')
     })
   })
 
@@ -214,7 +227,7 @@ describe('a project’s room (ADR 0097)', () => {
     await waitFor(() => expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['PricesIn My thesis', 'Weekly briefIn no project']))
     fireEvent.click(within(menu).getByRole('menuitem', { name: /^Prices/ }))
     await waitFor(() => expect(calls).toEqual([{ url: '/api/team/places', body: { path: 'thesis/prices.yaml', project: 'sutd' } }]))
-    expect(await screen.findByRole('status')).toHaveTextContent('Prices works here too, with its own chat and work here.')
+    expect(await screen.findByRole('status')).toHaveTextContent('Prices works here too, with a chat and work of its own.')
     fireEvent.click(screen.getByRole('button', { name: 'Add a team' }))
     fireEvent.click(within(screen.getByRole('menu', { name: 'Add a team' })).getByRole('menuitem', { name: /^Weekly brief/ }))
     await waitFor(() => expect(calls.map((call) => call.url)).toEqual(['/api/team/places', '/api/team']))

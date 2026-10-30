@@ -51,7 +51,8 @@ import { DocumentSwitcher } from './canvas/DocumentSwitcher'
 import { EdgeRefusalPopover } from './canvas/EdgeRefusalPopover'
 import { EntrypointProblemBar } from './canvas/EntrypointProblemBar'
 import { DeleteTeamDialog } from './home/DeleteTeamDialog'
-import { usePlaces } from '../lib/projects/places'
+import { setupDiffers, usePlaces } from '../lib/projects/places'
+import { takeTeamOut } from '../lib/projects/client'
 import { TeamReviewDialog } from './run/TeamReviewDialog'
 import { Home } from './home/Home'
 import { ALLOW_SWITCHES } from '../lib/team-file/allow'
@@ -265,7 +266,9 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   const doc = useTeamDocument()
   // The same team in other projects (ADR 0103): a save reaches them, and Delete team deletes them.
   const places = usePlaces(doc.shares, doc.path)
-  const alsoIn = useMemo(() => places?.others.flatMap((place) => (place.project ? [place.project] : [])) ?? [], [places])
+  // Only a change to the shared setup reaches them; a schedule, delivery or Brief stays this place's.
+  const setupChanged = useMemo(() => setupDiffers(doc.loadedYaml, doc.yamlPreview), [doc.loadedYaml, doc.yamlPreview])
+  const alsoIn = useMemo(() => (setupChanged ? places?.others.flatMap((place) => (place.project ? [place.project] : [])) ?? [] : []), [places, setupChanged])
   const { jobs: savedJobs, loaded: savedJobsLoaded } = useSavedJobs()
   // ADR 0092: the person's other agents a run may bring in, named and drawn as in My agents.
   const guests = useMemo(() => guestsOf(savedJobs, doc.nodes.map((node) => node.data.agent.name || node.id)), [savedJobs, doc.nodes])
@@ -2762,7 +2765,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
             <button type="button" aria-pressed={runView || runSetup} onClick={() => leaveBench(() => { clearSelection(); if (!activeRunId) setRunSetup(true) })} data-tour="tab-chat"><MessagesSquare size={15} />Chat</button>
           </nav>
           <DocumentSwitcher
-            path={doc.path} teamName={doc.teamName} alsoIn={alsoIn} saveState={doc.documentChipState} saveError={doc.saveError}
+            path={doc.path} teamName={doc.teamName} here={places && places.others.length > 0 ? places.here : null} alsoIn={alsoIn} saveState={doc.documentChipState} saveError={doc.saveError}
             entrypointProblem={doc.entrypointProblem} documentProblems={doc.documentProblems} fieldProblemsByAgent={doc.fieldProblemsByAgent} agentNames={nodeNames}
             isValid={doc.isValid} readOnlyReason={doc.readOnlyReason} fileGone={doc.fileGone} editingDisabled={windowWidth < 768}
             onSave={() => void doc.save()} onSaveCopy={() => setSaveCopyOpen(true)} onReload={() => void doc.reloadFromDisk()} onDiscard={() => void doc.reloadFromDisk()}
@@ -3025,7 +3028,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
         {newTeamSheet && <NewTeamSheet openTeamUnsaved={['dirty', 'invalid', 'conflict'].includes(doc.documentChipState)} onClose={() => setNewTeamSheet(false)} />}
         {saveCopyOpen && <SaveCopySheet error={doc.saveError} onClose={() => setSaveCopyOpen(false)} onSave={doc.saveCopy} />}
         {/* Home, not the deleted team's empty canvas, is where the operator goes next. */}
-        {deleteTeamOpen && doc.path && <DeleteTeamDialog path={doc.path} name={doc.teamName ?? baseName(doc.path).replace(/\.ya?ml$/i, '')} places={places && places.others.length > 0 ? { here: places.here ?? 'Not in a project', others: places.others.map((place) => ({ path: place.path, project: place.project ?? 'Not in a project' })) } : undefined} onDeleted={() => window.location.assign('/')} onClose={() => setDeleteTeamOpen(false)} />}
+        {deleteTeamOpen && doc.path && <DeleteTeamDialog path={doc.path} name={doc.teamName ?? baseName(doc.path).replace(/\.ya?ml$/i, '')} places={places && places.others.length > 0 ? { here: places.here ?? 'Not in a project', others: places.others.map((place) => ({ path: place.path, project: place.project ?? 'Not in a project' })) } : undefined} onTakeOut={() => takeTeamOut(doc.path ?? '').then(() => window.location.assign('/'))} onDeleted={() => window.location.assign('/')} onClose={() => setDeleteTeamOpen(false)} />}
         {/* ADR 0048: a team from outside LoomWatch is checked before its first run. */}
         {teamReview && <TeamReviewDialog review={teamReview} onTrust={trustAndRun} onClose={dismissReview} />}
         {chatFolder !== null && (

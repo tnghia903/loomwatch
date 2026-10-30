@@ -38,6 +38,28 @@ export async function loadPlaces(shares: string, path: string): Promise<Places> 
   return { here: places.find((place) => place.path === self)?.project ?? null, others: places.filter((place) => place.path !== self) }
 }
 
+/** The keys of a team file that are each place's own (`team_places::PLACE_KEYS` in the daemon). */
+const PLACE_KEYS = ['id', 'project', 'schedule', 'deliver', 'memory', 'shares']
+
+/** Whether `current` changes the team's setup from `saved`: anything but a place's own keys, which a
+    save keeps in this place alone (ADR 0103). */
+export function setupDiffers(saved: string | null, current: string): boolean {
+  const setup = (text: string | null): string => {
+    let doc: unknown
+    try { doc = text ? parse(text) : null } catch { return text ?? '' }
+    if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return JSON.stringify(doc)
+    const kept = Object.fromEntries(Object.entries(doc as Record<string, unknown>).filter(([key]) => !PLACE_KEYS.includes(key)))
+    return stable(kept)
+  }
+  return setup(saved) !== setup(current)
+}
+
+function stable(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stable).join(',')}]`
+  if (value && typeof value === 'object') return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stable((value as Record<string, unknown>)[key])}`).join(',')}}`
+  return JSON.stringify(value)
+}
+
 /** [`loadPlaces`] for the team open now, read again when a project changes; none without `shares`. */
 export function usePlaces(shares: string | null, path: string | null): Places | null {
   const [found, setFound] = useState<{ key: string; places: Places } | null>(null)

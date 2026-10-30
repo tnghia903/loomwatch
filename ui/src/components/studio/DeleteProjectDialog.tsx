@@ -38,7 +38,7 @@ export function DeleteProjectDialog({ project, teams, working = [], onDeleted, o
         <h2 id={titleId}>Delete the project “{project.name}”?</h2>
         {teams.length === 1 && <p>Its team, {teams[0]}, stays on Home, under Not in a project.</p>}
         {teams.length > 1 && <p>Its teams stay on Home, under Not in a project: {listNames(teams)}.</p>}
-        {working.map((team) => <p key={team.name}>{team.name} keeps working in {listNames(team.in)}; its work here goes with the project.</p>)}
+        {working.map((team) => <p key={team.name}>{team.name} keeps working in {listNames(team.in)}. Its chat and work here go with the project.</p>)}
         <p title=".projects/.removed, inside your teams folder">Its About and notes go too. LoomWatch keeps a copy in your teams folder. Your own folders aren’t touched.</p>
         {error && <p role="alert" className="dt-alert">{error}</p>}
         <div className="dt-acts">

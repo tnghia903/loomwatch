@@ -36,7 +36,7 @@ export function ProjectCardMenu({ name, putAway = false, onRename, onHide, onDel
  */
 export function TeamCardMenu({ name, onDelete }: { name: string; onDelete: () => void }) {
   return (
-    <CardMenu label={`Team settings for ${name}`} title="Team settings">
+    <CardMenu label={`More for ${name}`} title="More">
       {(pick) => <button type="button" role="menuitem" className="menu-alert" onClick={pick(onDelete)}>Delete team…</button>}
     </CardMenu>
   )
@@ -71,7 +71,7 @@ export function TeamPlacesMenu({ name, here, projects, onAdd, onTakeOut, onDelet
   onDelete: () => void
 }) {
   return (
-    <CardMenu label={`Team settings for ${name}`} title="Team settings" className="room-team-move">
+    <CardMenu label={`More for ${name}`} title="More" className="room-team-move">
       {(pick) => <PlacesItems here={here} projects={projects} onAdd={onAdd} onTakeOut={onTakeOut} onDelete={onDelete} pick={pick} />}
     </CardMenu>
   )
@@ -123,8 +123,8 @@ export function TakeOutDialog({ name, here, others, onTakeOut, onClose }: { name
     <div className="lw-scrim dim" onMouseDown={() => { if (!busy) onClose() }}>
       <div role="alertdialog" aria-modal="true" aria-labelledby={titleId} className="pop e2 lw-deleteteam" onMouseDown={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === 'Escape' && !busy) { event.stopPropagation(); onClose() } }}>
         <h2 id={titleId}>Take “{name}” out of {here}?</h2>
-        <p>It keeps working in {listNames(others)}. Its chat and work in {here} go with it.</p>
-        <p title=".trash, inside your teams folder">LoomWatch keeps a copy in your teams folder.</p>
+        <p>It keeps working in {listNames(others)}. Its chat and work leave {here}.</p>
+        <p title=".trash, inside your teams folder">LoomWatch keeps a copy and its past runs, so they come back if you restore it.</p>
         {error && <p role="alert" className="dt-alert">{error}</p>}
         <div className="dt-acts">
           <button type="button" className="btn" autoFocus onClick={onClose} disabled={busy}>Cancel</button>

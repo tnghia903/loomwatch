@@ -461,7 +461,7 @@ describe('Home, the studio (ADR 0097)', () => {
     render(<Home onPalette={vi.fn()} runs={[]} />)
     const teams = await screen.findByRole('list', { name: 'Teams in no project' })
     expect(teams.closest('section')).toBe(screen.getByRole('heading', { name: 'Not in a project' }).closest('section'))
-    const row = within(teams).getByRole('button', { name: 'Team settings for Weekly posts' }).closest('li') as HTMLElement
+    const row = within(teams).getByRole('button', { name: 'More for Weekly posts' }).closest('li') as HTMLElement
     // Its line opens its chat, as a team's line on a project's card does.
     expect(within(row).getByRole('link')).toHaveAttribute('href', '/?path=blog.yaml&view=chat')
     // Not a project: no room of its own among the projects, in either view.
@@ -483,8 +483,8 @@ describe('Home, the studio (ADR 0097)', () => {
     await waitFor(() => expect(calls).toEqual(['PUT /api/team']))
     expect(saved).toContain('project: sutd')
     expect(await screen.findByText(/works in/)).toHaveTextContent('Weekly posts works in SUTD final project now.')
-    fireEvent.click(within(row).getByRole('button', { name: 'Team settings for Weekly posts' }))
-    fireEvent.click(within(screen.getByRole('menu', { name: 'Team settings for Weekly posts' })).getByRole('menuitem', { name: 'Delete team…' }))
+    fireEvent.click(within(row).getByRole('button', { name: 'More for Weekly posts' }))
+    fireEvent.click(within(screen.getByRole('menu', { name: 'More for Weekly posts' })).getByRole('menuitem', { name: 'Delete team…' }))
     fireEvent.click(within(screen.getByRole('alertdialog', { name: 'Delete “Weekly posts”?' })).getByRole('button', { name: 'Delete team' }))
     await waitFor(() => expect(calls).toEqual(['PUT /api/team', 'DELETE /api/team?path=blog.yaml']))
   })
@@ -525,7 +525,7 @@ describe('Home, the studio (ADR 0097)', () => {
     fireEvent.click(within(card('Coffee shop')).getByRole('button', { name: 'Project settings for Coffee shop' }))
     fireEvent.click(within(screen.getByRole('menu', { name: 'Project settings for Coffee shop' })).getByRole('menuitem', { name: 'Delete project…' }))
     const dialog = screen.getByRole('alertdialog', { name: 'Delete the project “Coffee shop”?' })
-    expect(dialog).toHaveTextContent('Prices keeps working in Bike rental; its work here goes with the project.')
+    expect(dialog).toHaveTextContent('Prices keeps working in Bike rental. Its chat and work here go with the project.')
     expect(dialog).not.toHaveTextContent('Not in a project')
   })
 
@@ -539,7 +539,7 @@ describe('Home, the studio (ADR 0097)', () => {
     render(<Home onPalette={vi.fn()} runs={[]} />)
     const teams = await screen.findByRole('list', { name: 'Teams in no project' })
     expect(within(teams).queryByRole('button', { name: /Add to a project/ })).toBeNull()
-    expect(within(teams).getByRole('button', { name: 'Team settings for Weekly posts' })).toBeInTheDocument()
+    expect(within(teams).getByRole('button', { name: 'More for Weekly posts' })).toBeInTheDocument()
     // The desk still shows: a team in no project is a team like any other.
     expect(screen.getByRole('button', { name: 'New project' })).toBeInTheDocument()
   })

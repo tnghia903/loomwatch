@@ -778,10 +778,11 @@ with what should change; under its new version, **Continue with the team** runs 
    Ready-made teams are saved straight away, each agent on the model its job suits, so you can run
    them immediately.
 
-   One team can work in several projects. In a room, open a team's **⋯** and choose **Add to
-   another project**, or click **Add a team** to bring in one you already have. Each project keeps
-   its own chat, history, files and schedule for it, and a change you save to the team reaches it in
-   every project. **Take out of** the project removes it from just that one.
+   One team can work in several projects. In a project's room, open a team's **⋯** and choose
+   **Add to another project**, or click **Add a team** to bring in one you already have. Each
+   project keeps its own chat, history, files and schedule for it, and a change you save to its
+   agents and how they hand work on reaches every project. **Take out of** the project removes it
+   from just that one; **Delete team…** removes it from every project.
 4. A team has two tabs: **Team** and **Chat**. On **Team**, add agents from **My agents** in the
    panel on the left; to make a new one, choose **Build a new agent** and start from a job such as
    Researcher or Writer. Select a card and press its **Edit** button, such as **Edit Writer**, to change its name,
@@ -1128,7 +1129,9 @@ Windows, the program is `%LOCALAPPDATA%\Programs\LoomWatch\bin\loomwatchd.exe`).
 <summary>Deleting and restoring a team or a project</summary>
 
 To delete a team, open it from its project's room, click its name at the top and choose **Delete
-team…**.
+team…**. A team that works in several projects goes from every one of them, each project's files
+in a folder of their own in `.trash`; to remove it from one project only, choose **Only take out of**
+that project in the same confirmation.
 LoomWatch refuses while the team is running, or while another team reads its memory. Nothing is
 erased. The team file, its layout, its own notes folder (`<team>.brief`) and the folder of files
 added to its agents with **Add file…** (`<team>.files`) move to `.trash/<date>-<team>/` inside your

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { loadPlaces } from './places'
+import { loadPlaces, setupDiffers } from './places'
 
 const team = (id: string, project: string | null, shares = 'prices') => `schemaVersion: 1\nid: ${id}\nshares: ${shares}\n${project ? `project: ${project}\n` : ''}name: Prices\nentrypoint: a\nagents:\n  - {id: a, name: Writer, model: fake/offline, role: Write.}\nedges: []\n`
 
@@ -26,5 +26,17 @@ describe('a team’s places', () => {
     expect(await loadPlaces('prices', 'coffee.yaml')).toEqual(expected)
     // The open team names its file in full.
     expect(await loadPlaces('prices', '/teams/coffee.yaml')).toEqual(expected)
+  })
+})
+
+// Only a change to the setup reaches the other places: a schedule, delivery or Brief is this one's.
+describe('what an unsaved change reaches', () => {
+  const saved = team('prices', 'coffee')
+  it('is the setup, not a place’s own keys', () => {
+    expect(setupDiffers(saved, saved)).toBe(false)
+    expect(setupDiffers(saved, `${saved}schedule: {cron: "0 8 * * 1", prompt: Weekly}\n`)).toBe(false)
+    expect(setupDiffers(saved, saved.replace('project: coffee', 'project: bikes'))).toBe(false)
+    expect(setupDiffers(saved, saved.replace('role: Write.', 'role: Write it all.'))).toBe(true)
+    expect(setupDiffers(saved, saved.replace('name: Prices', 'name: Costs'))).toBe(true)
   })
 })

@@ -359,7 +359,7 @@ export function ProjectRoom({ id }: { id: string }) {
                     setProblem(null)
                     setSaid(null)
                     ;(alone ? moveTeam(team.path, project.id) : addTeamToProject(team.path, project.id).then(() => undefined)).then(
-                      () => { setSaid(alone ? <>{team.name} works here now.</> : <>{team.name} works here too, with its own chat and work here.</>); reload() },
+                      () => { setSaid(alone ? <>{team.name} works here now.</> : <>{team.name} works here too, with a chat and work of its own.{team.schedule ? ' It has no schedule here yet.' : ''}</>); reload() },
                       (caught: unknown) => setProblem(`Couldn’t add ${team.name}. ${caught instanceof Error ? caught.message : String(caught)}`),
                     )
                   }}
@@ -382,7 +382,8 @@ export function ProjectRoom({ id }: { id: string }) {
                   setProblem(null)
                   setSaid(null)
                   addTeamToProject(team.path, to).then(
-                    () => { if (target) setSaid(<>{team.name} works in <a className="link" href={roomHref(target.id)}>{target.name}</a> too, with its own chat and work there.</>); reload() },
+                    // Its schedule is each project's own: the new place starts without one.
+                    () => { if (target) setSaid(<>{team.name} works in <a className="link" href={roomHref(target.id)}>{target.name}</a> too, with a chat and work of its own there.{team.schedule ? ' It has no schedule there yet.' : ''}</>); reload() },
                     (caught: unknown) => setProblem(`Couldn’t add ${team.name} to ${target?.name ?? 'that project'}. ${caught instanceof Error ? caught.message : String(caught)}`),
                   )
                 }}
@@ -465,7 +466,7 @@ export function ProjectRoom({ id }: { id: string }) {
           here={project.name}
           others={(takingOut.alsoIn ?? []).map((other) => other.name)}
           onTakeOut={() => takeTeamOut(takingOut.path).then(() => {
-            setSaid(<>{takingOut.name} is out of {project.name}. It works on in {listNames((takingOut.alsoIn ?? []).map((other) => other.name))}.</>)
+            setSaid(<>{takingOut.name} is out of {project.name}. It still works in {listNames((takingOut.alsoIn ?? []).map((other) => other.name))}.</>)
             setTakingOut(null)
             reload()
           })}
@@ -477,6 +478,11 @@ export function ProjectRoom({ id }: { id: string }) {
           path={deletingTeam.path}
           name={deletingTeam.name}
           places={othersOf(deletingTeam).length > 0 ? { here: project.name, others: othersOf(deletingTeam) } : undefined}
+          onTakeOut={() => takeTeamOut(deletingTeam.path).then(() => {
+            setSaid(<>{deletingTeam.name} is out of {project.name}. It still works in {listNames(othersOf(deletingTeam).map((other) => other.project))}.</>)
+            setDeletingTeam(null)
+            reload()
+          })}
           onDeleted={() => { setDeletingTeam(null); projectsChanged(); reload() }}
           onClose={() => setDeletingTeam(null)}
         />
