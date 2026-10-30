@@ -14,6 +14,7 @@ const REQUEST: &str = "Write the update for Lan. Three sections: Agreed, Open an
 fn solo(id: &str, writer: &str) -> Arc<TeamConfig> {
     Arc::new(TeamConfig {
         project: None,
+        shares: None,
         project_file: None,
         schema_version: 1,
         id: id.into(),
