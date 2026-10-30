@@ -1,4 +1,4 @@
-import { X } from 'lucide-react'
+import { X } from '../ui/icon'
 import { createElement, useRef } from 'react'
 
 import { canonicalModel } from '../../lib/ai/modelIds'

@@ -1,4 +1,4 @@
-import { Ban, Box, BookOpen, Check, FilePlus2, FolderPlus, Puzzle, RotateCcw, ScrollText, Wrench, X } from 'lucide-react'
+import { Ban, Box, BookOpen, Check, FilePlus2, FolderPlus, Puzzle, RotateCcw, ScrollText, Wrench, X } from '../ui/icon'
 import { useRef, useState } from 'react'
 
 import { uniqueLabel } from '../../lib/composer-layout/types'

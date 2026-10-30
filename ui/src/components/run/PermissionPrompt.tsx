@@ -1,4 +1,4 @@
-import { ShieldQuestionMark } from 'lucide-react'
+import { ShieldQuestionMark } from '../ui/icon'
 import { useId, useState, type ReactNode } from 'react'
 
 import { useRevealOnArrival } from '../../lib/chat/follow'

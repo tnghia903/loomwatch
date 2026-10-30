@@ -59,7 +59,7 @@ team files, and agents never get them.
 Connected tools show under **Give it a tool you connected** in every agent's Tools block. Give one,
 and the agent can use that tool's actions. A tool from the list also says what to try asking, for
 example "Find the cheapest flight from Hanoi to Tokyo in mid-November." In a team, the tool also
-shows on the Workflow canvas as a card wired to the agent.
+shows on the team's canvas, on its Team tab, as a card wired to the agent.
 
 ## It asks you first
 

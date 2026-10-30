@@ -496,8 +496,8 @@ describe('reading a file an agent made', () => {
 
   it('says when the work stopped, or nothing came back', async () => {
     const { rerender } = renderReader({ asked: [part({ state: 'failed', by: 'writer', text: 'The AI could not be reached.' })] })
-    fireEvent.click(await screen.findByRole('button', { name: 'Writer stopped before answering about “Sales grew 12% in Q3.”' }))
-    expect(screen.getByRole('button', { name: 'Writer stopped before answering about “Sales grew 12% in Q3.”' })).toHaveAttribute('title', 'Stopped · Explain this part in plain words.')
+    fireEvent.click(await screen.findByRole('button', { name: 'Writer didn’t finish answering about “Sales grew 12% in Q3.”' }))
+    expect(screen.getByRole('button', { name: 'Writer didn’t finish answering about “Sales grew 12% in Q3.”' })).toHaveAttribute('title', 'Didn’t finish · Explain this part in plain words.')
     expect(document.querySelector('.rd-mark')).toHaveClass('failed')
     expect(answerCard()).toHaveTextContent('stopped')
     expect(answerCard()).toHaveTextContent('The AI could not be reached.')

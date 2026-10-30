@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowRight } from 'lucide-react'
+import { ArrowRight } from '../ui/icon'
 import { capabilityEvidence, hadSkill } from '../../lib/runs/capabilityEvidence'
 import type { Evidence, RunEvent, RunPhase, RunProjection } from '../../lib/watch/events'
 import { cardActivity, linkedIn, asUse, USE_NAMES, WEB_KINDS, type Use, type UseKind } from '../../lib/watch/cardActivity'
@@ -17,6 +17,7 @@ import { skillName } from '../../lib/story/reads'
 import type { RunRecord } from '../../lib/runs/client'
 import { modelLabelForAgent } from '../../lib/models'
 import { useRunQuests } from './useRunQuests'
+import { stateLabel } from '../../lib/state/words'
 
 export interface DeliveryLaneProps {
   prompt: string
@@ -82,7 +83,7 @@ const plural = (count: number, one: string, many = `${one}s`) => `${count} ${cou
 /** Run phases as an operator would say them; the raw phase ids are daemon vocabulary. */
 const PHASE_WORDS: Partial<Record<string, string>> = {
   queued: 'Queued', starting: 'Starting', running: 'Running', succeeded: 'Finished',
-  partial: 'Finished with gaps', failed: 'Failed', cancelled: 'Stopped',
+  partial: 'Finished with gaps', failed: stateLabel('failed'), cancelled: stateLabel('stopped'),
 }
 
 /** Run is a reading surface. The saved team canvas remains the editing surface, and detailed

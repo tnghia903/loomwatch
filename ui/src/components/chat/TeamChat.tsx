@@ -1,4 +1,4 @@
-import { ArrowDown, ChevronDown, ChevronRight, Play, Reply, RotateCcw, Search, X } from 'lucide-react'
+import { ArrowDown, ChevronDown, ChevronRight, Play, Reply, RotateCcw, Search, X } from '../ui/icon'
 import { Fragment, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import { continueWithTeam, findInChat, sendChatMessage, startFromNote, stillAnswering, uploadChatFile, type ChatFile, type ChatItem, type ChatMessage, type ChatTarget, type Found, type FoundPassage, type FoundPiece, type NoteFailure, type ReplyTo } from '../../lib/chat/client'
@@ -43,6 +43,7 @@ import { FixIt, WorkPiece, type TeamView } from './WorkPiece'
 import { InlineMarkdown } from '../ui/Markdown'
 import { earlierTries, triedAgain, tryingAgain } from '../../lib/chat/tries'
 import { fetchMoveStatus, movedLine } from '../../lib/team-file/moveOntoMyAgents'
+import { STATE_WORDS as WORDS } from '../../lib/state/words'
 
 /** Saving the team before work starts: the revision the run is pinned to, or why it could not. */
 export type Prepared = { ok: true; revision: string | null } | { ok: false; error: string }
@@ -975,7 +976,7 @@ function SewnMark() {
 
 // The words the chat uses for work everywhere: ready to take it, at it, waiting on you, or stopped
 // by an error. Each face glows its state's colour (team-chat.css).
-const STATE_WORDS = { working: 'working', waiting: 'waiting for you', idle: 'ready', failed: 'failed', away: 'offline' } as const
+const STATE_WORDS = { working: WORDS.working, waiting: WORDS.waiting, idle: WORDS.ready, failed: WORDS.failed, away: 'offline' } as const
 type Presence = keyof typeof STATE_WORDS
 
 /** The agents whose newest piece of work stopped at them with an error, until they work again. */

@@ -2,6 +2,7 @@ import { quoteLine, replyWords } from '../chat/reply'
 import { stillAnswering, type ChatItem, type ChatMessage, type ChatTarget, type PartAt, type ReplyTo } from '../chat/client'
 import type { RunRecord } from '../runs/client'
 import { plainRunError } from '../runs/errors'
+import { stateLabel } from '../state/words'
 
 /**
  * A part of a file marked in the reader and asked about (ADR 0077). It goes to the chat as a reply
@@ -383,7 +384,7 @@ export function bubbleLabel(passage: AskedPassage, look: PartLook, name: (id: st
   if (passage.answer.state === 'unsent') return `Your question about ${about} wasn't sent`
   if (look === 'busy') return `${who} is answering your question about ${about}`
   if (look === 'waiting') return `New answer from ${who} about ${about}`
-  if (look === 'failed') return `${who} stopped before answering about ${about}`
+  if (look === 'failed') return `${who} didn’t finish answering about ${about}`
   if (passage.answer.state === 'none') return `No answer from ${who} about ${about}`
   return `${who}'s answer about ${about}`
 }
@@ -396,7 +397,7 @@ export function bubbleTitle(passage: AskedPassage, look: PartLook, name: (id: st
     : state === 'sending' ? 'Sending your question'
       : state === 'writing' || state === 'working' ? `${name(bubbleAgent(passage))} ${state === 'writing' ? 'is writing' : 'is working'}`
         : look === 'waiting' ? 'New answer'
-          : look === 'failed' ? 'Stopped' : ''
+          : look === 'failed' ? stateLabel('failed') : ''
   return [said, words].filter(Boolean).join(' · ')
 }
 
@@ -415,7 +416,7 @@ export function bubbleCardParts(passage: AskedPassage, look: PartLook, name: (id
       : state === 'writing' ? 'Writing its answer'
         : state === 'working' ? 'Working on it'
           : look === 'waiting' ? 'New answer'
-            : look === 'failed' ? 'Stopped' : ''
+            : look === 'failed' ? stateLabel('failed') : ''
   return { said, words }
 }
 

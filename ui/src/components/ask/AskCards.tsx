@@ -1,4 +1,4 @@
-import { ArrowRight, Check, PenLine, Play } from 'lucide-react'
+import { ArrowRight, Check, PenLine, Play } from '../ui/icon'
 import { useMemo } from 'react'
 
 import { proposalChanges } from '../../lib/ask/proposal'

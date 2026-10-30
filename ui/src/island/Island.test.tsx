@@ -743,7 +743,7 @@ describe('the agent pinned to the notch', () => {
     expect(container.querySelector('.island-pinned .island-words')?.textContent).toBe('Maya just started')
     await waitFor(() => expect(container.querySelector('.island-pinned .island-row-figure')?.getAttribute('data-phase')).toBe('typing'))
     // A note's mark is the team chat's: a return arrow, where a message that starts work goes up.
-    expect(within(container).getByRole('button', { name: 'Send note' }).querySelector('svg.lucide-corner-down-left')).toBeTruthy()
+    expect(within(container).getByRole('button', { name: 'Send note' }).querySelector('svg.lw-icon-enter')).toBeTruthy()
     expect(container.querySelectorAll('.island-row:not(.island-pinned)')).toHaveLength(0)
     fireEvent.focus(field)
     fireEvent.change(field, { target: { value: 'Also check the weather' } })
@@ -917,7 +917,7 @@ describe('the agent pinned to the notch', () => {
     // Send: a mark at the field's end, out of sight until something is written.
     const rules = rulesOf(readFileSync(resolve(process.cwd(), 'src/island/island.css'), 'utf8'))
     const send = row.getByRole('button', { name: 'Send' })
-    expect([send.textContent, Boolean(send.querySelector('svg.lucide-arrow-up')), cascaded(send, 'opacity', DESKTOP, rules)]).toEqual(['', true, '0'])
+    expect([send.textContent, Boolean(send.querySelector('svg.lw-icon-send')), cascaded(send, 'opacity', DESKTOP, rules)]).toEqual(['', true, '0'])
     fireEvent.change(row.getByRole('textbox', { name: 'Message Maya' }), { target: { value: 'And the way back?' } })
     expect(cascaded(send, 'opacity', DESKTOP, rules)).toBe('1')
     // It comes by fading in and growing; with reduced motion it only fades, never growing.

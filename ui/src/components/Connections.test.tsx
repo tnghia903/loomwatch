@@ -34,10 +34,14 @@ function daemon({ tools = [] as unknown[], destination = null as typeof page | n
 }
 
 // It goes Home, and says so: "Back to the canvas" named a screen this page isn't reached from.
-it('leads back to Home by name', async () => {
+it('is one of You’s tabs, beside About you and Usage', async () => {
   daemon()
+  window.history.replaceState(null, '', '/connections')
   render(<Connections />)
-  expect(await screen.findByRole('link', { name: 'Back to Home' })).toHaveAttribute('href', '/')
+  const you = await screen.findByRole('navigation', { name: 'You' })
+  expect(within(you).getByRole('link', { name: 'Connections' })).toHaveAttribute('aria-current', 'page')
+  expect(within(you).getByRole('link', { name: 'About you' })).toHaveAttribute('href', '/you')
+  expect(screen.queryByRole('link', { name: 'Back to Home' })).toBeNull()
 })
 
 describe('Notion is one of the tools (ADR 0070)', () => {

@@ -1,4 +1,4 @@
-import { ArrowUp, AtSign, CornerDownLeft, MessageSquareText, Paperclip, Reply, TextQuote, Users, X, Zap } from 'lucide-react'
+import { AtSign, MessageSquareText, Reply, TextQuote, Users, X, Zap } from '../ui/icon'
 import { createElement, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 
 import { pastedName, type Attachment, type ChatAttachments } from '../../lib/chat/attachments'
@@ -15,6 +15,7 @@ import { Swap } from './Appearing'
 import { ChipField, type ChipFieldHandle } from './ChipField'
 import { MentionChip } from './SaidText'
 import type { RunRecord } from '../../lib/runs/client'
+import { AttachButton, SendButton } from '../box/BoxButtons'
 
 /** What the team is waiting on you for, which a typed answer goes with. */
 export interface OpenDecision {
@@ -391,9 +392,7 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
                 event.target.value = ''
                 if (files.length > 0) attachments.add(files)
               }} />
-              <button type="button" className="tc-attach" disabled={Boolean(disabled)} onClick={() => chooser.current?.click()} aria-label="Add pictures or files" title="Add pictures or files">
-                <Paperclip size={16} aria-hidden="true" />
-              </button>
+              <AttachButton disabled={Boolean(disabled)} onClick={() => chooser.current?.click()} />
             </>
           )}
           {canSendNow && !answering && (
@@ -404,10 +403,7 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
           {/* A review is decided with the buttons on its message; this box holds the note, which ↵
               sends back as Send back does. */}
           {answering?.kind !== 'review_stop' && (
-            <button type="submit" className="btn btn-primary tc-go" disabled={!trimmed || sending || Boolean(disabled) || filesHold} aria-label={sendLabel} title={filesHold && !answering ? 'Waits for your files' : undefined}>
-              {starts ? <ArrowUp size={15} aria-hidden="true" /> : <CornerDownLeft size={14} aria-hidden="true" />}
-              <span>{sendLabel}</span>
-            </button>
+            <SendButton label={sendLabel} icon={starts ? 'send' : 'enter'} primary className="tc-go" disabled={!trimmed || sending || Boolean(disabled) || filesHold} title={filesHold && !answering ? 'Waits for your files' : undefined} />
           )}
         </div>
       </div>

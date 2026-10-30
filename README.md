@@ -24,7 +24,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/readme/demo.gif" width="880" alt="The offline demo in LoomWatch: the three-step team on the Workflow canvas, then its chat. You write @team Prepare a short getting-started guide for new users and press Start. Under it, Waiting for you, with Details, Stop and Researcher's figure with 1 reply on the right; below, in the chat, Researcher's handover to you, and under it Approve and Send back to Researcher. You type Keep it to one page and press Approve with your note. Your note shows in the chat, marked approved, passed on to Writer, and Writer's answer appears, marked Nothing flagged.">
+  <img src="docs/assets/readme/demo.gif" width="880" alt="The offline demo in LoomWatch: the three-step team on its canvas, then its chat. You write @team Prepare a short getting-started guide for new users and press Start. Under it, Waiting for you, with Details, Stop and Researcher's figure with 1 reply on the right; below, in the chat, Researcher's handover to you, and under it Approve and Send back to Researcher. You type Keep it to one page and press Approve with your note. Your note shows in the chat, marked approved, passed on to Writer, and Writer's answer appears, marked Nothing flagged.">
   <br>
   <sub>A team in its chat: ask it, read what its agents say, approve with a note, read the answer.</sub>
 </p>
@@ -63,7 +63,7 @@ and asks.
 <td width="50%" valign="middle">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="site/assets/app/agents-dark.webp">
-  <img src="site/assets/app/agents-light.webp" alt="Building an agent called Writer. Along the top, the name Writer, marked as saved, the Build and Chat tabs, and the bell saying All clear. Down the left edge, a column of My agents' figures, with Writer's marked; pick one to open it. Under the top bar, one sentence sums the agent up: Writer thinks with Claude Opus 5.5, has 1 skill, and reads nothing yet. It asks you before it searches the web, edits files or runs commands. Below it, Writer's figure sits at a desk, with a label on each part: The job, its instructions pinned up; Skills · 1, a note for its house style; Thinks with Claude Opus 5.5; Allowed · nothing; Asks you first · Web, Edit files, Commands; Hands back · said in its instructions; Reads · nothing yet; Tools · none yet. On the right, the same settings in blocks, starting with Name, What it does and Instructions.">
+  <img src="site/assets/app/agents-light.webp" alt="Building an agent called Writer. Down the left, LoomWatch's dock: Home with a count of 1, Projects, My agents marked, Skills, Quests, then Ask and You. Along the top, the name Writer, saved a minute ago, the Build and Chat tabs, and the bell saying 1 needs you. Under the top bar, one sentence sums the agent up: Writer thinks with Claude Sonnet 5.5, has no skills yet, and reads nothing yet. It asks you before it searches the web, edits files or runs commands. Below it, Writer's figure sits at a desk, with a label on each part: The job, its instructions pinned up; Skills · none yet; Thinks with Claude Sonnet 5.5; Allowed · nothing; Asks you first · Web, Edit files, Commands; Hands back · said in its instructions; Reads · nothing yet; Tools · none yet. On the right, the same settings in blocks, starting with Name, Instructions and Model.">
 </picture>
 </td>
 <td width="50%" valign="middle">
@@ -80,7 +80,7 @@ change its job later and every team uses the change the next time it works.
 <tr>
 <td valign="middle">
 
-### 02 &nbsp;Workflow
+### 02 &nbsp;Team
 
 Start a team with the agents you built, and connect who hands work to whom on a canvas.
 LoomWatch reads the team back to you in **one plain sentence**, so you can check the plan before
@@ -340,8 +340,8 @@ on the models you've connected. Nothing is saved until you click **Apply**.
 ### 🎓 Guided first run
 
 Your first agent asks what to make first, and asks which AI should answer only when you send.
-**Just look around** skips to Home. **Getting started guide** in the ☰ menu shows the rest in three
-minutes.
+**Just look around** skips to Home. **Getting started guide**, under **You** in the dock on the left,
+shows the rest in three minutes.
 
 </td>
 <td valign="top">
@@ -379,7 +379,7 @@ add, connect and rename agents to match. To run a team on a schedule, ask
 <td align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="site/assets/app/home-dark.webp">
-  <img src="site/assets/app/home-light.webp" alt="Home: first Your desk, where Researcher brought work for you to check, with the Review and Chat with one agent buttons. Under Projects, a room for each project with its team's agents at their desks: in SUTD final project, Researcher is drawn faint because it is at your desk, then the gold ring where you check; in Bakery website, Writer is working; and in My thesis, Writer is drawn faint because it is working in the Website team. Then a New project tile, and an agent in no project yet. At the top right are search, Skills, Quests, Ask, the bell saying 1 needs you, and the menu.">
+  <img src="site/assets/app/home-light.webp" alt="Home. Down the left, LoomWatch's dock: Home, marked, with a count of 1, then Projects, My agents, Skills, Quests, Ask and You. At the top, the box to give work: To Daily tech digest, What should Daily tech digest do?, a clip to add files and the send arrow. Under it, Needs you · 1 across the row: Researcher's figure, drawn big, brought work for you to check in Review stop demo, with a page icon to read it first and Approve. Then Working now (nobody is working, 8 ready, their figures), Finished today and This month. Under Projects, a room for each project with its team's agents: Review stop demo, where Researcher is waiting for you; Daily tech digest, which runs every day at 9:00 AM; and Research and review, ready. At the top right, the bell saying 1 needs you, and search.">
 </picture>
 <br><sub><strong>Home.</strong> Your desk first, with whoever waits for you, then a room for each project, with its agents at their desks.</sub>
 </td>
@@ -388,16 +388,16 @@ add, connect and rename agents to match. To run a team on a schedule, ask
 <td align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="site/assets/app/workflow-dark.webp">
-  <img src="site/assets/app/workflow-light.webp" alt="A team's Workflow tab: a daily schedule feeds Gatherer, then Reader, then Writer, which produces the team response. At the top of the canvas the team is read back as one sentence, with each agent's figure. Down the left edge, a column shows each of your teams by its agents' figures, with this one marked; pick one to switch. Beside it, the Add to your team panel lists My agents with the models they think with, the Build a new agent link, then Workflow steps with You (review step). The heading says Your team is ready, beside Run team.">
+  <img src="site/assets/app/workflow-light.webp" alt="A team's Team tab, beside LoomWatch's dock with Projects marked. A daily schedule feeds Gatherer, then Reader, then Writer, which produces the team response. At the top of the canvas the team is read back as one sentence, with each agent's figure: every day at 9:00 AM and whenever you ask, Gatherer collects what is needed, then Reader does its part, and finally Writer writes the answer. Beside it, the Add to your team panel lists My agents with the models they think with. The heading says Your team is ready, beside Run team. Along the top, the team's name, saved, the Agents, Team and Chat tabs, the bell and the ⋯.">
 </picture>
-<br><sub><strong>Workflow.</strong> Your agents on the canvas, connected in order and read back as one sentence.</sub>
+<br><sub><strong>Team.</strong> Your agents on the canvas, connected in order and read back as one sentence.</sub>
 </td>
 </tr>
 <tr>
 <td align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="site/assets/app/chat-dark.webp">
-  <img src="site/assets/app/chat-light.webp" alt="A team's Chat tab: the request @team Prepare a short getting-started guide for new users; under it, Waiting for you: Researcher's work is ready for your review, with Details, Stop and Researcher's figure with 1 reply on the right. Below, in the chat, Researcher's handover to you, then Approve and Send back to Researcher, and the message box ready for your review note.">
+  <img src="site/assets/app/chat-light.webp" alt="A team's Chat tab, beside LoomWatch's dock with Projects marked: the request Prepare a short getting-started guide for new users; under it, Waiting for you: Researcher's work is ready for your review, with Details, Stop and Researcher's figure with 1 reply on the right. Below, in the chat, Researcher's handover to you, then Approve and Send back to Researcher, and the box ready for your review note.">
 </picture>
 <br><sub><strong>Chat.</strong> Your review waits in the chat, under what the agents said, and Details opens every step beside the chat.</sub>
 </td>
@@ -504,7 +504,7 @@ longer need it.
 
 - **A Mac** with macOS 11 or newer, or **a Windows PC** with 64-bit Windows 10 or 11.
 - **For real runs, one way to pay for models.** Connect any of these on Home, or on
-  **Connections…** in the ☰ menu. Each model you pick says which one pays for it.
+  **Connections**, under **You** in the dock. Each model you pick says which one pays for it.
   - **Your ChatGPT Plus or Pro plan.** Click **Continue with ChatGPT** and allow LoomWatch on
     ChatGPT's own page. Agents on ChatGPT models count against your plan's limits, at no extra
     charge. LoomWatch never sees your password.
@@ -598,7 +598,7 @@ hour. Each try starts the work over, and costs what it uses. For scheduled runs 
 
 ### Remove LoomWatch
 
-1. Disconnect what you connected: choose **Connections…** from the ☰ menu, click **Remove key** on
+1. Disconnect what you connected: open **Connections**, under **You** in the dock, click **Remove key** on
    **Your Claude API credit** and **OpenRouter (pay per use)**, and **Sign out** on
    **Your ChatGPT plan**. Otherwise the OpenRouter key stays in your Keychain as
    `LoomWatch.OpenRouter`, and the Claude key and ChatGPT sign-in as `LoomWatch.Plans` (on Windows,
@@ -715,7 +715,7 @@ language and length you want. Then it answers again, made for you. **Keep this a
 agents, and **Go to Home** leaves it there. **Just look around**, at the top, goes to Home at any
 time.
 
-For a tour of the rest, choose **Getting started guide** from the ☰ menu at the top right, or press
+For a tour of the rest, choose **Getting started guide** under **You** in the dock, or press
 <kbd>⌘</kbd><kbd>K</kbd> and pick it. It walks you through building an agent, trying it on its own, putting it in a team and running it.
 
 <details>
@@ -728,7 +728,7 @@ and pick its team. It is a
 three-step workflow: **Researcher → You → Writer**. Its agents produce fixed responses so you can
 learn the interface without calling a model provider.
 
-1. Open the team's **Chat** tab (or click **Run team** in **Workflow**), type
+1. Open the team's **Chat** tab (or click **Run team** on the **Team** tab), type
    `@team Prepare a short getting-started guide for new users.` in the message box at the bottom,
    and press <kbd>Enter</kbd> (<kbd>Shift</kbd>+<kbd>Enter</kbd> adds a new line). Only a message
    with an **@** starts work; the box says where each message goes before you send it.
@@ -752,10 +752,10 @@ with what should change; under its new version, **Continue with the team** runs 
 
 ## Run your own agents
 
-1. Connect a way to pay for models, on Home or on **Connections…** (☰ menu): click
+1. Connect a way to pay for models, on Home or in **Connections** (under **You** in the dock): click
    **Continue with ChatGPT**, or paste a Claude API key or an OpenRouter key. LoomWatch checks each
-   with its company. **Usage…** in the ☰ menu shows what LoomWatch has used on each.
-2. Open **My agents** (☰ menu, or **Build an agent** on Home before you have one) and start from a job, such as Researcher or Writer, or from
+   with its company. **Usage**, under **You**, shows what LoomWatch has used on each.
+2. Open **My agents** (in the dock, or **Build an agent** on Home before you have one) and start from a job, such as Researcher or Writer, or from
    **Blank**. Give it a name, change its instructions, model and how hard it thinks to fit your work,
    give it the skills it needs and **Allow** what it may do without asking. Pick it a face, then
    open its **Chat** tab and give it a real request: it runs on its model, and asks you before
@@ -777,8 +777,8 @@ with what should change; under its new version, **Continue with the team** runs 
 
    Ready-made teams are saved straight away, each agent on the model its job suits, so you can run
    them immediately.
-4. A team has three tabs: **Agents**, **Workflow** and **Chat**. On **Agents**, click **Add an
-   agent** to bring in one from My agents. On **Workflow**, add more from **My agents** in the
+4. A team has three tabs: **Agents**, **Team** and **Chat**. On **Agents**, click **Add an
+   agent** to bring in one from My agents. On **Team**, add more from **My agents** in the
    panel on the left; to make a new one, choose **Build a new agent** and start from a job such as
    Researcher or Writer. Select a card to edit its name, instructions, model and how hard it
    thinks. Drag from the dot on a card's right edge to the next card to make them work in order, and
@@ -789,7 +789,7 @@ with what should change; under its new version, **Continue with the team** runs 
 In the chat, **Reply** under anything an agent said, such as a handover, a question or the answer:
 the agent is told which message you mean, and a reply to an agent at work joins its next turn. Put
 a face on what an agent said, such as **Good**, **Not sure** or **Wrong**, and the team's next run
-reads what it meant. Tell your agents about you once, with **About you…** in the ☰ menu: every agent
+reads what it meant. Tell your agents about you once, with **About you**, under **You** in the dock: every agent
 reads your name and what you wrote before it works, including the language, length and tone you ask
 for.
 
@@ -812,10 +812,10 @@ you've connected that offers that model, or else through OpenRouter.
 <details>
 <summary><strong>Keep the pipeline easy to follow</strong></summary>
 
-Choose **Organize** from the ☰ menu at the top right (or press <kbd>⌥</kbd><kbd>⌘</kbd><kbd>L</kbd>,
+Choose **Organize** in the canvas's view bar (or press <kbd>⌥</kbd><kbd>⌘</kbd><kbd>L</kbd>,
 or choose **Organize pipeline** in <kbd>⌘</kbd><kbd>K</kbd>) to arrange stages from left to right
 and group skills and sources below their agents. The view then fits the arranged team. **Undo
-organize**, in the same menu, restores the previous arrangement. Positions are saved with the canvas
+organize**, beside it, restores the previous arrangement. Positions are saved with the canvas
 layout; organizing does not change the workflow or start a run.
 
 </details>
@@ -823,7 +823,7 @@ layout; organizing does not change the workflow or start a run.
 <details>
 <summary><strong>Connect skills, knowledge and tools</strong></summary>
 
-The add panel on the left of **Workflow** lists your skills and the teams whose memory you can
+The add panel on the left of the **Team** tab lists your skills and the teams whose memory you can
 share. **Manage skills** opens the Skills page, where you add more: search skills.sh and ClawHub at
 once, paste a GitHub link, or copy in the skills your AI apps already have. Each one shows its
 license and what it needs before anything is copied, and nothing in it runs when it is added. Add a
@@ -852,17 +852,17 @@ model drops or rewrites just those sentences as one edit you can keep or put bac
 
 If something cannot be delivered (for example, a skill that is no longer in LoomWatch's skills),
 the run stops before it starts and says what to change. If an older team shows "drawn but not
-delivered to agents yet" at the top of Workflow, click **Deliver on the next run**, then save.
+delivered to agents yet" at the top of the Team tab, click **Deliver on the next run**, then save.
 
 </details>
 
 <details>
 <summary><strong>Give the team context and review its work</strong></summary>
 
-Choose **Team memory** from the ☰ menu to add shared instructions or reference files to the
+Choose **Team memory** from a team's ⋯ menu to add shared instructions or reference files to the
 **Brief**. Use the **Notebook** to review reusable notes and checkpoints.
 
-Select an agent in Workflow to see its **Context**: its place in the team (for example "Step 2 of 3 ·
+Select an agent on the Team tab to see its **Context**: its place in the team (for example "Step 2 of 3 ·
 after Researcher · hands its work to Writer"), the team Brief, and every skill, folder, file and
 tool connected to it, each with an × to disconnect it. In a team of two or more, each agent is told
 its place at the start of every run. In a run's **Details**, an agent's **What it received** link
@@ -956,7 +956,7 @@ It depends on how each agent's model is paid:
 - **Through OpenRouter,** OpenRouter bills your key for each call at that model's price, and the
   receipt shows the exact cost it reported.
 
-**Usage…** in the ☰ menu shows what LoomWatch used on each over the last 30 days, with a link to
+**Usage**, under **You**, shows what LoomWatch used on each over the last 30 days, with a link to
 where you see the exact figure.
 
 </details>
@@ -984,7 +984,7 @@ free model such as DeepSeek or Qwen through OpenRouter.
 <details>
 <summary><strong>What happens when an agent asks for permission to do something?</strong></summary>
 
-LoomWatch decides, for every agent. Each agent's panel in **Workflow** has three switches under **Allowed
+LoomWatch decides, for every agent. Each agent's panel on the **Team** tab has three switches under **Allowed
 without asking**: **Search the web**, **Edit files** (only in the agent's own folder) and **Run
 commands**. They start off, except **Search the web** for researchers. LoomWatch always allows the
 team's own handovers and the tools, folders and files you connected to the agent.
@@ -1151,7 +1151,7 @@ while the team is working, or while its schedule is about to try its last work a
 <details>
 <summary>Reusing an agent with My agents</summary>
 
-Build an agent in **My agents** (☰ menu). It appears under **My agents** in
+Build an agent in **My agents** (in the dock). It appears under **My agents** in
 every team's add panel, with its instructions, model, skills and what it may do without asking.
 
 Every agent a team has is one of My agents, and it is the same agent in every team it's in. A
@@ -1194,20 +1194,20 @@ whose agent was behind a newer save of it in My agents says so once in its chat.
 | Another program is using port 3000 (a copy of the source) | Start LoomWatch on another port: `LOOMWATCH_PORT=3001 ./loomwatch`. The apps move to the next free port by themselves. |
 | `./loomwatch` says another copy of LoomWatch is already running, or the page says "Couldn't list your teams" | An earlier copy is still running, often one whose folder you deleted. Stop it with the `kill` command the message gives, then run `./loomwatch` again. |
 | Team file not found | Confirm the file is in your teams folder (`~/LoomWatch/teams` unless you set `LOOMWATCH_TEAMS_ROOT`). The demo link uses `?path=operator-stop.yaml`, relative to that folder. |
-| "OpenRouter refused the API key" | The key was deleted or mistyped. Make a new one at [openrouter.ai/keys](https://openrouter.ai/keys) and paste it into **OpenRouter (pay per use)** in **Connections…**. |
-| "Anthropic refused the Claude API key" | The key was deleted or mistyped. Make a new one in the Claude Console, in the organization linked to your Claude plan, and paste it into **Your Claude API credit** in **Connections…**. A key starting `sk-ant-oat` is a Claude sign-in, which LoomWatch can't use. |
-| "Your Claude API credit is used up" | It comes back when your plan renews. Until then, add credits in the Claude Console, or choose the agent a model paid another way. **Usage…** in the ☰ menu shows what LoomWatch spent. |
+| "OpenRouter refused the API key" | The key was deleted or mistyped. Make a new one at [openrouter.ai/keys](https://openrouter.ai/keys) and paste it into **OpenRouter (pay per use)** in **Connections** (under **You**). |
+| "Anthropic refused the Claude API key" | The key was deleted or mistyped. Make a new one in the Claude Console, in the organization linked to your Claude plan, and paste it into **Your Claude API credit** in **Connections** (under **You**). A key starting `sk-ant-oat` is a Claude sign-in, which LoomWatch can't use. |
+| "Your Claude API credit is used up" | It comes back when your plan renews. Until then, add credits in the Claude Console, or choose the agent a model paid another way. **Usage**, under **You**, shows what LoomWatch spent. |
 | "LoomWatch has reached a usage limit on your ChatGPT plan" | Click **Manage usage** to see your plan's limit and LoomWatch's share of it. Wait until the plan's limit resets, raise LoomWatch's share there, or choose the agent a model paid another way. |
 | "LoomWatch couldn't reach ChatGPT" (or OpenRouter, Anthropic) | This computer was offline, or that company didn't answer. Check the internet, then click **Try again**. A scheduled run tries again by itself first. |
-| "LoomWatch's sign-in with ChatGPT has ended" | Click **Continue with ChatGPT** on **Your ChatGPT plan** in **Connections…**. |
+| "LoomWatch's sign-in with ChatGPT has ended" | Click **Continue with ChatGPT** on **Your ChatGPT plan** in **Connections** (under **You**). |
 | "This ChatGPT account can't share its plan with apps" | Only ChatGPT Plus and Pro plans can. Choose the agent a model on your Claude credit or OpenRouter. |
-| "You signed in with ChatGPT but didn't allow LoomWatch to use your plan" | Click **Turn on plan use** on **Your ChatGPT plan** in **Connections…**, and allow it on ChatGPT's page. |
+| "You signed in with ChatGPT but didn't allow LoomWatch to use your plan" | Click **Turn on plan use** on **Your ChatGPT plan** in **Connections** (under **You**), and allow it on ChatGPT's page. |
 | "Your OpenRouter account is out of credits" | Add credits at [openrouter.ai/settings/credits](https://openrouter.ai/settings/credits), or choose a free model for the agent. |
 | "OpenRouter has no model called …" | The model was renamed or retired. Choose another model in the agent's panel. |
 | A skill is missing | Add it on the Skills page, or click **Find skills in your apps** there to copy it from an AI app's skills. Skills that travel with a team go in `.agents/skills` beside its file. |
-| Ask or a team says a way of paying isn't connected | The agent's model is paid by your ChatGPT plan, your Claude credit or OpenRouter, and that one isn't connected. Connect it in **Connections…**, or choose a model you can run. When a connected one has the same models, the team offers to move its agents with one click. |
+| Ask or a team says a way of paying isn't connected | The agent's model is paid by your ChatGPT plan, your Claude credit or OpenRouter, and that one isn't connected. Connect it in **Connections** (under **You**), or choose a model you can run. When a connected one has the same models, the team offers to move its agents with one click. |
 | An agent's working folder is missing | Native teams should use a real folder on this computer. Container-run teams must use `/workspaces/...` and mount its host parent through `LOOMWATCH_WORKSPACES_DIR`. |
-| Agent cannot perform a tool action | While the run is going, answer its question in the run or the Needs-you tray before it is declined after 10 minutes. Afterwards, read the run receipt: it says what the agent wasn't allowed to do. Click **Allow from now on**, or switch it on under **Allowed without asking** in the agent's panel in Workflow. An edit outside the agent's own folder always asks, even with **Edit files** on. |
+| Agent cannot perform a tool action | While the run is going, answer its question in the run or the Needs-you tray before it is declined after 10 minutes. Afterwards, read the run receipt: it says what the agent wasn't allowed to do. Click **Allow from now on**, or switch it on under **Allowed without asking** in the agent's panel on the Team tab. An edit outside the agent's own folder always asks, even with **Edit files** on. |
 | Build reports an unsupported Node version | Install the current Node.js from <https://nodejs.org/>, reopen Terminal, and check `node --version`. |
 | UI assets are missing or look out of date (a copy of the source) | Stop LoomWatch, then start it with `./loomwatch --rebuild`. |
 | Cannot connect from another device | This setup serves runs and history only on your own computer at `127.0.0.1`. Use the browser on that computer. |

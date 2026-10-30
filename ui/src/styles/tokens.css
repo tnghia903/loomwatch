@@ -292,3 +292,16 @@
 @media (prefers-reduced-motion: reduce) {
   :root { --bloom: none; }
 }
+
+/* ---------------------------------------------------------------------------
+   STATE GLOWS — one light per state, the same on every screen (round 3):
+   green ready, blue working, gold waiting for you, red didn't finish, grey stopped.
+   Each follows its theme's colour, so one definition serves both themes.
+   --------------------------------------------------------------------------- */
+:root {
+  --glow-ready:   var(--color-ok);
+  --glow-working: var(--color-live);
+  --glow-waiting: var(--color-accent);
+  --glow-failed:  var(--color-alert);
+  --glow-stopped: var(--color-halt);
+}

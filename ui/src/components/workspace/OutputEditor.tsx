@@ -1,4 +1,4 @@
-import { X } from 'lucide-react'
+import { X } from '../ui/icon'
 
 import type { AgentNode } from '../../lib/library/nodeFromDrop'
 import type { DeliverConfig } from '../../lib/team-file/types'

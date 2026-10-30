@@ -1,5 +1,5 @@
 import { Suspense, useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
-import { ExternalLink, FilePlus2, FileText, Folder, FolderPlus, Network, NotebookText, Plug, Plus, Puzzle, Search, Store, Wrench, X } from 'lucide-react'
+import { ExternalLink, FilePlus2, FileText, Folder, FolderPlus, Network, NotebookText, Plug, Plus, Puzzle, Search, Store, Wrench, X } from '../ui/icon'
 
 import { shortName } from '../../lib/ai/client'
 import { effortWord, modelEfforts, placeEffort } from '../../lib/ai/efforts'
@@ -573,7 +573,7 @@ function Reads({ reads, own, teamOwn, inTeam, readOnly, agentName, onGive, onTak
   }
 
   // A team's own agent is given it here as well as in Workflow, so that button only goes to see it.
-  const workflowLabel = teamOwn ? (reads.length ? 'See it in Workflow' : null) : !own ? (reads.length ? 'Change it in Workflow' : 'Give it something in Workflow') : 'Give it more in Workflow'
+  const workflowLabel = teamOwn ? (reads.length ? 'See it on the Team tab' : null) : !own ? (reads.length ? 'Change it on the Team tab' : 'Give it something on the Team tab') : 'Give it more on the Team tab'
   return (
     <>
       {reads.length > 0 && <ul className="byhand-reads" aria-label="Folders, files and pages it reads">
@@ -610,10 +610,10 @@ function Reads({ reads, own, teamOwn, inTeam, readOnly, agentName, onGive, onTak
         </ul>}
       </>}
       <p className="t-meta">{teamOwn
-        ? 'Each is a card in Workflow with a line to this agent, and a line drawn there shows here too. A folder is linked where it is; a file is copied into your teams folder.'
+        ? 'Each is a card on the Team tab with a line to this agent, and a line drawn there shows here too. A folder is linked where it is; a file is copied into your teams folder.'
         : inTeam
-          ? 'What you give it here, it reads in every team it joins. This team can give it more with a line in Workflow.'
-          : 'What you give it here, it reads in every team it joins. A folder is linked where it is; a file is copied into your teams folder. A team can give it more in its Workflow.'}</p>
+          ? 'What you give it here, it reads in every team it joins. This team can give it more with a line on its Team tab.'
+          : 'What you give it here, it reads in every team it joins. A folder is linked where it is; a file is copied into your teams folder. A team can give it more on its Team tab.'}</p>
       {onShowWorkflow && workflowLabel && <button type="button" className="btn" onClick={onShowWorkflow}><Network size={14} aria-hidden="true" />{workflowLabel}</button>}
       {picking === 'folder' && <FolderPicker
         onClose={() => setPicking(null)}

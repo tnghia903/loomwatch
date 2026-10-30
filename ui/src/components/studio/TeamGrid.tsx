@@ -11,7 +11,7 @@ import { TeamDesks } from './TeamDesks'
 /** What a team is doing, when none of its desks shows it: it stopped, or nobody is at work yet. */
 function said(team: RoomTeam): string | null {
   if (team.state === 'ready' || litAt(team)) return null
-  return team.state === 'failed' ? 'didn’t finish' : PRESENCE_WORDS[team.state]
+  return PRESENCE_WORDS[team.state]
 }
 
 /**

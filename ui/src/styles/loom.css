@@ -385,16 +385,13 @@ span.story-schedule { cursor: default; }
   /* The header has no room on a phone: the bell drops below it, as an icon and a count, and only
      appears when something is working or waiting. */
   .needs-you-anchor { right: 12px; top: 52px; }
-  /* A team's page keeps its menu on a phone, at the end of that row: it is the way to Team memory,
-     About you, Connections, Usage and the guide there. Like the bell it keeps its 30 px look and
-     reaches 44 px, mostly down into the heading's empty corner; its reach meets the bell's at 56 px. */
+  /* A team's page keeps its ⋯ on a phone, at the end of that row: it is the way to Team memory, the
+     guide and feedback there. Like the bell it keeps its 30 px look and reaches 44 px, mostly down
+     into the heading's empty corner; its reach meets the bell's at 56 px. */
   .lw-shell .workspace-chrome > .prototype-workspace-menu { right: 19px; top: 59px; }
   .lw-shell .workspace-chrome > .prototype-workspace-menu > button { width: 30px; height: 30px; position: relative; }
   .lw-shell .workspace-chrome > .prototype-workspace-menu > button::before { content: ''; position: absolute; inset: -3px -7px -11px; }
   .lw-shell .workspace-chrome > .prototype-workspace-menu ~ .needs-you-anchor { right: 64px; top: 59px; }
-  /* Ask beside them reaches 44 px too: as wide, and down into the same corner. */
-  .workspace-chrome .ask-button { min-width: 44px; justify-content: center; }
-  .workspace-chrome .ask-button::before { content: ''; position: absolute; inset: 0 0 -14px; }
   .needs-you-bell .needs-you-label { display: none; }
   .needs-you-bell .needs-you-n { display: inline; font-variant-numeric: tabular-nums; }
   .needs-you-bell:not(.has):not(.working) { display: none; }

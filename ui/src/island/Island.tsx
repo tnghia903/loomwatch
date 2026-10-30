@@ -9,7 +9,7 @@ import { createPortal } from 'react-dom'
 
 import { AgentFigure } from '../components/agents/benchFigure'
 import { FigureStill } from '../components/agents/FigureStill'
-import { ArrowUp, CornerDownLeft, Plus } from 'lucide-react'
+import { Plus } from '../components/ui/icon'
 
 import { LoomMark, StatusGlyph } from '../components/ui/glyphs'
 import { dropped } from '../lib/chat/attachments'
@@ -26,6 +26,8 @@ import { useIsland, type Island as IslandState } from './useIsland'
 import { useRunLimit } from './useRunLimit'
 import { ISLAND_WAITS } from './waits'
 import { InlineMarkdown } from '../components/ui/Markdown'
+import { STATE_WORDS } from '../lib/state/words'
+import { SendButton } from '../components/box/BoxButtons'
 
 /** Rows in the list before "N more teams in LoomWatch", as in the menu. */
 const LIST_ROWS = 5
@@ -398,7 +400,7 @@ function AskBody({ island, team, ticket, first }: { island: IslandState; team: T
 function resultWords(team: TeamNow): string {
   if (team.didNotStart) return `${team.teamName} didn’t start`
   if (team.chat && team.moment === 'fail') return `${team.agentName ?? team.teamName} didn’t answer`
-  if (team.moment === 'fail') return `${team.teamName} stopped`
+  if (team.moment === 'fail') return `${team.teamName} ${STATE_WORDS.failed}`
   if (team.pinned) return `${team.teamName} answered`
   if (team.chat) return `${team.agentName ?? 'The team'} answered in ${team.teamName}`
   return `${team.teamName} is done`
@@ -575,7 +577,7 @@ function PinnedRow({ island, work, crews, firstPermission, watching, foot, flyin
     </span>
   )
   if (watching) {
-    const doing = work?.moment === 'work' ? working(work, island.now) : work?.moment === 'done' ? `${pinned.name} answered` : work?.moment === 'fail' ? `${pinned.name} stopped` : `${pinned.name} just started`
+    const doing = work?.moment === 'work' ? working(work, island.now) : work?.moment === 'done' ? `${pinned.name} answered` : work?.moment === 'fail' ? `${pinned.name} ${STATE_WORDS.failed}` : `${pinned.name} just started`
     return (
       <div className="island-row island-pinned" data-moment={moment}>
         <span className="island-row-figures" aria-hidden="true">{figure}</span>
@@ -680,7 +682,7 @@ function PinnedRow({ island, work, crews, firstPermission, watching, foot, flyin
           }}
         />
         {!startHere && (
-          <button type="submit" className="island-send" aria-label={island.pinnedWorking ? 'Send note' : 'Send'} disabled={island.sending || !island.draft.trim()}>{island.pinnedWorking ? <CornerDownLeft size={16} aria-hidden="true" /> : <ArrowUp size={17} aria-hidden="true" />}</button>
+          <SendButton label={island.pinnedWorking ? 'Send note' : 'Send'} icon={island.pinnedWorking ? 'enter' : 'send'} className="island-send" disabled={island.sending || !island.draft.trim()} />
         )}
         </span>
         {startHere && <StartTeam island={island} request={startHere} first={!firstPermission} limit={limit} />}

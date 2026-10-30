@@ -1,4 +1,4 @@
-import { FilePlus2, PackageOpen, PencilLine, X } from 'lucide-react'
+import { FilePlus2, PackageOpen, PencilLine, X } from '../ui/icon'
 import { useEffect, useRef, useState } from 'react'
 
 import { isAbsolutePath } from '../../lib/files/paths'

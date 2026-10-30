@@ -1,4 +1,4 @@
-import { Check, Copy } from 'lucide-react'
+import { Check, Copy } from '../ui/icon'
 import { useRef, useState } from 'react'
 
 import { keys } from '../../lib/platform'

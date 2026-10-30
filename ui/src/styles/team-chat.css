@@ -163,10 +163,10 @@
 /* What an agent is doing glows round its figure's outline, with no dot or ring: green ready, gold
    waiting for you, blue at work (breathing where motion is welcome), red stopped by an error, or
    LoomWatch out of reach. On a piece's line only the figures doing something glow. */
-.tc-member { --glow: var(--color-ok); }
-.tc-member.waiting, .tc-replies-faces .chat-avatar.waiting { --glow: var(--color-accent); }
-.tc-member.working, .tc-replies-faces .chat-avatar.working { --glow: var(--color-live); }
-.tc-member:is(.failed, .away), .tc-replies-faces .chat-avatar.failed { --glow: var(--color-alert); }
+.tc-member { --glow: var(--glow-ready); }
+.tc-member.waiting, .tc-replies-faces .chat-avatar.waiting { --glow: var(--glow-waiting); }
+.tc-member.working, .tc-replies-faces .chat-avatar.working { --glow: var(--glow-working); }
+.tc-member:is(.failed, .away), .tc-replies-faces .chat-avatar.failed { --glow: var(--glow-failed); }
 .tc-member .chat-avatar-figure,
 .tc-replies-faces .chat-avatar:is(.waiting, .working, .failed) .chat-avatar-figure { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 2px var(--glow)); }
 .tc-member em { font-style: normal; font-size: 11.5px; color: var(--color-ink-3); }
@@ -1209,21 +1209,6 @@ button.tc-reply-quote:hover, button.tc-reply-quote:focus-visible { border-left-c
   background: color-mix(in srgb, var(--color-accent-tint) 55%, transparent);
   pointer-events: none;
 }
-.tc-attach {
-  display: inline-grid;
-  place-items: center;
-  width: 34px;
-  height: 34px;
-  padding: 0;
-  border: 0;
-  border-radius: 11px;
-  background: none;
-  color: var(--color-ink-3);
-  cursor: pointer;
-  transition: color var(--t-quick) var(--ease-out);
-}
-.tc-attach:hover, .tc-attach:focus-visible { color: var(--color-accent); }
-.tc-attach:disabled { opacity: 0.45; cursor: default; }
 .tc-attached { display: flex; flex-wrap: wrap; gap: 10px; margin: 0; padding: 6px 6px 0 0; list-style: none; }
 .tc-attached-item {
   position: relative;
@@ -1288,7 +1273,6 @@ button.tc-reply-quote:hover, button.tc-reply-quote:focus-visible { border-left-c
   .tc-attached-item:not(.picture) { padding-right: 40px; }
   .tc-attached-item.picture .tc-attached-remove { top: -8px; right: -8px; }
   .tc-attached { gap: 12px; padding: 8px 8px 0 0; }
-  .tc-attach { width: 44px; height: 44px; }
 }
 /* What happened to something done from the chat, such as a dropped folder added: a line over the box. */
 .tc-notice { margin: 0; font-size: 12.5px; color: var(--color-ink-2); display: flex; align-items: flex-start; gap: 6px; }

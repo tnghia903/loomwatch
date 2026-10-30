@@ -1,4 +1,4 @@
-import { X } from 'lucide-react'
+import { X } from '../ui/icon'
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 
 /** One AI the first agent can answer with. */

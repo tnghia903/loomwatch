@@ -1,4 +1,4 @@
-import { Check, ExternalLink, KeyRound, Link2, LogIn, Plug, Search } from 'lucide-react'
+import { Check, ExternalLink, KeyRound, Link2, LogIn, Plug, Search } from '../ui/icon'
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 
 import {

@@ -1,4 +1,4 @@
-import { X } from 'lucide-react'
+import { X } from '../ui/icon'
 import { useRef } from 'react'
 
 import { BUBBLE_POINT_EDGE, BUBBLE_POINT_FILL } from '../../lib/files/pageFrame'

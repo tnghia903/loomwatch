@@ -1,4 +1,4 @@
-import { CircleCheck, X } from 'lucide-react'
+import { CircleCheck, X } from '../ui/icon'
 import { useEffect, useRef, useState } from 'react'
 
 const SHOWN_FOR = 15_000

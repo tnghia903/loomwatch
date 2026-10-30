@@ -1,4 +1,4 @@
-import { ArrowUp, FileText, Folder } from 'lucide-react'
+import { ArrowUp, FileText, Folder } from '../ui/icon'
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 

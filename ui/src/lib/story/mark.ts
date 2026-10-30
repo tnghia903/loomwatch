@@ -1,5 +1,6 @@
 import type { AgentStatus } from '../team-file/types'
 import type { TaskState } from '../watch/events'
+import { STATE_WORDS } from '../state/words'
 
 /**
  * Agent marks: a small woven swatch that identifies one agent everywhere it appears, and moves
@@ -75,7 +76,7 @@ export const MARK_WORDS: Record<MarkState, string> = {
   writing: 'writing its reply',
   waiting: 'waiting for you',
   done: 'done',
-  failed: 'stopped with a problem',
+  failed: STATE_WORDS.failed,
   stopped: 'stopped',
 }
 

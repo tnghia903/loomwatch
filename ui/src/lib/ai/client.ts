@@ -144,7 +144,10 @@ export async function removeClaudeKey(): Promise<ClaudeStatus> {
 
 /** Starts a sign-in with ChatGPT: the address of OpenAI's page, to open in a new tab. */
 export async function startChatGptSignIn(): Promise<string> {
-  return (await call<{ url: string }>('/api/ai/chatgpt/sign-in', 'POST', {})).url
+  const answer = await call<{ url?: string } | null>('/api/ai/chatgpt/sign-in', 'POST', {})
+  // An answer with no address says so in words, never as the code's own error.
+  if (!answer?.url) throw new Error('Couldn’t start the sign-in with ChatGPT. Try again.')
+  return answer.url
 }
 
 /** Lists the plan's models again, which also proves the sign-in still works. */

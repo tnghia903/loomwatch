@@ -1,4 +1,4 @@
-import { Coins } from 'lucide-react'
+import { Coins } from '../ui/icon'
 import { useState } from 'react'
 
 import { useRevealOnArrival } from '../../lib/chat/follow'

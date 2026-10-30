@@ -1,5 +1,5 @@
 import { useRef, useState, type ReactNode } from 'react'
-import { Trash2, Wrench, X } from 'lucide-react'
+import { Trash2, Wrench, X } from '../ui/icon'
 import { AgentCheckup } from './AgentCheckup'
 import { AgentContext } from './AgentContext'
 import { AgentWorkFolder } from './AgentWorkFolder'

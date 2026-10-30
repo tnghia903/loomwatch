@@ -1,4 +1,4 @@
-import { ChevronDown, Pin } from 'lucide-react'
+import { ChevronDown, Pin } from '../ui/icon'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 import { PINNED_SHORTCUT, PINNED_SHORTCUT_WORDS } from '../../island/bridge'
@@ -61,7 +61,7 @@ export function AgentChip({ name, state, detail, action, onRemove, inTeams = [],
           <div className="pop-foot">
             {removing
               ? inTeams.length > 0
-                ? <span className="pop-inline t-meta" role="status"><span>It’s in {listNames(inTeams)}. Delete its card in {inTeams.length === 1 ? `${inTeams[0]}’s` : 'each one’s'} Workflow and save, then remove it here.</span><button type="button" className="btn" onClick={() => setRemoving(false)}>OK</button></span>
+                ? <span className="pop-inline t-meta" role="status"><span>It’s in {listNames(inTeams)}. Delete its card on {inTeams.length === 1 ? `${inTeams[0]}’s` : 'each one’s'} Team tab and save, then remove it here.</span><button type="button" className="btn" onClick={() => setRemoving(false)}>OK</button></span>
                 : <span className="pop-inline t-meta" role="alertdialog" aria-label="Remove from My agents"><span>Remove it from My agents?</span><button type="button" className="btn" onClick={() => { setOpen(false); onRemove() }}>Remove</button><button type="button" className="btn" onClick={() => setRemoving(false)}>Keep it</button></span>
               : <span className="acts">
                 {pin && <button type="button" className="link" title={pin.pinned ? undefined : pin.notchShown ? `Message it with ${PINNED_SHORTCUT_WORDS} (${PINNED_SHORTCUT}) from any app, without opening LoomWatch` : `Message it with ${PINNED_SHORTCUT_WORDS} (${PINNED_SHORTCUT}) from any app, after you turn on Show at the notch`} onClick={() => { setOpen(false); pin.onToggle() }}>{pin.pinned ? 'Unpin from the notch' : 'Pin to the notch'}</button>}

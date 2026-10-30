@@ -1,4 +1,4 @@
-import { ExternalLink, FolderOpen, X } from 'lucide-react'
+import { ExternalLink, FolderOpen, X } from '../ui/icon'
 import { createElement, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 

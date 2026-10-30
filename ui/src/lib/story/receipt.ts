@@ -8,6 +8,7 @@ import type { Evidence, RunPhase, RunProjection } from '../watch/events'
 import { formatTokens, type TokenSummary, type TurnPurpose, costWords } from '../watch/usage'
 import { failuresOf, readPhrase, workCount } from './reads'
 import { describeEvidence } from './weft'
+import { stateLabel } from '../state/words'
 
 /**
  * The run receipt: a printed account of one run, in the order a person checks it.
@@ -213,7 +214,7 @@ export function receiptTokens(summary: TokenSummary | null | undefined, names: R
 const PHASE_OUTCOME: Partial<Record<RunPhase, ReceiptOutcome>> = {
   succeeded: { word: 'Finished', tone: 'ok' },
   partial: { word: 'Finished with gaps', tone: 'warn' },
-  failed: { word: 'Failed', tone: 'bad' },
+  failed: { word: stateLabel('failed'), tone: 'bad' },
   cancelled: { word: 'Stopped by you', tone: 'wait' },
 }
 

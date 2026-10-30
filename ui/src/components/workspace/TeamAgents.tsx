@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
-import { Network, Plus, UserRoundPlus, X } from 'lucide-react'
+import { Network, Plus, UserRoundPlus, X } from '../ui/icon'
 
 import type { DetectedCapability } from '../../lib/library/client'
 import type { AgentDraft } from '../../lib/library/draft'
@@ -55,7 +55,7 @@ export interface TeamAgentsProps {
 const NO_MOVES: ReadonlyMap<string, ModelMove> = new Map()
 
 /**
- * THE TEAM'S AGENTS, the first of a team's three views (Agents, Workflow, Chat): every agent of the
+ * THE TEAM'S AGENTS, the first of a team's three views (Agents, Team, Chat): every agent of the
  * team on its workbench. A team starts here, with the agents you built in My agents or a new one;
  * Workflow is where they are connected. Every agent is one of My agents (ADR 0094), so its workbench
  * is its own: saving it changes it in every team it's in. One the team hasn't saved yet is edited
@@ -91,7 +91,7 @@ export function TeamAgents({ agents, responder, selected, onSelect, teamName, te
       {!agent && !onAdd && (
         <div className="team-agents-empty">
           <p>This team has no agents yet.</p>
-          <button type="button" className="btn btn-primary" onClick={onShowWorkflow}><Network size={14} aria-hidden="true" />Add one in Workflow</button>
+          <button type="button" className="btn btn-primary" onClick={onShowWorkflow}><Network size={14} aria-hidden="true" />Add one on the Team tab</button>
         </div>
       )}
 
@@ -101,8 +101,8 @@ export function TeamAgents({ agents, responder, selected, onSelect, teamName, te
             ? <AgentBuilder id={mine.id} skills={[...skills]} skillsLoading={skillsLoading} inTeam={{ name: teamName, onSaved: onAgentSaved, reads, knowledge, onShowWorkflow }} />
             : savedJobsLoaded && (
               <div className="team-agents-empty">
-                <p>This agent isn’t in My agents any more, so this team can’t run. In Workflow, select it, press Delete and save.</p>
-                <button type="button" className="btn" onClick={onShowWorkflow}><Network size={14} aria-hidden="true" />Open Workflow</button>
+                <p>This agent isn’t in My agents any more, so this team can’t run. On the Team tab, select it, press Delete and save.</p>
+                <button type="button" className="btn" onClick={onShowWorkflow}><Network size={14} aria-hidden="true" />Open the Team tab</button>
               </div>
             )}
         </div>
@@ -127,7 +127,7 @@ function AddAgents({ jobs, inTeam, teamPath, first, onAdd, onClose, onShowWorkfl
   return (
     <section className="team-agents-add" aria-label="Add an agent to this team" data-tour="agent-picker">
       <div className="team-agents-add-head">
-        <p>{first ? <><b>Start with its agents.</b> Add the agents you built, or build a new one. Then connect them in Workflow, and give the team work in Chat.</> : <><b>Add an agent.</b> It joins at the end of the workflow; connect it there.</>}</p>
+        <p>{first ? <><b>Start with its agents.</b> Add the agents you built, or build a new one. Then connect them on the Team tab, and give the team work in Chat.</> : <><b>Add an agent.</b> It joins at the end of the workflow; connect it there.</>}</p>
         {onClose && <button type="button" className="iconbtn" aria-label="Close" onClick={onClose}><X size={14} aria-hidden="true" /></button>}
       </div>
       {jobs.length > 0 && (
@@ -146,7 +146,7 @@ function AddAgents({ jobs, inTeam, teamPath, first, onAdd, onClose, onShowWorkfl
       )}
       <div className="team-agents-add-acts">
         <a className={`btn${jobs.length === 0 ? ' btn-primary' : ''}`} href={`/agents/new${teamPath ? `?team=${encodeURIComponent(teamPath)}` : ''}`}><UserRoundPlus size={14} aria-hidden="true" />Build a new agent</a>
-        {first && <button type="button" className="link" onClick={onShowWorkflow}>Or start in Workflow</button>}
+        {first && <button type="button" className="link" onClick={onShowWorkflow}>Or start on the Team tab</button>}
       </div>
     </section>
   )

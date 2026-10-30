@@ -43,7 +43,7 @@ export async function fetchAbout(signal?: AbortSignal): Promise<AboutLoomWatch> 
   return (await response.json()) as AboutLoomWatch
 }
 
-export type FeedbackScreen = 'home' | 'build' | 'run' | 'agent'
+export type FeedbackScreen = 'home' | 'build' | 'run' | 'agent' | 'you'
 
 /** What the operator was looking at, and any error they are reporting. */
 export interface FeedbackContext {
@@ -54,7 +54,7 @@ export interface FeedbackContext {
   plans?: { chatgpt: boolean; anthropic: boolean }
 }
 
-const SCREENS: Record<FeedbackScreen, string> = { home: 'Home', build: 'Build (editing a team)', run: 'Run (watching a run)', agent: 'An agent in My agents' }
+const SCREENS: Record<FeedbackScreen, string> = { home: 'Home', build: 'Build (editing a team)', run: 'Run (watching a run)', agent: 'An agent in My agents', you: 'You (About you, Connections or Usage)' }
 const SYSTEMS: Record<string, string> = { macos: 'macOS', linux: 'Linux', windows: 'Windows' }
 
 /** The browser and its major version, from a user agent string. Unknown agents pass through. */

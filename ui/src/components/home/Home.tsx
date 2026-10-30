@@ -1,22 +1,17 @@
-import { Search } from 'lucide-react'
+import { Search } from '../ui/icon'
 import { useEffect, useState, type ReactNode } from 'react'
 
 import { useAiStatus } from '../../lib/ai/useKeyStatus'
 import { SOURCE_INFO, connectedSources } from '../../lib/ai/sources'
 import { fetchTeamsDiscovery } from '../../lib/team-file/client'
-import { useTheme } from '../../lib/theme'
 import { markFirstRun, opensOnFirstRun, readFirstRun } from '../../lib/firstrun/store'
 import { fetchJobs } from '../../lib/library/jobs'
 import { FirstRun } from '../firstrun/FirstRun'
-import { ChipDot, LoomMark, LoomWordmark } from '../ui/glyphs'
+import { ChipDot } from '../ui/glyphs'
 import { fetchRuns, type RunRecord } from '../../lib/runs/client'
-import type { LoomMarkState } from '../../lib/story/loomMark'
 import { Sources } from '../connections/Sources'
 import { UsageNotices } from '../usage/UsageNotices'
 import { UpdateBadge } from '../updates/Updates'
-import { WorkspaceMenu } from '../workspace/WorkspaceMenu'
-import { QuestsLink } from '../quests/QuestsLink'
-import { SkillsLink } from '../skills/SkillsLink'
 import { keys } from '../../lib/platform'
 import { dollars } from '../../lib/runs/spend'
 import { Studio } from '../studio/Studio'
@@ -30,10 +25,10 @@ export interface HomeProps {
   topActions?: ReactNode
   /** Every run the daemon knows, for each team card's run fabric. */
   runs?: readonly RunRecord[]
-  /** What the header's mark says, from the same poll as the needs-you tray. */
-  mark?: LoomMarkState
   /** Ask LoomWatch, which sets a project up from what you are working on (ADR 0097). */
   ask?: { unavailable: string | null; onAsk: (text: string) => void; open?: boolean }
+  /** Home, or the dock's Projects: the same studio with only its projects and agents in none. */
+  part?: 'all' | 'projects'
   children?: ReactNode
 }
 
@@ -43,8 +38,7 @@ export interface HomeProps {
  * work, where you left off, each project as a room, and your agents in no project; or, before any
  * project, what you are working on.
  */
-export function Home({ notice = null, onPalette, topActions, runs = [], mark, ask, children }: HomeProps) {
-  const { resolved, toggle } = useTheme()
+export function Home({ notice = null, onPalette, topActions, runs = [], ask, part = 'all', children }: HomeProps) {
   const ai = useAiStatus()
   const key = ai?.openrouter ?? null
   const sources = ai ? connectedSources(ai) : []
@@ -55,7 +49,7 @@ export function Home({ notice = null, onPalette, topActions, runs = [], mark, as
   // Someone who has never had anything made in this LoomWatch opens on the first run (ADR 0075),
   // instead of this page; see lib/firstrun/store.ts. Asked once per visit. It replaces the
   // getting-started guide opening by itself, which stays a link here and in the menu.
-  const [firstRun, setFirstRun] = useState<'checking' | 'on' | 'off'>(() => (readFirstRun() ? 'off' : 'checking'))
+  const [firstRun, setFirstRun] = useState<'checking' | 'on' | 'off'>(() => (part === 'projects' || readFirstRun() ? 'off' : 'checking'))
   useEffect(() => {
     if (firstRun !== 'checking') return
     let live = true
@@ -75,7 +69,7 @@ export function Home({ notice = null, onPalette, topActions, runs = [], mark, as
 
   // What the footer says about the one thing every run needs: a way to pay for its models.
   let status: { state: 'dirty' | 'saved' | 'incomplete' | 'invalid'; text: string; action?: ReactNode }
-  const manage = <a className="link" href="/connections">{sources.length ? 'Manage' : 'Connect'}</a>
+  const manage = <a className="link" href="/connections">{sources.length ? 'Connections' : 'Connect'}</a>
   const usage = <a className="link" href="/usage">Usage</a>
   // A connected source that said something is wrong, named, so the person knows which to fix.
   const problem = ai && [
@@ -97,21 +91,13 @@ export function Home({ notice = null, onPalette, topActions, runs = [], mark, as
     // run, not Home for a moment before it. home.css shows it after a second whatever the answer.
     <div className="lw-home" data-tour="home" data-checking={firstRun === 'checking' || undefined}>
       <div className="ground" aria-hidden="true" />
+      {/* The places are the dock's, and the look, the guide and feedback are in You: Home's corner
+          keeps the update, the bell and search. */}
       <header className="home-top">
-        <span className="home-brand"><LoomMark size={28} state={mark} /><LoomWordmark height={19} /></span>
         <span className="home-top-acts">
-          <button type="button" className="iconbtn" onClick={onPalette} aria-label="Open the command palette" title={`Commands (${keys('⌘K')})`}><Search size={15} aria-hidden="true" /></button>
           <UpdateBadge />
-          {/* Skills and Quests are Home's own: what every agent can be taught, and what runs earn.
-              A team's and an agent's page reach them from the menu. */}
-          <SkillsLink />
-          <QuestsLink />
-          {/* The bell beside the menu, as on a team's and an agent's page. The theme, which a team's
-              screen reaches from its palette and view bar, is in the menu. */}
           {topActions}
-          <WorkspaceMenu screen="home" more={[
-            { label: resolved === 'dark' ? 'Switch to light theme' : 'Switch to dark theme', run: toggle },
-          ]} />
+          <button type="button" className="iconbtn" onClick={onPalette} aria-label="Open the command palette" title={`Commands (${keys('⌘K')})`}><Search size={15} aria-hidden="true" /></button>
         </span>
       </header>
 
@@ -123,6 +109,7 @@ export function Home({ notice = null, onPalette, topActions, runs = [], mark, as
         <UsageNotices />
 
         <Studio
+          part={part}
           runs={runs}
           setUpUnavailable={ask ? ask.unavailable : 'Ask LoomWatch isn’t available here.'}
           asking={ask?.open === true}

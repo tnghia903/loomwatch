@@ -33,7 +33,7 @@ agents:
       web: true
 ```
 
-- **How it is paid.** You connect each way on Home or in **Connections…** (ADR 0073): **Continue
+- **How it is paid.** You connect each way on Home or in **Connections** (under **You**) (ADR 0073): **Continue
   with ChatGPT** for a ChatGPT Plus or Pro plan, a Claude API key from the Console organization
   linked to a Claude Max or Team plan, or an OpenRouter key. LoomWatch checks each with its company
   and keeps it only if it is accepted. On a Mac the OpenRouter key is kept in the Keychain as

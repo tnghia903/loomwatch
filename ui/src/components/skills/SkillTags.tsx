@@ -1,13 +1,13 @@
 import {
   AudioLines, BookOpenText, CalendarDays, ChartColumn, CircleCheck, Clapperboard, Code, Database, FilePen, FileText, FlaskConical, Globe, Image,
   Info, Languages, Lock, Mail, Megaphone, NotebookPen, OctagonX, Palette, PenLine, Presentation, Receipt, Scale, Sheet, ShieldCheck, Telescope,
-  type LucideIcon,
-} from 'lucide-react'
+  type IconComponent,
+} from '../ui/icon'
 import { useState, type CSSProperties, type ReactNode } from 'react'
 
 import { glyphColor, needLabel, RUNTIME_LABEL, topicOf, type Notice, type Publisher, type Runtime, type SkillTopic } from '../../lib/library/skillStore'
 
-const TOPIC_ICON: Record<SkillTopic, LucideIcon> = {
+const TOPIC_ICON: Record<SkillTopic, IconComponent> = {
   pdf: FileText,
   doc: FilePen,
   sheet: Sheet,

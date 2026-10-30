@@ -68,7 +68,7 @@ import { BuildResourceInspector } from './canvas/BuildResourceInspector'
 import { NotionPagePicker } from './canvas/NotionPagePicker'
 import { BuildInspector } from './canvas/BuildInspector'
 import { ComponentPalette } from './library/ComponentPalette'
-import { MessageSquareText, MessagesSquare, Network, UserRound, X } from 'lucide-react'
+import { Bot, MessageSquareText, MessagesSquare, Network, X } from './ui/icon'
 import { Composer, type ComposerState } from './composer/Composer'
 import { RoutineNote } from './composer/RoutineNote'
 import { CAPABILITY_DRAG_MIME, CONNECTION_DRAG_MIME, LIBRARY_DRAG_MIME } from './library'
@@ -95,7 +95,7 @@ import { afterClosing, closedKey, fileTab, madeTabs, paneTabId, shownPaneTab, ty
 import type { HandOver } from '../lib/chat/handed'
 import type { ReceiptLine } from '../lib/story/receipt'
 import { PromptNodeCard } from './run/StoryNodes'
-import { ChipDot, LoomMark, LoomWordmark } from './ui/glyphs'
+import { ChipDot } from './ui/glyphs'
 import { SegmentThumb } from './ui/SegmentThumb'
 import { InlineMarkdown } from './ui/Markdown'
 import { AttentionAlerts } from './workspace/AttentionAlerts'
@@ -139,7 +139,6 @@ import { WorkspaceMenu } from './workspace/WorkspaceMenu'
 import { useAsk } from '../lib/ask/useAsk'
 import { DEFAULT_ROUTINE_NOTION_TITLE, NOTION_PAGE_SOURCE, useNotionConnection, type NotionPageHit } from '../lib/notion/connection'
 import type { AskContext } from '../lib/ask/client'
-import { AskButton } from './ask/AskButton'
 import { AskPanel } from './ask/AskPanel'
 import type { CardActions } from './ask/AskCards'
 import { proposalSource, sameTeamFile, teamFileForAsk, useAskActions } from './ask/useAskActions'
@@ -148,10 +147,8 @@ import { sendBackFields, sendBackOf, type SendBackSetting } from '../lib/team-fi
 import { fileRefsIn, filesTouched, filesWritten, workspaceAgent } from '../lib/files/fileRefs'
 import { askedInChat, type AskedPassage } from '../lib/files/passage'
 import { baseName } from '../lib/files/paths'
-import { goToTeam } from '../lib/team-file/teamPage'
-import { openTeam, type TeamView as TeamTab } from '../lib/team-file/useTeamList'
-import type { LeaveGuard } from './rail/CrewRail'
-import { showTeamRail } from './rail/teamRailStore'
+import { registerAskToggle, showAsk } from './frame/frameStore'
+import { openTeam } from '../lib/team-file/useTeamList'
 import { FileOriginContext, FileReaderContext, readerFormat, type FileToRead } from '../lib/files/reader'
 import { useFilesFound } from '../lib/files/useFile'
 import { lookupFile } from '../lib/files/client'
@@ -1819,16 +1816,12 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   }, [askOpen, askDockBusy, askSetOpen, askFor])
   const toggleAskRef = useRef(toggleAsk)
   useEffect(() => { toggleAskRef.current = toggleAsk })
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'j') {
-        event.preventDefault()
-        toggleAskRef.current()
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  // The dock's Ask opens this screen's own panel.
+  // ⌘J is the dock's, on every screen, so it reaches this one through the same toggle.
+  useEffect(() => registerAskToggle(() => toggleAskRef.current()), [])
+  const askActivity = ask.activity
+  useEffect(() => { showAsk({ open: askOpen, activity: askActivity }) }, [askOpen, askActivity])
+  useEffect(() => () => showAsk({ open: false, activity: null }), [])
   /** The inspected capability as a card: what wiring and the canvas compare it by. */
   const inspectedCard = inspectedCapability ? { kind: inspectedCapability.kind, name: inspectedCapability.item.name, source: inspectedCapability.item.source, memory: inspectedCapability.item.memory, ...(inspectedCapability.item.path ? { path: inspectedCapability.item.path } : {}), ...(inspectedCapability.item.notion ? { notion: inspectedCapability.item.notion } : {}) } : null
   // Kind and name identify a card, and a path identifies a folder or file; a recorded source can
@@ -2204,7 +2197,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     doc.addAgentFromDrop(raw, at)
     placeJobSkills(raw, at)
     if (added) { setBenchAgentId(added.id); writeBuildViewToUrl(true, added.id) }
-    setStatusAnnouncement(`${job.name} is in this team now. Connect it in Workflow, and save the team to keep it.`)
+    setStatusAnnouncement(`${job.name} is in this team now. Connect it on the Team tab, and save the team to keep it.`)
   }, [doc, editable, placeJobSkills])
 
   // ---- notifications + announcements -----------------------------------------------------
@@ -2331,24 +2324,6 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   // ---- commands + keys ----------------------------------------------------------------------
   // With a team open the dialog belongs to the workspace; on Home, Home owns it.
   const openNewTeam = useCallback(() => { if (doc.path) setNewTeamSheet(true); else window.dispatchEvent(new Event('loomwatch:new-team')) }, [doc.path])
-  // The team rail: this team as it is on screen, and leaving it for another. Changes not saved are
-  // saved or dropped first (the rail asks), and the page moves once they are, so the browser's own
-  // "Leave site?" prompt never asks a second time.
-  const railAgents = useMemo(() => doc.nodes.filter((node) => node.data.agent.kind !== 'operator').map((node) => node.data.agent), [doc.nodes])
-  const railTeam = useMemo(() => (doc.path ? { path: doc.path, name: doc.teamName ?? baseName(doc.path).replace(/\.ya?ml$/i, ''), agents: railAgents } : null), [doc.path, doc.teamName, railAgents])
-  const railTab: TeamTab = runView || runSetup ? 'chat' : agentsView ? 'agents' : 'workflow'
-  const unsavedTeam = ['dirty', 'invalid', 'conflict'].includes(doc.documentChipState)
-  const [leavingTo, setLeavingTo] = useState<string | null>(null)
-  useEffect(() => { if (leavingTo && !unsavedTeam) goToTeam(leavingTo) }, [leavingTo, unsavedTeam])
-  const { save: saveTeam, reloadFromDisk } = doc
-  const leaveTeam = useCallback((): LeaveGuard | null => (unsavedTeam
-    ? { save: saveTeam, problem: doc.isValid ? null : 'It has problems to fix before it can be saved.', discard: async () => { await reloadFromDisk() } }
-    : null), [unsavedTeam, saveTeam, reloadFromDisk, doc.isValid])
-  // The page frame draws the rail (FrameTeamRail), so it stays while teams change in place beside it.
-  useLayoutEffect(() => {
-    showTeamRail(railTeam ? { open: railTeam, runs: needsYou.records, savedJobs, view: railTab, go: setLeavingTo, onNewTeam: openNewTeam, leave: leaveTeam } : null)
-  }, [railTeam, needsYou.records, savedJobs, railTab, openNewTeam, leaveTeam])
-  useLayoutEffect(() => () => showTeamRail(null), [])
   const toggleLibrary = useCallback(() => window.dispatchEvent(new Event('loomwatch:toggle-library')), [])
   const actions = useMemo<CommandAction[]>(() => [
     { label: 'Ask LoomWatch…', shortcut: '⌘J', icon: MessageSquareText, run: () => askFor() },
@@ -2536,13 +2511,13 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   if (!doc.path) {
     return (
       <Home
+        part={window.location.pathname === '/projects' ? 'projects' : 'all'}
         notice={requestedPath && doc.saveState === 'error' ? `Couldn't open “${requestedPath}”. ${/no such file|not found/i.test(doc.saveError ?? '') ? 'It may have been moved, renamed or deleted — pick a team below.' : doc.saveError ?? ''}` : null}
         onPalette={() => setPaletteOpen(true)}
-        // Ask keeps the app's own button on Home (ADR 0097): it answers questions there, and Set up
-        // project asks it to set a project up, saying so while it is already at work.
-        topActions={<><AskButton ask={ask} onToggle={toggleAsk} />{needsYouTray()}</>}
+        // Ask is the dock's (ADR 0097's own button on Home moved there): Set up project asks it to
+        // set a project up, and the dock's Ask says while it is at work.
+        topActions={needsYouTray()}
         runs={needsYou.records}
-        mark={needsYou.mark}
         ask={{ unavailable: ask.unavailable, onAsk: askFor, open: ask.open }}
       >
         {paletteOpen && <CommandPalette actions={actions} interpret={interpret} fallback={askFallback} onClose={() => setPaletteOpen(false)} />}
@@ -2694,7 +2669,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
               </div>
             )}
           </ReactFlow>
-          {storyParts.length > 0 ? <TeamStory parts={storyParts} figures={agentFigures} onAgent={focusAgent} onSchedule={doc.teamSchedule ? openScheduleEditor : undefined} onConnect={editable ? (edges) => { for (const edge of edges) doc.onConnect({ source: edge.from, target: edge.to, sourceHandle: null, targetHandle: null }) } : undefined} /> : <div className="build-canvas-help"><strong>Connect your agents</strong><span>Drag from the dot on the right of a card to the next card to hand work along.</span></div>}<div className="build-canvas-legend"><span><i />Workflow</span><span><i className="resource" />Resources</span><span>Select a card to edit</span></div>{!runSetup && <div className="canvas-notes"><InstructionUpdateBar entries={instructionUpdates.entries} names={nodeNames} readOnly={!editable} onReview={focusAgent} onKeepAll={instructionUpdates.keepAll} onRewrite={ask.unavailable ? undefined : instructionUpdates.rewrite} />{turnedOffNote && <TurnedOffNote note={turnedOffNote} names={nodeNames} onDismiss={() => setTurnedOffNote(null)} />}</div>}
+          {storyParts.length > 0 ? <TeamStory parts={storyParts} figures={agentFigures} onAgent={focusAgent} onSchedule={doc.teamSchedule ? openScheduleEditor : undefined} onConnect={editable ? (edges) => { for (const edge of edges) doc.onConnect({ source: edge.from, target: edge.to, sourceHandle: null, targetHandle: null }) } : undefined} /> : <div className="build-canvas-help"><strong>Connect your agents</strong><span>Drag from the dot on the right of a card to the next card to hand work along.</span></div>}<div className="build-canvas-legend"><span><i />Handovers</span><span><i className="resource" />Resources</span><span>Select a card to edit</span></div>{!runSetup && <div className="canvas-notes"><InstructionUpdateBar entries={instructionUpdates.entries} names={nodeNames} readOnly={!editable} onReview={focusAgent} onKeepAll={instructionUpdates.keepAll} onRewrite={ask.unavailable ? undefined : instructionUpdates.rewrite} />{turnedOffNote && <TurnedOffNote note={turnedOffNote} names={nodeNames} onDismiss={() => setTurnedOffNote(null)} />}</div>}
         </div>
         )}
         <div className="lw-sweep" aria-hidden="true" />
@@ -2745,17 +2720,14 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
         )}
 
         <div className="workspace-chrome pointer-events-none absolute inset-x-0 z-40 flex flex-col items-center gap-2" style={{ top: 'var(--lw-panel-inset)' }}>
-          {/* The brand is the way home: every team is one click from the list of all teams. */}
-          {/* Home opens in place, as another team does; a click that asks for a new tab gets one. */}
-          <a className="delivery-brand" href="/" aria-label="LoomWatch, my team" title="My team" style={{ pointerEvents: 'auto', color: 'inherit', textDecoration: 'none' }}
-            onClick={(event) => { if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); goToTeam('/') }}><LoomMark size={26} state={needsYou.mark} /><LoomWordmark height={19} /></a>
+          {/* Home, Ask and the other places are the dock's; the header keeps what is this team's. */}
           <WorkspaceMenu runView={runView} onMemory={() => { clearSelection(); setMemoryOpen(true) }} />
-          <div className="needs-you-anchor"><AskButton ask={ask} onToggle={toggleAsk} />{needsYouTray(runView ? activeRunId : null)}</div>
+          <div className="needs-you-anchor">{needsYouTray(runView ? activeRunId : null)}</div>
           <nav className="workspace-view-tabs" aria-label="Workspace view" data-tour="view-tabs">
             <SegmentThumb />
-            {/* In the order a team is made: its agents, then its workflow, then its chat. */}
-            <button type="button" aria-pressed={!runView && !runSetup && agentsView} onClick={() => { const chosen = inspectedNode?.id ?? null; clearSelection(); closeRun(); showAgents(chosen) }} data-tour="tab-agents"><UserRound size={15} />Agents</button>
-            <button type="button" aria-pressed={!runView && !runSetup && !agentsView} onClick={() => { clearSelection(); closeRun(); showWorkflow() }} data-tour="tab-workflow"><Network size={15} />Workflow</button>
+            {/* In the order a team is made: its agents, then how they work together (Team), then its chat. */}
+            <button type="button" aria-pressed={!runView && !runSetup && agentsView} onClick={() => { const chosen = inspectedNode?.id ?? null; clearSelection(); closeRun(); showAgents(chosen) }} data-tour="tab-agents"><Bot size={15} />Agents</button>
+            <button type="button" aria-pressed={!runView && !runSetup && !agentsView} onClick={() => { clearSelection(); closeRun(); showWorkflow() }} data-tour="tab-workflow"><Network size={15} />Team</button>
             <button type="button" aria-pressed={runView || runSetup} onClick={() => { clearSelection(); if (!activeRunId) setRunSetup(true) }} data-tour="tab-chat"><MessagesSquare size={15} />Chat</button>
           </nav>
           <DocumentSwitcher

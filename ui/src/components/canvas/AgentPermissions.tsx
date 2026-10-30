@@ -1,4 +1,4 @@
-import { Check, FilePen, Globe, SquareTerminal } from 'lucide-react'
+import { Check, FilePen, Globe, SquareTerminal } from '../ui/icon'
 
 import { ALLOW_SWITCHES } from '../../lib/team-file/allow'
 import type { AgentConfig, AllowSwitch } from '../../lib/team-file/types'

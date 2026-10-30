@@ -1,4 +1,4 @@
-import { ArrowRight, Check } from 'lucide-react'
+import { ArrowRight, Check } from '../ui/icon'
 import { useId, useState } from 'react'
 
 import { figureFor } from '../../lib/library/figures'

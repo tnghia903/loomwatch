@@ -1,4 +1,4 @@
-import { ArrowRight, CalendarClock, FileText, RotateCcw, Square } from 'lucide-react'
+import { ArrowRight, CalendarClock, FileText, RotateCcw, Square } from '../ui/icon'
 import { Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import { AppearContext, useAppear } from '../../lib/chat/appear'

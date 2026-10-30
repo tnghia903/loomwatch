@@ -31,6 +31,10 @@ export function movedInPlace(): boolean {
   return moved
 }
 
+/** Said on the window each time the page moves in place, for what stands outside it (the dock). */
+export const MOVED_EVENT = 'loomwatch:moved-in-place'
+
 export function markMovedInPlace() {
   moved = true
+  window.dispatchEvent(new Event(MOVED_EVENT))
 }

@@ -1,4 +1,4 @@
-import { X } from 'lucide-react'
+import { X } from '../ui/icon'
 import { useEffect, useRef } from 'react'
 
 import type { FileToRead } from '../../lib/files/reader'

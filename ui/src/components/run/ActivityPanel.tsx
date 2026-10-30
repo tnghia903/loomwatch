@@ -1,4 +1,4 @@
-import { ArrowRight, X } from 'lucide-react'
+import { ArrowRight, X } from '../ui/icon'
 import { useEffect, useRef } from 'react'
 
 import type { Face } from '../../lib/chat/reactions'

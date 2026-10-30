@@ -1,4 +1,4 @@
-import { CornerUpLeft } from 'lucide-react'
+import { CornerUpLeft } from '../ui/icon'
 
 import type { ReplyTo } from '../../lib/chat/client'
 import { replyWhat, replyWords } from '../../lib/chat/reply'

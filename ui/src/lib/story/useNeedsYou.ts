@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 
 import { keepIfSame } from '../keepIfSame'
 import { answerPermission, answerRun, answerSpend, fetchRuns, type PermissionDecision, type RunRecord, type SpendDecision } from '../runs/client'
@@ -6,11 +6,79 @@ import { teamDisplayName } from '../team-file/client'
 import { movedInPlace } from '../team-file/inPlace'
 import { useTeamList } from '../team-file/useTeamList'
 import { useLoomMarkState } from './loomMark'
-import { ticketsFrom, type Ticket } from './needsYou'
+import { APPROVAL_TEXT, ticketsFrom, type Ticket } from './needsYou'
 
 const DISMISSED_KEY = 'loomwatch.needsYou.dismissed'
+/** Said on the window when a stopped run is dismissed, so every reader of the poll leaves it out. */
+const DISMISSED_EVENT = 'loomwatch:needs-you-dismissed'
 
 let lastRecords: RunRecord[] = []
+
+/**
+ * One poll of the run registry for the whole page (round 3: the frame's dock and every screen read
+ * the same records). It starts with the first reader and stops with the last; a team page that moved
+ * in place starts from the last poll, so the tray, the mark and the tab don't blink.
+ */
+interface RunsSnapshot { records: RunRecord[]; error: string | null }
+const runs = {
+  snapshot: { records: [], error: null } as RunsSnapshot,
+  readers: new Set<() => void>(),
+  generation: 0,
+  stop: null as (() => void) | null,
+}
+function told() { for (const reader of runs.readers) reader() }
+async function refreshRuns(signal?: AbortSignal) {
+  const mine = ++runs.generation
+  try {
+    const fetched = await fetchRuns(signal)
+    if (signal?.aborted || mine !== runs.generation) return
+    // Every screen draws from this list, so an answer that isn't one is an error, never a crash.
+    if (!Array.isArray(fetched)) throw new Error('LoomWatch’s list of runs couldn’t be read.')
+    lastRecords = fetched
+    const records = keepIfSame(runs.snapshot.records, fetched)
+    if (records !== runs.snapshot.records || runs.snapshot.error !== null) {
+      runs.snapshot = { records, error: null }
+      told()
+    }
+  } catch (caught) {
+    if (signal?.aborted) return
+    runs.snapshot = { ...runs.snapshot, error: caught instanceof Error ? caught.message : String(caught) }
+    told()
+  }
+}
+function startPolling() {
+  const controller = new AbortController()
+  let timer: ReturnType<typeof setTimeout>
+  if (movedInPlace() && lastRecords.length) runs.snapshot = { records: lastRecords, error: null }
+  // Keeps polling in a background tab, more slowly: the tab title and icon exist for exactly the
+  // moment the operator is looking somewhere else.
+  const tick = async () => {
+    await refreshRuns(controller.signal)
+    if (!controller.signal.aborted) timer = setTimeout(() => void tick(), document.hidden ? 15000 : 5000)
+  }
+  void tick()
+  const wake = () => { if (!document.hidden) void refreshRuns(controller.signal) }
+  document.addEventListener('visibilitychange', wake)
+  runs.stop = () => { controller.abort(); clearTimeout(timer); document.removeEventListener('visibilitychange', wake) }
+}
+function readRuns(reader: () => void) {
+  runs.readers.add(reader)
+  if (runs.readers.size === 1) startPolling()
+  return () => {
+    runs.readers.delete(reader)
+    if (runs.readers.size > 0) return
+    runs.stop?.()
+    runs.stop = null
+    runs.generation++
+    runs.snapshot = { records: [], error: null }
+  }
+}
+const runsNow = () => runs.snapshot
+
+/** The run records every screen shares, from the one poll. */
+export function useRunRecords(): RunsSnapshot {
+  return useSyncExternalStore(readRuns, runsNow, runsNow)
+}
 
 /** The stopped runs the person dismissed from the tray, by run id: Home and a room leave them out too. */
 export function loadDismissed(): Set<string> {
@@ -25,40 +93,10 @@ export function loadDismissed(): Set<string> {
  * lib/story/loomMark.ts).
  */
 export function useNeedsYou() {
-  // A team page that moved in place starts from the last poll, so the tray, the mark and the tab don't blink.
-  const [records, setRecords] = useState<RunRecord[]>(() => (movedInPlace() ? lastRecords : []))
+  const { records, error } = useRunRecords()
   const [dismissed, setDismissed] = useState<Set<string>>(loadDismissed)
-  const [error, setError] = useState<string | null>(null)
   const { teams } = useTeamList()
-  const generation = useRef(0)
-
-  const refresh = useCallback(async (signal?: AbortSignal) => {
-    const mine = ++generation.current
-    try {
-      const runs = await fetchRuns(signal)
-      if (signal?.aborted || mine !== generation.current) return
-      lastRecords = runs
-      setRecords((previous) => keepIfSame(previous, runs))
-      setError(null)
-    } catch (caught) {
-      if (!signal?.aborted) setError(caught instanceof Error ? caught.message : String(caught))
-    }
-  }, [])
-
-  useEffect(() => {
-    const controller = new AbortController()
-    let timer: ReturnType<typeof setTimeout>
-    // Keeps polling in a background tab, more slowly: the tab title and icon exist for exactly
-    // the moment the operator is looking somewhere else.
-    const tick = async () => {
-      await refresh(controller.signal)
-      if (!controller.signal.aborted) timer = setTimeout(() => void tick(), document.hidden ? 15000 : 5000)
-    }
-    void tick()
-    const wake = () => { if (!document.hidden) void refresh(controller.signal) }
-    document.addEventListener('visibilitychange', wake)
-    return () => { controller.abort(); clearTimeout(timer); document.removeEventListener('visibilitychange', wake) }
-  }, [refresh])
+  const refresh = useCallback((signal?: AbortSignal) => refreshRuns(signal), [])
 
   const names = useMemo(() => new Map((teams ?? []).map((team) => [team.path, teamDisplayName(team)])), [teams])
   const tickets = useMemo(() => ticketsFrom(records, names, dismissed), [records, names, dismissed])
@@ -71,6 +109,12 @@ export function useNeedsYou() {
       try { localStorage.setItem(DISMISSED_KEY, JSON.stringify([...next].slice(-200))) } catch { /* private mode */ }
       return next
     })
+    window.dispatchEvent(new Event(DISMISSED_EVENT))
+  }, [])
+  useEffect(() => {
+    const reread = () => setDismissed((current) => { const stored = loadDismissed(); return stored.size === current.size && [...stored].every((id) => current.has(id)) ? current : stored })
+    window.addEventListener(DISMISSED_EVENT, reread)
+    return () => window.removeEventListener(DISMISSED_EVENT, reread)
   }, [])
 
   const answer = useCallback(async (ticket: Ticket, text: string, sendBack?: string) => {
@@ -95,6 +139,21 @@ export function useNeedsYou() {
   const mark = useLoomMarkState(records, tickets.length, working)
   const teamList = useMemo(() => [...names].map(([path, name]) => ({ path, name })), [names])
   return { records, tickets, working, mark, error, dismiss, answer, answerPermission: answerPermissionTicket, answerSpend: answerSpendTicket, refresh, teams: teamList }
+}
+
+/**
+ * Approve, from anywhere a review shows outside its run (Home, a room): the review the run waits
+ * on, from the shared poll, read again first when the poll hasn't seen the run yet. The same words
+ * the tray's Approve sends. False when the run has no review waiting any more.
+ */
+export async function approveRun(runId: string): Promise<boolean> {
+  const review = () => ticketsFrom(runs.snapshot.records, new Map(), new Set()).find((one) => one.kind === 'review' && one.runId === runId)
+  if (!review()) await refreshRuns()
+  const ticket = review()
+  if (!ticket?.node) return false
+  await answerRun(ticket.runId, ticket.node, APPROVAL_TEXT)
+  await refreshRuns()
+  return true
 }
 
 /** Tab title and tab icon carry the count, so a waiting team is visible from another tab. */

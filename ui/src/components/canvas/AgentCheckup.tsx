@@ -1,4 +1,4 @@
-import { CircleAlert, History, Lightbulb, Wand2 } from 'lucide-react'
+import { CircleAlert, History, Lightbulb, Wand2 } from '../ui/icon'
 
 import { keys } from '../../lib/platform'
 import type { CheckupFinding } from '../../lib/team-file/checkup'

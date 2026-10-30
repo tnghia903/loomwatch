@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { NotionDeliverySettings } from './NotionDeliverySettings'
@@ -36,16 +36,16 @@ describe('Send every answer to Notion (ADR 0038)', () => {
     connection({ connected: false })
     renderSettings({ notion: {} })
     const status = await screen.findByText(/Notion isn’t connected yet, so nothing can be sent\./)
-    // Connections opens from the menu, its one way in (ADR 0043): the line says where, not a second link.
-    expect(status).toHaveTextContent('Connect Notion under Tools in Connections, from the menu.')
-    expect(screen.queryByRole('link')).toBeNull()
+    // Connections is under You, and nothing else on a team's page reaches it, so the line links there.
+    expect(status).toHaveTextContent('Connect Notion under Tools in Connections.')
+    expect(within(status).getByRole('link', { name: 'Connections' })).toHaveAttribute('href', '/connections')
     expect(status).toHaveClass('warn')
   })
 
   it('asks for a page when connected without one, and stays quiet when the daemon has no Notion API', async () => {
     connection({ connected: true, name: 'Notion', destination: null, problem: null })
     renderSettings({ notion: {} })
-    expect(await screen.findByText(/Choose a page in Connections, from the menu\./)).toBeInTheDocument()
+    expect(await screen.findByText((_, node) => node?.className === 'output-send-link' && node.textContent === 'Choose a page in Connections.')).toBeInTheDocument()
     cleanup()
     connection({ error: 'Not Found' }, 404)
     renderSettings(null)

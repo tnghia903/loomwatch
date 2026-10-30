@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import { CheckCircle2, CircleAlert, FileWarning } from 'lucide-react'
+import { CheckCircle2, CircleAlert, FileWarning } from '../ui/icon'
 
 import { fetchInstructions, RunApiError } from '../../lib/runs/client'
 import type { RequiredSkillReceipt } from '../../lib/watch/events'

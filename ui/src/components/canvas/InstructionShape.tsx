@@ -1,4 +1,4 @@
-import { Check, Plus } from 'lucide-react'
+import { Check, Plus } from '../ui/icon'
 import type { RefObject } from 'react'
 
 import { appendToRole, instructionShape, PART_STARTERS, type InstructionPart } from '../../lib/team-file/checkup'

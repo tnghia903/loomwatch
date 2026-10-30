@@ -1,13 +1,13 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { FEEDBACK_EVENT } from '../../lib/feedback/report'
 import { forgetKeyStatus } from '../../lib/ai/useKeyStatus'
 import { resetFirstRunForTests } from '../../lib/firstrun/store'
 import { readTourState, resetTourForTests } from '../../lib/tour/store'
 import { forgetYou } from '../../lib/you/client'
 import type { RunRecord } from '../../lib/runs/client'
-import { cascaded, goldFilled, isGoldFill } from '../../test/cascade'
+import { APPROVAL_TEXT } from '../../lib/story/needsYou'
+import { cascaded, goldFilled, isGoldFill, PHONE } from '../../test/cascade'
 import { figureFor, figureStill } from '../../lib/library/figures'
 import { Home } from './Home'
 
@@ -135,8 +135,16 @@ describe('Home, the studio (ADR 0097)', () => {
     expect(assign).toHaveBeenCalledWith('/projects/sutd')
   })
 
-  it('puts whoever waits for you first on Your desk, and Review opens what waits, as the bell does', async () => {
-    fetchMock.mockImplementation(studio)
+  it('puts whoever waits for you first on Your desk, with Approve one press and the work one press away', async () => {
+    const answered: unknown[] = []
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === '/api/runs?preview=true') return respond(answered.length ? [] : [waitingOnTheResearcher])
+      if (url === `/api/runs/${encodeURIComponent(waitingOnTheResearcher.runId)}/answers` && init?.method === 'POST') {
+        answered.push(JSON.parse(String(init.body)))
+        return respond({ ...waitingOnTheResearcher, waitingOn: null })
+      }
+      return studio(url)
+    })
     const opened = vi.fn()
     window.addEventListener('loomwatch:open-needs-you', opened)
     render(<Home onPalette={vi.fn()} runs={[waitingOnTheResearcher]} />)
@@ -144,15 +152,37 @@ describe('Home, the studio (ADR 0097)', () => {
     const needs = await within(desk).findByRole('region', { name: 'Needs you · 1' })
     expect(within(needs).getByText('Researcher brought work for you to check')).toBeInTheDocument()
     expect(within(needs).getByText('Research and design')).toBeInTheDocument()
-    fireEvent.click(within(needs).getByRole('button', { name: 'Review: Researcher brought work for you to check' }))
-    expect(opened).toHaveBeenCalledTimes(1)
-    // At that item: the tray opens on the work whose Review was pressed.
+    // Reading it first opens the bell's tray at that item, where Send back is.
+    fireEvent.click(within(needs).getByRole('button', { name: 'Read Researcher’s work first' }))
     expect((opened.mock.calls[0][0] as CustomEvent<string>).detail).toBe(waitingOnTheResearcher.runId)
-    // One gold fill on the screen: Review. The box beside it gives work with a plain Send meanwhile,
+    // One gold fill on the screen: Approve. The box beside it gives work with a plain Send meanwhile,
     // even with words in it (an empty box's Send is off, and off is never gold).
     fireEvent.change(within(screen.getByRole('form', { name: 'Give work' })).getByRole('textbox'), { target: { value: 'Draw the gate.' } })
-    expect(goldFilled()).toEqual(['Review'])
+    expect(goldFilled()).toEqual(['Approve'])
+    // Approve answers the review the run waits on, with the words the tray's Approve sends.
+    fireEvent.click(within(needs).getByRole('button', { name: 'Approve: Researcher brought work for you to check' }))
+    expect(await screen.findByText('Approved. Research and design carries on.')).toBeInTheDocument()
+    expect(answered).toEqual([{ node: 'review', text: APPROVAL_TEXT }])
+    expect(opened).toHaveBeenCalledTimes(1)
     window.removeEventListener('loomwatch:open-needs-you', opened)
+  })
+
+  // The quiet desk (ADR 0101): the box first, then what needs you across the row, its first item
+  // stepped up and drawn big. A room keeps its four tiles side by side.
+  it('leads with the box, and steps up the first thing that needs you across the row', async () => {
+    fetchMock.mockImplementation(studio)
+    render(<Home onPalette={vi.fn()} runs={[waitingOnTheResearcher]} />)
+    const desk = await screen.findByRole('group', { name: 'Your desk' })
+    const box = screen.getByRole('form', { name: 'Give work' })
+    expect(box.compareDocumentPosition(desk) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const needs = await within(desk).findByRole('region', { name: 'Needs you · 1' })
+    expect(cascaded(needs, 'grid-column')).toBe('1 / -1')
+    const first = within(needs).getAllByRole('listitem')[0]
+    expect(first).toHaveClass('glance-up')
+    expect(first.querySelector('.desk-figure img')).toHaveAttribute('width', '88')
+    expect(cascaded(desk, 'grid-template-columns', PHONE)).toBe('repeat(2, minmax(0, 1fr))')
+    // Its own class names only: a shared name once gave it a room card's desk width of 78 px.
+    expect(cascaded(desk, ['width', 'flex'])).toBeNull()
   })
 
   it('gives any team work from Home, its teams under their projects', async () => {
@@ -433,38 +463,23 @@ describe('Home, the studio (ADR 0097)', () => {
     renderHome()
     expect(await screen.findByText('Agents can run on OpenRouter')).toBeInTheDocument()
     expect(screen.queryByRole('region', { name: 'First, choose how your agents’ models are paid' })).toBeNull()
-    expect(screen.getByRole('link', { name: 'Manage' })).toHaveAttribute('href', '/connections')
+    expect(screen.getByRole('link', { name: 'Connections' })).toHaveAttribute('href', '/connections')
     expect(screen.getByRole('link', { name: 'Usage' })).toHaveAttribute('href', '/usage')
   })
 
   // Home wears the header a team's and an agent's page have, the bell beside the menu. Skills and
   // Quests are Home's own, so they stand in the header as links, once: the menu doesn't repeat them.
-  it('has Skills and Quests in its header, and the menu a team’s page has, with the theme and feedback in it', async () => {
+  // Round 3: the places are the dock's, and the look, the guide and feedback are in You. Home's
+  // corner keeps the bell and search; no brand, pills or menu come back beside them.
+  it('keeps only the bell and search in its corner', async () => {
     fetchMock.mockImplementation((url: string) => respond(url === '/api/wardrobe' ? { items: {} } : { root: '/teams', files: [], teams: [] }))
-    const sent = vi.fn()
-    window.addEventListener(FEEDBACK_EVENT, sent)
-    render(<Home onPalette={vi.fn()} topActions={<button type="button">1 needs you</button>} />)
+    const palette = vi.fn()
+    render(<Home onPalette={palette} topActions={<button type="button">1 needs you</button>} />)
     const header = screen.getByRole('banner')
-    expect(within(header).getAllByRole('button').map((button) => button.getAttribute('aria-label') ?? button.textContent)).toEqual(['Open the command palette', '1 needs you', 'Menu'])
-    expect(within(header).getAllByRole('link').map((link) => link.getAttribute('href'))).toEqual(['/skills', '/quests'])
-    const skills = within(header).getByRole('link', { name: 'Skills' })
-    const quests = await within(header).findByRole('link', { name: 'Quests 0 of 13 earned' })
-    for (const pill of [skills, quests]) expect(pill.querySelector('svg')).toBeNull()
-    const menu = within(header).getByRole('button', { name: 'Menu' })
-    fireEvent.click(menu)
-    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
-      'My agents…', 'About you…', 'Connections…', 'Usage…', expect.stringMatching(/^Switch to (light|dark) theme$/), 'Getting started guide', 'Send feedback…',
-    ])
-    fireEvent.click(menu)
-    const before = document.documentElement.dataset.theme
-    fireEvent.click(menu)
-    fireEvent.click(screen.getByRole('menuitem', { name: /^Switch to (light|dark) theme$/ }))
-    expect(document.documentElement.dataset.theme).not.toBe(before)
-    fireEvent.click(menu)
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Send feedback…' }))
-    expect(sent.mock.calls.map(([event]) => (event as CustomEvent).detail)).toEqual([{ screen: 'home' }])
-    window.removeEventListener(FEEDBACK_EVENT, sent)
-    localStorage.removeItem('loomwatch:theme')
+    expect(within(header).getAllByRole('button').map((button) => button.getAttribute('aria-label') ?? button.textContent)).toEqual(['1 needs you', 'Open the command palette'])
+    expect(within(header).queryAllByRole('link')).toEqual([])
+    fireEvent.click(within(header).getByRole('button', { name: 'Open the command palette' }))
+    expect(palette).toHaveBeenCalledOnce()
   })
 
   it('says when the account has no credits yet, or OpenRouter refused the key', async () => {
@@ -543,16 +558,13 @@ describe('Home, the first run and the getting-started guide', () => {
     await expect(screen.findByText('What shall we make first?', {}, { timeout: 300 })).rejects.toThrow()
   })
 
-  it('leaves someone who has run a team on Home, and lets them start the guide from the menu', async () => {
+  it('leaves someone who has run a team on Home, where the guide’s first step still points', async () => {
     fetchMock.mockImplementation(daemon({ runs: [ran], teams: [desk] }))
     renderHome()
     await homeHeading()
     await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/runs?preview=true')).toBe(true))
     expect(screen.queryByText('What shall we make first?')).toBeNull()
     expect(readTourState()).toBeNull()
-    fireEvent.click(within(screen.getByRole('banner')).getByRole('button', { name: 'Menu' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Getting started guide' }))
-    expect(readTourState()).toMatchObject({ status: 'active', step: 'welcome' })
     // The guide's first step points at building an agent, which Home keeps.
     expect(document.querySelector('[data-tour="build-agent"]')).toHaveAttribute('href', '/agents/new')
   })

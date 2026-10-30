@@ -380,9 +380,9 @@
   position: absolute; z-index: 5; display: flex; flex-direction: column; box-sizing: border-box; width: min(360px, calc(100% - 16px));
   border-radius: 14px; background: var(--color-accent-tint); color: var(--color-ink); box-shadow: 0 0 0 1px var(--rd-edge), var(--e2-shadow);
 }
-.rd-answer.busy { --glow: var(--color-live); }
+.rd-answer.busy { --glow: var(--glow-working); }
 .rd-answer.waiting { --glow: var(--color-accent-fill); }
-.rd-answer.failed { --glow: var(--color-alert); }
+.rd-answer.failed { --glow: var(--glow-failed); }
 /* Its point, at the part: on its top edge under the part, on its bottom edge over it, edged as it is. */
 .rd-answer::before { content: ''; position: absolute; top: -5px; left: var(--rd-arrow, 50%); width: 10px; height: 10px; border-radius: 2px 0 0 0; background: inherit; box-shadow: -1px -1px 0 var(--rd-edge); transform: translateX(-50%) rotate(45deg); }
 .rd-answer.above::before { top: auto; bottom: -5px; border-radius: 0 0 2px 0; box-shadow: 1px 1px 0 var(--rd-edge); }

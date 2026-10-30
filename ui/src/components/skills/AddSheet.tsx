@@ -1,4 +1,4 @@
-import { ExternalLink, Search } from 'lucide-react'
+import { ExternalLink, Search } from '../ui/icon'
 import { useMemo, useState } from 'react'
 
 import {

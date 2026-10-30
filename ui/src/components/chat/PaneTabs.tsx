@@ -1,4 +1,4 @@
-import { X } from 'lucide-react'
+import { X } from '../ui/icon'
 import { createElement, Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 
 import { paneTabId, type MadeTab, type PaneTab } from '../../lib/chat/paneTabs'

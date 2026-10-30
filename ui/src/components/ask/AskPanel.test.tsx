@@ -7,7 +7,6 @@ import { forgetModels } from '../../lib/ai/useModels'
 import { EMPTY_THREAD, type AskThread, type ProposalCard, type ReviewNoteCard, type RunRequestCard, type RunStartedCard } from '../../lib/ask/thread'
 import type { AskController } from '../../lib/ask/useAsk'
 import type { CardActions } from './AskCards'
-import { AskButton } from './AskButton'
 import { AskPanel } from './AskPanel'
 
 const model = (id: string, name: string) => ({ id, name, contextLength: 200_000, inputPrice: 2, outputPrice: 10, free: false, reasoning: true })
@@ -205,14 +204,5 @@ describe('Choosing the model', () => {
   it('cannot be changed while a message is on its way', () => {
     render(<AskPanel ask={controller({ sending: true })} view="build" cards={cards()} />)
     expect(screen.getByRole('button', { name: 'Model: Claude Opus 5.5. Change' })).toBeDisabled()
-  })
-})
-
-describe('AskButton', () => {
-  it('says when the assistant is working, and whether the panel is open', () => {
-    const { rerender } = render(<AskButton ask={controller({ open: false, activity: 'Drafting the team' })} />)
-    expect(screen.getByRole('button', { name: 'Ask LoomWatch (Drafting the team)' })).toHaveAttribute('aria-pressed', 'false')
-    rerender(<AskButton ask={controller({ open: true })} />)
-    expect(screen.getByRole('button', { name: 'Ask LoomWatch' })).toHaveAttribute('aria-pressed', 'true')
   })
 })
