@@ -54,6 +54,20 @@ function StateShape({ state }: { state: RoomTeam['state'] }) {
   return <span className="room-card-noshape" aria-hidden="true" />
 }
 
+/** A team on one line, the whole line opening its chat: on a room's card, and under "Not in a project". */
+export function TeamLine({ team, figureOf }: { team: RoomTeam; figureOf: FigureOf }) {
+  return (
+    <a className="room-card-team" href={teamHref(team.path, 'chat')}>
+      <StateShape state={team.state} />
+      <span className="room-card-team-words">
+        <b>{team.name}</b>
+        <small className={`room-state ${team.state}`}>{teamLine(team)}</small>
+      </span>
+      <TeamDesks team={team} figureOf={figureOf} size={26} compact />
+    </a>
+  )
+}
+
 /**
  * A project's room on Home (ADR 0097), at a glance: each team on a line, most pressing first, with
  * what it is doing and its agents' figures, the whole line opening its chat; then the newest thing
@@ -87,16 +101,7 @@ export function RoomCard({ room, figureOf, onOpen, newest = null, spend = null, 
       {room.teams.length === 0 ? <p className="desk-empty">No team yet</p> : (
         <ul className="room-card-teams" aria-label={`${room.name}’s teams`}>
           {room.teams.slice(0, TEAMS_LISTED).map((team) => (
-            <li key={team.path}>
-              <a className="room-card-team" href={teamHref(team.path, 'chat')}>
-                <StateShape state={team.state} />
-                <span className="room-card-team-words">
-                  <b>{team.name}</b>
-                  <small className={`room-state ${team.state}`}>{teamLine(team)}</small>
-                </span>
-                <TeamDesks team={team} figureOf={figureOf} size={26} compact />
-              </a>
-            </li>
+            <li key={team.path}><TeamLine team={team} figureOf={figureOf} /></li>
           ))}
         </ul>
       )}

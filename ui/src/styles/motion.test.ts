@@ -46,6 +46,14 @@ describe('round 3’s screens move', () => {
     expect(animation(at('#dialog')) ?? '').not.toMatch(/rise-in/)
   })
 
+  // ADR 0100: Home's delete and rename dialogs open inside the studio too; each fades in as any
+  // dialog does, never rising in with the page.
+  it('leave a delete’s or a rename’s dialog on Home out of the page’s arrival', () => {
+    const at = page('<div class="studio"><section id="desk"></section><div id="scrim" class="lw-scrim dim"><div class="pop e2 lw-deleteteam"></div></div></div>')
+    expect(animation(at('#scrim'))).toMatch(/^fade-in /)
+    expect(animation(at('.lw-deleteteam'))).toMatch(/^dialog-in /)
+  })
+
   it('keep a lifted team card’s open menu above the cards after it', () => {
     const at = page('<div class="team-card"><button aria-expanded="true"></button></div>')
     expect(cascaded(at('.team-card'), 'z-index')).toBe('3')

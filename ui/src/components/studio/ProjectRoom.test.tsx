@@ -172,7 +172,7 @@ describe('a project’s room (ADR 0097)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Project settings' }))
     fireEvent.click(within(screen.getByRole('menu', { name: 'Project settings' })).getByRole('menuitem', { name: 'Delete project…' }))
     const dialog = screen.getByRole('alertdialog', { name: 'Delete the project “SUTD final project”?' })
-    expect(dialog).toHaveTextContent('Its team, Research and design, stays on Home as a card of its own.')
+    expect(dialog).toHaveTextContent('Its team, Research and design, stays on Home, under Not in a project.')
     // The red that reads in both themes (contrast.test.ts holds the tokens to it).
     const confirm = within(dialog).getByRole('button', { name: 'Delete project' })
     expect(cascaded(confirm, ['background', 'background-color'])).toBe('var(--color-alert-fill)')

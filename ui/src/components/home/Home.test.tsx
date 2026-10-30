@@ -404,7 +404,7 @@ describe('Home, the studio (ADR 0097)', () => {
     fireEvent.click(within(blog as HTMLElement).getByRole('button', { name: 'Project settings for Blog' }))
     fireEvent.click(within(screen.getByRole('menu', { name: 'Project settings for Blog' })).getByRole('menuitem', { name: 'Delete project…' }))
     const dialog = screen.getByRole('alertdialog', { name: 'Delete the project “Blog”?' })
-    expect(dialog).toHaveTextContent('Its team, Blog, stays on Home as a card of its own.')
+    expect(dialog).toHaveTextContent('Its team, Blog, stays on Home, under Not in a project.')
     expect(fetchMock.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === 'DELETE')).toBe(false)
     fireEvent.click(within(dialog).getByRole('button', { name: 'Delete project' }))
     await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
@@ -440,9 +440,9 @@ describe('Home, the studio (ADR 0097)', () => {
     for (const project of many) expect(screen.getByRole('button', { name: `Project settings for ${project.name}` })).toBeInTheDocument()
   })
 
-  // ADR 0100: a team left in no project stands as its own card, under its team name; its "…" moves
-  // it into a project or deletes it.
-  it('shows a team in no project under its own name, and moves it into a project or deletes it from its card', async () => {
+  // ADR 0100: a team in no project is listed under "Not in a project", not among the projects: one
+  // pick moves it into a project, and its "…" deletes it.
+  it('lists a team in no project under Not in a project, moves it into a project in one pick, and deletes it from its "…"', async () => {
     const calls: string[] = []
     let saved = ''
     fetchMock.mockImplementation((url: string, init?: RequestInit) => {
@@ -456,18 +456,43 @@ describe('Home, the studio (ADR 0097)', () => {
       return studio(url)
     })
     render(<Home onPalette={vi.fn()} runs={[]} />)
-    const blog = (await screen.findByRole('heading', { name: 'Weekly posts' })).closest('article') as HTMLElement
-    expect(within(blog).queryByRole('button', { name: /Project settings/ })).toBeNull()
-    fireEvent.click(within(blog).getByRole('button', { name: 'Team settings for Weekly posts' }))
-    fireEvent.click(within(screen.getByRole('menu', { name: 'Team settings for Weekly posts' })).getByRole('menuitem', { name: 'Move to a project' }))
-    fireEvent.click(within(screen.getByRole('menu', { name: 'Team settings for Weekly posts' })).getByRole('menuitem', { name: 'SUTD final project' }))
+    const teams = await screen.findByRole('list', { name: 'Teams in no project' })
+    expect(teams.closest('section')).toBe(screen.getByRole('heading', { name: 'Not in a project' }).closest('section'))
+    const row = within(teams).getByRole('button', { name: 'Team settings for Weekly posts' }).closest('li') as HTMLElement
+    // Its line opens its chat, as a team's line on a project's card does.
+    expect(within(row).getByRole('link')).toHaveAttribute('href', '/?path=blog.yaml&view=chat')
+    // Not a project: no room of its own among the projects, in either view.
+    expect(screen.getAllByRole('article').map((room) => room.getAttribute('aria-labelledby'))).toEqual(['room-sutd'])
+    expect(screen.queryByRole('button', { name: /Project settings for Weekly posts/ })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'List' }))
+    expect(within(screen.getByRole('list', { name: 'Projects' })).queryByText('Weekly posts')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Rooms' }))
+    localStorage.removeItem('loomwatch:studio-view')
+    // One pick: the button opens your projects, and the one picked takes the team.
+    fireEvent.click(within(row).getByRole('button', { name: 'Move to a project: Weekly posts' }))
+    fireEvent.click(within(screen.getByRole('menu', { name: 'Move to a project: Weekly posts' })).getByRole('menuitem', { name: 'SUTD final project' }))
     await waitFor(() => expect(calls).toEqual(['PUT /api/team']))
     expect(saved).toContain('project: sutd')
-    fireEvent.click(within(blog).getByRole('button', { name: 'Team settings for Weekly posts' }))
-    // The menu opens at its top again.
+    expect(await screen.findByText(/works in/)).toHaveTextContent('Weekly posts works in SUTD final project now.')
+    fireEvent.click(within(row).getByRole('button', { name: 'Team settings for Weekly posts' }))
     fireEvent.click(within(screen.getByRole('menu', { name: 'Team settings for Weekly posts' })).getByRole('menuitem', { name: 'Delete team…' }))
     fireEvent.click(within(screen.getByRole('alertdialog', { name: 'Delete “Weekly posts”?' })).getByRole('button', { name: 'Delete team' }))
     await waitFor(() => expect(calls).toEqual(['PUT /api/team', 'DELETE /api/team?path=blog.yaml']))
+  })
+
+  it('offers no move for a team in no project while there is no project to move it to', async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (url === '/api/projects') return respond({ projects: [], loose: ['blog.yaml'], missing: [], removed: [] })
+      if (url === '/api/runs') return respond([])
+      if (url === '/api/teams') return respond({ root: '/teams', files: ['blog.yaml'], teams: [{ path: 'blog.yaml', name: 'Weekly posts', agentCount: 1 }] })
+      return studio(url)
+    })
+    render(<Home onPalette={vi.fn()} runs={[]} />)
+    const teams = await screen.findByRole('list', { name: 'Teams in no project' })
+    expect(within(teams).queryByRole('button', { name: /Move to a project/ })).toBeNull()
+    expect(within(teams).getByRole('button', { name: 'Team settings for Weekly posts' })).toBeInTheDocument()
+    // The desk still shows: a team in no project is a team like any other.
+    expect(screen.getByRole('button', { name: 'New project' })).toBeInTheDocument()
   })
 
   it('says a file cannot be opened, so none goes missing from Home', async () => {

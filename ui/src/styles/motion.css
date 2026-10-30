@@ -183,8 +183,9 @@
   .lw-dock-count.rose { animation: count-pop var(--t-move) var(--ease-out) backwards; }
 
   /* A place arrives: its parts rise in, one after another, and a long page never waits. */
-  /* New project's scrim and dialog sit in the studio too, but open when asked, not with the page. */
-  :is(.studio, .agents-main, .quests-main, .lw-skills-main, .lw-settings) > :not(.set-up-backdrop),
+  /* New project's scrim and dialog, and a delete's or a rename's, sit in the studio too, but open
+     when asked, not with the page. */
+  :is(.studio, .agents-main, .quests-main, .lw-skills-main, .lw-settings) > :not(.set-up-backdrop, .lw-scrim),
   :is(.home-grid, .room-list, .glance-needs) > li {
     animation: rise-in var(--t-entrance) var(--ease-out) backwards;
   }

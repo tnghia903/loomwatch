@@ -34,8 +34,8 @@ export function DeleteProjectDialog({ project, teams, onDeleted, onClose }: Dele
     <div className="lw-scrim dim" onMouseDown={() => { if (!busy) onClose() }}>
       <div role="alertdialog" aria-modal="true" aria-labelledby={titleId} className="pop e2 lw-deleteteam" onMouseDown={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === 'Escape' && !busy) { event.stopPropagation(); onClose() } }}>
         <h2 id={titleId}>Delete the project “{project.name}”?</h2>
-        {teams.length === 1 && <p>Its team, {teams[0]}, stays on Home as a card of its own.</p>}
-        {teams.length > 1 && <p>Its teams stay on Home as cards of their own: {listNames(teams)}.</p>}
+        {teams.length === 1 && <p>Its team, {teams[0]}, stays on Home, under Not in a project.</p>}
+        {teams.length > 1 && <p>Its teams stay on Home, under Not in a project: {listNames(teams)}.</p>}
         <p title=".projects/.removed, inside your teams folder">Its About and notes go with it. Nothing is erased: LoomWatch keeps them in your teams folder, and your own folders stay where they are.</p>
         {error && <p role="alert" className="dt-alert">{error}</p>}
         <div className="dt-acts">

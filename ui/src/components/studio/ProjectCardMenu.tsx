@@ -1,4 +1,4 @@
-import { MoreHorizontal } from 'lucide-react'
+import { ChevronDown, MoreHorizontal } from '../ui/icon'
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 
 import { ProjectMark } from './RoomCard'
@@ -30,39 +30,33 @@ export function ProjectCardMenu({ name, putAway = false, onRename, onHide, onDel
 }
 
 /**
- * The "…" on the card of a team in no project, the way a deleted project leaves its teams (ADR
- * 0100): move it into one of your projects, or delete it, from Home.
+ * The "…" on a team in no project, under "Not in a project" on Home (ADR 0100): what is done to the
+ * team itself. Moving it into a project has its own button beside it.
  */
-export function TeamCardMenu({ name, ...items }: { name: string } & Omit<TeamMenuItems, 'pick'>) {
-  return <CardMenu label={`Team settings for ${name}`} title="Team settings">{(pick) => <TeamItems {...items} pick={pick} />}</CardMenu>
-}
-
-interface TeamMenuItems {
-  projects: readonly { id: string; name: string; mark?: string }[]
-  onMove: (project: string) => void
-  onDelete: () => void
-  pick: (act: () => void) => () => void
-}
-
-/** Its items, which start again at the top each time the menu opens. */
-function TeamItems({ projects, onMove, onDelete, pick }: TeamMenuItems) {
-  const [moving, setMoving] = useState(false)
-  if (moving) {
-    return projects.map((project) => (
-      <button key={project.id} type="button" role="menuitem" onClick={pick(() => onMove(project.id))}><ProjectMark id={project.id} mark={project.mark} />{project.name}</button>
-    ))
-  }
+export function TeamCardMenu({ name, onDelete }: { name: string; onDelete: () => void }) {
   return (
-    <>
-      <button type="button" role="menuitem" onClick={() => setMoving(true)} disabled={projects.length === 0} title={projects.length === 0 ? 'Set up a project first' : undefined}>Move to a project</button>
-      <span className="menu-rule" role="separator" />
-      <button type="button" role="menuitem" className="menu-alert" onClick={pick(onDelete)}>Delete team…</button>
-    </>
+    <CardMenu label={`Team settings for ${name}`} title="Team settings">
+      {(pick) => <button type="button" role="menuitem" className="menu-alert" onClick={pick(onDelete)}>Delete team…</button>}
+    </CardMenu>
   )
 }
 
-/** A "…" over a card on Home, above the link the card's name stretches over it. */
-function CardMenu({ label, title, children }: { label: string; title: string; children: (pick: (act: () => void) => () => void) => ReactNode }) {
+/** A team in no project's one step into one of your projects: the button opens the list, a pick moves it. */
+export function MoveToProject({ name, projects, onMove }: { name: string; projects: readonly { id: string; name: string; mark?: string }[]; onMove: (project: string) => void }) {
+  return (
+    <CardMenu label={`Move to a project: ${name}`} title={null} face={<>Move to a project</>} className="move-to-project">
+      {(pick) => projects.map((project) => (
+        <button key={project.id} type="button" role="menuitem" onClick={pick(() => onMove(project.id))}><ProjectMark id={project.id} mark={project.mark} />{project.name}</button>
+      ))}
+    </CardMenu>
+  )
+}
+
+/**
+ * A "…" over a card on Home, above the link the card's name stretches over it; with a `face`, a
+ * button in words that opens a list the same way.
+ */
+function CardMenu({ label, title, face, className = 'room-card-menu', children }: { label: string; title: string | null; face?: ReactNode; className?: string; children: (pick: (act: () => void) => () => void) => ReactNode }) {
   const [open, setOpen] = useState(false)
   const box = useRef<HTMLSpanElement>(null)
   useEffect(() => {
@@ -75,8 +69,10 @@ function CardMenu({ label, title, children }: { label: string; title: string; ch
   }, [open])
   const pick = (act: () => void) => () => { setOpen(false); act() }
   return (
-    <span className="room-card-menu" ref={box}>
-      <button type="button" className="iconbtn" aria-label={label} title={title} aria-expanded={open} aria-haspopup="menu" onClick={() => setOpen((value) => !value)}><MoreHorizontal size={16} aria-hidden="true" /></button>
+    <span className={className} ref={box}>
+      {face
+        ? <button type="button" className="btn" aria-label={label} aria-expanded={open} aria-haspopup="menu" onClick={() => setOpen((value) => !value)}>{face}<ChevronDown size={14} aria-hidden="true" /></button>
+        : <button type="button" className="iconbtn" aria-label={label} title={title ?? undefined} aria-expanded={open} aria-haspopup="menu" onClick={() => setOpen((value) => !value)}><MoreHorizontal size={16} aria-hidden="true" /></button>}
       {open && <span className="idle-agent-menu" role="menu" aria-label={label}>{children(pick)}</span>}
     </span>
   )

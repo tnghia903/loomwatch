@@ -540,6 +540,17 @@ button.wall-paper:focus-visible { outline: 2px solid var(--color-accent); outlin
 .idle-agent-menu button.menu-alert { color: var(--color-alert); font-weight: 600; }
 .idle-agent-menu button.menu-alert:hover:not(:disabled) { background: color-mix(in srgb, var(--color-alert) 10%, transparent); }
 /* As wide as its longest item, so "Remove from My agents…" stays on one line. */
-:is(.room-card-menu, .agent-card-menu) .idle-agent-menu { width: max-content; }
+:is(.room-card-menu, .agent-card-menu, .move-to-project) .idle-agent-menu { width: max-content; }
 /* An open "…" looks open, as a card's menu button on Home does. */
 :is(.room-card-menu, .agent-card-menu) .iconbtn[aria-expanded="true"] { background: var(--color-accent-tint); color: var(--color-ink); }
+
+/* ---------- A team in no project, under "Not in a project" (ADR 0100) ---------- */
+/* Each on its line as in a room's card, then its one step into a project and its "…". In a narrow
+   window the line takes the row and the two controls go under it, at its right. */
+.not-in-project .loose-teams { flex-basis: 100%; list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(380px, 100%), 1fr)); gap: var(--sp-3); }
+.loose-team { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); padding: var(--sp-1) var(--sp-1) var(--sp-1) var(--sp-3); border: 1px solid var(--color-hairline); border-radius: var(--r-md); background: var(--color-panel-solid); }
+.loose-team > .room-card-team { flex: 1 1 200px; min-width: 0; }
+.move-to-project { position: relative; flex: none; margin-left: auto; }
+.move-to-project > .btn { gap: 6px; min-height: 36px; }
+.loose-team > .room-card-menu { margin: 0; }
+.not-in-project > :is(.loose-moved, .alert) { flex-basis: 100%; margin: 0; }
