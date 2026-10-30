@@ -260,7 +260,10 @@ mod tests {
         assert_eq!(after["project"], value("bikes"));
         assert_eq!(after["memory"]["enabled"], value("true"));
         assert!(after.get("schedule").is_none());
-        assert!(after.get("deliver").is_none(), "where answers go is each project's");
+        assert!(
+            after.get("deliver").is_none(),
+            "where answers go is each project's"
+        );
         // The other way, the place's schedule stays and the saved one's Brief doesn't arrive.
         let back = value(
             &with_setup(&BIKES.replace("perRun: 1", "perRun: 5"), COFFEE)
