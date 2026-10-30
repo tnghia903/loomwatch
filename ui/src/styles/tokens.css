@@ -82,6 +82,9 @@
   --color-live-dim:       var(--lw-blue-500);
   --color-live-tint:      var(--lw-blue-tint-light);
   --color-alert:          var(--lw-red-600);
+  /* A delete's confirm button and its label (5.6:1): the alert red as a fill, in both themes. */
+  --color-alert-fill:     var(--lw-red-600);
+  --color-alert-on-fill:  var(--color-white);
   --color-ok:             var(--lw-jade-700);
   --color-halt:           var(--lw-slate-600);
   /* Each figure's colour as text and as an avatar's disc (lib/library/figures.ts FIGURE_COLORS),
@@ -148,6 +151,9 @@
   --color-live-dim:       var(--lw-blue-500);
   --color-live-tint:      var(--lw-blue-tint-dark);
   --color-alert:          var(--lw-red-400);
+  /* White on red-400 reads 3.1:1, so the fill stays the deeper red here. */
+  --color-alert-fill:     var(--lw-red-600);
+  --color-alert-on-fill:  var(--color-white);
   --color-ok:             var(--lw-jade-400);
   --color-halt:           var(--lw-slate-400);
   /* Light enough to read on obsidian (9:1 or more); butter leans lemon, away from your gold. */

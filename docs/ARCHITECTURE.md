@@ -471,6 +471,23 @@ adds the person's note. The daemon keeps a copy of every team file once before t
 team into a project of its own (`/api/move-into-projects`), through its normal save. Moving a
 team to another project later is the same save, with only its `project` changed.
 
+Deleting a project (ADR 0100), from the "…" on its card on Home or in its room:
+`DELETE /api/projects/{id}` takes the `project:` line out of each of its teams' files, all of them
+or none (`projects::without_project`), keeps an approved team approved, adds those teams to the
+`leftOut` list beside the move's record (renaming a team carries its entry to the new path) so the
+app never moves them into a project of their own,
+and moves the project's file to `.projects/.removed/`. Those teams stand on Home as cards of their
+own, whose "…" moves one into a project or deletes it. A removed project's id stays taken (`projects::removed_ids`, listed by `GET /api/projects` as
+`removed`): its notebook and Ask chat are kept under it.
+
+Removing one of My agents (ADR 0100), from the "…" on its card or its name's menu, takes it off
+every team it is in first, in the app (`lib/library/removeAgent.ts`): each team closes up around
+it (`lib/team-file/takeOff.ts`): whoever handed it work hands it on, the next one starts when it
+started the team, a review stop left at the front goes, and a team left with no agent goes to the
+trash. When it started a team and handed work to several, the confirmation asks which of them
+starts, and that one hands the work on to the others. `DELETE /api/jobs/{id}` still refuses an
+agent a team uses.
+
 In the app, Home is the studio (`components/studio/`, `lib/projects/studio.ts`). Home and a
 project's room open the same way, at a glance (`lib/projects/glance.ts`, `GlanceTiles`): four tiles
 that keep their places. Needs you counts by the bell's own rules (`ticketsFrom`), so the two never
@@ -496,13 +513,18 @@ with "To" when there is more than one. The first thing to do is the screen's one
 first item's answer, or Start while nothing waits.
 
 Home then has where the person left off (the newest things made, their chats with one agent, and
-Chat with one agent), a card per project, and their agents in no project. A card lists the
+Chat with one agent), a card per project, and what is in no project: each team in none on its line,
+as a card has it, with Add to a project (one pick moves it, ADR 0100) and a "…" with Delete team…,
+then the agents in no team. One team can work in several projects (ADR 0103): each project has a
+place of its own for it, a team file naming the same `shares:` id with its own id, project,
+schedule, delivery and Brief, and `PUT /api/team` writes the rest, the setup, into the other places
+(`team_places.rs`). Its line says "Also in" the others. A card lists the
 project's teams, one per line, waiting first, then working, then stopped, then the next to run on a
 schedule: a shape and words for how each is, its agents' figures, and its name opening its chat;
 then the newest thing made there and this month's cost. A room (`/projects/<id>`) has its teams as
-cards in the same order, kept while the person is in it, each with its desks, Move to and its
-newest file; then Made here, everything its agents made, newest first, narrowed to one team by a
-row of teams; and beside them the wall (About, folders, notes), Add an agent, New team and Ask
+cards in the same order, kept while the person is in it, each with its desks, its "…" (Add to
+another project, Take out of the project, Delete team…) and its newest file; then Made here, everything its agents made, newest first, narrowed to one team by a
+row of teams; and beside them the wall (About, folders, notes), Add an agent, Add a team, New team and Ask
 about the project. A made file opens in the reader over the page, with a link to ask about it in
 its chat. An agent is lit only where it is now, gold at its own desk while it waits for the person:
 where it is busy in another team, its figure is faint and unlit, naming that team. Where the person

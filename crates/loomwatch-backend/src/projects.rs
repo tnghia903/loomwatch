@@ -19,6 +19,8 @@ use serde::{Deserialize, Serialize};
 
 /// The folder in the teams folder that holds the projects, one file each.
 pub(crate) const FOLDER: &str = ".projects";
+/// The folder in [`FOLDER`] a deleted project's file moves to.
+pub(crate) const REMOVED: &str = ".removed";
 
 /// The most characters a project's About may hold: a few paragraphs every agent reads at the
 /// start of every session, well inside the memory packet's budget (ADR 0014).
@@ -378,17 +380,160 @@ pub fn moved(state_dir: &Path, teams_root: &Path) -> bool {
 /// When the mark can't be written.
 pub fn record_moved(state_dir: &Path, teams_root: &Path) -> std::io::Result<()> {
     let path = mark_path(state_dir, teams_root);
-    let mut record = std::fs::read(&path)
-        .ok()
-        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
-        .filter(serde_json::Value::is_object)
-        .unwrap_or_else(|| serde_json::json!({}));
+    let mut record = mark_record(&path);
     record["movedAt"] =
         serde_json::json!(chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
     crate::approvals::write_private(
         &path,
         &serde_json::to_vec_pretty(&record).map_err(std::io::Error::other)?,
     )
+}
+
+fn mark_record(path: &Path) -> serde_json::Value {
+    std::fs::read(path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .filter(serde_json::Value::is_object)
+        .unwrap_or_else(|| serde_json::json!({}))
+}
+
+/// The teams of `teams_root` the person left in no project by deleting theirs (ADR 0100): the app
+/// never moves them into a project of their own, as it does a team found in none.
+#[must_use]
+pub fn left_out(state_dir: &Path, teams_root: &Path) -> Vec<String> {
+    mark_record(&mark_path(state_dir, teams_root))
+        .get("leftOut")
+        .and_then(serde_json::Value::as_array)
+        .map(|teams| {
+            teams
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Keep `teams` in no project from now on: added to [`left_out`].
+///
+/// # Errors
+///
+/// When the mark can't be written.
+pub fn leave_out(state_dir: &Path, teams_root: &Path, teams: &[String]) -> std::io::Result<()> {
+    let path = mark_path(state_dir, teams_root);
+    let mut record = mark_record(&path);
+    let mut kept = left_out(state_dir, teams_root);
+    for team in teams {
+        if !kept.contains(team) {
+            kept.push(team.clone());
+        }
+    }
+    record["leftOut"] = serde_json::json!(kept);
+    crate::approvals::write_private(
+        &path,
+        &serde_json::to_vec_pretty(&record).map_err(std::io::Error::other)?,
+    )
+}
+
+/// A team left in no project that was renamed (ADR 0099) stays left out under its new path.
+///
+/// # Errors
+///
+/// When the mark can't be written.
+pub fn follow_rename(
+    state_dir: &Path,
+    teams_root: &Path,
+    from: &str,
+    to: &str,
+) -> std::io::Result<()> {
+    let kept = left_out(state_dir, teams_root);
+    if !kept.iter().any(|team| team == from) {
+        return Ok(());
+    }
+    let path = mark_path(state_dir, teams_root);
+    let mut record = mark_record(&path);
+    record["leftOut"] = serde_json::json!(
+        kept.into_iter()
+            .map(|team| if team == from { to.to_owned() } else { team })
+            .collect::<Vec<_>>()
+    );
+    crate::approvals::write_private(
+        &path,
+        &serde_json::to_vec_pretty(&record).map_err(std::io::Error::other)?,
+    )
+}
+
+/// `text`, a team file in project `id`, with the top-level `project: <id>` line taken out, so the
+/// team works in no project. Nothing else in the file changes, comments included. `None` when the
+/// file names the project some other way than one such line (written by hand): such a file is left
+/// for the person to change.
+#[must_use]
+pub fn without_project(text: &str, id: &str) -> Option<String> {
+    let names_it = |line: &str| {
+        let Some(value) = line.strip_prefix("project:") else {
+            return false;
+        };
+        let value = value.split(" #").next().unwrap_or_default().trim();
+        [value, value.trim_matches('"'), value.trim_matches('\'')].contains(&id)
+    };
+    let lines: Vec<&str> = text.split_inclusive('\n').collect();
+    let mut at = lines.iter().enumerate().filter(|(_, line)| names_it(line));
+    let (index, _) = at.next()?;
+    if at.next().is_some() {
+        return None;
+    }
+    let kept: String = lines
+        .iter()
+        .enumerate()
+        .filter(|(line, _)| *line != index)
+        .map(|(_, line)| *line)
+        .collect();
+    let read = |text: &str| serde_yaml::from_str::<serde_yaml::Value>(text).ok();
+    let before = read(text)?;
+    let after = read(&kept)?;
+    (before.get("project").and_then(serde_yaml::Value::as_str) == Some(id)
+        && after.get("project").is_none())
+    .then_some(kept)
+}
+
+/// The ids of the deleted projects whose files are in `.projects/.removed/`. A new project never
+/// takes one: it would read the deleted project's notebook and Ask chat, kept under its id.
+#[must_use]
+pub fn removed_ids(teams_root: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(teams_root.join(FOLDER).join(REMOVED)) else {
+        return Vec::new();
+    };
+    let mut ids: Vec<String> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            name.strip_suffix(".yaml")
+                .filter(|id| is_id(id))
+                .map(str::to_owned)
+        })
+        .collect();
+    ids.sort();
+    ids
+}
+
+/// Move project `id`'s file into `.projects/.removed/`, where it can be moved back by hand, under a
+/// name no earlier removed file has. Returns where it went.
+///
+/// # Errors
+///
+/// When the file can't be moved.
+pub fn move_to_removed(teams_root: &Path, id: &str) -> std::io::Result<PathBuf> {
+    let removed = teams_root.join(FOLDER).join(REMOVED);
+    std::fs::create_dir_all(&removed)?;
+    let mut target = removed.join(format!("{id}.yaml"));
+    for counter in 2.. {
+        if !target.exists() {
+            break;
+        }
+        target = removed.join(format!("{id}-{counter}.yaml"));
+    }
+    std::fs::rename(file_of(teams_root, id), &target)?;
+    Ok(target)
 }
 
 #[cfg(test)]
@@ -643,5 +788,86 @@ mod tests {
         record_moved(&state.0, &root.0).unwrap();
         assert!(moved(&state.0, &root.0));
         assert_eq!(back_up_once(&state.0, &root.0).unwrap(), None);
+    }
+
+    /// ADR 0100: a deleted project's teams stay in no project, and the record of the move into
+    /// projects keeps both.
+    #[test]
+    fn teams_left_in_no_project_are_kept_beside_the_move() {
+        let root = folder();
+        let state = folder();
+        assert!(left_out(&state.0, &root.0).is_empty());
+        record_moved(&state.0, &root.0).unwrap();
+        leave_out(&state.0, &root.0, &["gate.yaml".into(), "blog.yaml".into()]).unwrap();
+        leave_out(
+            &state.0,
+            &root.0,
+            &["gate.yaml".into(), "notes/trip.yaml".into()],
+        )
+        .unwrap();
+        assert_eq!(
+            left_out(&state.0, &root.0),
+            ["gate.yaml", "blog.yaml", "notes/trip.yaml"]
+        );
+        assert!(moved(&state.0, &root.0), "the move stays recorded");
+        follow_rename(&state.0, &root.0, "blog.yaml", "weekly-posts.yaml").unwrap();
+        follow_rename(&state.0, &root.0, "other.yaml", "elsewhere.yaml").unwrap();
+        assert_eq!(
+            left_out(&state.0, &root.0),
+            ["gate.yaml", "weekly-posts.yaml", "notes/trip.yaml"],
+            "a renamed team stays left out; one never left out stays out of the list"
+        );
+    }
+
+    #[test]
+    fn a_team_loses_only_its_project_line() {
+        let team = "schemaVersion: 1\n# The gate team.\nname: Gate\nproject: sutd  # where it works\nentrypoint: a\n";
+        assert_eq!(
+            without_project(team, "sutd").as_deref(),
+            Some("schemaVersion: 1\n# The gate team.\nname: Gate\nentrypoint: a\n")
+        );
+        assert_eq!(
+            without_project("name: Gate\r\nproject: \"sutd\"\r\n", "sutd").as_deref(),
+            Some("name: Gate\r\n")
+        );
+        assert_eq!(
+            without_project("name: Gate\nproject: blog\n", "sutd"),
+            None,
+            "another project's team"
+        );
+        assert_eq!(
+            without_project("name: Gate\nproject:\n  sutd\n", "sutd"),
+            None,
+            "written another way by hand"
+        );
+        assert_eq!(
+            without_project(
+                "name: Gate\nnotes: |\n  project: sutd\nproject: sutd\n",
+                "sutd"
+            )
+            .as_deref(),
+            Some("name: Gate\nnotes: |\n  project: sutd\n"),
+            "a line inside a block is not the key"
+        );
+        assert_eq!(
+            without_project("name: Gate\nproject: sutd\n  more\n", "sutd"),
+            None,
+            "a value that goes on past the line"
+        );
+    }
+
+    #[test]
+    fn a_removed_project_file_never_takes_an_earlier_ones_place() {
+        let root = folder();
+        write(&root.0, "sutd", &sutd()).unwrap();
+        let first = move_to_removed(&root.0, "sutd").expect("moved");
+        assert_eq!(first, root.0.join(".projects/.removed/sutd.yaml"));
+        assert!(read(&root.0, "sutd").unwrap().is_none());
+        assert!(list(&root.0).is_empty(), "a removed project isn't listed");
+        write(&root.0, "sutd", &sutd()).unwrap();
+        let second = move_to_removed(&root.0, "sutd").expect("moved");
+        assert_eq!(second, root.0.join(".projects/.removed/sutd-2.yaml"));
+        assert!(first.is_file());
+        assert_eq!(removed_ids(&root.0), ["sutd", "sutd-2"]);
     }
 }

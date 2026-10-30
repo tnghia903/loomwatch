@@ -961,7 +961,11 @@ fn project_of(
 
 /// A new project, under a free id from its name.
 fn new_project_for(teams_root: &Path, project: crate::projects::Project) -> ProposedProject {
-    let taken: Vec<String> = crate::projects::list(teams_root).into_keys().collect();
+    // A deleted project's id stays taken: its notebook and Ask chat are kept under it (ADR 0100).
+    let taken: Vec<String> = crate::projects::list(teams_root)
+        .into_keys()
+        .chain(crate::projects::removed_ids(teams_root))
+        .collect();
     ProposedProject {
         id: crate::projects::id_for(&project.name, &taken),
         name: project.name,

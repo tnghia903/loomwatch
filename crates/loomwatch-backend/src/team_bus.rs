@@ -3981,6 +3981,7 @@ mod tests {
     fn team_of(id: &str, entrypoint: &str) -> TeamConfig {
         TeamConfig {
             project: None,
+            shares: None,
             project_file: None,
             schema_version: 1,
             id: id.into(),
@@ -4108,6 +4109,7 @@ mod tests {
         let worker = demo_model(Demo::responder(|_| Some(says("worker reply"))));
         let team = Arc::new(TeamConfig {
             project: None,
+            shares: None,
             project_file: None,
             schema_version: 1,
             id: "test-team".into(),
@@ -4239,6 +4241,7 @@ mod tests {
         let pool = crate::db::Db::temp().await;
         let team = Arc::new(TeamConfig {
             project: None,
+            shares: None,
             project_file: None,
             schema_version: 1,
             id: "guard-test-team".into(),
@@ -4335,6 +4338,7 @@ mod tests {
         let worker = demo_model(worker);
         let team = Arc::new(TeamConfig {
             project: None,
+            shares: None,
             project_file: None,
             schema_version: 1,
             id: "fanout-test-team".into(),
@@ -4407,6 +4411,7 @@ mod tests {
         locked.allow_recruiting = false;
         let team = Arc::new(TeamConfig {
             project: None,
+            shares: None,
             project_file: None,
             schema_version: 1,
             id: "pipeline-restriction-team".into(),
@@ -4511,6 +4516,7 @@ mod tests {
         editor.allow_recruiting = false;
         let team = Arc::new(TeamConfig {
             project: None,
+            shares: None,
             project_file: None,
             schema_version: 1,
             id: "part-asked-team".into(),
@@ -4589,6 +4595,7 @@ mod tests {
         let pool = crate::db::Db::temp().await;
         let team = Arc::new(TeamConfig {
             project: None,
+            shares: None,
             project_file: None,
             schema_version: 1,
             id: "warning-test-team".into(),
@@ -4667,6 +4674,7 @@ mod tests {
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
         let team = Arc::new(TeamConfig {
             project: None,
+            shares: None,
             project_file: None,
             schema_version: 1,
             id: "notebook-tools".into(),
@@ -4833,6 +4841,7 @@ mod tests {
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
         let team = Arc::new(TeamConfig {
             project: None,
+            shares: None,
             project_file: None,
             schema_version: 1,
             id: "scoped-team".into(),

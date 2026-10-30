@@ -46,9 +46,32 @@ describe('round 3’s screens move', () => {
     expect(animation(at('#dialog')) ?? '').not.toMatch(/rise-in/)
   })
 
+  // ADR 0100: Home's delete and rename dialogs open inside the studio too; each fades in as any
+  // dialog does, never rising in with the page.
+  it('leave a delete’s or a rename’s dialog on Home out of the page’s arrival', () => {
+    const at = page('<div class="studio"><section id="desk"></section><div id="scrim" class="lw-scrim dim"><div class="pop e2 lw-deleteteam"></div></div></div>')
+    expect(animation(at('#scrim'))).toMatch(/^fade-in /)
+    expect(animation(at('.lw-deleteteam'))).toMatch(/^dialog-in /)
+    // Opened after the page's parts, it is a later child: no arrival delay holds it back.
+    // Wherever it lands among them: second to sixth and after.
+    for (const before of [1, 2, 3, 4, 5]) {
+      const late = page(`<div class="studio">${'<section></section>'.repeat(before)}<div id="scrim" class="lw-scrim dim"></div></div>`)
+      expect(cascaded(late('#scrim'), 'animation-delay'), `after ${before}`).toBeNull()
+    }
+    const parts = page('<div class="studio"><section></section><section></section><section></section><section></section><section id="fifth"></section></div>')
+    expect(cascaded(parts('#fifth'), 'animation-delay')).toBe('160ms')
+  })
+
   it('keep a lifted team card’s open menu above the cards after it', () => {
     const at = page('<div class="team-card"><button aria-expanded="true"></button></div>')
     expect(cascaded(at('.team-card'), 'z-index')).toBe('3')
+  })
+
+  // ADR 0100: a project card on Home lifts under the pointer, which stays on its open "…".
+  it('keep a lifted project card’s open "…" above the cards after it', () => {
+    const at = page('<article class="room-card"><span class="room-card-menu"><button aria-expanded="true"></button></span></article><article id="closed" class="room-card"></article>')
+    expect(cascaded(at('.room-card'), 'z-index')).toBe('3')
+    expect(cascaded(at('#closed'), 'z-index')).toBeNull()
   })
 
   it('breathe a working figure’s glow, and hold the others still', () => {

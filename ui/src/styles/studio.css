@@ -108,6 +108,7 @@
 .room-card-team-words { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .room-card-team-words b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 13.5px/18px var(--font-sans); }
 .room-card-team-words small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 16px; color: var(--color-ink-2); }
+/* The other projects it works in, under what it is doing (ADR 0103). */
 /* The figures in a line pass the press to the line. */
 .room-card-team .desk { pointer-events: none; }
 .room-card-more { margin: 0; font-size: 12.5px; color: var(--color-ink-3); }
@@ -522,3 +523,69 @@ button.wall-paper:focus-visible { outline: 2px solid var(--color-accent); outlin
 
 /* Ask in a project's room answers under LoomWatch's own mark, beside its title (ADR 0097). */
 .ask-head h2 { display: flex; align-items: center; gap: var(--sp-2); }
+
+/* ---------- A project's "…" on Home (ADR 0100) ---------- */
+/* Above the link the card's name stretches over it, as a team's "…" in a room is. */
+.room-card-menu { position: relative; z-index: 2; flex: none; margin: calc(-1 * var(--sp-2)) calc(-1 * var(--sp-2)) calc(-1 * var(--sp-2)) 0; }
+.room-card-menu:has([aria-expanded="true"]) { z-index: 3; }
+.room-card-menu .iconbtn { width: 44px; height: 44px; }
+.room-tile-box { position: relative; display: flex; flex-direction: column; }
+.room-tile-box > .room-tile { flex: 1; padding-right: calc(44px + var(--sp-2)); }
+.room-tile-box > .room-card-menu { position: absolute; top: 6px; right: 6px; margin: 0; }
+.room-list li:has(> .room-card-menu) { display: flex; align-items: center; }
+.room-list li:has(> .room-card-menu) > button:not(.btn):not(.link) { flex: 1; min-width: 0; width: auto; }
+.room-list li > .room-card-menu { margin: 0 var(--sp-1) 0 0; }
+/* What is done to the thing itself comes last, under a rule; deleting it is in the alert colour
+   with words, never colour alone. */
+.idle-agent-menu .menu-rule { flex: none; height: 1px; margin: var(--sp-1) 0; background: var(--color-hairline); }
+.idle-agent-menu button.menu-alert { color: var(--color-alert); font-weight: 600; }
+.idle-agent-menu button.menu-alert:hover:not(:disabled) { background: color-mix(in srgb, var(--color-alert) 10%, transparent); }
+/* As wide as its longest item, so "Remove from My agents…" stays on one line. */
+:is(.room-card-menu, .agent-card-menu, .move-to-project, .add-a-team) .idle-agent-menu { width: max-content; }
+/* An open "…" or Add list looks open, as a card's menu button on Home does; the ring shows it on the
+   dark panel, where the tint alone barely does. */
+:is(.room-card-menu, .agent-card-menu, .room-team-move) .iconbtn[aria-expanded="true"],
+:is(.move-to-project, .add-a-team) > .btn[aria-expanded="true"] { background: var(--color-accent-tint); color: var(--color-ink); box-shadow: inset 0 0 0 1px var(--color-accent-dim); }
+:is(.move-to-project, .add-a-team) > .btn > svg { transition: rotate var(--t-quick) var(--ease-out); }
+:is(.move-to-project, .add-a-team) > .btn[aria-expanded="true"] > svg { rotate: 180deg; }
+
+/* ---------- A team in no project, under "Not in a project" (ADR 0100) ---------- */
+/* Each on its line as in a room's card, then its one step into a project and its "…". In a narrow
+   window the line takes the row and the two controls go under it, at its right. */
+.not-in-project .loose-teams { flex-basis: 100%; list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(380px, 100%), 1fr)); gap: var(--sp-3); }
+.loose-team { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); padding: var(--sp-1) var(--sp-1) var(--sp-1) var(--sp-3); border: 1px solid var(--color-hairline); border-radius: var(--r-md); background: var(--color-panel-solid); }
+.loose-team > .room-card-team { flex: 1 1 200px; min-width: 0; }
+.move-to-project { position: relative; flex: none; margin-left: auto; }
+.move-to-project > .btn { gap: 6px; min-height: 36px; }
+.loose-team > .room-card-menu { margin: 0; }
+/* In a narrow window the list of projects hangs under the whole row, as wide as it, so a long
+   project name never pushes it off the window's left edge. */
+@media (max-width: 767px) {
+  .loose-team { position: relative; }
+  .loose-team > .move-to-project { position: static; }
+  .loose-team > .move-to-project > .idle-agent-menu { left: 0; right: 0; width: auto; }
+}
+.not-in-project > :is(.loose-moved, .alert) { flex-basis: 100%; margin: 0; }
+
+/* ---------- One team in several projects (ADR 0103) ---------- */
+/* On a room's team card, under its name: the other projects it works in, which a save or a delete
+   reaches too, so it reads as well as the line above it (ink-2: APCA Lc 53 dark, 87 light). */
+.team-card-title { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.team-card-also { font-size: 12px; line-height: 16px; color: var(--color-ink-2); overflow-wrap: anywhere; }
+.room-card-team-words .room-card-also { color: var(--color-ink-2); }
+/* Add a team, in the room's toolbar beside Add an agent and New team: its own rules, so it stands
+   as they do. Each of yours in its list, the name over where it works now. */
+.add-a-team { position: relative; flex: none; }
+.add-a-team > .btn { gap: 6px; }
+.add-a-team .idle-agent-menu { min-width: 240px; }
+.add-a-team-name { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: var(--sp-1) 0; overflow-wrap: anywhere; }
+/* ink-2: a hovered row's hairline tint takes ink-3 under 4.5:1. */
+.add-a-team-name small { font-size: 12px; font-weight: 400; color: var(--color-ink-2); }
+.add-a-team .idle-agent-menu button { min-height: 48px; }
+/* In a narrow window the list hangs under the whole toolbar, as wide as it, so a long project name
+   never pushes it off the window's left edge. */
+@media (max-width: 767px) {
+  .room-floor-head { position: relative; }
+  .room-floor-acts > .add-a-team { position: static; }
+  .add-a-team > .idle-agent-menu { left: 0; right: 0; width: auto; }
+}

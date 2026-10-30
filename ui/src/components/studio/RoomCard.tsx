@@ -1,8 +1,9 @@
-import { Fragment } from 'react'
+import { Fragment, type ReactNode } from 'react'
 
 import { otherTeams, type Room, type RoomTeam } from '../../lib/projects/studio'
 import { markOf, type FigureOf } from '../../lib/projects/studioUi'
 import { PRESENCE_WORDS } from '../../lib/rail/presence'
+import { listNames } from '../../lib/format'
 import { teamHref } from '../../lib/team-file/teamHref'
 import { FileChip } from '../ui/FileChip'
 import { TeamDesks } from './TeamDesks'
@@ -54,16 +55,34 @@ function StateShape({ state }: { state: RoomTeam['state'] }) {
   return <span className="room-card-noshape" aria-hidden="true" />
 }
 
+/** A team on one line, the whole line opening its chat: on a room's card, and under "Not in a project". */
+export function TeamLine({ team, figureOf }: { team: RoomTeam; figureOf: FigureOf }) {
+  return (
+    <a className="room-card-team" href={teamHref(team.path, 'chat')}>
+      <StateShape state={team.state} />
+      <span className="room-card-team-words">
+        <b>{team.name}</b>
+        <small className={`room-state ${team.state}`}>{teamLine(team)}</small>
+        {/* The same team works in other projects too, each with its own work (ADR 0103). */}
+        {team.alsoIn?.length ? <small className="room-card-also">Also in {listNames(team.alsoIn.map((project) => project.name))}</small> : null}
+      </span>
+      <TeamDesks team={team} figureOf={figureOf} size={26} compact />
+    </a>
+  )
+}
+
 /**
  * A project's room on Home (ADR 0097), at a glance: each team on a line, most pressing first, with
  * what it is doing and its agents' figures, the whole line opening its chat; then the newest thing
  * made here, one press from being read, and what this month cost. The rest of the card opens the
  * room.
  */
-export function RoomCard({ room, figureOf, onOpen, newest = null, spend = null }: {
+export function RoomCard({ room, figureOf, onOpen, newest = null, spend = null, menu = null }: {
   room: Room
   figureOf: FigureOf
   onOpen: () => void
+  /** Its "…", above the card's link: what is done to the project itself. */
+  menu?: ReactNode
   /** The newest file the agents here made. */
   newest?: string | null
   /** What this month cost here, in words. */
@@ -80,20 +99,12 @@ export function RoomCard({ room, figureOf, onOpen, newest = null, spend = null }
           </button>
         </h3>
         {room.teams.length > 1 && <span className="room-card-count">{room.teams.length} teams</span>}
+        {menu}
       </div>
       {room.teams.length === 0 ? <p className="desk-empty">No team yet</p> : (
         <ul className="room-card-teams" aria-label={`${room.name}’s teams`}>
           {room.teams.slice(0, TEAMS_LISTED).map((team) => (
-            <li key={team.path}>
-              <a className="room-card-team" href={teamHref(team.path, 'chat')}>
-                <StateShape state={team.state} />
-                <span className="room-card-team-words">
-                  <b>{team.name}</b>
-                  <small className={`room-state ${team.state}`}>{teamLine(team)}</small>
-                </span>
-                <TeamDesks team={team} figureOf={figureOf} size={26} compact />
-              </a>
-            </li>
+            <li key={team.path}><TeamLine team={team} figureOf={figureOf} /></li>
           ))}
         </ul>
       )}

@@ -51,6 +51,7 @@ pub mod skills_store;
 pub mod spa;
 pub mod spend;
 mod team_bus;
+pub mod team_places;
 mod team_rename;
 pub mod team_requests;
 pub mod updates;
@@ -5846,6 +5847,7 @@ mod tests {
 
         let team = Arc::new(TeamConfig {
             project: None,
+            shares: None,
             project_file: None,
             schema_version: 1,
             id: "pipeline-test-team".into(),
@@ -5976,6 +5978,7 @@ mod tests {
         }];
         let team = Arc::new(TeamConfig {
             project: None,
+            shares: None,
             project_file: None,
             schema_version: 1,
             id: "skill-team".into(),
@@ -6045,6 +6048,7 @@ mod tests {
         agent.done_when = vec!["Every story has a link".into()];
         let team = Arc::new(TeamConfig {
             project: None,
+            shares: None,
             project_file: None,
             schema_version: 1,
             id: "done-when-team".into(),
@@ -6184,6 +6188,7 @@ mod tests {
     fn check_team(id: &str, agents: Vec<AgentConfig>, edges: &[(&str, &str)]) -> Arc<TeamConfig> {
         Arc::new(TeamConfig {
             project: None,
+            shares: None,
             project_file: None,
             schema_version: 1,
             id: id.into(),
@@ -6964,6 +6969,7 @@ mod tests {
         };
         let team = Arc::new(TeamConfig {
             project: None,
+            shares: None,
             project_file: None,
             schema_version: 1,
             id: "notebook-checkpoints".into(),
@@ -7047,6 +7053,7 @@ mod tests {
         }
         TeamConfig {
             project: None,
+            shares: None,
             project_file: None,
             schema_version: 1,
             id: "shape".into(),
@@ -7258,6 +7265,7 @@ mod tests {
     fn a_helpers_long_reply_is_capped_in_the_turn_that_hands_it_back() {
         let team = TeamConfig {
             project: None,
+            shares: None,
             project_file: None,
             schema_version: 1,
             id: "desk".into(),
@@ -7339,6 +7347,7 @@ mod tests {
 
         let team = Arc::new(TeamConfig {
             project: None,
+            shares: None,
             project_file: None,
             schema_version: 1,
             id: "pipeline-diamond-team".into(),
@@ -7714,6 +7723,7 @@ mod tests {
         let reader = never_prompted();
         let team = Arc::new(TeamConfig {
             project: None,
+            shares: None,
             project_file: None,
             schema_version: 1,
             id: "refused-pipeline".into(),
@@ -7786,6 +7796,7 @@ mod tests {
         let pool = crate::db::Db::temp().await;
         let team = Arc::new(TeamConfig {
             project: None,
+            shares: None,
             project_file: None,
             schema_version: 1,
             id: "pre-minted-pipeline".into(),
@@ -7869,6 +7880,7 @@ mod tests {
         let pool = crate::db::Db::temp().await;
         let team = Arc::new(TeamConfig {
             project: None,
+            shares: None,
             project_file: None,
             schema_version: 1,
             id: "pre-minted-team".into(),
@@ -7947,6 +7959,7 @@ mod tests {
         }));
         let team = Arc::new(TeamConfig {
             project: None,
+            shares: None,
             project_file: None,
             schema_version: 1,
             id: "dispatching-team".into(),
@@ -8229,6 +8242,7 @@ mod tests {
         let model = crate::engine::demo_model(demo.clone());
         let team = Arc::new(TeamConfig {
             project: None,
+            shares: None,
             project_file: None,
             schema_version: 1,
             id: "bench-ada".into(),
@@ -8374,6 +8388,7 @@ mod tests {
         let model = crate::engine::demo_model(demo);
         let team = Arc::new(TeamConfig {
             project: None,
+            shares: None,
             project_file: None,
             schema_version: 1,
             id: "bench-ada".into(),
@@ -8509,6 +8524,7 @@ mod tests {
         }));
         let team = Arc::new(TeamConfig {
             project: None,
+            shares: None,
             project_file: None,
             schema_version: 1,
             id: "looping-team".into(),
@@ -8626,6 +8642,7 @@ mod tests {
         worker.spend.per_run = Some(0.003);
         let team = Arc::new(TeamConfig {
             project: None,
+            shares: None,
             project_file: None,
             schema_version: 1,
             id: "dispatching-team".into(),
@@ -8724,6 +8741,7 @@ mod tests {
         }));
         let team = Arc::new(TeamConfig {
             project: None,
+            shares: None,
             project_file: None,
             schema_version: 1,
             id: "asking-team".into(),
@@ -8811,6 +8829,7 @@ mod tests {
         let pool = crate::db::Db::temp().await;
         let team = Arc::new(TeamConfig {
             project: None,
+            shares: None,
             project_file: None,
             schema_version: 1,
             id: "broken".into(),
@@ -8897,6 +8916,7 @@ mod tests {
 
         let team = Arc::new(TeamConfig {
             project: None,
+            shares: None,
             project_file: None,
             schema_version: 1,
             id: "brief-team".into(),
@@ -9168,6 +9188,7 @@ mod tests {
 
         let team = Arc::new(TeamConfig {
             project: None,
+            shares: None,
             project_file: None,
             schema_version: 1,
             id: "notebook-team".into(),
@@ -9338,6 +9359,7 @@ mod tests {
         let never = never_prompted();
         let team = Arc::new(TeamConfig {
             project: None,
+            shares: None,
             project_file: None,
             schema_version: 1,
             id: "oversize-team".into(),
@@ -10163,6 +10185,7 @@ mod tests {
     fn material_team(agents: Vec<AgentConfig>) -> TeamConfig {
         TeamConfig {
             project: None,
+            shares: None,
             project_file: None,
             schema_version: 1,
             id: "material".into(),
@@ -10467,6 +10490,7 @@ mod tests {
         let pool = crate::db::Db::temp().await;
         let team = Arc::new(TeamConfig {
             project: None,
+            shares: None,
             project_file: None,
             schema_version: 1,
             id: "follow-up-team".into(),
@@ -10634,6 +10658,7 @@ mod tests {
         let pool = crate::db::Db::temp().await;
         let team = Arc::new(TeamConfig {
             project: None,
+            shares: None,
             project_file: None,
             schema_version: 1,
             id: "follow-failed-team".into(),
@@ -10809,6 +10834,7 @@ mod tests {
         };
         Arc::new(TeamConfig {
             project: None,
+            shares: None,
             project_file: None,
             schema_version: 1,
             id: id.into(),
@@ -11658,6 +11684,7 @@ mod tests {
         let (after, _) = stand_in(vec![turn(&[], "done")]);
         let team = Arc::new(TeamConfig {
             project: None,
+            shares: None,
             project_file: None,
             schema_version: 1,
             id: "asking".into(),
@@ -12314,6 +12341,7 @@ mod tests {
         let team_of = |lead: AgentConfig| {
             Arc::new(TeamConfig {
                 project: None,
+                shares: None,
                 project_file: None,
                 schema_version: 1,
                 id: "learning-lead".into(),

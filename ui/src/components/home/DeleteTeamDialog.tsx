@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useState } from 'react'
 
 import { fetchRuns, isTerminalRun } from '../../lib/runs/client'
 import { isAbsolutePath } from '../../lib/files/paths'
+import { listNames } from '../../lib/format'
 import { isWindows } from '../../lib/platform'
 import { deleteTeamFile, fetchTeamsDiscovery, teamPathUnderRoot, type DeletedTeam } from '../../lib/team-file/client'
 
@@ -10,6 +11,11 @@ export interface DeleteTeamDialogProps {
   path: string
   /** What the operator calls the team. */
   name: string
+  /** A team in several projects (ADR 0103): the project of this place, and its other places,
+      which go with it, each with its project's name. */
+  places?: { here: string; others: readonly { path: string; project: string }[] }
+  /** For a team in several projects: take it out of this one only, the step most people want. */
+  onTakeOut?: () => Promise<void>
   onDeleted: (deleted: DeletedTeam) => void
   onClose: () => void
 }
@@ -25,7 +31,7 @@ const LIVE_RECHECK_MS = 4000
  * deleted; the daemon refuses that itself (ADR 0028), and asking it for the runs first means the
  * operator is told before choosing, not after.
  */
-export function DeleteTeamDialog({ path, name, onDeleted, onClose }: DeleteTeamDialogProps) {
+export function DeleteTeamDialog({ path, name, places, onTakeOut, onDeleted, onClose }: DeleteTeamDialogProps) {
   const titleId = useId()
   const [live, setLive] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -57,12 +63,27 @@ export function DeleteTeamDialog({ path, name, onDeleted, onClose }: DeleteTeamD
     return () => { controller.abort(); window.clearInterval(timer) }
   }, [live, check])
 
+  async function takeOut() {
+    if (busy || !onTakeOut) return
+    setBusy(true)
+    setError(null)
+    try {
+      await onTakeOut()
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught))
+      setBusy(false)
+    }
+  }
+
   async function confirm() {
     if (busy || live) return
     setBusy(true)
     setError(null)
     try {
-      onDeleted(await deleteTeamFile(path))
+      const deleted = await deleteTeamFile(path)
+      // Its places in other projects go too: Delete team deletes the team (ADR 0103).
+      for (const other of places?.others ?? []) await deleteTeamFile(other.path)
+      onDeleted(deleted)
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught))
       setBusy(false)
@@ -73,12 +94,14 @@ export function DeleteTeamDialog({ path, name, onDeleted, onClose }: DeleteTeamD
     <div className="lw-scrim dim" onMouseDown={() => { if (!busy) onClose() }}>
       <div role="alertdialog" aria-modal="true" aria-labelledby={titleId} className="pop e2 lw-deleteteam" onMouseDown={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === 'Escape' && !busy) { event.stopPropagation(); onClose() } }}>
         <h2 id={titleId}>Delete “{name}”?</h2>
-        <p>It leaves your teams list. Nothing is erased: its file, layout, notes and any files you added to its agents move to a {isWindows() ? '' : 'hidden '}<code>.trash</code> folder inside your teams folder, and moving them back restores the team.</p>
+        <p title={`${isWindows() ? 'The' : 'The hidden'} .trash folder inside your teams folder. Moving them back restores the team.`}>{places?.others.length ? `It goes from every project it works in: ${listNames([places.here, ...places.others.map((other) => other.project)])}.` : 'It leaves Home.'} LoomWatch keeps a copy in your teams folder, with its notes and any files you added to its agents.</p>
         <p>LoomWatch keeps its past runs, so they come back if you restore it.</p>
-        {live && <p role="alert" className="dt-alert">“{name}” is running right now. Stop the run or wait for it to finish, then delete the team.</p>}
+        {live && <p role="alert" className="dt-wait">“{name}” is running right now. Stop the run or wait for it to finish, then delete the team.</p>}
         {error && <p role="alert" className="dt-alert">{error}</p>}
         <div className="dt-acts">
           <button type="button" className="btn" autoFocus onClick={onClose} disabled={busy}>Cancel</button>
+          {/* In several projects (ADR 0103), the step most people want is the smaller one. */}
+          {places?.others.length && onTakeOut ? <button type="button" className="btn" onClick={() => void takeOut()} disabled={busy}>Only take out of {places.here}</button> : null}
           <button type="button" className="btn btn-danger-fill" onClick={() => void confirm()} disabled={busy || live}>{busy ? 'Deleting…' : 'Delete team'}</button>
         </div>
       </div>

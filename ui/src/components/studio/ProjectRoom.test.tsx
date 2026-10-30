@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { cascaded, isGoldFill } from '../../test/cascade'
+import { cascaded, isGoldFill, PHONE } from '../../test/cascade'
 import { ProjectRoom } from './ProjectRoom'
 
 let fetchMock: ReturnType<typeof vi.fn>
@@ -26,6 +26,7 @@ function daemon(url: string, init?: RequestInit) {
     project = { ...kept, ...(JSON.parse(String(init.body)) as object), teams: project.teams } as typeof project
     return respond(project)
   }
+  if (url === '/api/projects/sutd' && init?.method === 'DELETE') return respond({ id: 'sutd', teams: project.teams, movedTo: '.projects/.removed/sutd.yaml' })
   if (url === '/api/projects/sutd/notes' && init?.method === 'POST') {
     project = { ...project, notes: [...project.notes, { text: (JSON.parse(String(init.body)) as { text: string }).text, by: undefined as unknown as string }] }
     return respond(project)
@@ -106,34 +107,157 @@ describe('a project’s room (ADR 0097)', () => {
   })
 
   // Ruling 1: teams that started as projects of their own can be moved into one project.
-  it('moves a team into another of your projects, as the editor saves it', async () => {
+  // ADR 0103: one team can work in several projects, each with a place of its own.
+  it('adds a team to another project from its "…", with its own place there', async () => {
     const thesis = { id: 'thesis', name: 'My thesis', teams: [] }
-    fetchMock.mockImplementation((url: string, init?: RequestInit) => (url === '/api/projects' ? respond({ projects: [project, thesis], loose: [], missing: [] }) : daemon(url, init)))
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === '/api/projects') return respond({ projects: [project, thesis], loose: [], missing: [] })
+      if (url === '/api/team/places' && init?.method === 'POST') return respond({ path: 'sutd/gate-thesis.yaml', shares: 'gate' })
+      return daemon(url, init)
+    })
     render(<ProjectRoom id="sutd" />)
-    fireEvent.click(await screen.findByRole('button', { name: 'Move Research and design to another project' }))
-    const menu = screen.getByRole('menu', { name: 'Move Research and design to' })
-    // Only the other projects: never the one it is in.
+    fireEvent.click(await screen.findByRole('button', { name: 'More for Research and design' }))
+    const menu = screen.getByRole('menu', { name: 'More for Research and design' })
+    // The open "…" looks open, as Home's do, however the pointer moves.
+    expect(cascaded(screen.getByRole('button', { name: 'More for Research and design' }), 'box-shadow')).toBe('inset 0 0 0 1px var(--color-accent-dim)')
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Add to another project' }))
+    // Only the other projects: never the one it is in. The keyboard's place moves to the first.
     expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['My thesis'])
+    expect(within(menu).getByRole('menuitem', { name: 'My thesis' })).toHaveFocus()
     fireEvent.click(within(menu).getByRole('menuitem', { name: 'My thesis' }))
-    await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/team' && init?.method === 'PUT')).toBe(true))
-    const put = fetchMock.mock.calls.find(([url, init]) => url === '/api/team' && init?.method === 'PUT')
-    const body = JSON.parse(String(put?.[1]?.body)) as { path: string; yaml: string }
-    // Saved over the file it read, never over a change made since.
-    expect(new Headers(put?.[1]?.headers).get('If-Match')).toBe('"r"')
-    expect(body.path).toBe('sutd/gate.yaml')
-    expect(body.yaml).toContain('project: thesis')
-    expect(body.yaml).not.toContain('project: sutd')
-    // The rest of the team stays as it was.
-    expect(body.yaml).toMatch(/from: \{ ?agent: researcher ?\}/)
-    expect(body.yaml).toMatch(/schedule: \{ ?cron: "0 17 \* \* 5" ?\}/)
-    expect(await screen.findByRole('status')).toHaveTextContent('Research and design works in My thesis now.')
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/team/places', expect.objectContaining({ method: 'POST' })))
+    const post = fetchMock.mock.calls.find(([url]) => url === '/api/team/places')
+    expect(JSON.parse(String(post?.[1]?.body))).toEqual({ path: 'sutd/gate.yaml', project: 'thesis' })
+    // Its file here is not touched: the daemon makes the new place.
+    expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/team' && init?.method === 'PUT')).toBe(false)
+    expect(await screen.findByRole('status')).toHaveTextContent('Research and design works in My thesis too, with a chat and work of its own there. It has no schedule there yet.')
     expect(within(screen.getByRole('status')).getByRole('link', { name: 'My thesis' })).toHaveAttribute('href', '/projects/thesis')
   })
 
-  it('offers no move when there is no other project', async () => {
+  it('takes a team in no other project out of this one, to wait on Home', async () => {
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => (url === '/api/team/take-out' ? respond({ path: 'sutd/gate.yaml', project: null }) : daemon(url, init)))
     render(<ProjectRoom id="sutd" />)
-    expect(await screen.findByRole('link', { name: /Research and design/ })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /to another project/ })).toBeNull()
+    fireEvent.click(await screen.findByRole('button', { name: 'More for Research and design' }))
+    // No other project: nothing to add it to.
+    expect(within(screen.getByRole('menu')).queryByRole('menuitem', { name: 'Add to another project' })).toBeNull()
+    fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Take out of SUTD final project' }))
+    // Nothing is lost, so nothing is asked.
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/team/take-out', expect.objectContaining({ method: 'POST', body: JSON.stringify({ path: 'sutd/gate.yaml' }) })))
+    expect(await screen.findByRole('status')).toHaveTextContent('Research and design is in no project now. It waits on Home, under Not in a project.')
+  })
+
+  describe('a team that works in another project too', () => {
+    const thesis = { id: 'thesis', name: 'My thesis', teams: ['thesis/gate.yaml'] }
+    const PLACE = GATE.replace('id: gate\n', 'id: gate\nshares: gate\n')
+    const THERE = PLACE.replace('id: gate\n', 'id: gate-thesis\n').replace('project: sutd', 'project: thesis')
+    const calls: string[] = []
+    beforeEach(() => {
+      calls.length = 0
+      fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+        if (init?.method && init.method !== 'GET') calls.push(`${init.method} ${url}`)
+        if (url === '/api/projects') return respond({ projects: [project, thesis], loose: [], missing: [] })
+        if (url === '/api/team?path=thesis%2Fgate.yaml') return respond({ path: 'thesis/gate.yaml', yaml: THERE, revision: 't' })
+        if (url.startsWith('/api/team?') && !init?.method) return respond({ path: 'sutd/gate.yaml', yaml: PLACE, revision: 'r' })
+        if (url === '/api/team/take-out') return respond({ path: 'sutd/gate.yaml', trash: '.trash/x' })
+        if (url.startsWith('/api/team?') && init?.method === 'DELETE') return respond({ path: 'x', trash: '.trash/x', moved: [] })
+        if (url === '/api/teams') return respond({ root: '/teams', files: ['sutd/gate.yaml', 'thesis/gate.yaml'], teams: [{ path: 'sutd/gate.yaml', name: 'Research and design', agentCount: 1 }, { path: 'thesis/gate.yaml', name: 'Research and design', agentCount: 1 }], trashed: [] })
+        return daemon(url, init)
+      })
+    })
+
+    it('says where else it works, and asks before taking it out of this one', async () => {
+      render(<ProjectRoom id="sutd" />)
+      const card = await screen.findByRole('article', { name: 'Research and design' })
+      await waitFor(() => expect(card).toHaveTextContent('Also in My thesis'))
+      fireEvent.click(within(card).getByRole('button', { name: 'More for Research and design' }))
+      // It is in every other project already.
+      expect(within(screen.getByRole('menu')).queryByRole('menuitem', { name: 'Add to another project' })).toBeNull()
+      fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Take out of SUTD final project' }))
+      const dialog = screen.getByRole('alertdialog', { name: 'Take “Research and design” out of SUTD final project?' })
+      expect(dialog).toHaveTextContent('It keeps working in My thesis. Its chat and work leave SUTD final project.')
+      expect(dialog).toHaveTextContent('LoomWatch keeps a copy and its past runs, so they come back if you restore it.')
+      expect(calls).toEqual([])
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Take out' }))
+      await waitFor(() => expect(calls).toEqual(['POST /api/team/take-out']))
+      expect(await screen.findByRole('status')).toHaveTextContent('Research and design is out of SUTD final project. It still works in My thesis.')
+    })
+
+    it('says, deleting this project, that the team keeps working in the other', async () => {
+      render(<ProjectRoom id="sutd" />)
+      const card = await screen.findByRole('article', { name: 'Research and design' })
+      await waitFor(() => expect(card).toHaveTextContent('Also in My thesis'))
+      fireEvent.click(screen.getByRole('button', { name: 'Project settings' }))
+      fireEvent.click(within(screen.getByRole('menu', { name: 'Project settings' })).getByRole('menuitem', { name: 'Delete project…' }))
+      const dialog = screen.getByRole('alertdialog', { name: 'Delete the project “SUTD final project”?' })
+      expect(dialog).toHaveTextContent('Research and design keeps working in My thesis. Its chat and work here go with the project.')
+      expect(dialog).not.toHaveTextContent('Not in a project')
+    })
+
+    it('deletes it from every project with Delete team…, after naming them', async () => {
+      render(<ProjectRoom id="sutd" />)
+      const card = await screen.findByRole('article', { name: 'Research and design' })
+      await waitFor(() => expect(card).toHaveTextContent('Also in My thesis'))
+      fireEvent.click(within(card).getByRole('button', { name: 'More for Research and design' }))
+      fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Delete team…' }))
+      const dialog = screen.getByRole('alertdialog', { name: 'Delete “Research and design”?' })
+      expect(dialog).toHaveTextContent('It goes from every project it works in: SUTD final project and My thesis.')
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Delete team' }))
+      await waitFor(() => expect(calls).toEqual(['DELETE /api/team?path=sutd%2Fgate.yaml', 'DELETE /api/team?path=thesis%2Fgate.yaml']))
+    })
+
+    // Newcomer review: the red Delete is the familiar control, so the smaller step is offered beside it.
+    it('offers to take it out of this project only, from Delete team…', async () => {
+      render(<ProjectRoom id="sutd" />)
+      const card = await screen.findByRole('article', { name: 'Research and design' })
+      await waitFor(() => expect(card).toHaveTextContent('Also in My thesis'))
+      fireEvent.click(within(card).getByRole('button', { name: 'More for Research and design' }))
+      fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Delete team…' }))
+      // Three buttons wrap on a phone rather than push the dialog sideways.
+      expect(cascaded(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Cancel' }).parentElement as HTMLElement, 'flex-wrap')).toBe('wrap')
+      fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Only take out of SUTD final project' }))
+      await waitFor(() => expect(calls).toEqual(['POST /api/team/take-out']))
+      expect(await screen.findByRole('status')).toHaveTextContent('Research and design is out of SUTD final project. It still works in My thesis.')
+    })
+  })
+
+  it('adds one of your teams to this project: one in another project gets a place here, one in none moves in', async () => {
+    const thesis = { id: 'thesis', name: 'My thesis', teams: ['thesis/prices.yaml'] }
+    const PRICES = 'schemaVersion: 1\nid: prices\nname: Prices\nproject: thesis\nentrypoint: researcher\nagents:\n  - id: researcher\n    from: {agent: researcher}\nedges: []\n'
+    const BRIEF = 'schemaVersion: 1\nid: brief\nname: Weekly brief\nentrypoint: researcher\nagents:\n  - id: researcher\n    from: {agent: researcher}\nedges: []\n'
+    const calls: { url: string; body: unknown }[] = []
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (init?.method === 'POST' || init?.method === 'PUT') calls.push({ url, body: JSON.parse(String(init.body)) })
+      if (url === '/api/projects') return respond({ projects: [project, thesis], loose: ['brief.yaml'], missing: [] })
+      if (url === '/api/team?path=thesis%2Fprices.yaml') return respond({ path: 'thesis/prices.yaml', yaml: PRICES, revision: 'p' })
+      if (url === '/api/team?path=brief.yaml') return respond({ path: 'brief.yaml', yaml: BRIEF, revision: 'b' })
+      if (url === '/api/team/places') return respond({ path: 'thesis/prices-sutd.yaml', shares: 'prices' })
+      if (url === '/api/team' && init?.method === 'PUT') return respond({ path: 'brief.yaml', yaml: '', revision: 'b2' })
+      if (url === '/api/teams') return respond({ root: '/teams', files: ['brief.yaml', 'sutd/gate.yaml', 'thesis/prices.yaml'], teams: [{ path: 'brief.yaml', name: 'Weekly brief', agentCount: 1 }, { path: 'sutd/gate.yaml', name: 'Research and design', agentCount: 1 }, { path: 'thesis/prices.yaml', name: 'Prices', agentCount: 1 }], trashed: [] })
+      return daemon(url, init)
+    })
+    render(<ProjectRoom id="sutd" />)
+    const add = await screen.findByRole('button', { name: 'Add a team' })
+    // It stands as Add an agent and New team do beside it.
+    expect(cascaded(add, 'min-height')).toBe(cascaded(screen.getByRole('button', { name: 'New team' }), 'min-height'))
+    fireEvent.click(add)
+    const menu = screen.getByRole('menu', { name: 'Add a team' })
+    // In a narrow window it hangs under the whole toolbar, so a long name never runs off the left.
+    expect(cascaded(menu, 'left', PHONE)).toBe('0')
+    expect(cascaded(menu, 'width', PHONE)).toBe('auto')
+    expect(cascaded(menu.parentElement as HTMLElement, 'position', PHONE)).toBe('static')
+    // Each of yours not here yet, saying where it works now; never one already here.
+    await waitFor(() => expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['PricesIn My thesis', 'Weekly briefIn no project']))
+    // Where each works reads on a hovered row too: ink-2, not ink-3.
+    expect(cascaded(within(menu).getByText('In My thesis'), 'color')).toBe('var(--color-ink-2)')
+    fireEvent.click(within(menu).getByRole('menuitem', { name: /^Prices/ }))
+    await waitFor(() => expect(calls).toEqual([{ url: '/api/team/places', body: { path: 'thesis/prices.yaml', project: 'sutd' } }]))
+    expect(await screen.findByRole('status')).toHaveTextContent('Prices works here too, with a chat and work of its own.')
+    fireEvent.click(screen.getByRole('button', { name: 'Add a team' }))
+    fireEvent.click(within(screen.getByRole('menu', { name: 'Add a team' })).getByRole('menuitem', { name: /^Weekly brief/ }))
+    await waitFor(() => expect(calls.map((call) => call.url)).toEqual(['/api/team/places', '/api/team']))
+    expect((calls[1].body as { yaml: string }).yaml).toContain('project: sutd')
+    expect(await screen.findByText('Weekly brief works here now.')).toBeInTheDocument()
   })
 
   it('changes the About in place, and keeps a note every agent here reads', async () => {
@@ -162,6 +286,24 @@ describe('a project’s room (ADR 0097)', () => {
     fireEvent.click(within(screen.getByRole('menu', { name: 'Project settings' })).getByRole('menuitem', { name: 'Hide from Home' }))
     await waitFor(() => expect(project.putAway).toBe(true))
     expect(await screen.findByText('Hidden from Home')).toBeInTheDocument()
+  })
+
+  // ADR 0100: the project's own "…" deletes it; its team stays, in no project, and Home opens.
+  it('deletes the project from its menu, after saying its team stays', async () => {
+    render(<ProjectRoom id="sutd" />)
+    await screen.findByRole('link', { name: /Research and design/ })
+    fireEvent.click(screen.getByRole('button', { name: 'Project settings' }))
+    fireEvent.click(within(screen.getByRole('menu', { name: 'Project settings' })).getByRole('menuitem', { name: 'Delete project…' }))
+    const dialog = screen.getByRole('alertdialog', { name: 'Delete the project “SUTD final project”?' })
+    expect(dialog).toHaveTextContent('Its team, Research and design, stays on Home, under Not in a project.')
+    // The red that reads in both themes (contrast.test.ts holds the tokens to it).
+    const confirm = within(dialog).getByRole('button', { name: 'Delete project' })
+    expect(cascaded(confirm, ['background', 'background-color'])).toBe('var(--color-alert-fill)')
+    expect(cascaded(confirm, 'color')).toBe('var(--color-alert-on-fill)')
+    expect(fetchMock.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === 'DELETE')).toBe(false)
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete project' }))
+    await waitFor(() => expect(assign).toHaveBeenCalledWith('/'))
+    expect(fetchMock).toHaveBeenCalledWith('/api/projects/sutd', expect.objectContaining({ method: 'DELETE' }))
   })
 
   it('adds the agent Home sent here to one of the project’s teams, and opens its workflow to connect it', async () => {

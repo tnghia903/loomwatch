@@ -75,6 +75,10 @@ pub struct TeamConfig {
     /// The project this team works in (ADR 0097): `<teams root>/.projects/<id>.yaml`.
     #[serde(default)]
     pub project: Option<String>,
+    /// The team this file is one place of (ADR 0103): every team file naming the same id shares
+    /// its setup, and keeps its own project, schedule, delivery and Brief (`team_places.rs`).
+    #[serde(default)]
+    pub shares: Option<String>,
     /// That project as it was read with the team. Read only in the teams folder
     /// ([`Self::parse_in`]): a team read on its own runs without it.
     #[serde(skip)]

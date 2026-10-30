@@ -29,6 +29,8 @@ export interface TeamShape {
   path: string
   name: string
   project: string | null
+  /** The team it is one place of, when it works in more than one project (ADR 0103). */
+  shares?: string
   seats: SeatSpec[]
   /** "Every day at 8:00 AM", when it runs on a schedule. */
   schedule: string | null
@@ -47,6 +49,8 @@ export interface RoomTeam {
   seats: Seat[]
   state: Presence
   schedule: string | null
+  /** The other projects the same team works in, each in a place of its own (ADR 0103). */
+  alsoIn?: { id: string; name: string }[]
 }
 
 export interface Room {
@@ -86,6 +90,7 @@ export function teamShapeOf(path: string, yaml: string, jobs: readonly { id: str
     path,
     name: doc.name?.trim() || fileName,
     project: typeof doc.project === 'string' && doc.project.trim() ? doc.project.trim() : null,
+    ...(typeof doc.shares === 'string' && doc.shares.trim() ? { shares: doc.shares.trim() } : {}),
     seats,
     // A paused routine doesn't run, so it says nothing here (its team's chat says it is paused).
     schedule: doc.schedule?.cron && doc.schedule.enabled !== false ? scheduleWords(doc.schedule) : null,
@@ -129,6 +134,8 @@ export function roomsOf(
   shapes: readonly TeamShape[],
   runs: readonly RunRecord[],
   root: string | null,
+  /** Every project, by name, for a team that works in others too (ADR 0103): those rooms' own by default. */
+  named: readonly { id: string; name: string }[] = projects,
 ): Room[] {
   const runsOf = (path: string) => runs.filter((run) => isOpenTeam(path, run.teamPath, root))
   const states = new Map(shapes.map((shape) => [shape.path, agentStates(runsOf(shape.path))]))
@@ -160,7 +167,8 @@ export function roomsOf(
         : seats.some((seat) => seat.state === 'working') || teamRuns.some((run) => !isTerminalRun(run.status))
           ? 'working'
           : failed ? 'failed' : 'ready'
-      return [{ path, name: shape.name, seats, state, schedule: shape.schedule }]
+      const alsoIn = elsewhere(shape, shapes, named)
+      return [{ path, name: shape.name, seats, state, schedule: shape.schedule, ...(alsoIn.length ? { alsoIn } : {}) }]
     }).sort(byTeamRank)
     const state = teams[0]?.state ?? 'ready'
     return {
@@ -174,6 +182,17 @@ export function roomsOf(
       lastWorked: lastOf(project.teams.flatMap(runsOf)),
     }
   })
+}
+
+/**
+ * The other projects a team works in (ADR 0103): the projects of the other places that share its
+ * setup, by name, in the order the projects are listed. A place in no project isn't one.
+ */
+export function elsewhere(shape: Pick<TeamShape, 'path' | 'shares'>, shapes: readonly Pick<TeamShape, 'path' | 'shares' | 'project'>[], projects: readonly { id: string; name: string }[]): { id: string; name: string }[] {
+  if (!shape.shares) return []
+  const there = new Set(shapes.filter((other) => other.shares === shape.shares && other.path !== shape.path && other.project).map((other) => other.project))
+  const own = shapes.find((other) => other.path === shape.path)?.project
+  return projects.filter((project) => there.has(project.id) && project.id !== own).map((project) => ({ id: project.id, name: project.name }))
 }
 
 /**

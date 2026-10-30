@@ -855,7 +855,7 @@ button.thread-node:hover svg, button.thread-node:focus-visible svg { color: var(
    --------------------------------------------------------------------------- */
 .lw-confirm { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-3); border-color: color-mix(in srgb, var(--color-alert) 40%, transparent); }
 .lw-confirm.leave { flex-wrap: wrap; margin: 0 var(--sp-4); border-color: var(--color-hairline); }
-.lw-confirm .btn-danger-fill { background: var(--color-alert); color: var(--color-white); border-color: transparent; }
+.lw-confirm .btn-danger-fill { background: var(--color-alert-fill); color: var(--color-alert-on-fill); border-color: transparent; }
 
 /* ---------------------------------------------------------------------------
    NARROW — the coordinate canvas becomes a reading column (TNG-115).

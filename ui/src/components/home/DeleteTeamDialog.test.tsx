@@ -1,7 +1,8 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { RunRecord } from '../../lib/runs/client'
+import { cascaded } from '../../test/cascade'
 import { teamPathUnderRoot, type DeletedTeam } from '../../lib/team-file/client'
 import { DeleteTeamDialog } from './DeleteTeamDialog'
 
@@ -47,10 +48,11 @@ describe('DeleteTeamDialog', () => {
   it('says what happens in plain words, then moves the team to the trash', async () => {
     const { onDeleted } = renderDialog()
     const dialog = screen.getByRole('alertdialog', { name: 'Delete “Trip planner”?' })
-    expect(dialog).toHaveTextContent('It leaves your teams list. Nothing is erased')
+    expect(dialog).toHaveTextContent('It leaves Home. LoomWatch keeps a copy in your teams folder')
     // Added files go to the trash with the team (ADR 0028, amended), so the copy names them.
-    expect(dialog).toHaveTextContent('any files you added to its agents move to a hidden .trash folder')
-    expect(dialog).toHaveTextContent('.trash folder inside your teams folder')
+    expect(dialog).toHaveTextContent('with its notes and any files you added to its agents.')
+    // Where, for whoever looks: the hidden folder, in the line's tooltip.
+    expect(within(dialog).getByText(/^It leaves Home/)).toHaveAttribute('title', expect.stringContaining('hidden .trash folder inside your teams folder'))
     expect(dialog).toHaveTextContent('LoomWatch keeps its past runs')
     // The safe choice has the focus, so Enter on open never deletes.
     expect(screen.getByRole('button', { name: 'Cancel' })).toHaveFocus()
@@ -67,6 +69,8 @@ describe('DeleteTeamDialog', () => {
     renderDialog()
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })
     expect(screen.getByRole('alert')).toHaveTextContent('“Trip planner” is running right now. Stop the run or wait for it to finish')
+    // A team at work is a wait, not a fault: ink, not the alert red.
+    expect(cascaded(screen.getByRole('alert'), 'color')).toBe('var(--color-ink-2)')
     const remove = screen.getByRole('button', { name: 'Delete team' })
     expect(remove).toBeDisabled()
     fireEvent.click(remove)

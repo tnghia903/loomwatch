@@ -7,7 +7,7 @@ import { readTourState, resetTourForTests } from '../../lib/tour/store'
 import { forgetYou } from '../../lib/you/client'
 import type { RunRecord } from '../../lib/runs/client'
 import { APPROVAL_TEXT } from '../../lib/story/needsYou'
-import { cascaded, goldFilled, isGoldFill, PHONE } from '../../test/cascade'
+import { cascaded, DESKTOP, goldFilled, isGoldFill, PHONE } from '../../test/cascade'
 import { figureFor, figureStill } from '../../lib/library/figures'
 import { Home } from './Home'
 
@@ -26,7 +26,8 @@ beforeEach(() => {
   forgetKeyStatus()
   forgetYou()
 })
-afterEach(() => { cleanup(); vi.unstubAllGlobals() })
+// A failed List test must not leave the rest of the file looking at the list.
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); localStorage.removeItem('loomwatch:studio-view') })
 
 function renderHome() {
   render(<Home onPalette={vi.fn()} />)
@@ -384,13 +385,163 @@ describe('Home, the studio (ADR 0097)', () => {
     await screen.findAllByRole('article')
     fireEvent.click(screen.getByRole('button', { name: 'List' }))
     const list = screen.getByRole('list', { name: 'Projects' })
-    expect(within(list).getAllByRole('button').map((button) => button.textContent)).toEqual([
+    expect(within(list).getAllByRole('button').map((button) => button.textContent || button.getAttribute('aria-label'))).toEqual([
       'SUTD final projectResearcher is waiting for youResearch and design',
+      'Project settings for SUTD final project',
       'BlogReadyBlog',
+      'Project settings for Blog',
       'New project',
     ])
     fireEvent.click(screen.getByRole('button', { name: 'Rooms' }))
     localStorage.removeItem('loomwatch:studio-view')
+  })
+
+  // ADR 0100: a project's "…" on its card deletes it without opening it; its team stays, in no project.
+  it('deletes a project from its card’s menu, after saying its team stays', async () => {
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => (init?.method === 'DELETE' ? respond({ id: 'blog', teams: ['blog.yaml'] }) : studio(url)))
+    render(<Home onPalette={vi.fn()} runs={[waitingOnTheResearcher]} />)
+    const blog = (await screen.findAllByRole('article')).find((room) => within(room).queryByRole('heading', { name: 'Blog' }))
+    fireEvent.click(within(blog as HTMLElement).getByRole('button', { name: 'Project settings for Blog' }))
+    fireEvent.click(within(screen.getByRole('menu', { name: 'Project settings for Blog' })).getByRole('menuitem', { name: 'Delete project…' }))
+    const dialog = screen.getByRole('alertdialog', { name: 'Delete the project “Blog”?' })
+    expect(dialog).toHaveTextContent('Its team, Blog, stays on Home, under Not in a project.')
+    expect(fetchMock.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === 'DELETE')).toBe(false)
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete project' }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    expect(fetchMock).toHaveBeenCalledWith('/api/projects/blog', expect.objectContaining({ method: 'DELETE' }))
+    expect(assign).not.toHaveBeenCalled()
+  })
+
+  it('renames and hides a project from its card’s menu, without opening it', async () => {
+    const puts: { url: string; body: Record<string, unknown> }[] = []
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (init?.method === 'PUT') { puts.push({ url, body: JSON.parse(String(init.body)) as Record<string, unknown> }); return respond({ id: 'blog', name: 'Blog', teams: ['blog.yaml'] }) }
+      return studio(url)
+    })
+    render(<Home onPalette={vi.fn()} runs={[]} />)
+    const blog = (await screen.findAllByRole('article')).find((room) => within(room).queryByRole('heading', { name: 'Blog' })) as HTMLElement
+    fireEvent.click(within(blog).getByRole('button', { name: 'Project settings for Blog' }))
+    fireEvent.click(within(screen.getByRole('menu', { name: 'Project settings for Blog' })).getByRole('menuitem', { name: 'Rename…' }))
+    const rename = screen.getByRole('dialog', { name: 'Rename project' })
+    // A finger-sized field on a phone, with text big enough that Safari doesn't zoom in on it.
+    expect(cascaded(within(rename).getByRole('textbox', { name: 'Project name' }), 'font-size', PHONE)).toBe('16px')
+    expect(cascaded(within(rename).getByRole('textbox', { name: 'Project name' }), 'height', PHONE)).toBe('44px')
+    fireEvent.change(within(rename).getByRole('textbox', { name: 'Project name' }), { target: { value: 'Blog posts' } })
+    fireEvent.click(within(rename).getByRole('button', { name: 'Rename' }))
+    await waitFor(() => expect(puts).toEqual([{ url: '/api/projects/blog', body: { name: 'Blog posts' } }]))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Rename project' })).toBeNull())
+    fireEvent.click(within(blog).getByRole('button', { name: 'Project settings for Blog' }))
+    fireEvent.click(within(screen.getByRole('menu', { name: 'Project settings for Blog' })).getByRole('menuitem', { name: 'Hide from Home' }))
+    await waitFor(() => expect(puts[1]).toEqual({ url: '/api/projects/blog', body: { name: 'Blog', putAway: true } }))
+  })
+
+  it('puts the same "…" on the small tiles Home folds quiet projects into', async () => {
+    const many = Array.from({ length: 7 }, (_, at) => ({ id: `p${at + 1}`, name: `Project ${at + 1}`, teams: [] }))
+    fetchMock.mockImplementation((url: string) => (url === '/api/projects' ? respond({ projects: many, loose: [], missing: [], removed: [] }) : studio(url)))
+    render(<Home onPalette={vi.fn()} runs={[]} />)
+    expect(await screen.findAllByRole('article')).toHaveLength(1)
+    for (const project of many) expect(screen.getByRole('button', { name: `Project settings for ${project.name}` })).toBeInTheDocument()
+  })
+
+  // ADR 0100: a team in no project is listed under "Not in a project", not among the projects: one
+  // pick moves it into a project, and its "…" deletes it.
+  it('lists a team in no project under Not in a project, moves it into a project in one pick, and deletes it from its "…"', async () => {
+    const calls: string[] = []
+    let saved = ''
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (init?.method && init.method !== 'GET') calls.push(`${init.method} ${url}`)
+      if (url === '/api/projects') return respond({ projects: [{ id: 'sutd', name: 'SUTD final project', teams: ['sutd/gate.yaml'] }], loose: ['blog.yaml'], missing: [], removed: ['blog'] })
+      if (url === '/api/team' && init?.method === 'PUT') { saved = (JSON.parse(String(init.body)) as { yaml: string }).yaml; return respond({ path: 'blog.yaml', yaml: saved, revision: 'r2' }) }
+      if (url === '/api/runs') return respond([])
+      if (url.startsWith('/api/team?') && init?.method === 'DELETE') return respond({ path: 'blog.yaml', trash: '.trash/blog', moved: ['blog.yaml'] })
+      // Its name, not its file's.
+      if (url === '/api/teams') return respond({ root: '/teams', files: ['blog.yaml', 'sutd/gate.yaml'], teams: [{ path: 'blog.yaml', name: 'Weekly posts', agentCount: 1 }, { path: 'sutd/gate.yaml', name: 'Research and design', agentCount: 3 }] })
+      return studio(url)
+    })
+    render(<Home onPalette={vi.fn()} runs={[]} />)
+    const teams = await screen.findByRole('list', { name: 'Teams in no project' })
+    expect(teams.closest('section')).toBe(screen.getByRole('heading', { name: 'Not in a project' }).closest('section'))
+    const row = within(teams).getByRole('button', { name: 'More for Weekly posts' }).closest('li') as HTMLElement
+    // Its line opens its chat, as a team's line on a project's card does.
+    expect(within(row).getByRole('link')).toHaveAttribute('href', '/?path=blog.yaml&view=chat')
+    // Not a project: no room of its own among the projects, in either view.
+    expect(screen.getAllByRole('article').map((room) => room.getAttribute('aria-labelledby'))).toEqual(['room-sutd'])
+    expect(screen.queryByRole('button', { name: /Project settings for Weekly posts/ })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'List' }))
+    expect(within(screen.getByRole('list', { name: 'Projects' })).queryByText('Weekly posts')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Rooms' }))
+    localStorage.removeItem('loomwatch:studio-view')
+    // One pick: the button opens your projects, and the one picked takes the team.
+    fireEvent.click(within(row).getByRole('button', { name: 'Add to a project: Weekly posts' }))
+    // In a narrow window the list hangs under the whole row, so a long name never runs off the left.
+    const list = screen.getByRole('menu', { name: 'Add to a project: Weekly posts' })
+    expect(cascaded(list, 'left', PHONE)).toBe('0')
+    expect(cascaded(list, 'right', PHONE)).toBe('0')
+    expect(cascaded(list, 'width', PHONE)).toBe('auto')
+    expect(cascaded(list, 'width', DESKTOP)).toBe('max-content')
+    fireEvent.click(within(screen.getByRole('menu', { name: 'Add to a project: Weekly posts' })).getByRole('menuitem', { name: 'SUTD final project' }))
+    await waitFor(() => expect(calls).toEqual(['PUT /api/team']))
+    expect(saved).toContain('project: sutd')
+    expect(await screen.findByText(/works in/)).toHaveTextContent('Weekly posts works in SUTD final project now.')
+    fireEvent.click(within(row).getByRole('button', { name: 'More for Weekly posts' }))
+    fireEvent.click(within(screen.getByRole('menu', { name: 'More for Weekly posts' })).getByRole('menuitem', { name: 'Delete team…' }))
+    fireEvent.click(within(screen.getByRole('alertdialog', { name: 'Delete “Weekly posts”?' })).getByRole('button', { name: 'Delete team' }))
+    await waitFor(() => expect(calls).toEqual(['PUT /api/team', 'DELETE /api/team?path=blog.yaml']))
+  })
+
+  it('says a team changed just now when a move finds it changed, in words for Home, not for a save', async () => {
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === '/api/projects') return respond({ projects: [{ id: 'sutd', name: 'SUTD final project', teams: ['sutd/gate.yaml'] }], loose: ['blog.yaml'], missing: [], removed: [] })
+      if (url === '/api/team' && init?.method === 'PUT') return respond({ error: 'The team file changed or the destination already exists. Reload before saving.' }, 412)
+      if (url === '/api/runs') return respond([])
+      if (url === '/api/teams') return respond({ root: '/teams', files: ['blog.yaml', 'sutd/gate.yaml'], teams: [{ path: 'blog.yaml', name: 'Weekly posts', agentCount: 1 }, { path: 'sutd/gate.yaml', name: 'Research and design', agentCount: 3 }] })
+      return studio(url)
+    })
+    render(<Home onPalette={vi.fn()} runs={[]} />)
+    const teams = await screen.findByRole('list', { name: 'Teams in no project' })
+    fireEvent.click(within(teams).getByRole('button', { name: 'Add to a project: Weekly posts' }))
+    fireEvent.click(within(screen.getByRole('menu', { name: 'Add to a project: Weekly posts' })).getByRole('menuitem', { name: 'SUTD final project' }))
+    const said = await screen.findByText(/Couldn’t move/)
+    expect(said).toHaveTextContent('Couldn’t move Weekly posts. It changed just now. Reload the page and try again.')
+    expect(said.closest('section')).toBe(teams.closest('section'))
+  })
+
+  // ADR 0103: one team set up once works in two projects, each with a place of its own.
+  it('says on each project’s card where else a team works, and that deleting one project leaves it working in the other', async () => {
+    const place = (id: string, project: string) => `schemaVersion: 1\nid: ${id}\nshares: prices\nname: Prices\nproject: ${project}\nentrypoint: a\nagents:\n  - {id: a, name: Writer, model: fake/offline, role: Write.}\nedges: []\n`
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === '/api/projects') return respond({ projects: [{ id: 'coffee', name: 'Coffee shop', teams: ['coffee.yaml'] }, { id: 'bikes', name: 'Bike rental', teams: ['bikes.yaml'] }], loose: [], missing: [], removed: [] })
+      if (url === '/api/runs') return respond([])
+      if (url === '/api/teams') return respond({ root: '/teams', files: ['bikes.yaml', 'coffee.yaml'], teams: [{ path: 'bikes.yaml', name: 'Prices', agentCount: 1 }, { path: 'coffee.yaml', name: 'Prices', agentCount: 1 }] })
+      if (url === '/api/team?path=coffee.yaml') return respond({ path: 'coffee.yaml', yaml: place('prices', 'coffee'), revision: 'c' })
+      if (url === '/api/team?path=bikes.yaml') return respond({ path: 'bikes.yaml', yaml: place('prices-bikes', 'bikes'), revision: 'b' })
+      if (init?.method === 'DELETE') return respond({ id: 'coffee', teams: [], placesRemoved: ['coffee.yaml'] })
+      return studio(url)
+    })
+    render(<Home onPalette={vi.fn()} runs={[]} />)
+    const card = (name: string) => screen.getAllByRole('article').find((room) => within(room).queryByRole('heading', { name })) as HTMLElement
+    await waitFor(() => expect(card('Coffee shop')).toHaveTextContent('Also in Bike rental'))
+    expect(card('Bike rental')).toHaveTextContent('Also in Coffee shop')
+    fireEvent.click(within(card('Coffee shop')).getByRole('button', { name: 'Project settings for Coffee shop' }))
+    fireEvent.click(within(screen.getByRole('menu', { name: 'Project settings for Coffee shop' })).getByRole('menuitem', { name: 'Delete project…' }))
+    const dialog = screen.getByRole('alertdialog', { name: 'Delete the project “Coffee shop”?' })
+    expect(dialog).toHaveTextContent('Prices keeps working in Bike rental. Its chat and work here go with the project.')
+    expect(dialog).not.toHaveTextContent('Not in a project')
+  })
+
+  it('offers no move for a team in no project while there is no project to move it to', async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (url === '/api/projects') return respond({ projects: [], loose: ['blog.yaml'], missing: [], removed: [] })
+      if (url === '/api/runs') return respond([])
+      if (url === '/api/teams') return respond({ root: '/teams', files: ['blog.yaml'], teams: [{ path: 'blog.yaml', name: 'Weekly posts', agentCount: 1 }] })
+      return studio(url)
+    })
+    render(<Home onPalette={vi.fn()} runs={[]} />)
+    const teams = await screen.findByRole('list', { name: 'Teams in no project' })
+    expect(within(teams).queryByRole('button', { name: /Add to a project/ })).toBeNull()
+    expect(within(teams).getByRole('button', { name: 'More for Weekly posts' })).toBeInTheDocument()
+    // The desk still shows: a team in no project is a team like any other.
+    expect(screen.getByRole('button', { name: 'New project' })).toBeInTheDocument()
   })
 
   it('says a file cannot be opened, so none goes missing from Home', async () => {

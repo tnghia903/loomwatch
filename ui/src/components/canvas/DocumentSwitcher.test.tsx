@@ -123,3 +123,18 @@ it('offers Discard with unsaved changes and Reload from disk without, never both
   fireEvent.click(screen.getByRole('button', { name: 'Reload from disk' }))
   expect(onReload).toHaveBeenCalledOnce()
 })
+
+// ADR 0103: a team in several projects says, before Save is pressed, where a save changes it.
+it('says which project the page is the team’s place in, and what an unsaved change to its setup reaches', () => {
+  renderSwitcher({ here: 'Bike rental' })
+  expect(screen.getByRole('button', { name: /open team menu/ })).toHaveTextContent('Saved · in Bike rental')
+  cleanup()
+  renderSwitcher({ saveState: 'dirty', here: 'Bike rental', alsoIn: ['Coffee shop', 'Website'] })
+  expect(screen.getByRole('button', { name: /open team menu/ })).toHaveTextContent('Unsaved · Coffee shop and Website get this too when you save')
+  cleanup()
+  renderSwitcher({ saveState: 'dirty', alsoIn: ['Coffee shop'] })
+  expect(screen.getByRole('button', { name: /open team menu/ })).toHaveTextContent('Unsaved · Coffee shop gets this too when you save')
+  cleanup()
+  renderSwitcher({ saveState: 'dirty' })
+  expect(screen.getByRole('button', { name: /open team menu/ })).toHaveTextContent('Unsaved changes')
+})

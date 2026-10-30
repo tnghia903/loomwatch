@@ -29,6 +29,14 @@ properties:
       folders without asking, and shares its Notebook with the project's other teams.
     type: string
     pattern: "^[a-z0-9][a-z0-9-]{0,63}$"
+  shares:
+    description: >-
+      The team this file is one place of (ADR 0103). A team set up once can work in several
+      projects: each project has a team file of its own, and every one of them names the same
+      `shares` id. Each keeps its own `id`, `project`, `schedule`, `deliver` and `memory` (the
+      Brief beside it), so its chat, run history and files are that project's; everything else is
+      the team's setup, and saving one place in LoomWatch writes it into the others.
+    $ref: "#/$defs/Identifier"
   budget:
     $ref: "#/$defs/RetiredBudget"
   spend:

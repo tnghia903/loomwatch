@@ -81,4 +81,23 @@ describe('every team becomes a project of its own (ADR 0097)', () => {
     const [, yaml] = client.saveTeamFile.mock.calls[0] as unknown as [string, string]
     expect(yaml).toContain('project: gate-2')
   })
+
+  // ADR 0100: a deleted project's notebook and Ask chat are kept under its id.
+  it('never gives a new project a deleted project’s id', async () => {
+    const { moveIntoProjects } = await import('./move')
+    projects.fetchProjects.mockResolvedValueOnce({ projects: [{ id: 'gate' }], loose: [], missing: [], removed: ['gate-2'] } as never)
+    client.fetchTeamFile.mockResolvedValue({ yaml: 'schemaVersion: 1\nid: gate\nname: Gate\nentrypoint: a\nagents: []\nedges: []\n', revision: 'r' })
+    memory.fetchMemory.mockResolvedValue({ enabled: false, entries: [] })
+    expect(await moveIntoProjects(['gate.yaml'])).toEqual(['gate.yaml'])
+    expect(projects.saveProject).toHaveBeenCalledWith('gate-3', { name: 'Gate' })
+  })
+
+  it('still gives a team that names a deleted project a project of its own', async () => {
+    const { moveIntoProjects } = await import('./move')
+    projects.fetchProjects.mockResolvedValueOnce({ projects: [], loose: [], missing: [], removed: ['gate'] } as never)
+    client.fetchTeamFile.mockResolvedValue({ yaml: 'schemaVersion: 1\nid: gate\nname: Gate\nproject: gate\nentrypoint: a\nagents: []\nedges: []\n', revision: 'r' })
+    memory.fetchMemory.mockResolvedValue({ enabled: false, entries: [] })
+    expect(await moveIntoProjects(['gate.yaml'])).toEqual(['gate.yaml'])
+    expect(projects.saveProject).toHaveBeenCalledWith('gate-2', { name: 'Gate' })
+  })
 })
