@@ -68,7 +68,7 @@ import { BuildResourceInspector } from './canvas/BuildResourceInspector'
 import { NotionPagePicker } from './canvas/NotionPagePicker'
 import { BuildInspector } from './canvas/BuildInspector'
 import { ComponentPalette } from './library/ComponentPalette'
-import { Bot, MessageSquareText, MessagesSquare, Network, X } from './ui/icon'
+import { MessageSquareText, MessagesSquare, Network, X } from './ui/icon'
 import { Composer, type ComposerState } from './composer/Composer'
 import { RoutineNote } from './composer/RoutineNote'
 import { CAPABILITY_DRAG_MIME, CONNECTION_DRAG_MIME, LIBRARY_DRAG_MIME } from './library'
@@ -110,7 +110,8 @@ import { inLibrary, turnedOffFor } from '../lib/team-file/turnedOff'
 import { TurnedOffNote, type TurnedOffNoteState } from './workspace/TurnedOffNote'
 import { capabilityEdgeId } from './workspace/canvasGraph'
 import { OutputEditor } from './workspace/OutputEditor'
-import { ConflictSheetFooter, InlineConfirm, NewTeamSheet, OpenTeamSheet, SaveCopySheet } from './workspace/Sheets'
+import { ConflictSheetFooter, InlineConfirm, LeaveConfirm, NewTeamSheet, OpenTeamSheet, SaveCopySheet } from './workspace/Sheets'
+import type { LeaveGuard } from './agents/leave'
 import { useCanvasGraph } from './workspace/useCanvasGraph'
 import { useRunAgents } from './workspace/runAgents'
 import { useRunController } from './workspace/useRunController'
@@ -226,7 +227,7 @@ function memoryKey(memory: MemoryRef | undefined): string {
   return ''
 }
 
-/** Build's two halves in the address: `view=agents` (and the agent on its bench), or neither for Workflow. */
+/** The Team tab in the address: `view=agents` (and the agent on its bench) while a workbench is open over it, or neither. */
 function writeBuildViewToUrl(agents: boolean, agentId: string | null) {
   const params = new URLSearchParams(window.location.search)
   if (agents) params.set('view', 'agents')
@@ -378,7 +379,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   // Run team was pressed and the chat's box has not yet started with @team.
   const [startTeam, setStartTeam] = useState(false)
   const startTeamTaken = useCallback(() => setStartTeam(false), [])
-  // Build is two views: Workflow (the canvas) and Agents (each agent on its workbench).
+  // The Team tab is the canvas; an agent's workbench opens over it as a sheet (round 3).
   const [agentsView, setAgentsView] = useState(() => !initialRunId && new URLSearchParams(window.location.search).get('view') === 'agents')
   const [benchAgentId, setBenchAgentId] = useState<string | null>(() => new URLSearchParams(window.location.search).get('agent'))
   const showAgents = useCallback((agentId: string | null) => {
@@ -390,6 +391,16 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     setAgentsView(false)
     writeBuildViewToUrl(false, null)
   }, [])
+  // What closing the agent's workbench would lose, kept by its builder; and the move asked about.
+  const benchLeave = useRef<LeaveGuard | null>(null)
+  const [leaving, setLeaving] = useState<{ guard: LeaveGuard; then: () => void } | null>(null)
+  /** Does `then`, which closes the workbench or moves it to another agent, once nothing would be lost. */
+  const leaveBench = useCallback((then: () => void) => {
+    const guard = agentsView ? benchLeave.current : null
+    if (guard) setLeaving({ guard, then })
+    else then()
+  }, [agentsView])
+  const closeBench = useCallback(() => leaveBench(showWorkflow), [leaveBench, showWorkflow])
   // §15.2.1: the configured graph's positions are the document's, so what is left here is
   // presentation-only: where the operator dragged Build's docked Prompt and Output cards.
   const [overlayPositions, setOverlayPositions] = useState<Record<string, { x: number; y: number }>>({})
@@ -2185,7 +2196,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     return () => window.removeEventListener('loomwatch:add-agent', add)
   }, [doc, editable, flow, placeJobSkills])
 
-  // From the Agents tab: one of Your agents joins the team, linked to the version it is now, to the
+  // From the add panel or the workbench sheet: one of Your agents joins the team, linked to the version it is now, to the
   // right of the agents already there, and its workbench opens. Workflow is where it gets connected.
   const addSavedAgent = useCallback((job: SavedJob) => {
     const source = editable && doc.path ? roleSource(savedJobPreset(job)) : null
@@ -2403,9 +2414,21 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     }
   }, [doc.path, editable, modelNames, flow, needsYou, setComposerText, savedJobs])
 
+  // The workbench is a sheet: the keyboard goes into it as it opens and, back on the Team tab, to
+  // the card it was opened from (the panel that opened it is gone), else the tab.
+  const benchShown = agentsView && !runView && !runSetup
+  const benchPage = useRef<HTMLDivElement>(null)
+  const benchWasShown = useRef(benchShown)
+  useEffect(() => {
+    if (benchShown === benchWasShown.current) return
+    benchWasShown.current = benchShown
+    if (benchShown) benchPage.current?.focus()
+    else if (!runView && !runSetup) (document.querySelector<HTMLElement>(`.react-flow__node[data-id=${JSON.stringify(benchAgentId ?? '')}]`) ?? document.querySelector<HTMLElement>('[data-tour="tab-workflow"]'))?.focus()
+  }, [benchShown, runView, runSetup, benchAgentId])
+
   useWorkspaceShortcuts({
     editable, doc, flow, theme, windowWidth, runView,
-    submit, openNewTeam, toggleLibrary, cycleProblem, clearSelection, closeDetails: detailsOpen ? closeDetails : undefined, organize, fitCanvas,
+    submit, openNewTeam, toggleLibrary, cycleProblem, clearSelection, closeDetails: detailsOpen ? closeDetails : undefined, closeBench: benchShown && !leaving ? closeBench : undefined, organize, fitCanvas,
     pendingNodeDelete, setPendingNodeDelete, requestNodeDelete, deleteNodes, discardConfirm, setDiscardConfirm,
     paletteOpen, setPaletteOpen, problemsOpen, setProblemsOpen,
     compareOpen, setCompareOpen, inspectedEvidenceId, setInspectedEvidenceId,
@@ -2630,7 +2653,8 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
           )}
           </FileReaderContext.Provider>
         ) : (
-        <div ref={canvasRef} role="application" aria-label="Team canvas" className="lw-canvas" data-depth={depth}>
+        // Under the workbench the canvas is out of reach: no tabbing to cards that can't be seen.
+        <div ref={canvasRef} role="application" aria-label="Team canvas" className="lw-canvas" data-depth={depth} inert={benchShown || undefined}>
           <ReactFlow
             nodes={lit.nodes}
             edges={lit.edges}
@@ -2688,13 +2712,15 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
           <ComponentPalette capabilityInventory={capabilityInventory} capabilitiesLoading={capabilitiesLoading} capabilitiesError={capabilitiesError} capabilitiesScannedAt={capabilitiesScannedAt} onRetryCapabilities={onRetryCapabilities} onInspectCapability={inspectCapability} onDragStateChange={(dragging) => { setLibraryDragging(dragging); if (!dragging) setDropAgentId(null) }} onCollapsedChange={setLibraryCollapsed} teamSources={teamSources} onRevealSource={revealSource} teamPath={doc.path} teamAgents={ownAgents} onRevealAgent={focusAgent} notion={{ connection: notionConnection, pages: notionPages, ...(editable && doc.path ? { onChoosePage: () => setNotionPicker({ agentId: null, at: flow.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 }) }) } : {}) }} width={paletteWidth} onResize={windowWidth >= 768 ? setPaletteWidth : undefined} />
         )}
 
-        {agentsView && !runView && !runSetup && (
-          <div className="team-agents-page">
+        {benchShown && (
+          // An agent's workbench, over the Team tab: opened from its card, closed back to the team.
+          <div ref={benchPage} tabIndex={-1} className="team-agents-page" role="region" aria-label={`${doc.teamName || 'This team'}’s agents`}>
+            <button type="button" className="iconbtn team-agents-close" onClick={closeBench} aria-label="Back to the team" title="Back to the team" data-tour="bench-close"><X size={16} aria-hidden="true" /></button>
             <TeamAgents
               agents={doc.nodes.map((node) => node.data.agent).filter((agent) => agent.kind !== 'operator')}
               responder={responderFromDoc}
               selected={benchAgentId}
-              onSelect={(id) => { setBenchAgentId(id); writeBuildViewToUrl(true, id) }}
+              onSelect={(id) => leaveBench(() => { setBenchAgentId(id); writeBuildViewToUrl(true, id) })}
               teamName={doc.teamName || 'this team'}
               teamPath={doc.path}
               editable={editable}
@@ -2710,8 +2736,9 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
                 else doc.applyAgentFields(agentId, change.fields)
               }}
               onAgentSaved={doc.refillAgent}
-              onShowWorkflow={showWorkflow}
-              onAdd={editable ? addSavedAgent : undefined}
+              onShowWorkflow={closeBench}
+              leaveRef={benchLeave}
+              onAdd={editable ? (job) => leaveBench(() => addSavedAgent(job)) : undefined}
               onPickModel={(agentId, model, follow) => doc.applyAgentFields(agentId, { model, followsSuggestion: follow ? true : undefined })}
               modelMoves={modelFollowing.moves}
               onUndoModelMove={modelFollowing.undo}
@@ -2725,10 +2752,10 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
           <div className="needs-you-anchor">{needsYouTray(runView ? activeRunId : null)}</div>
           <nav className="workspace-view-tabs" aria-label="Workspace view" data-tour="view-tabs">
             <SegmentThumb />
-            {/* In the order a team is made: its agents, then how they work together (Team), then its chat. */}
-            <button type="button" aria-pressed={!runView && !runSetup && agentsView} onClick={() => { const chosen = inspectedNode?.id ?? null; clearSelection(); closeRun(); showAgents(chosen) }} data-tour="tab-agents"><Bot size={15} />Agents</button>
-            <button type="button" aria-pressed={!runView && !runSetup && !agentsView} onClick={() => { clearSelection(); closeRun(); showWorkflow() }} data-tour="tab-workflow"><Network size={15} />Team</button>
-            <button type="button" aria-pressed={runView || runSetup} onClick={() => { clearSelection(); if (!activeRunId) setRunSetup(true) }} data-tour="tab-chat"><MessagesSquare size={15} />Chat</button>
+            {/* In the order a team is made: its agents working together (Team), then its chat. */}
+            {/* A team's agents are on its Team tab; each one's workbench opens over it from its card (round 3). */}
+            <button type="button" aria-pressed={!runView && !runSetup} onClick={() => leaveBench(() => { clearSelection(); closeRun(); showWorkflow() })} data-tour="tab-workflow"><Network size={15} />Team</button>
+            <button type="button" aria-pressed={runView || runSetup} onClick={() => leaveBench(() => { clearSelection(); if (!activeRunId) setRunSetup(true) })} data-tour="tab-chat"><MessagesSquare size={15} />Chat</button>
           </nav>
           <DocumentSwitcher
             path={doc.path} teamName={doc.teamName} saveState={doc.documentChipState} saveError={doc.saveError}
@@ -2974,6 +3001,12 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
         />}
 
         {paletteOpen && <CommandPalette actions={actions} interpret={interpret} fallback={askFallback} onClose={() => setPaletteOpen(false)} />}
+        {leaving && (
+          <LeaveConfirm name={leaving.guard.name ?? null} problem={leaving.guard.problem}
+            onSave={async () => { const saved = await leaving.guard.save(); if (saved) { setLeaving(null); leaving.then() } return saved }}
+            onDrop={() => { setLeaving(null); leaving.then() }}
+            onCancel={() => setLeaving(null)} />
+        )}
         {discardConfirm && <InlineConfirm message="Discard changes and reload from disk?" confirmLabel="Discard changes" onConfirm={() => { setDiscardConfirm(false); void doc.reloadFromDisk() }} onCancel={() => setDiscardConfirm(false)} />}
         {pendingNodeDelete.length > 0 && (() => {
           // An agent of My agents only leaves this team (ADR 0094): the confirmation says so.

@@ -52,7 +52,7 @@ export function teamAgentSource(agent: AgentConfig): LibrarySource {
   }
 }
 
-/** Where a team's own agent is worked on: that team, on its Agents tab, with this agent open. */
+/** Where a team's own agent is worked on: that team, with this agent's workbench open over its Team tab. */
 export function teamAgentHref(agent: Pick<TeamOwnAgent, 'teamPath' | 'agentId'>): string {
   return `/?${new URLSearchParams({ path: agent.teamPath, view: 'agents', agent: agent.agentId })}`
 }

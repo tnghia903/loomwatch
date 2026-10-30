@@ -63,7 +63,7 @@ and asks.
 <td width="50%" valign="middle">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="site/assets/app/agents-dark.webp">
-  <img src="site/assets/app/agents-light.webp" alt="Building an agent called Writer. Down the left, LoomWatch's dock: Home with a count of 1, Projects, My agents marked, Skills, Quests, then Ask and You. Along the top, the name Writer, saved a minute ago, the Build and Chat tabs, and the bell saying 1 needs you. Under the top bar, one sentence sums the agent up: Writer thinks with Claude Sonnet 5.5, has no skills yet, and reads nothing yet. It asks you before it searches the web, edits files or runs commands. Below it, Writer's figure sits at a desk, with a label on each part: The job, its instructions pinned up; Skills · none yet; Thinks with Claude Sonnet 5.5; Allowed · nothing; Asks you first · Web, Edit files, Commands; Hands back · said in its instructions; Reads · nothing yet; Tools · none yet. On the right, the same settings in blocks, starting with Name, Instructions and Model.">
+  <img src="site/assets/app/agents-light.webp" alt="Building an agent called Writer. Down the left, LoomWatch's dock: Home with a count of 1, Projects, My agents marked, Skills, Quests, then Ask and You. Along the top, the name Writer, saved a minute ago, the Build and Chat tabs, and 1 needs you. Under them, one sentence sums the agent up: Writer thinks with Claude Sonnet 5.5, has no skills yet, and reads nothing yet. It asks you before it searches the web, edits files or runs commands. Below it, Writer's figure sits at a desk, with a label on each part: The job, its instructions pinned up; Skills · none yet; Thinks with Claude Sonnet 5.5; Allowed · nothing; Asks you first · Web, Edit files, Commands; Hands back · said in its instructions; Reads · nothing yet; Tools · none yet. On the right, each setting is a row that says what it is set to: Name, Writer · Turns the kept stories into the digest; Instructions, 3 of 4 parts · add How it checks; Model, Thinks with Claude Sonnet 5.5; then Skills, What it reads, Tools it can use, What it may do without asking and What it hands back.">
 </picture>
 </td>
 <td width="50%" valign="middle">
@@ -388,7 +388,7 @@ add, connect and rename agents to match. To run a team on a schedule, ask
 <td align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="site/assets/app/workflow-dark.webp">
-  <img src="site/assets/app/workflow-light.webp" alt="A team's Team tab, beside LoomWatch's dock with Projects marked. A daily schedule feeds Gatherer, then Reader, then Writer, which produces the team response. At the top of the canvas the team is read back as one sentence, with each agent's figure: every day at 9:00 AM and whenever you ask, Gatherer collects what is needed, then Reader does its part, and finally Writer writes the answer. Beside it, the Add to your team panel lists My agents with the models they think with. The heading says Your team is ready, beside Run team. Along the top, the team's name, saved, the Agents, Team and Chat tabs, the bell and the ⋯.">
+  <img src="site/assets/app/workflow-light.webp" alt="A team's Team tab, beside LoomWatch's dock with Projects marked. Along the top, the team's name, Daily tech digest, saved, the Team and Chat tabs, 1 needs you and the ⋯. The heading says Your team is ready, beside Run team. Down the left, the Add to your team panel lists My agents, each with what it does and its model. On the canvas the team is read back as one sentence, with each agent's figure: every day at 9:00 AM and whenever you ask, Gatherer collects what is needed, then Reader does its part, and finally Writer writes the answer. Below it, a daily schedule feeds Gatherer, then Reader, then Writer, which produces the team response.">
 </picture>
 <br><sub><strong>Team.</strong> Your agents on the canvas, connected in order and read back as one sentence.</sub>
 </td>
@@ -397,7 +397,7 @@ add, connect and rename agents to match. To run a team on a schedule, ask
 <td align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="site/assets/app/chat-dark.webp">
-  <img src="site/assets/app/chat-light.webp" alt="A team's Chat tab, beside LoomWatch's dock with Projects marked: the request Prepare a short getting-started guide for new users; under it, Waiting for you: Researcher's work is ready for your review, with Details, Stop and Researcher's figure with 1 reply on the right. Below, in the chat, Researcher's handover to you, then Approve and Send back to Researcher, and the box ready for your review note.">
+  <img src="site/assets/app/chat-light.webp" alt="A team's Chat tab, beside LoomWatch's dock with Projects marked. Along the top, Review stop demo, with Researcher waiting for you and Editor ready. The request Prepare a short getting-started guide for new users; under it, Waiting for you: Researcher's work is ready for your review, with Details, Stop and 1 reply on the right. Below, in the chat, Researcher's handover to you, then Approve and Send back to Researcher, and the box ready for your review note.">
 </picture>
 <br><sub><strong>Chat.</strong> Your review waits in the chat, under what the agents said, and Details opens every step beside the chat.</sub>
 </td>
@@ -777,11 +777,10 @@ with what should change; under its new version, **Continue with the team** runs 
 
    Ready-made teams are saved straight away, each agent on the model its job suits, so you can run
    them immediately.
-4. A team has three tabs: **Agents**, **Team** and **Chat**. On **Agents**, click **Add an
-   agent** to bring in one from My agents. On **Team**, add more from **My agents** in the
+4. A team has two tabs: **Team** and **Chat**. On **Team**, add agents from **My agents** in the
    panel on the left; to make a new one, choose **Build a new agent** and start from a job such as
-   Researcher or Writer. Select a card to edit its name, instructions, model and how hard it
-   thinks. Drag from the dot on a card's right edge to the next card to make them work in order, and
+   Researcher or Writer. Select a card and press its **Edit** button, such as **Edit Writer**, to change its name,
+   instructions, model and how hard it thinks; each setting is a row that says what it is set to. Drag from the dot on a card's right edge to the next card to make them work in order, and
    add **You (review step)** wherever you want to approve work before the team continues.
 5. Click **Run team**, or open **Chat**, describe what you want in plain words, and press
    <kbd>Enter</kbd>.
@@ -840,7 +839,7 @@ a folder or a file, select the agent and click **Folder** or **File** under **Gi
   has no text to read. The agent can also read the folder or file itself. An added file can be up to 25 MB; link a
   folder for anything bigger.
 - A **tool** you connected, such as Todoist or Kiwi.com, lets the agent use that service. Connect one
-  in the agent's **Tools it can use** block or in Connections; the agent asks you before each action
+  in the agent's **Tools it can use** row or in Connections; the agent asks you before each action
   it takes there, unless you always allow that action. See [Give agents tools](docs/TOOLS.md). A tool from an AI app's own settings is
   not given to LoomWatch's agents: an agent that still names one is told it isn't there, and the run
   carries on without it.

@@ -7,7 +7,7 @@ import type { AgentConfig } from '../../lib/team-file/types'
 
 /**
  * Your agents, for anything inside a team that draws an agent (the canvas cards, the team sentence,
- * the Agents tab): with them, an agent placed from Your agents wears the figure it wears there.
+ * its workbench): with them, an agent placed from Your agents wears the figure it wears there.
  */
 export const SavedAgentsContext = createContext<readonly SavedJob[]>([])
 

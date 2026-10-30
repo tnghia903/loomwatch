@@ -15,7 +15,7 @@ const readAskedTool = () => new URLSearchParams(window.location.search).get('too
 /**
  * Connections' Tools section (ADR 0069): every tool connected in LoomWatch, what each offers, and
  * connecting, checking, signing in again or removing one. Which agent may use which tool is the
- * agent's own Tools block. Notion's card also says where teams' answers go, since its sign-in
+ * agent's own Tools it can use row. Notion's card also says where teams' answers go, since its sign-in
  * sends them and reads the pages agents are given (ADR 0070).
  */
 export function ConnectedTools() {
@@ -65,7 +65,7 @@ export function ConnectedTools() {
   return (
     <section className="e1 lw-settings-section" aria-labelledby="tools-heading" aria-busy={busy}>
       <h2 id="tools-heading" className="t-title">Tools</h2>
-      <p className="t-body lw-settings-quiet">A tool lets your agents use a service, such as Notion or Todoist. Connect it here, then give it to an agent in its Tools block. The agent asks you before each action it takes there, unless you always allow that action. Notion also lets LoomWatch send your teams’ answers to a page.</p>
+      <p className="t-body lw-settings-quiet">A tool lets your agents use a service, such as Notion or Todoist. Connect it here, then give it to an agent under Tools it can use. The agent asks you before each action it takes there, unless you always allow that action. Notion also lets LoomWatch send your teams’ answers to a page.</p>
       {error && <p role="alert" className="inline-error t-body"><span className="detail">{error}</span></p>}
       {notice && <p role="status" className="lw-notice t-meta">{notice}</p>}
       {tools.state === 'loading' && <p role="status" className="t-meta lw-settings-quiet">Loading tools…</p>}
@@ -113,9 +113,9 @@ export function ConnectedTools() {
               setConnecting(null); setStart(null); tools.refresh(); setError('')
               if (tool.notion) {
                 setChoosingFor(tool.id)
-                setNotice(`${tool.name} is connected. Choose the page your teams’ answers go under, and give it to agents in their Tools block.`)
+                setNotice(`${tool.name} is connected. Choose the page your teams’ answers go under, and give it to agents under Tools it can use.`)
               } else {
-                setNotice(`${tool.name} is connected. Give it to an agent in its Tools block.`)
+                setNotice(`${tool.name} is connected. Give it to an agent under Tools it can use.`)
               }
             }}
           />

@@ -1,5 +1,7 @@
 /** Changes on this page that leaving would lose, and how to keep or drop them first. */
 export interface LeaveGuard {
+  /** Whose changes these are, to name in the question. */
+  name?: string | null
   /** Saves; true once saved. */
   save: () => Promise<boolean>
   /** Why it can't be saved as it is, if it can't. */

@@ -4,6 +4,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { BLANK_DRAFT, type AgentDraft } from '../../lib/library/draft'
 import { ByHand } from './ByHand'
+import { openBenchRows } from '../../test/benchRows'
+
+// Each setting is a row that opens; these tests are about the editors inside them.
+openBenchRows()
 
 // The bench's 3D figure is beside the point here.
 vi.mock('./AgentFigure', () => ({ default: () => null }))

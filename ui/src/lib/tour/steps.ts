@@ -124,7 +124,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
     view: () => present('[data-tour="agent-blocks"]')
       ? {
           title: 'Give it a name and a job',
-          body: 'Each block is one of its settings, in plain words: its name, its instructions, its model, its skills, and what it may do without asking. The figure at the bench shows the same things. Type a name, and in Instructions say what it does and what it replies with.',
+          body: 'Each row is one of its settings and says what it is set to: its name, its instructions, its model, its skills, and what it may do without asking. Press a row, or its label on the bench, to change it. Type a name, and in Instructions say what it does and what it replies with.',
           target: ['[data-tour="agent-blocks"]'],
           sides: ['left', 'right', 'top', 'bottom'],
           advance: 'next',
@@ -298,16 +298,16 @@ export const TOUR_STEPS: readonly TourStep[] = [
       : present('[data-tour="agent-picker"]')
       ? {
           title: 'Add your agent',
-          body: 'A team starts on Agents. Press Add beside the agent you built, and it joins the team as you saved it. More agents join the same way.',
+          body: 'A team starts with its agents. Press Add beside the agent you built, and it joins the team as you saved it. More agents join the same way.',
           target: ['[data-tour="agent-picker"]'],
           sides: ['bottom', 'right', 'left'],
           advance: 'action',
         }
       : {
           title: 'Add your agent',
-          body: 'This team has no agents yet. Click Agents at the top to add the one you built.',
-          target: ['[data-tour="tab-agents"]', '[data-tour="view-tabs"]'],
-          sides: ['bottom'],
+          body: 'This team has no agents yet. Add the one you built from My agents, on the left.',
+          target: ['[data-tour="palette"]'],
+          sides: ['right', 'bottom'],
           advance: 'action',
         },
     done: () => agentCount() > 0 && !proposalShowing(),
@@ -324,13 +324,22 @@ export const TOUR_STEPS: readonly TourStep[] = [
           advance: 'next',
           dim: true,
         }
-      : {
-          title: 'Open the Team tab',
-          body: 'The Team tab shows how the team’s agents hand work along. Click Team at the top.',
-          target: ['[data-tour="tab-workflow"]', '[data-tour="view-tabs"]'],
-          sides: ['bottom'],
-          advance: 'action',
-        },
+      // An agent's workbench is open over the Team tab: its close goes back to the team.
+      : teamView() === 'agents'
+        ? {
+            title: 'Back to the team',
+            body: 'You’re editing one agent here. Close it to see the whole team.',
+            target: ['[data-tour="bench-close"]'],
+            sides: ['left', 'bottom'],
+            advance: 'action',
+          }
+        : {
+            title: 'Open the Team tab',
+            body: 'The Team tab shows how the team’s agents hand work along. Click Team at the top.',
+            target: ['[data-tour="tab-workflow"]', '[data-tour="view-tabs"]'],
+            sides: ['bottom'],
+            advance: 'action',
+          },
   },
   {
     id: 'run-team',

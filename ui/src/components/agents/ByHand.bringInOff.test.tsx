@@ -6,6 +6,10 @@ import { forgetModels } from '../../lib/ai/useModels'
 import { BRINGING_IN_SHIPPED, MY_AGENTS_LISTED_BY_DEFAULT } from '../../lib/library/bringIn'
 import { BLANK_DRAFT } from '../../lib/library/draft'
 import { ByHand } from './ByHand'
+import { openBenchRows } from '../../test/benchRows'
+
+// Each setting is a row that opens; these tests are about the editors inside them.
+openBenchRows()
 
 vi.mock('./AgentFigure', () => ({ default: () => null }))
 

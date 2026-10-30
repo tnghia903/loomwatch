@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { teamDisplayName } from '../../lib/team-file/client'
 import { openTeam, useTeamList } from '../../lib/team-file/useTeamList'
@@ -21,6 +21,37 @@ export function InlineConfirm({ message, confirmLabel, onConfirm, onCancel }: { 
         <span>{message}</span>
         <button type="button" className="btn" onClick={onCancel}>Cancel</button>
         <button type="button" className="btn btn-danger-fill" onClick={onConfirm}>{confirmLabel}</button>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Before an agent's workbench closes with changes not saved: save them, drop them, or stay. Save
+ * waits for the save and stays put if it fails, so nothing goes without a word.
+ */
+export function LeaveConfirm({ name, problem, onSave, onDrop, onCancel }: { name: string | null; problem: string | null; onSave: () => Promise<boolean>; onDrop: () => void; onCancel: () => void }) {
+  const [saving, setSaving] = useState(false)
+  // Where the keyboard waits: on Save, or on Cancel when it can't be saved, never on Don't save.
+  const first = useRef<HTMLButtonElement>(null)
+  // It can't be saved as it is (no name, no instructions): it says why, and offers what it can do.
+  const message = problem ? `${name || 'This agent'} can’t be saved yet. ${problem}` : `Save changes to ${name || 'this agent'}?`
+  useEffect(() => { first.current?.focus() }, [])
+  const save = async () => {
+    setSaving(true)
+    const saved = await onSave().catch(() => false)
+    setSaving(false)
+    if (!saved) first.current?.focus()
+  }
+  return (
+    <div role="alertdialog" aria-label={message} className="pointer-events-none absolute inset-x-0 z-50 flex justify-center" style={{ bottom: 'calc(var(--lw-panel-inset) + 72px)' }}
+      onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); onCancel() } }}>
+      <div className="e2 lw-confirm leave t-body" style={{ pointerEvents: 'auto' }}>
+        <span>{message}</span>
+        {/* The answer to the question it asks: ringed, as the page's own Save keeps the one fill. */}
+        {!problem && <button ref={first} type="button" className="btn btn-ring" onClick={() => void save()} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>}
+        <button type="button" className="btn" onClick={onDrop} disabled={saving}>Don’t save</button>
+        <button ref={problem ? first : undefined} type="button" className="btn" onClick={onCancel} disabled={saving}>Cancel</button>
       </div>
     </div>
   )

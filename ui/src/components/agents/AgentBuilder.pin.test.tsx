@@ -5,6 +5,10 @@ import type { SavedJob } from '../../lib/library/jobs'
 import { forgetYou } from '../../lib/you/client'
 import type { AgentFigureProps } from './AgentFigure'
 import { AgentsPage } from './AgentsPage'
+import { openBenchRows } from '../../test/benchRows'
+
+// Each setting is a row that opens; these tests are about the editors inside them.
+openBenchRows()
 
 // The bench is drawn with WebGL, which jsdom has none of: here it is only its labels.
 vi.mock('./AgentFigure', () => ({

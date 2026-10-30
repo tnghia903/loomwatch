@@ -25,7 +25,7 @@ describe('Building an agent', () => {
     window.history.replaceState({}, '', '/agents/new?team=desk%2Fresearch.yaml')
     page()
     expect(screen.getByRole('heading', { name: 'Build an agent' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Back to the team' })).toHaveAttribute('href', '/?path=desk%2Fresearch.yaml&view=agents')
+    expect(screen.getByRole('link', { name: 'Back to the team' })).toHaveAttribute('href', '/?path=desk%2Fresearch.yaml')
     const jobs = screen.getByRole('region', { name: 'Start from a job' })
     // On its job's model from the model table: the strong one, while quality comes first.
     expect(within(jobs).getByRole('button', { name: /^Researcher.*on Claude Opus 5\.5/ })).toBeInTheDocument()

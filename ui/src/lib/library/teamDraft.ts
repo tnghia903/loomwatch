@@ -8,7 +8,7 @@ import { knowledgeOf, readKey, type AgentRead } from './reads'
 import { callsFor, type ToolAllow } from '../tools/allow'
 
 /**
- * A team's own agent on the workbench (the team's Agents tab). The workbench edits an
+ * A team's own agent on the workbench (a sheet over the team's Team tab). The workbench edits an
  * `AgentDraft`; for an agent that is the team's own, that draft is read from the team file and
  * every change is written straight back to it, so it is saved with the team like a canvas edit.
  * (An agent placed from Your agents is edited there instead, as its next version.)

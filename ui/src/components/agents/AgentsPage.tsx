@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ReactNode } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { Plus, UserRound } from '../ui/icon'
 
 import { modelNameFromId } from '../../lib/ai/modelIds'
@@ -9,12 +9,12 @@ import { useSavedJobs } from '../../lib/library/jobs'
 import { usePinnedAgent } from '../../lib/library/pinned'
 import { modelForPreset, ROLE_PRESETS } from '../../lib/library/roles'
 import { useAgentUses } from '../../lib/library/uses'
+import { useRunRecords } from '../../lib/story/useNeedsYou'
 import { KnowYou } from '../you/KnowYou'
-import { AgentBadge } from './AgentBadge'
+import { AgentTile } from './AgentTile'
 import { AgentBuilder } from './AgentBuilder'
 import { AgentChip } from './AgentChip'
 import { AgentFrame, type AgentBarSlots } from './AgentFrame'
-import type { LeaveGuard } from './leave'
 import { navigate, useAgentsRoute } from './route'
 import { SectionHead } from '../ui/SectionHead'
 
@@ -33,8 +33,6 @@ export interface AgentsPageProps {
 export function AgentsPage(props: AgentsPageProps) {
   const route = useAgentsRoute()
   const { tray, ...builder } = props
-  // What leaving the agent on screen would lose, kept by its builder.
-  const leave = useRef<LeaveGuard | null>(null)
   // Where the agent on screen puts its name chip and tabs in the header.
   const [slots, setSlots] = useState<AgentBarSlots>(NO_SLOTS)
   if (route.kind !== 'list') {
@@ -45,7 +43,7 @@ export function AgentsPage(props: AgentsPageProps) {
         <main className="home-main agents-main">
           {starting
             ? <AgentTemplates team={route.team} />
-            : <AgentBuilder key={route.kind === 'agent' ? route.id : `new-${route.from ?? ''}`} id={route.kind === 'agent' ? route.id : null} startFrom={route.kind === 'new' ? route.from : null} cameFrom={route.team} view={route.view} run={route.kind === 'agent' ? route.run : null} leaveRef={leave} bar={slots} {...builder} />}
+            : <AgentBuilder key={route.kind === 'agent' ? route.id : `new-${route.from ?? ''}`} id={route.kind === 'agent' ? route.id : null} startFrom={route.kind === 'new' ? route.from : null} cameFrom={route.team} view={route.view} run={route.kind === 'agent' ? route.run : null} bar={slots} {...builder} />}
         </main>
       </AgentFrame>
     )
@@ -72,7 +70,7 @@ function AgentTemplates({ team }: { team: string | null }) {
     <>
       <section className="home-hero agents-hero">
         <SectionHead page as="h1" className="t-display" title="Build an agent" explain="Start from a job: it comes with working instructions, on the model its kind of work suits, and you can change all of it. Or start blank and write your own." />
-        {team && <a className="link agent-back" href={`/?path=${encodeURIComponent(team)}&view=agents`}>Back to the team</a>}
+        {team && <a className="link agent-back" href={`/?path=${encodeURIComponent(team)}`}>Back to the team</a>}
       </section>
       <section className="agents-start" aria-labelledby="agents-start-title" data-tour="agent-start">
         <h2 id="agents-start-title">Start from a job</h2>
@@ -91,6 +89,8 @@ function AgentsList() {
   const { jobs, problems, available, loaded, error } = useSavedJobs()
   const { uses } = useAgentUses()
   const { pinned } = usePinnedAgent()
+  // The one shared poll (round 3): what each agent is doing in its own chat lights its figure.
+  const { records } = useRunRecords()
   const usage = useMemo(() => {
     const byAgent = new Map<string, { teams: number; scheduled: number }>()
     for (const job of jobs) byAgent.set(job.id, { teams: 0, scheduled: 0 })
@@ -106,7 +106,7 @@ function AgentsList() {
   return (
     <>
       <section className="home-hero agents-hero">
-        <SectionHead page as="h1" className="t-display" title="My agents" explain="Build an agent once and work with it in its own chat. Then add it to any team: it is the same agent in every team it’s in." />
+        <SectionHead page as="h1" className="t-display" title="My agents" explain="Build an agent once and work with it in its own chat. Then add it to any team: it is the same agent in every team it’s in. Under each agent, a mark with a check is something it may do without asking; a dashed one, it asks you first." />
         <KnowYou />
         <div className="home-hero-acts">
           <button type="button" className="btn btn-primary btn-lg" onClick={() => open('/agents/new')} data-tour="new-agent"><Plus size={16} aria-hidden="true" />New agent</button>
@@ -126,8 +126,8 @@ function AgentsList() {
           <ul className="home-grid agents-grid">
             {jobs.map((job) => (
               <li key={job.id}>
-                <button type="button" className="home-card agent-card" onClick={() => open(`/agents/${encodeURIComponent(job.id)}`)}>
-                  <AgentBadge compact markId={job.id} figure={figureFor(job.id, job.figure)} draft={draftFromJob(job)} usedIn={usage.get(job.id)} pinned={pinned === job.id} />
+                <button type="button" className="home-card agent-card" title={job.model ? `${job.name} · on ${modelNameFromId(job.model)}` : job.name} onClick={() => open(`/agents/${encodeURIComponent(job.id)}`)}>
+                  <AgentTile id={job.id} figure={figureFor(job.id, job.figure)} draft={draftFromJob(job)} teams={usage.get(job.id)?.teams ?? 0} runs={records} pinned={pinned === job.id} />
                 </button>
               </li>
             ))}

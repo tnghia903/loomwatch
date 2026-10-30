@@ -2,9 +2,14 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { SavedJob } from '../../lib/library/jobs'
+import { pageIsHeld } from '../../lib/team-file/inPlace'
 import { forgetYou } from '../../lib/you/client'
 import type { AgentFigureProps } from './AgentFigure'
 import { AgentsPage } from './AgentsPage'
+import { openBenchRows } from '../../test/benchRows'
+
+// Each setting is a row that opens; these tests are about the editors inside them.
+openBenchRows()
 
 // The bench is drawn with WebGL, which jsdom has none of: here it is only its labels.
 vi.mock('./AgentFigure', () => ({
@@ -33,7 +38,7 @@ describe('An agent’s page, one agent in every team', () => {
   it('names the teams it is in, with nothing to update in them and no numbers', async () => {
     const { container } = render(<AgentsPage skills={[]} skillsLoading={false} />)
     const usedIn = await screen.findByRole('region', { name: 'Used in' }, { timeout: 5000 })
-    // The link goes to the team's Agents tab with this agent open.
+    // The link goes to the team, with this agent's workbench open over its Team tab.
     expect(await within(usedIn).findByRole('link', { name: /Blog/ }, { timeout: 5000 })).toHaveAttribute('href', '/?path=blog.yaml&view=agents&agent=writer')
     expect(screen.getByText(/^Saved /)).toBeInTheDocument()
     expect(container.textContent).not.toMatch(/update/i)
@@ -57,5 +62,24 @@ describe('An agent’s page, one agent in every team', () => {
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save' })) })
     expect(await screen.findByText('Saved.', {}, { timeout: 5000 })).toBeInTheDocument()
     expect(container.textContent).not.toMatch(/update|keeps its copy/i)
+  }, 15000)
+
+  // A change not saved holds the page: the browser asks before it goes, and a team's page moves as a
+  // page load, so the browser asks there too (the dock's Home and Projects from a team's workbench).
+  it('holds the page while a change is not saved, and lets it go once saved', async () => {
+    render(<AgentsPage skills={[]} skillsLoading={false} />)
+    const instructions = await screen.findByRole('textbox', { name: /Instructions/ }, { timeout: 5000 })
+    const leaving = () => { const event = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(event); return event.defaultPrevented }
+    expect(pageIsHeld()).toBe(false)
+    expect(leaving()).toBe(false)
+
+    fireEvent.change(instructions, { target: { value: 'Write a short draft with a title.' } })
+    expect(pageIsHeld()).toBe(true)
+    expect(leaving()).toBe(true)
+
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save' })) })
+    expect(await screen.findByText('Saved.', {}, { timeout: 5000 })).toBeInTheDocument()
+    expect(pageIsHeld()).toBe(false)
+    expect(leaving()).toBe(false)
   }, 15000)
 })
