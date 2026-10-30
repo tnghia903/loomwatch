@@ -236,7 +236,7 @@ mod tests {
         Folder(crate::platform::canonicalize(&path).expect("a canonical folder"))
     }
 
-    const COFFEE: &str = "schemaVersion: 1\nid: market-research\nshares: market-research\nname: Market research\nproject: coffee\n# who looks first\nentrypoint: researcher\nagents:\n  - id: researcher\n    from:\n      agent: researcher\nedges: []\nschedule:\n  cron: \"0 8 * * 1\"\n  prompt: Weekly prices\nspend:\n  perRun: 1\n";
+    const COFFEE: &str = "schemaVersion: 1\nid: market-research\nshares: market-research\nname: Market research\nproject: coffee\n# who looks first\nentrypoint: researcher\nagents:\n  - id: researcher\n    from:\n      agent: researcher\nedges: []\nschedule:\n  cron: \"0 8 * * 1\"\n  prompt: Weekly prices\nspend:\n  perRun: 1\ndeliver:\n  notion:\n    title: Prices\n";
     const BIKES: &str = "schemaVersion: 1\nid: market-research-bikes\nshares: market-research\nname: Market research\nproject: bikes\nentrypoint: researcher\nagents:\n  - id: researcher\n    from:\n      agent: researcher\nedges: []\nspend:\n  perRun: 1\nmemory:\n  enabled: true\n";
 
     fn value(text: &str) -> Value {
@@ -260,6 +260,7 @@ mod tests {
         assert_eq!(after["project"], value("bikes"));
         assert_eq!(after["memory"]["enabled"], value("true"));
         assert!(after.get("schedule").is_none());
+        assert!(after.get("deliver").is_none(), "where answers go is each project's");
         // The other way, the place's schedule stays and the saved one's Brief doesn't arrive.
         let back = value(
             &with_setup(&BIKES.replace("perRun: 1", "perRun: 5"), COFFEE)
@@ -268,6 +269,7 @@ mod tests {
         );
         assert_eq!(back["spend"]["perRun"], value("5"));
         assert_eq!(back["schedule"]["prompt"], value("Weekly prices"));
+        assert_eq!(back["deliver"]["notion"]["title"], value("Prices"));
         assert!(back.get("memory").is_none());
         assert_eq!(back["project"], value("coffee"));
     }
@@ -331,6 +333,7 @@ mod tests {
         assert_eq!(place["shares"], value("market-research"));
         assert_eq!(place["name"], value("Market research"));
         assert!(place.get("schedule").is_none());
+        assert!(place.get("deliver").is_none());
         assert_eq!(place["agents"][0]["from"]["agent"], value("researcher"));
         assert_eq!(place["entrypoint"], value("researcher"));
     }

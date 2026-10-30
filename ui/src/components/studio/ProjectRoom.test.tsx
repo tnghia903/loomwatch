@@ -183,6 +183,17 @@ describe('a project’s room (ADR 0097)', () => {
       expect(await screen.findByRole('status')).toHaveTextContent('Research and design is out of SUTD final project. It still works in My thesis.')
     })
 
+    it('says, deleting this project, that the team keeps working in the other', async () => {
+      render(<ProjectRoom id="sutd" />)
+      const card = await screen.findByRole('article', { name: 'Research and design' })
+      await waitFor(() => expect(card).toHaveTextContent('Also in My thesis'))
+      fireEvent.click(screen.getByRole('button', { name: 'Project settings' }))
+      fireEvent.click(within(screen.getByRole('menu', { name: 'Project settings' })).getByRole('menuitem', { name: 'Delete project…' }))
+      const dialog = screen.getByRole('alertdialog', { name: 'Delete the project “SUTD final project”?' })
+      expect(dialog).toHaveTextContent('Research and design keeps working in My thesis. Its chat and work here go with the project.')
+      expect(dialog).not.toHaveTextContent('Not in a project')
+    })
+
     it('deletes it from every project with Delete team…, after naming them', async () => {
       render(<ProjectRoom id="sutd" />)
       const card = await screen.findByRole('article', { name: 'Research and design' })

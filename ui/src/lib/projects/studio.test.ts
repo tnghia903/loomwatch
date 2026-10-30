@@ -85,10 +85,13 @@ describe('the studio (ADR 0097)', () => {
     const loose = teamShapeOf('gate-2.yaml', PIPELINE.replace('id: gate\n', 'id: gate-2\nshares: gate\n').replace('project: sutd\n', ''), JOBS) as TeamShape
     const other = teamShapeOf('blog.yaml', PIPELINE.replace('id: gate\n', 'id: blog\nshares: blog\n').replace('project: sutd', 'project: thesis'), JOBS) as TeamShape
     expect(here.shares).toBe('gate')
-    const [sutd] = roomsOf([project('sutd', ['gate.yaml'])], [here, there, loose, other], [], null, [project('sutd', []), project('thesis', [])])
+    // A second place in its own project (a file changed by hand) isn't another project.
+    const twice = teamShapeOf('gate-3.yaml', PIPELINE.replace('id: gate\n', 'id: gate-3\nshares: gate\n'), JOBS) as TeamShape
+    const every = [project('sutd', []), project('thesis', [])]
+    const [sutd] = roomsOf([project('sutd', ['gate.yaml'])], [here, there, loose, other, twice], [], null, every)
     expect(sutd.teams[0].alsoIn).toEqual([{ id: 'thesis', name: 'THESIS' }])
-    // A team in one project says nothing more.
-    const [alone] = roomsOf([project('thesis', ['blog.yaml'])], [here, there, loose, other], [], null)
+    // A team in one project says nothing more, though another team works in the project next door.
+    const [alone] = roomsOf([project('thesis', ['blog.yaml'])], [here, there, loose, other, twice], [], null, every)
     expect(alone.teams[0].alsoIn).toBeUndefined()
   })
 

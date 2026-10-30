@@ -1,6 +1,8 @@
+import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { loadPlaces, setupDiffers } from './places'
+import { projectsChanged } from './client'
+import { loadPlaces, setupDiffers, usePlaces } from './places'
 
 const team = (id: string, project: string | null, shares = 'prices') => `schemaVersion: 1\nid: ${id}\nshares: ${shares}\n${project ? `project: ${project}\n` : ''}name: Prices\nentrypoint: a\nagents:\n  - {id: a, name: Writer, model: fake/offline, role: Write.}\nedges: []\n`
 
@@ -10,7 +12,32 @@ const FILES: Record<string, string> = {
   'other.yaml': team('other', 'bikes', 'other'),
 }
 
+let projects = [{ id: 'coffee', name: 'Coffee shop', teams: ['coffee.yaml'] }, { id: 'bikes', name: 'Bike rental', teams: ['bikes.yaml', 'other.yaml'] }]
+function daemon() {
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url === '/api/teams') return new Response(JSON.stringify({ root: '/teams', files: Object.keys(FILES), teams: Object.keys(FILES).map((path) => ({ path, agentCount: 1 })) }), { status: 200 })
+    if (url === '/api/projects') return new Response(JSON.stringify({ projects, loose: [], missing: [], removed: [] }), { status: 200 })
+    const path = new URLSearchParams(url.split('?')[1]).get('path') ?? ''
+    return new Response(JSON.stringify({ path, yaml: FILES[path], revision: 'r' }), { status: 200 })
+  }))
+}
+
 afterEach(() => vi.unstubAllGlobals())
+
+// The team page's view of them: none for a team in one project, read again when a project changes.
+describe('the open team’s places', () => {
+  it('are none without a shared team, found with one, and read again after a project changes', async () => {
+    daemon()
+    const none = renderHook(() => usePlaces(null, '/teams/coffee.yaml'))
+    expect(none.result.current).toBeNull()
+    const { result } = renderHook(() => usePlaces('prices', '/teams/coffee.yaml'))
+    await waitFor(() => expect(result.current).toEqual({ here: 'Coffee shop', others: [{ path: 'bikes.yaml', project: 'Bike rental' }] }))
+    projects = [{ ...projects[0] }, { ...projects[1], name: 'Bikes for rent' }]
+    act(() => projectsChanged())
+    await waitFor(() => expect(result.current?.others[0].project).toBe('Bikes for rent'))
+  })
+})
 
 // ADR 0103: where a team works, seen from the place open, for its page's save line and Delete team.
 describe('a team’s places', () => {
