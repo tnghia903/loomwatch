@@ -9,8 +9,9 @@ import { useSavedJobs } from '../../lib/library/jobs'
 import { usePinnedAgent } from '../../lib/library/pinned'
 import { modelForPreset, ROLE_PRESETS } from '../../lib/library/roles'
 import { useAgentUses } from '../../lib/library/uses'
+import { useRunRecords } from '../../lib/story/useNeedsYou'
 import { KnowYou } from '../you/KnowYou'
-import { AgentBadge } from './AgentBadge'
+import { AgentTile } from './AgentTile'
 import { AgentBuilder } from './AgentBuilder'
 import { AgentChip } from './AgentChip'
 import { AgentFrame, type AgentBarSlots } from './AgentFrame'
@@ -91,6 +92,8 @@ function AgentsList() {
   const { jobs, problems, available, loaded, error } = useSavedJobs()
   const { uses } = useAgentUses()
   const { pinned } = usePinnedAgent()
+  // The one shared poll (round 3): what each agent is doing in its own chat lights its figure.
+  const { records } = useRunRecords()
   const usage = useMemo(() => {
     const byAgent = new Map<string, { teams: number; scheduled: number }>()
     for (const job of jobs) byAgent.set(job.id, { teams: 0, scheduled: 0 })
@@ -127,7 +130,7 @@ function AgentsList() {
             {jobs.map((job) => (
               <li key={job.id}>
                 <button type="button" className="home-card agent-card" onClick={() => open(`/agents/${encodeURIComponent(job.id)}`)}>
-                  <AgentBadge compact markId={job.id} figure={figureFor(job.id, job.figure)} draft={draftFromJob(job)} usedIn={usage.get(job.id)} pinned={pinned === job.id} />
+                  <AgentTile id={job.id} figure={figureFor(job.id, job.figure)} draft={draftFromJob(job)} teams={usage.get(job.id)?.teams ?? 0} runs={records} pinned={pinned === job.id} />
                 </button>
               </li>
             ))}

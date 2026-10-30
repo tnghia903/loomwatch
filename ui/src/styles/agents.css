@@ -24,8 +24,23 @@
 .agents-start-card em { margin-top: auto; padding-top: 4px; font: 500 11px var(--font-mono); font-style: normal; color: var(--color-ink-3); }
 
 /* ---------- the ID card ---------- */
-.agents-grid { grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
-.agent-card { min-height: 0; padding-right: var(--sp-6); }
+.agents-grid { grid-template-columns: repeat(auto-fill, minmax(208px, 1fr)); }
+/* One of My agents (round 3): the figure big and lit by what it is doing, its name, a word when it
+   is not just ready, and one row of marks whose words are their tooltips. */
+.agent-tile { display: flex; flex-direction: column; align-items: center; gap: var(--sp-2); min-height: 260px; padding: var(--sp-4) var(--sp-2) var(--sp-3); box-sizing: border-box; text-align: center; }
+.agent-tile-figure { margin-bottom: var(--sp-1); }
+.agent-tile-name { display: inline-flex; align-items: center; gap: 6px; font-size: 15px; font-weight: 600; color: var(--color-ink); }
+.agent-tile-state { font-size: 12.5px; line-height: 16px; color: var(--color-ink-2); }
+.agent-tile-state.waiting { color: var(--color-accent); }
+.agent-tile-state.working { color: var(--color-live); }
+.agent-tile-state.failed { color: var(--color-alert); }
+.agent-tile-marks { margin-top: auto; display: inline-flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
+/* A switch is solid when it is allowed and dashed when the agent asks you first: shape, not colour. */
+.agent-tile-mark { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-width: 28px; height: 28px; padding: 0 6px; box-sizing: border-box; border: 1.5px solid var(--color-hairline); border-radius: var(--r-sm); color: var(--color-ink-2); font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.agent-tile-mark.on { border-style: solid; border-color: color-mix(in srgb, var(--color-ink) 45%, transparent); color: var(--color-ink); }
+.agent-tile-mark.asks { border-style: dashed; }
+.agent-tile-mark.count { border-color: transparent; }
+.agent-card { min-height: 0; }
 .agent-badge { display: flex; flex-direction: column; gap: 9px; min-width: 0; padding: var(--sp-4); border: 1px solid var(--color-hairline); border-radius: var(--r-lg); background: var(--color-panel-solid); }
 .agent-card .agent-badge { padding: 0; border: 0; background: none; }
 .agent-badge-head { display: flex; align-items: flex-start; gap: var(--sp-3); }
