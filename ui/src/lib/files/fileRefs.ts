@@ -8,7 +8,8 @@ export { baseName }
  *
  * Deliberately narrow: an absolute path whose last segment has an extension, written as inline
  * code, as a Markdown link, or as a `file://` URL — or a file name listed under such a folder, or a
- * file the run wrote named in plain words ([`withFolderPaths`]). Other bare words and API routes
+ * file the run wrote, or one in an agent's own folder, named in plain words ([`withFolderPaths`]).
+ * Other bare words and API routes
  * ("/api/runs") are not files, and a false positive would put an Open button on something that is
  * not openable.
  */
@@ -190,6 +191,10 @@ export function fileRefsIn(markdown: string, touched: readonly string[] = [], ag
  *
  * Such a name, or its path, becomes a file only when it fits just one file in `written`, what the
  * run's agents wrote: those are real files, so a word is never taken for one it isn't.
+ *
+ * A file an agent made with a command (`python make_deck.py`) was never written by name. Its full
+ * path in plain words becomes a file too when it is in an agent's own folder, where LoomWatch keeps
+ * the team's work ([`madeByAgent`]): what is there, the work made.
  */
 export function withFolderPaths(markdown: string, touched: readonly string[] = [], agentFolder: string | null = null, written: readonly string[] = []): string {
   const home = agentFolder && isAbsolutePath(agentFolder) ? agentFolder : null
@@ -219,20 +224,61 @@ export function withFolderPaths(markdown: string, touched: readonly string[] = [
     })
   }
   const named = plainNames(written)
-  if (named) for (const index of passages.flat()) lines[index] = named(lines[index])
+  for (const index of passages.flat()) {
+    if (named) lines[index] = inPlainWords(lines[index], named)
+    lines[index] = inPlainWords(lines[index], madePaths)
+  }
   return lines.join('\n')
 }
 
 // What plain words may not be read inside: code, a link with its words, an HTML tag or a web address.
 const KEPT = /`[^`\n]*`|!?\[[^\]\n]*\]\([^)\n]*\)|<[^>\n]*>|[A-Za-z][A-Za-z0-9+.-]*:\/\/\S+/g
 
+/** A line with `resolve` applied to its plain words alone ([`KEPT`]). */
+function inPlainWords(line: string, resolve: (words: string) => string): string {
+  let out = ''
+  let at = 0
+  for (const match of line.matchAll(KEPT)) {
+    out += resolve(line.slice(at, match.index)) + match[0]
+    at = match.index + match[0].length
+  }
+  return out + resolve(line.slice(at))
+}
+
+// A full path without spaces, from `/` or a drive to an extension, standing alone as a name does
+// in `plainNames`.
+const FULL_PATH = /(^|[\s(["'“‘*])((?:\/|[A-Za-z]:[\\/])[^\s`'"()<>[\]*]*\.[A-Za-z0-9]{1,8})(?=$|[\s)\]"'”’*,;:!?]|\.(?:\s|$))/g
+
+/** Plain words with each full path to a file an agent made ([`madeByAgent`]) as a code span. */
+function madePaths(words: string): string {
+  return words.replace(FULL_PATH, (whole, before: string, path: string) => (madeByAgent(path) ? `${before}\`${path}\`` : whole))
+}
+
 /**
- * A line's plain words with each name of a file in `written` (`architecture.html`,
+ * Whether a full path is of a file in an agent's own folder (`.loomwatch/<team>/<agent>/…`, the
+ * folder it works in), of a kind this module names. Not what LoomWatch keeps there for it: hidden
+ * folders (its skills), the copies of the files it was given, and its notes.
+ */
+function madeByAgent(path: string): boolean {
+  if (!filePathFrom(path) || !Object.hasOwn(LABELS, extensionOf(path))) return false
+  const parts = splitPath(path)
+  const at = parts.indexOf('.loomwatch')
+  const inside = at < 0 ? [] : parts.slice(at + 1)
+  return inside.length >= 2 && inside.every((part) => !part.startsWith('.') && part !== KNOWLEDGE_COPIES) && inside.at(-1) !== NOTES_FILE
+}
+
+/** Where an agent's folder keeps the full texts of the files it was given (`chosen_knowledge.rs`). */
+const KNOWLEDGE_COPIES = 'knowledge'
+/** The notes LoomWatch writes for the agent in its folder (`workspace.rs`). */
+const NOTES_FILE = 'AGENTS.md'
+
+/**
+ * Plain words with each name of a file in `written` (`architecture.html`,
  * `design/architecture.html`, or its full path) as a code span of that file's full path, or `null`
  * when the run wrote nothing. A name stands alone: not inside another word, an address, code or a
  * link. A name two written files share stays words, unless given by its full path.
  */
-function plainNames(written: readonly string[]): ((line: string) => string) | null {
+function plainNames(written: readonly string[]): ((words: string) => string) | null {
   const files = written.filter((path) => !path.includes('`'))
   if (!files.length) return null
   const longestFirst = (a: string, b: string) => b.length - a.length
@@ -242,19 +288,10 @@ function plainNames(written: readonly string[]): ((line: string) => string) | nu
   // line's end, a space, closing punctuation, or a full stop that ends the sentence. Its full path
   // first, which can hold spaces; else the name, with the folders before it.
   const name = new RegExp(`(^|[\\s(\\["'“‘*])(${paths}|(?:[^\\s\`'"()<>\\[\\]*]*[\\\\/])?(?:${names}))(?=$|[\\s)\\]"'”’*,;:!?]|\\.(?:\\s|$))`, 'g')
-  const resolve = (words: string) => words.replace(name, (whole, before: string, said: string) => {
+  return (words) => words.replace(name, (whole, before: string, said: string) => {
     const path = isAbsolutePath(said) ? files.find((file) => samePath(file, said)) : touchedFile(said, files)
     return path ? `${before}\`${path}\`` : whole
   })
-  return (line) => {
-    let out = ''
-    let at = 0
-    for (const match of line.matchAll(KEPT)) {
-      out += resolve(line.slice(at, match.index)) + match[0]
-      at = match.index + match[0].length
-    }
-    return out + resolve(line.slice(at))
-  }
 }
 
 /** Whether two full paths name the same file, either separator, and on Windows in any case. */
