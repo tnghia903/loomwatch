@@ -317,7 +317,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
     screen: 'workspace',
     view: () => teamView() === 'workflow' && agentCount() > 0
       ? {
-          title: 'Connect them in Workflow',
+          title: 'Connect them on the Team tab',
           body: 'Each card is one of the team’s agents, on the model named on it. With more than one, connect the cards so work passes from one to the next, or add a review step that waits for you. One agent needs nothing more.',
           target: [AGENT_CARD],
           sides: ['right', 'bottom', 'left', 'top'],
@@ -325,8 +325,8 @@ export const TOUR_STEPS: readonly TourStep[] = [
           dim: true,
         }
       : {
-          title: 'Open Workflow',
-          body: 'Workflow shows how the team’s agents hand work along. Click Workflow at the top.',
+          title: 'Open the Team tab',
+          body: 'The Team tab shows how the team’s agents hand work along. Click Team at the top.',
           target: ['[data-tour="tab-workflow"]', '[data-tour="view-tabs"]'],
           sides: ['bottom'],
           advance: 'action',
@@ -392,7 +392,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
     screen: 'any',
     view: () => ({
       title: 'You’re all set',
-      body: `That is the whole loop: build an agent, put it in a team’s workflow, and give the team work in its chat. When a team needs you, for an answer or an approval, it asks in its chat, and Home on the left counts it. To see this guide again, choose Getting started guide under You, or press ${keys('⌘K')}.`,
+      body: `That is the whole loop: build an agent, put it in a team, and give the team work in its chat. When a team needs you, for an answer or an approval, it asks in its chat, and Home on the left counts it. To see this guide again, choose Getting started guide under You, or press ${keys('⌘K')}.`,
       advance: 'finish',
     }),
   },

@@ -36,7 +36,7 @@ export function depthForZoom(zoom: number): Depth {
 
 export const DEPTH_LABEL: Record<Depth, { name: string; hint: string }> = {
   story: { name: 'Story', hint: 'Each helper in one sentence' },
-  team: { name: 'Team', hint: 'Cards with app, instructions and status' },
+  team: { name: 'Cards', hint: 'Cards with app, instructions and status' },
   trace: { name: 'Trace', hint: 'Model, what each may do, what it is given, and full instructions' },
 }
 

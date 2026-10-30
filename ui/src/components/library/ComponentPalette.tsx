@@ -22,7 +22,7 @@ import { plainWords } from '../../lib/chat/findWords'
 const ROLE_ICONS: Record<RoleIcon, IconComponent> = { research: Telescope, write: PenLine, edit: Scissors, review: ScanEye, code: Code2, design: Shapes, analyse: ChartColumn, slides: Presentation, document: ScrollText, sheet: Sheet, chart: ChartSpline, dashboard: LayoutDashboard, video: Clapperboard }
 
 const YOURS = 'My agents'
-const STEPS = 'Workflow steps'
+const STEPS = 'Other steps'
 const SKILLS = 'Skills'
 const CONNECTIONS = 'Connections'
 const FILES = 'Folders & files'
@@ -206,7 +206,7 @@ function notionPageItem(page: TeamNotionPage, reveal?: (id: string) => void): Pa
  * when a group is empty; these sentences are for whoever wonders why.
  */
 const EXPLAIN: Record<string, ReactNode> = {
-  [STEPS]: 'Steps of the workflow that are not agents. You (review step) pauses the team so you can approve the work or send it back.',
+  [STEPS]: 'Steps in the team that are not agents. You (review step) pauses the team so you can approve the work or send it back.',
   [SKILLS]: <>LoomWatch’s skills, and the ones this team’s project folder has. Drag one onto an agent to supply its instructions there. Add, bring in or install skills on the <a href="/skills">Skills</a> page. Web search, commands and file edits need no skill: switch them on per agent, under <b>Allowed without asking</b>.</>,
   [CONNECTIONS]: <>Services you connected in Connections. Drag <b>Notion</b> onto an agent and choose a page: the agent is given the page’s text each time the team runs. The pages this team reads are listed under it.</>,
   [FILES]: <>This team’s folders and files. Add one from an agent’s panel, with <b>Folder</b> or <b>File</b> under Given. Then drag it onto another agent to share it, or click it to find its card.</>,

@@ -224,7 +224,7 @@ describe('Workspace', () => {
     expect(screen.getByRole('textbox', {name: 'Message the team'})).toBeInTheDocument()
     expect(await screen.findByRole('heading', {name: /^Talk to /})).toBeInTheDocument()
     expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0)
-    fireEvent.click(screen.getByRole('button', {name: 'Workflow'}))
+    fireEvent.click(screen.getByRole('button', { name: 'Team' }))
     expect(screen.getByRole('application', {name: 'Team canvas'})).toBeInTheDocument()
   })
 
@@ -590,7 +590,7 @@ describe('Workspace', () => {
     expect(screen.queryByRole('complementary', { name: 'Details of this piece of work' })).not.toBeInTheDocument()
     expect(screen.getByRole('region', { name: /chat$/ })).toBeInTheDocument()
     expect(window.location.search).not.toContain('run=run-1')
-    fireEvent.click(screen.getByRole('button', { name: 'Workflow' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Team' }))
     expect(screen.getByRole('application', { name: 'Team canvas' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Chat' }))
     expect(screen.getByRole('region', { name: /chat$/ })).toBeInTheDocument()
@@ -1039,7 +1039,7 @@ describe('Workspace', () => {
     await runOnScreen()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     // The request went into that run, so the box it was typed in is empty again.
-    fireEvent.click(screen.getByRole('button', { name: 'Workflow' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Team' }))
     expect(screen.getByLabelText('What should the team do?')).toHaveValue('')
   })
 
@@ -1347,7 +1347,7 @@ describe('Workspace', () => {
       fireEvent.change(screen.getByLabelText('What should the team do?'), { target: { value: 'Summarise the repo' } })
       fireEvent.click(screen.getByRole('button', { name: RUN_BUTTON }))
       await runOnScreen()
-      fireEvent.click(screen.getByRole('button', { name: 'Workflow' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Team' }))
 
       expect(positionOf('Researcher')).toBe('0x0')
       expect(positionOf('Reviewer')).toBe('300x0')
@@ -1400,7 +1400,7 @@ describe('Workspace', () => {
       researcher.selected = true
       const view = renderWorkspace()
       try {
-        expect(screen.getByRole('region', { name: 'In the workflow' })).toHaveTextContent(/Step 1 of \d · receives your request first/)
+        expect(screen.getByRole('region', { name: 'In the team' })).toHaveTextContent(/Step 1 of \d · receives your request first/)
         expect(screen.queryByRole('button', { name: /Produces the team output/ })).not.toBeInTheDocument()
       } finally {
         view.unmount()
@@ -1708,11 +1708,11 @@ describe('an Attention alert routes to the repair and to the record', () => {
     return () => { documentState.nodes = original; vi.mocked(documentState.onNodesChange).mockReset() }
   }
 
-  it('takes "Fix in Workflow" to the field that has to change, and says why', async () => {
+  it('takes "Fix on the Team tab" to the field that has to change, and says why', async () => {
     const restore = withRealSelection()
     sessionState.events = busFailure()
     renderWorkspace('run-1')
-    fireEvent.click(await screen.findByRole('button', { name: /Fix in Workflow/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Fix on the Team tab/ }))
     // Out of the run: Build is the only editing surface.
     await waitFor(() => expect(screen.getByRole('heading', { name: /^(Your team is ready|Finish setting up|Add your first agent)$/ })).toBeInTheDocument())
     // On the agent that did the asking, in its full settings, with the instructions focused.
@@ -1732,7 +1732,7 @@ describe('an Attention alert routes to the repair and to the record', () => {
     const restore = withRealSelection()
     sessionState.events = busFailure()
     renderWorkspace('run-1')
-    fireEvent.click(await screen.findByRole('button', { name: /Fix in Workflow/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Fix on the Team tab/ }))
     const field = await screen.findByLabelText('Role and instructions')
     expect(screen.getByRole('note')).toBeInTheDocument()
     fireEvent.change(field, { target: { value: 'You are an agent receiving the report from Research.' } })
@@ -1746,7 +1746,7 @@ describe('an Attention alert routes to the repair and to the record', () => {
     const restore = withRealSelection()
     sessionState.events = busFailure()
     renderWorkspace('run-1')
-    fireEvent.click(await screen.findByRole('button', { name: /Fix in Workflow/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Fix on the Team tab/ }))
     await screen.findByRole('note')
     fireEvent.change(screen.getByRole('textbox', { name: 'Name' }), { target: { value: 'Report Designer' } })
     await waitFor(() => expect(documentState.renameAgent).toHaveBeenCalledWith('researcher', 'name', 'Report Designer'))
@@ -1758,7 +1758,7 @@ describe('an Attention alert routes to the repair and to the record', () => {
     const restore = withRealSelection()
     sessionState.events = busFailure()
     renderWorkspace('run-1')
-    fireEvent.click(await screen.findByRole('button', { name: /Fix in Workflow/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Fix on the Team tab/ }))
     await screen.findByRole('note')
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss this note' }))
     await waitFor(() => expect(screen.queryByRole('note')).not.toBeInTheDocument())
@@ -1774,7 +1774,7 @@ describe('an Attention alert routes to the repair and to the record', () => {
     renderWorkspace('run-1')
     const panel = await screen.findByRole('region', { name: /^Attention/ })
     expect(panel).toHaveTextContent('Exited unexpectedly')
-    expect(screen.queryByRole('button', { name: /Fix in Workflow/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Fix on the Team tab/ })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Show the agent' })).toBeInTheDocument()
   })
 
@@ -1788,7 +1788,7 @@ describe('an Attention alert routes to the repair and to the record', () => {
     renderWorkspace('run-1')
     const panel = await screen.findByRole('region', { name: /^Attention/ })
     expect(panel).toHaveTextContent('budget exhausted')
-    expect(screen.queryByRole('button', { name: /Fix in Workflow/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Fix on the Team tab/ })).not.toBeInTheDocument()
   })
 
   it('keeps the record reachable: "Show evidence" opens the failing call, without the agent panel over it', async () => {
@@ -1829,7 +1829,7 @@ describe('switching workspace tab closes the node inspector', () => {
     await waitFor(() => expect(nodePanel()).not.toBeInTheDocument())
 
     // Closed, not merely hidden behind a selection that is still set.
-    fireEvent.click(screen.getByRole('button', { name: 'Workflow' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Team' }))
     await waitFor(() => expect(screen.getByRole('heading', { name: /^(Your team is ready|Finish setting up|Add your first agent)$/ })).toBeInTheDocument())
     expect(nodePanel()).not.toBeInTheDocument()
     restore()
@@ -1852,7 +1852,7 @@ describe('switching workspace tab closes the node inspector', () => {
     sessionState.events = [event(0, 'process', { phase: 'spawned', pid: 1 })]
     renderWorkspace('run-1')
     expect(nodePanel()).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Workflow' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Team' }))
     await waitFor(() => expect(nodePanel()).not.toBeInTheDocument())
     restore()
   })

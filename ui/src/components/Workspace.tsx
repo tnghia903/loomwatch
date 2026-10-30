@@ -2197,7 +2197,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     doc.addAgentFromDrop(raw, at)
     placeJobSkills(raw, at)
     if (added) { setBenchAgentId(added.id); writeBuildViewToUrl(true, added.id) }
-    setStatusAnnouncement(`${job.name} is in this team now. Connect it in Workflow, and save the team to keep it.`)
+    setStatusAnnouncement(`${job.name} is in this team now. Connect it on the Team tab, and save the team to keep it.`)
   }, [doc, editable, placeJobSkills])
 
   // ---- notifications + announcements -----------------------------------------------------
@@ -2669,7 +2669,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
               </div>
             )}
           </ReactFlow>
-          {storyParts.length > 0 ? <TeamStory parts={storyParts} figures={agentFigures} onAgent={focusAgent} onSchedule={doc.teamSchedule ? openScheduleEditor : undefined} onConnect={editable ? (edges) => { for (const edge of edges) doc.onConnect({ source: edge.from, target: edge.to, sourceHandle: null, targetHandle: null }) } : undefined} /> : <div className="build-canvas-help"><strong>Connect your agents</strong><span>Drag from the dot on the right of a card to the next card to hand work along.</span></div>}<div className="build-canvas-legend"><span><i />Workflow</span><span><i className="resource" />Resources</span><span>Select a card to edit</span></div>{!runSetup && <div className="canvas-notes"><InstructionUpdateBar entries={instructionUpdates.entries} names={nodeNames} readOnly={!editable} onReview={focusAgent} onKeepAll={instructionUpdates.keepAll} onRewrite={ask.unavailable ? undefined : instructionUpdates.rewrite} />{turnedOffNote && <TurnedOffNote note={turnedOffNote} names={nodeNames} onDismiss={() => setTurnedOffNote(null)} />}</div>}
+          {storyParts.length > 0 ? <TeamStory parts={storyParts} figures={agentFigures} onAgent={focusAgent} onSchedule={doc.teamSchedule ? openScheduleEditor : undefined} onConnect={editable ? (edges) => { for (const edge of edges) doc.onConnect({ source: edge.from, target: edge.to, sourceHandle: null, targetHandle: null }) } : undefined} /> : <div className="build-canvas-help"><strong>Connect your agents</strong><span>Drag from the dot on the right of a card to the next card to hand work along.</span></div>}<div className="build-canvas-legend"><span><i />Handovers</span><span><i className="resource" />Resources</span><span>Select a card to edit</span></div>{!runSetup && <div className="canvas-notes"><InstructionUpdateBar entries={instructionUpdates.entries} names={nodeNames} readOnly={!editable} onReview={focusAgent} onKeepAll={instructionUpdates.keepAll} onRewrite={ask.unavailable ? undefined : instructionUpdates.rewrite} />{turnedOffNote && <TurnedOffNote note={turnedOffNote} names={nodeNames} onDismiss={() => setTurnedOffNote(null)} />}</div>}
         </div>
         )}
         <div className="lw-sweep" aria-hidden="true" />
@@ -2725,9 +2725,9 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
           <div className="needs-you-anchor">{needsYouTray(runView ? activeRunId : null)}</div>
           <nav className="workspace-view-tabs" aria-label="Workspace view" data-tour="view-tabs">
             <SegmentThumb />
-            {/* In the order a team is made: its agents, then its workflow, then its chat. */}
+            {/* In the order a team is made: its agents, then how they work together (Team), then its chat. */}
             <button type="button" aria-pressed={!runView && !runSetup && agentsView} onClick={() => { const chosen = inspectedNode?.id ?? null; clearSelection(); closeRun(); showAgents(chosen) }} data-tour="tab-agents"><Bot size={15} />Agents</button>
-            <button type="button" aria-pressed={!runView && !runSetup && !agentsView} onClick={() => { clearSelection(); closeRun(); showWorkflow() }} data-tour="tab-workflow"><Network size={15} />Workflow</button>
+            <button type="button" aria-pressed={!runView && !runSetup && !agentsView} onClick={() => { clearSelection(); closeRun(); showWorkflow() }} data-tour="tab-workflow"><Network size={15} />Team</button>
             <button type="button" aria-pressed={runView || runSetup} onClick={() => { clearSelection(); if (!activeRunId) setRunSetup(true) }} data-tour="tab-chat"><MessagesSquare size={15} />Chat</button>
           </nav>
           <DocumentSwitcher

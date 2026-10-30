@@ -56,14 +56,14 @@ describe('a team’s agents, the first of its views', () => {
     expect(within(within(add).getByText('Coder').closest('li')!).getByRole('button', { name: 'Add' })).toBeEnabled()
     // A new one is built in Your agents, which leads back to this team.
     expect(within(add).getByRole('link', { name: 'Build a new agent' })).toHaveAttribute('href', '/agents/new?team=digest.yaml')
-    fireEvent.click(within(add).getByRole('button', { name: 'Or start in Workflow' }))
+    fireEvent.click(within(add).getByRole('button', { name: 'Or start on the Team tab' }))
     expect(props.onShowWorkflow).toHaveBeenCalled()
   })
 
   it('keeps the old way in when the team can’t be changed here', () => {
     renderTeamAgents({ onAdd: undefined, editable: false })
     expect(screen.queryByRole('region', { name: 'Add an agent to this team' })).toBeNull()
-    expect(screen.getByRole('button', { name: 'Add one in Workflow' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Add one on the Team tab' })).toBeInTheDocument()
   })
 
   it('shows what a team’s own agent reads on its workbench, and takes one away there', () => {
@@ -77,15 +77,15 @@ describe('a team’s agents, the first of its views', () => {
       'EKIS hubNotion page · read when each run starts',
     ])
     expect(screen.getByText(/has 1 skill, and reads 1 folder, 1 file and 1 Notion page\./)).toBeInTheDocument()
-    // Given here or with a line in Workflow, it is the same card: either place changes it.
-    expect(block).toHaveTextContent('Each is a card in Workflow with a line to this agent')
+    // Given here or with a line on the Team tab, it is the same card: either place changes it.
+    expect(block).toHaveTextContent('Each is a card on the Team tab with a line to this agent')
     expect(within(block).getByRole('group', { name: 'Give it something to read' })).toBeInTheDocument()
     fireEvent.click(within(held).getByRole('button', { name: 'Stop reading brief.md' }))
     expect(props.onEdit).toHaveBeenLastCalledWith('scope', 'reads', [
       { name: 'sutd-final-project', path: '/Users/me/Developer/sutd-final-project' },
       { name: 'EKIS hub', notion: { page: 'abc123' } },
     ])
-    fireEvent.click(within(block).getByRole('button', { name: 'See it in Workflow' }))
+    fireEvent.click(within(block).getByRole('button', { name: 'See it on the Team tab' }))
     expect(props.onShowWorkflow).toHaveBeenCalled()
   })
 
@@ -98,7 +98,7 @@ describe('a team’s agents, the first of its views', () => {
     expect(within(give).getByRole('button', { name: 'Folder' })).toBeInTheDocument()
     expect(within(give).getByRole('button', { name: 'File' })).toBeInTheDocument()
     // Giving it something is right here, so there is no second way to it on this screen.
-    expect(within(block).queryByRole('button', { name: /in Workflow$/ })).toBeNull()
+    expect(within(block).queryByRole('button', { name: /on the Team tab$/ })).toBeNull()
   })
 
   it('gives a team’s own agent a folder, after what it reads already', async () => {

@@ -189,7 +189,7 @@ function AddAnAgent({ jobs, project, teams, initial, onClose }: { jobs: readonly
             {teams.map((team) => <option key={team.path} value={team.path}>{team.name}</option>)}
           </select>
         </label>
-        {where && <p className="set-up-hint">It joins the team, whose workflow opens for you to connect it.</p>}
+        {where && <p className="set-up-hint">It joins the team, whose Team tab opens for you to connect it.</p>}
         {error && <p role="alert" className="wall-error">{error}</p>}
         <span className="wall-paper-acts">
           <button type="button" className="btn" onClick={onClose} disabled={busy}>Cancel</button>

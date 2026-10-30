@@ -244,7 +244,7 @@ describe('GettingStarted', () => {
     expect(screen.getByRole('heading', { name: 'Add your agent' })).toBeInTheDocument()
   })
 
-  it('moves on once the agent is in the team, and explains its card in Workflow', () => {
+  it('moves on once the agent is in the team, and explains its card on the Team tab', () => {
     showPage(workspace('<section data-tour="agent-picker"></section>', 0, 'agents'))
     goToStep('team-agents')
     renderGuide()
@@ -252,11 +252,11 @@ describe('GettingStarted', () => {
     tick(250)
     expect(readTourState()?.step).toBe('workflow')
     tick(250)
-    expect(screen.getByRole('heading', { name: 'Open Workflow' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Open the Team tab' })).toBeInTheDocument()
 
     showPage(workspace('<div class="react-flow__node-agent" data-tour="card"></div>', 1, 'workflow'))
     tick(250)
-    expect(screen.getByRole('heading', { name: 'Connect them in Workflow' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Connect them on the Team tab' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /Next/ }))
     tick()
     expect(screen.getByRole('heading', { name: 'Open the team’s chat' })).toBeInTheDocument()

@@ -34,9 +34,9 @@ export function AgentWorkflowPlace({ agentId, name, place, figures, onFocus, onP
   }
   const self = figures?.get(agentId)
   return (
-    <section className="workflow-place" aria-label="In the workflow">
+    <section className="workflow-place" aria-label="In the team">
       <div className="workflow-place-head">
-        <span className="t-micro">In the workflow</span>
+        <span className="t-micro">In the team</span>
         {flow && <span className="t-meta">Step {flow.step} of {flow.of}</span>}
       </div>
       <span className="visually-hidden">{place.summary}</span>

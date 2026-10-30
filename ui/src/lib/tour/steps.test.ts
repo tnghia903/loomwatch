@@ -53,7 +53,7 @@ describe('getting-started guide steps', () => {
     expect(step('new-team').view(ready)).toMatchObject({ title: 'Start it with your agent', keepClear: true })
   })
 
-  it('waits for an agent to join the team, then shows it in Workflow', () => {
+  it('waits for an agent to join the team, then shows it on the Team tab', () => {
     document.body.innerHTML = '<div data-tour="workspace" data-tour-agents="0" data-tour-view="agents"><section data-tour="agent-picker"></section></div>'
     expect(step('team-agents').done?.({ runAtStepStart: null })).toBe(false)
     document.body.innerHTML = '<div data-tour="workspace" data-tour-agents="1" data-tour-view="agents"></div>'
@@ -63,9 +63,9 @@ describe('getting-started guide steps', () => {
     expect(step('team-agents').done?.({ runAtStepStart: null })).toBe(false)
     expect(step('team-agents').view(ready)).toMatchObject({ title: 'Keep the team', target: ['[data-tour="apply-proposal"]'] })
     document.body.innerHTML = '<div data-tour="workspace" data-tour-agents="1" data-tour-view="agents"></div>'
-    expect(step('workflow').view(ready)).toMatchObject({ title: 'Open Workflow', advance: 'action' })
+    expect(step('workflow').view(ready)).toMatchObject({ title: 'Open the Team tab', advance: 'action' })
     document.body.innerHTML = '<div data-tour="workspace" data-tour-agents="1" data-tour-view="workflow"></div>'
-    expect(step('workflow').view(ready)).toMatchObject({ title: 'Connect them in Workflow', advance: 'next' })
+    expect(step('workflow').view(ready)).toMatchObject({ title: 'Connect them on the Team tab', advance: 'next' })
   })
 
   it('points only at data-tour names, never at styling', () => {

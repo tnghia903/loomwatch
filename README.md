@@ -24,7 +24,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/readme/demo.gif" width="880" alt="The offline demo in LoomWatch: the three-step team on the Workflow canvas, then its chat. You write @team Prepare a short getting-started guide for new users and press Start. Under it, Waiting for you, with Details, Stop and Researcher's figure with 1 reply on the right; below, in the chat, Researcher's handover to you, and under it Approve and Send back to Researcher. You type Keep it to one page and press Approve with your note. Your note shows in the chat, marked approved, passed on to Writer, and Writer's answer appears, marked Nothing flagged.">
+  <img src="docs/assets/readme/demo.gif" width="880" alt="The offline demo in LoomWatch: the three-step team on its canvas, then its chat. You write @team Prepare a short getting-started guide for new users and press Start. Under it, Waiting for you, with Details, Stop and Researcher's figure with 1 reply on the right; below, in the chat, Researcher's handover to you, and under it Approve and Send back to Researcher. You type Keep it to one page and press Approve with your note. Your note shows in the chat, marked approved, passed on to Writer, and Writer's answer appears, marked Nothing flagged.">
   <br>
   <sub>A team in its chat: ask it, read what its agents say, approve with a note, read the answer.</sub>
 </p>
@@ -80,7 +80,7 @@ change its job later and every team uses the change the next time it works.
 <tr>
 <td valign="middle">
 
-### 02 &nbsp;Workflow
+### 02 &nbsp;Team
 
 Start a team with the agents you built, and connect who hands work to whom on a canvas.
 LoomWatch reads the team back to you in **one plain sentence**, so you can check the plan before
@@ -388,9 +388,9 @@ add, connect and rename agents to match. To run a team on a schedule, ask
 <td align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="site/assets/app/workflow-dark.webp">
-  <img src="site/assets/app/workflow-light.webp" alt="A team's Workflow tab, beside LoomWatch's dock with Projects marked. A daily schedule feeds Gatherer, then Reader, then Writer, which produces the team response. At the top of the canvas the team is read back as one sentence, with each agent's figure: every day at 9:00 AM and whenever you ask, Gatherer collects what is needed, then Reader does its part, and finally Writer writes the answer. Beside it, the Add to your team panel lists My agents with the models they think with. The heading says Your team is ready, beside Run team. Along the top, the team's name, saved, the Agents, Workflow and Chat tabs, the bell and the ⋯.">
+  <img src="site/assets/app/workflow-light.webp" alt="A team's Team tab, beside LoomWatch's dock with Projects marked. A daily schedule feeds Gatherer, then Reader, then Writer, which produces the team response. At the top of the canvas the team is read back as one sentence, with each agent's figure: every day at 9:00 AM and whenever you ask, Gatherer collects what is needed, then Reader does its part, and finally Writer writes the answer. Beside it, the Add to your team panel lists My agents with the models they think with. The heading says Your team is ready, beside Run team. Along the top, the team's name, saved, the Agents, Team and Chat tabs, the bell and the ⋯.">
 </picture>
-<br><sub><strong>Workflow.</strong> Your agents on the canvas, connected in order and read back as one sentence.</sub>
+<br><sub><strong>Team.</strong> Your agents on the canvas, connected in order and read back as one sentence.</sub>
 </td>
 </tr>
 <tr>
@@ -728,7 +728,7 @@ and pick its team. It is a
 three-step workflow: **Researcher → You → Writer**. Its agents produce fixed responses so you can
 learn the interface without calling a model provider.
 
-1. Open the team's **Chat** tab (or click **Run team** in **Workflow**), type
+1. Open the team's **Chat** tab (or click **Run team** on the **Team** tab), type
    `@team Prepare a short getting-started guide for new users.` in the message box at the bottom,
    and press <kbd>Enter</kbd> (<kbd>Shift</kbd>+<kbd>Enter</kbd> adds a new line). Only a message
    with an **@** starts work; the box says where each message goes before you send it.
@@ -777,8 +777,8 @@ with what should change; under its new version, **Continue with the team** runs 
 
    Ready-made teams are saved straight away, each agent on the model its job suits, so you can run
    them immediately.
-4. A team has three tabs: **Agents**, **Workflow** and **Chat**. On **Agents**, click **Add an
-   agent** to bring in one from My agents. On **Workflow**, add more from **My agents** in the
+4. A team has three tabs: **Agents**, **Team** and **Chat**. On **Agents**, click **Add an
+   agent** to bring in one from My agents. On **Team**, add more from **My agents** in the
    panel on the left; to make a new one, choose **Build a new agent** and start from a job such as
    Researcher or Writer. Select a card to edit its name, instructions, model and how hard it
    thinks. Drag from the dot on a card's right edge to the next card to make them work in order, and
@@ -823,7 +823,7 @@ layout; organizing does not change the workflow or start a run.
 <details>
 <summary><strong>Connect skills, knowledge and tools</strong></summary>
 
-The add panel on the left of **Workflow** lists your skills and the teams whose memory you can
+The add panel on the left of the **Team** tab lists your skills and the teams whose memory you can
 share. **Manage skills** opens the Skills page, where you add more: search skills.sh and ClawHub at
 once, paste a GitHub link, or copy in the skills your AI apps already have. Each one shows its
 license and what it needs before anything is copied, and nothing in it runs when it is added. Add a
@@ -852,7 +852,7 @@ model drops or rewrites just those sentences as one edit you can keep or put bac
 
 If something cannot be delivered (for example, a skill that is no longer in LoomWatch's skills),
 the run stops before it starts and says what to change. If an older team shows "drawn but not
-delivered to agents yet" at the top of Workflow, click **Deliver on the next run**, then save.
+delivered to agents yet" at the top of the Team tab, click **Deliver on the next run**, then save.
 
 </details>
 
@@ -862,7 +862,7 @@ delivered to agents yet" at the top of Workflow, click **Deliver on the next run
 Choose **Team memory** from a team's ⋯ menu to add shared instructions or reference files to the
 **Brief**. Use the **Notebook** to review reusable notes and checkpoints.
 
-Select an agent in Workflow to see its **Context**: its place in the team (for example "Step 2 of 3 ·
+Select an agent on the Team tab to see its **Context**: its place in the team (for example "Step 2 of 3 ·
 after Researcher · hands its work to Writer"), the team Brief, and every skill, folder, file and
 tool connected to it, each with an × to disconnect it. In a team of two or more, each agent is told
 its place at the start of every run. In a run's **Details**, an agent's **What it received** link
@@ -984,7 +984,7 @@ free model such as DeepSeek or Qwen through OpenRouter.
 <details>
 <summary><strong>What happens when an agent asks for permission to do something?</strong></summary>
 
-LoomWatch decides, for every agent. Each agent's panel in **Workflow** has three switches under **Allowed
+LoomWatch decides, for every agent. Each agent's panel on the **Team** tab has three switches under **Allowed
 without asking**: **Search the web**, **Edit files** (only in the agent's own folder) and **Run
 commands**. They start off, except **Search the web** for researchers. LoomWatch always allows the
 team's own handovers and the tools, folders and files you connected to the agent.
@@ -1207,7 +1207,7 @@ whose agent was behind a newer save of it in My agents says so once in its chat.
 | A skill is missing | Add it on the Skills page, or click **Find skills in your apps** there to copy it from an AI app's skills. Skills that travel with a team go in `.agents/skills` beside its file. |
 | Ask or a team says a way of paying isn't connected | The agent's model is paid by your ChatGPT plan, your Claude credit or OpenRouter, and that one isn't connected. Connect it in **Connections** (under **You**), or choose a model you can run. When a connected one has the same models, the team offers to move its agents with one click. |
 | An agent's working folder is missing | Native teams should use a real folder on this computer. Container-run teams must use `/workspaces/...` and mount its host parent through `LOOMWATCH_WORKSPACES_DIR`. |
-| Agent cannot perform a tool action | While the run is going, answer its question in the run or the Needs-you tray before it is declined after 10 minutes. Afterwards, read the run receipt: it says what the agent wasn't allowed to do. Click **Allow from now on**, or switch it on under **Allowed without asking** in the agent's panel in Workflow. An edit outside the agent's own folder always asks, even with **Edit files** on. |
+| Agent cannot perform a tool action | While the run is going, answer its question in the run or the Needs-you tray before it is declined after 10 minutes. Afterwards, read the run receipt: it says what the agent wasn't allowed to do. Click **Allow from now on**, or switch it on under **Allowed without asking** in the agent's panel on the Team tab. An edit outside the agent's own folder always asks, even with **Edit files** on. |
 | Build reports an unsupported Node version | Install the current Node.js from <https://nodejs.org/>, reopen Terminal, and check `node --version`. |
 | UI assets are missing or look out of date (a copy of the source) | Stop LoomWatch, then start it with `./loomwatch --rebuild`. |
 | Cannot connect from another device | This setup serves runs and history only on your own computer at `127.0.0.1`. Use the browser on that computer. |

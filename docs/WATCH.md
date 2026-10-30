@@ -25,7 +25,7 @@ output, paths and other private data; this implementation does not publish it on
 
 ## Reading a run
 
-Open a team's **Chat** (or press **Run team** in Workflow) and send the team a request with
+Open a team's **Chat** (or press **Run team** on the **Team** tab) and send the team a request with
 `@team`. Unsaved changes to the team file are saved first: a run executes an exact snapshot of the
 file, so there is no “run without saving”. The run is then a piece of work in the chat, and
 **Details** beside it shows:
