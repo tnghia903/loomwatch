@@ -1,4 +1,4 @@
-import { Plus, Search } from 'lucide-react'
+import { Plus, Search } from '../ui/icon'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { FileReaderContext, type FileToRead } from '../../lib/files/reader'
@@ -9,7 +9,7 @@ import { costWords, doneByOf, crewOf, finishedToday, lastFinished, madeHere, mon
 import { moveTeam } from '../../lib/projects/move'
 import { roomsOf, studioLayout, type Room } from '../../lib/projects/studio'
 import { useMonthUsage } from '../../lib/projects/useMonthUsage'
-import { loadDismissed } from '../../lib/story/useNeedsYou'
+import { approveRun, loadDismissed } from '../../lib/story/useNeedsYou'
 import { useTeamShapes } from '../../lib/projects/useTeamShapes'
 import { benchChatId } from '../../lib/rail/presence'
 import { historyRunUrl } from '../../lib/runs/history'
@@ -116,8 +116,10 @@ function NotInAProject({ jobs, rooms, used }: { jobs: readonly SavedJob[]; rooms
  * project as a room, its agents at their desks in team order, waiting rooms first; then your agents
  * in no project. With no project yet it asks what you are working on.
  */
-export function Studio({ runs, onSetUp, setUpUnavailable, asking = false }: {
+export function Studio({ runs, onSetUp, setUpUnavailable, asking = false, part = 'all' }: {
   runs: readonly RunRecord[]
+  /** Home shows everything; Projects (the dock's place) shows only the projects and agents in none. */
+  part?: 'all' | 'projects'
   onSetUp: (start: ProjectStart) => void
   setUpUnavailable: string | null
   /** Ask's panel is open: Set up project says Ask is already at work beside it. */
@@ -230,7 +232,7 @@ export function Studio({ runs, onSetUp, setUpUnavailable, asking = false }: {
       <FileReaderContext.Provider value={read}>
       <div className="studio studio-empty">
         <SetUpProject onSetUp={setUp} unavailable={setUpUnavailable} asking={asking} />
-        {pickUp}
+        {part === 'all' && pickUp}
         <CantBeOpened teams={problems} />
         <NotInAProject jobs={jobs} rooms={rooms} used={used} />
       </div>
@@ -258,8 +260,11 @@ export function Studio({ runs, onSetUp, setUpUnavailable, asking = false }: {
   return (
     <FileReaderContext.Provider value={read}>
     <div className="studio">
-      <div id="your-desk" className="studio-desk">
+      {part === 'all' && <div id="your-desk" className="studio-desk">
+        {/* The quiet desk (ADR 0101): the box first, then what needs you, stepped up. */}
+        {boxTeams.length > 0 && <WorkBox teams={boxTeams} primary={needs.length === 0} />}
         <GlanceTiles
+          stepUp
           label="Your desk"
           needs={needs}
           last={lastFinished(runs, root)}
@@ -271,15 +276,15 @@ export function Studio({ runs, onSetUp, setUpUnavailable, asking = false }: {
           spenders={monthSpenders(usage, null, teamShapes, jobs)}
           doneBy={doneBy}
           figureOf={figureOf}
-          // Home's Review opens the bell's tray at that item, where each thing waiting is answered
-          // in turn (ADR 0043); "Show N more" opens it at the first.
+          // Approve is one press here; reading the work first opens the bell's tray at that item,
+          // where each thing waiting is answered in turn (ADR 0043); "Show N more" opens it at the first.
+          onApprove={(item) => approveRun(item.runId).then((done) => { if (!done) openNeedsYou(item.runId); return done })}
           onReview={(item) => openNeedsYou(item.runId)}
           onOpenRun={openRun}
           onMore={() => openNeedsYou()}
         />
-        {boxTeams.length > 0 && <WorkBox teams={boxTeams} primary={needs.length === 0} />}
-      </div>
-      {pickUp}
+      </div>}
+      {part === 'all' && pickUp}
       <section className="studio-projects" aria-labelledby="studio-projects-title" data-tour="projects">
         <div className="studio-projects-head">
           <h2 id="studio-projects-title" className="studio-head">Projects</h2>

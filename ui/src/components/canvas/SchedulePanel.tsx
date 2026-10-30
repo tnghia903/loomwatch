@@ -1,4 +1,4 @@
-import { AlertCircle, ChevronDown, Clock3, Globe2, Save, X } from 'lucide-react'
+import { AlertCircle, ChevronDown, Clock3, Globe2, Save, X } from '../ui/icon'
 import { useLayoutEffect, useState, type ReactNode } from 'react'
 
 import { cronFor, normalizeSchedule, scheduleParts, unsupportedScheduleKeys, type ScheduleFrequency } from '../../lib/team-file/schedule'

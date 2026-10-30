@@ -33,7 +33,7 @@ agents:
       web: true
 ```
 
-- **How it is paid.** You connect each way on Home or in **Connections…** (ADR 0073): **Continue
+- **How it is paid.** You connect each way on Home or in **Connections** (under **You**) (ADR 0073): **Continue
   with ChatGPT** for a ChatGPT Plus or Pro plan, a Claude API key from the Console organization
   linked to a Claude Max or Team plan, or an OpenRouter key. LoomWatch checks each with its company
   and keeps it only if it is accepted. On a Mac the OpenRouter key is kept in the Keychain as
@@ -628,7 +628,7 @@ each skill came from, the fingerprint of the delivered file, how it was delivere
 once the prompt is sent. This verifies delivery, not whether every instruction was followed.
 
 **Tools** (`kind: tool`) name a tool connected in LoomWatch (Connections → Tools, or the agent's
-Tools block; see [Give agents tools](TOOLS.md)), ignoring case. The agent is offered that tool's
+Tools it can use row; see [Give agents tools](TOOLS.md)), ignoring case. The agent is offered that tool's
 actions, and asks you before each one unless the entry's `alwaysAllow` names it (by the tool's own
 name for the action):
 

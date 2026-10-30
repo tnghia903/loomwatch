@@ -8,6 +8,7 @@ import type { Evidence, RunPhase, RunProjection } from '../watch/events'
 import { formatTokens, type TokenSummary, type TurnPurpose, costWords } from '../watch/usage'
 import { failuresOf, readPhrase, workCount } from './reads'
 import { describeEvidence } from './weft'
+import { stateLabel } from '../state/words'
 
 /**
  * The run receipt: a printed account of one run, in the order a person checks it.
@@ -213,7 +214,7 @@ export function receiptTokens(summary: TokenSummary | null | undefined, names: R
 const PHASE_OUTCOME: Partial<Record<RunPhase, ReceiptOutcome>> = {
   succeeded: { word: 'Finished', tone: 'ok' },
   partial: { word: 'Finished with gaps', tone: 'warn' },
-  failed: { word: 'Failed', tone: 'bad' },
+  failed: { word: stateLabel('failed'), tone: 'bad' },
   cancelled: { word: 'Stopped by you', tone: 'wait' },
 }
 
@@ -296,7 +297,7 @@ export function buildReceipt(input: ReceiptInput): Receipt {
   for (const alert of input.projection.attention) {
     checks.push({ tone: 'warn', text: alert.message, agentId: alert.agentId, evidenceId: alert.evidenceId })
   }
-  if (anyRefused) checks.push({ tone: 'warn', text: 'What an agent isn’t allowed to do waits for your answer during a run. Requests you denied, or that nobody answered in time, were declined. Change what each agent may do on its workbench, in Agents.', aside: true })
+  if (anyRefused) checks.push({ tone: 'warn', text: 'What an agent isn’t allowed to do waits for your answer during a run. Requests you denied, or that nobody answered in time, were declined. To change what an agent may do, select its card on the Team tab and press Edit.', aside: true })
   if (terminal && !input.answered) checks.push({ tone: 'bad', text: 'The run ended without an answer' })
   const money = spendNote({ spend: input.spend }, (id) => nameWithHelpers(new Map(input.agents.map((agent) => [agent.id, agent.name])), id) ?? id)
   if (money) checks.push({ tone: input.spend?.stopped ? 'warn' : 'ok', text: money, aside: true })

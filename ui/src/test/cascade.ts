@@ -187,6 +187,7 @@ export const px = (value: string | null) => Number(/^(-?[\d.]+)px$/.exec(value ?
 export const heightOf = (element: Element, viewport: Viewport = DESKTOP) =>
   Math.max(...[cascaded(element, 'height', viewport), cascaded(element, 'min-height', viewport)].map(px).filter(Number.isFinite))
 
-/** The buttons and links on screen painted with a gold fill, by their words. */
+/** The buttons and links on screen painted with a gold fill, by their words, or by their name when
+    they are an icon alone (every box's send). */
 export const goldFilled = (within: ParentNode = document, viewport: Viewport = DESKTOP) =>
-  [...within.querySelectorAll('button, a')].filter((element) => isGoldFill(element, viewport)).map((element) => element.textContent?.trim() ?? '')
+  [...within.querySelectorAll('button, a')].filter((element) => isGoldFill(element, viewport)).map((element) => element.textContent?.trim() || element.getAttribute('aria-label') || '')

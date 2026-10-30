@@ -1,5 +1,5 @@
 import { Suspense, useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
-import { ExternalLink, FilePlus2, FileText, Folder, FolderPlus, Network, NotebookText, Plug, Plus, Puzzle, Search, Store, Wrench, X } from 'lucide-react'
+import { ExternalLink, FilePlus2, FileText, Folder, FolderPlus, Icon, Network, NotebookText, Plug, Plus, Puzzle, Search, Store, Wrench, X } from '../ui/icon'
 
 import { shortName } from '../../lib/ai/client'
 import { effortWord, modelEfforts, placeEffort } from '../../lib/ai/efforts'
@@ -23,7 +23,7 @@ import type { BenchKit } from '../../lib/watch/workPhase'
 import { ALLOW_SWITCHES } from '../../lib/team-file/allow'
 import { allowedFor, withoutAllowed } from '../../lib/tools/allow'
 import { actionCount, toolNamed, useConnectedTools, type ConnectedTool } from '../../lib/tools/client'
-import { INSTRUCTION_PARTS, instructionShape } from '../../lib/team-file/checkup'
+import { INSTRUCTION_PARTS, instructionShape, PART_LABELS } from '../../lib/team-file/checkup'
 import { suggestedOfDraft } from '../../lib/team-file/agentSetup'
 import type { ModelSuggestionInput } from '../../lib/team-file/modelSuggestion'
 import type { AllowSwitch } from '../../lib/team-file/types'
@@ -44,6 +44,7 @@ import { benchLabels, readCount, readsSay, toolsSay, useFigureMood } from './ben
 import type { BenchView } from './workbenchScene'
 import { LearnedBlock } from './LearnedBlock'
 import { InlineMarkdown } from '../ui/Markdown'
+import { benchRows } from './benchRows'
 
 /**
  * BUILD BY HAND: every setting of the agent as a block of plain words and controls, always open,
@@ -111,6 +112,8 @@ export interface ByHandProps {
   onBuild?: () => void
   /** Laid over the bench while it is shown: an answer in the chat, read in full beside it. */
   cover?: ReactNode
+  /** A new agent, not saved yet: its name and instructions start open, where it starts. */
+  fresh?: boolean
 }
 
 /**
@@ -130,11 +133,18 @@ const BLOCKS: readonly { part: FigurePart; title: string }[] = [
 ]
 
 
-export function ByHand({ draft, set: write, skills, skillsLoading, roleField, figure, record, hideDoes = false, readOnly = false, reads: teamReads, teamOwn, onShowWorkflow, learned, suggestFor, following, chat, onBuild, cover }: ByHandProps) {
+export function ByHand({ draft, set: write, skills, skillsLoading, roleField, figure, record, hideDoes = false, readOnly = false, reads: teamReads, teamOwn, onShowWorkflow, learned, suggestFor, following, chat, onBuild, cover, fresh = false }: ByHandProps) {
   const chatting = chat !== undefined
   const set: ByHandProps['set'] = (key, value) => { if (!readOnly) write(key, value) }
   // The block you are working in: its thing on the bench is lit.
   const [focus, setFocus] = useState<FigurePart | null>(null)
+  // Its settings as rows (round 3): each shows what it is set to, and opens to change it. A new
+  // agent, or one with no name, opens on its name and instructions; the bench opens the row picked.
+  const [opened, setOpened] = useState<ReadonlySet<FigurePart>>(() => new Set(benchRows.allOpen ? BLOCKS.map((block) => block.part) : fresh || !draft.name.trim() ? ['name', 'job'] : []))
+  const openRow = (part: FigurePart) => setOpened((current) => (current.has(part) ? current : new Set([...current, part])))
+  const toggleRow = (part: FigurePart) => setOpened((current) => { const next = new Set(current); if (!next.delete(part)) next.add(part); return next })
+  /** What is set to be worked in is open: a part picked on the bench, or one just added to. */
+  const focusAndOpen = (part: FigurePart) => { setFocus(part); openRow(part) }
   const [flash, setFlash] = useState<{ part: FigurePart; at: number } | null>(null)
   const [dragging, setDragging] = useState<'skill' | null>(null)
   const [failed, setFailed] = useState<string | null>(null)
@@ -170,7 +180,7 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
     setFromMarket(fresh)
     if (!fresh.length) return
     set('skills', [...draft.skills, ...fresh])
-    setFocus('skills')
+    focusAndOpen('skills')
     setFlash((current) => ({ part: 'skills', at: (current?.at ?? 0) + 1 }))
   }
   const { catalog } = useModels()
@@ -204,7 +214,7 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
   const giveRead = (read: AgentRead) => {
     if (draft.reads.some((had) => readKey(had) === readKey(read))) return
     set('reads', [...draft.reads, { ...read, name: uniqueLabel(read.name, new Set(draft.reads.map((had) => had.name))) }])
-    setFocus('reads')
+    focusAndOpen('reads')
   }
 
   const kit = useMemo<BenchKit>(() => ({ skills: draft.skills, reads, tools: draft.tools }), [draft.skills, reads, draft.tools])
@@ -234,14 +244,15 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
   const goTo = (target: FigurePart) => {
     // The laptop shows the model, so it opens the Model block.
     const part = target === 'app' ? 'mind' : target
-    setFocus(part)
+    focusAndOpen(part)
     setFlash((current) => ({ part, at: (current?.at ?? 0) + 1 }))
     if (chatting) {
       picked.current = part
       onBuild?.()
       return
     }
-    showBlock(blocks.current.get(part))
+    // Once its row is open, so its first field can take the focus.
+    requestAnimationFrame(() => showBlock(blocks.current.get(part)))
   }
 
   const parts = INSTRUCTION_PARTS.filter((part) => shape[part]).length
@@ -249,24 +260,30 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
   // boxes already say all of it, and a line above them said the name twice.
   const says: Record<Exclude<FigurePart, 'app'>, string> = {
     name: '',
-    job: draft.instructions.trim() ? `Says ${parts} of the ${INSTRUCTION_PARTS.length} things good instructions say: its job, how to work, how it checks its work, and what it replies with` : 'Nothing written yet',
+    job: !draft.instructions.trim() ? 'Nothing written yet'
+      : parts === INSTRUCTION_PARTS.length ? `All ${parts} parts`
+      : `${parts} of ${INSTRUCTION_PARTS.length} parts · add ${listNames(INSTRUCTION_PARTS.filter((part) => !shape[part]).map((part) => PART_LABELS[part]))}`,
     mind: `Thinks with ${thinks}`,
     skills: draft.skills.length ? `${draft.skills.length} skill${draft.skills.length === 1 ? '' : 's'} it opens when the work calls for one` : 'No skills yet',
     reads: readsSay(ownReads, teamGiven, Boolean(teamOwn)),
-    tools: toolsSay(givenTools, connected.state === 'loading'),
+    tools: toolsRowSays(givenTools, connected.state === 'loading'),
     keys: keysSay(draft.allow),
     reply: replyPart ? replySays(replyPart.text) : 'Its instructions don’t say yet',
   }
-  const labels = benchLabels({ draft, model, effort: effort?.name.toLowerCase() ?? null, reads, readsSaid: says.reads, toolsSaid: says.tools, asked })
+  const labels = benchLabels({ draft, model, effort: effort?.name.toLowerCase() ?? null, reads, readsSaid: says.reads, toolsSaid: toolsSay(givenTools, connected.state === 'loading'), asked })
 
   const block = (part: Exclude<FigurePart, 'app'>, body: ReactNode, extra?: ReactNode) => {
     const meta = BLOCKS.find((item) => item.part === part)!
     const flashing = flash?.part === part
+    const open = opened.has(part)
+    // Closed, Name's row says the name itself and what it does; open, its boxes say them, once.
+    // Instructions' parts are said under its box once it is open.
+    const summary = part === 'name' ? (open ? '' : [draft.name.trim() || 'No name yet', draft.does.trim()].filter(Boolean).join(' · ')) : part === 'job' && open ? '' : says[part]
     return (
       <section
         key={part}
         ref={(element) => { if (element) blocks.current.set(part, element); else blocks.current.delete(part) }}
-        className={`byhand-block${focus === part ? ' focus' : ''}`}
+        className={`byhand-block${focus === part ? ' focus' : ''}${open ? ' open' : ''}`}
         aria-labelledby={`${ids}-${part}`}
         onFocus={() => setFocus(part)}
         onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocus((current) => (current === part ? null : current)) }}
@@ -274,12 +291,19 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
         onPointerLeave={(event) => { if (!event.currentTarget.contains(document.activeElement)) setFocus((current) => (current === part ? null : current)) }}
       >
         {flashing && <span key={flash.at} className="byhand-block-flash" aria-hidden="true" onAnimationEnd={() => setFlash(null)} />}
-        <header className="byhand-block-head">
-          <h3 id={`${ids}-${part}`}>{meta.title}</h3>
-        </header>
-        {says[part] && <p className="byhand-block-says">{says[part]}</p>}
-        {body}
-        {extra}
+        {/* A row: what it is, and what it is set to; pressing it opens the setting to change it. */}
+        <h3 className="byhand-row-head">
+          <button type="button" className="byhand-row" aria-expanded={open} aria-controls={`${ids}-${part}-body`} onClick={() => toggleRow(part)}>
+            <span id={`${ids}-${part}`} className="byhand-row-title">{meta.title}</span>{' '}
+            <span className="byhand-row-says">{summary}</span>
+            <Icon name="chevron-down" size={14} className="byhand-row-chev" />
+          </button>
+        </h3>
+        {/* Closed, it is hidden, never taken away: what was being written in it is there when it opens. */}
+        <div id={`${ids}-${part}-body`} className="byhand-row-body" hidden={!open}>
+          {body}
+          {extra}
+        </div>
       </section>
     )
   }
@@ -290,15 +314,15 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
       <div className="byhand-main">
         <div className="byhand-stage">
           {failed
-            ? <div className="bench-fallback"><p className="t-meta">The bench can’t be drawn in this browser ({failed}). Every setting is in the blocks.</p></div>
+            ? <div className="bench-fallback"><p className="t-meta">The bench can’t be drawn in this browser ({failed}). Every setting is in the rows.</p></div>
             : <Suspense fallback={<div className="bench-stage"><p className="bench-loading t-meta">Setting up the bench…</p></div>}>
                 <AgentFigure
                   view={view}
                   labels={labels}
                   open={focus}
                   onPart={goTo}
-                  onKey={(key, on) => { giveKey(key, on); setFocus('keys') }}
-                  onSkillDrop={(skill) => { setDragging(null); addSkill(skill); setFocus('skills') }}
+                  onKey={(key, on) => { giveKey(key, on); focusAndOpen('keys') }}
+                  onSkillDrop={(skill) => { setDragging(null); addSkill(skill); focusAndOpen('skills') }}
                   skillMime={SKILL_MIME}
                   onFail={setFailed}
                 />
@@ -354,7 +378,7 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
           />)}
 
           {block('tools', <>
-            <p className="t-meta">Every agent can read and write files in its own folder, search and read the web, and run commands, as you allow below.</p>
+            <p className="t-meta">Every agent can read and write files in its own folder, search and read the web, and run commands, as you allow under “What it may do without asking”.</p>
             {givenTools.length > 0 && <ul className="byhand-tools" aria-label="Tools you gave it">
               {givenTools.map(({ name, tool }) => {
                 const allowed = allowedFor(draft.toolAllow, name)
@@ -435,7 +459,8 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
 function showBlock(block: HTMLElement | undefined) {
   if (!block) return
   block.scrollIntoView({ behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'nearest' })
-  block.querySelector<HTMLElement>('textarea, input, select, button')?.focus({ preventScroll: true })
+  // Its first field, not the row it opened from.
+  block.querySelector<HTMLElement>('.byhand-row-body :is(textarea, input, select, button)')?.focus({ preventScroll: true })
 }
 
 /** What the skills shelf says, in the words the tools block uses: a skill is given and taken away. */
@@ -518,7 +543,18 @@ function keysSay(allow: AgentDraft['allow']): string {
   const asks = FIGURE_KEYS.filter(({ key }) => !allow[key]).map(({ key }) => DOES[key])
   if (!has.length) return `Asks you before it ${orList(asks)}`
   const goes = listNames(has)
-  return `${goes.charAt(0).toUpperCase()}${goes.slice(1)} without asking${asks.length ? `; asks you before it ${orList(asks)}` : ''}`
+  return `${goes.charAt(0).toUpperCase()}${goes.slice(1)}${asks.length ? `; asks you before it ${orList(asks)}` : ''}`
+}
+
+/** The tools added to it, by name, and which of them aren't connected yet; files, the web and
+    commands are What it may do without asking's, so they aren't counted here. */
+function toolsRowSays(given: readonly { name: string; tool: unknown }[], loading: boolean): string {
+  if (!given.length) return 'No tools yet'
+  if (loading) return listNames(given.map((item) => item.name))
+  const usable = given.filter((item) => item.tool).map((item) => item.name)
+  const missing = given.filter((item) => !item.tool).map((item) => item.name)
+  const away = `${listNames(missing)} ${missing.length === 1 ? 'isn’t' : 'aren’t'} connected yet`
+  return !missing.length ? listNames(usable) : !usable.length ? away : `${listNames(usable)}; ${away}`
 }
 
 /** "a, b or c". */
@@ -573,7 +609,7 @@ function Reads({ reads, own, teamOwn, inTeam, readOnly, agentName, onGive, onTak
   }
 
   // A team's own agent is given it here as well as in Workflow, so that button only goes to see it.
-  const workflowLabel = teamOwn ? (reads.length ? 'See it in Workflow' : null) : !own ? (reads.length ? 'Change it in Workflow' : 'Give it something in Workflow') : 'Give it more in Workflow'
+  const workflowLabel = teamOwn ? (reads.length ? 'See it on the Team tab' : null) : !own ? (reads.length ? 'Change it on the Team tab' : 'Give it something on the Team tab') : 'Give it more on the Team tab'
   return (
     <>
       {reads.length > 0 && <ul className="byhand-reads" aria-label="Folders, files and pages it reads">
@@ -610,10 +646,10 @@ function Reads({ reads, own, teamOwn, inTeam, readOnly, agentName, onGive, onTak
         </ul>}
       </>}
       <p className="t-meta">{teamOwn
-        ? 'Each is a card in Workflow with a line to this agent, and a line drawn there shows here too. A folder is linked where it is; a file is copied into your teams folder.'
+        ? 'Each is a card on the Team tab with a line to this agent, and a line drawn there shows here too. A folder is linked where it is; a file is copied into your teams folder.'
         : inTeam
-          ? 'What you give it here, it reads in every team it joins. This team can give it more with a line in Workflow.'
-          : 'What you give it here, it reads in every team it joins. A folder is linked where it is; a file is copied into your teams folder. A team can give it more in its Workflow.'}</p>
+          ? 'What you give it here, it reads in every team it joins. This team can give it more with a line on its Team tab.'
+          : 'What you give it here, it reads in every team it joins. A folder is linked where it is; a file is copied into your teams folder. A team can give it more on its Team tab.'}</p>
       {onShowWorkflow && workflowLabel && <button type="button" className="btn" onClick={onShowWorkflow}><Network size={14} aria-hidden="true" />{workflowLabel}</button>}
       {picking === 'folder' && <FolderPicker
         onClose={() => setPicking(null)}

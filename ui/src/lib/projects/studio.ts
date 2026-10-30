@@ -7,6 +7,7 @@ import { pipelineOrder } from '../team-file/pipelineOrder'
 import type { AgentConfig, TeamDocument } from '../team-file/types'
 import { PRESENCE_WORDS, type Presence } from '../rail/presence'
 import type { ProjectEntry } from './client'
+import { STATE_WORDS } from '../state/words'
 
 /**
  * Home is a studio (ADR 0097): each project a room, its agents at desks in team order, and what
@@ -211,7 +212,7 @@ export function roomLine(teams: readonly RoomTeam[], state: Presence): string {
 
 /** What a team is doing, after its name: "is working", "is waiting for you", "didn’t finish". */
 export function teamStateWords(state: Presence): string {
-  return state === 'failed' ? 'didn’t finish' : `is ${PRESENCE_WORDS[state] ?? 'ready'}`
+  return state === 'failed' ? STATE_WORDS.failed : `is ${PRESENCE_WORDS[state] ?? STATE_WORDS.ready}`
 }
 
 /** A team at work, said by its name: "Product pages is working". */

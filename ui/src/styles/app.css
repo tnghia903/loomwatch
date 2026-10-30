@@ -54,7 +54,8 @@ code, kbd, pre { font-family: var(--font-mono); }
 .react-flow__node.dragging, .lw-shell.node-dragging .react-flow__node { transition: none; }
 .react-flow__node:focus, .react-flow__node:focus-visible { outline: 0; }
 .react-flow__node:focus-visible > .node,
-.react-flow__node:focus-visible > .rt {
+.react-flow__node:focus-visible > .rt,
+.react-flow__node:focus-visible .build-node {
   box-shadow: 0 0 0 1px var(--color-panel-solid), 0 0 0 3px var(--lw-node-ring);
 }
 .react-flow__edge:focus, .react-flow__edge:focus-visible { outline: 0; }
@@ -585,6 +586,13 @@ select.input, .inspector-fields label > select { appearance: none; -webkit-appea
 .explain-text > div + div { margin-top: 6px; }
 .explain-text { display: block; padding: 8px 10px; border-left: 2px solid color-mix(in srgb, var(--color-accent) 50%, transparent); border-radius: 0 var(--r-xs) var(--r-xs) 0; background: color-mix(in srgb, var(--color-ink) 4%, transparent); color: var(--color-ink-2); font: 400 12px/1.5 var(--font-sans); letter-spacing: normal; text-transform: none; user-select: text; -webkit-user-select: text; }
 .explain-text b { color: var(--color-ink); font-weight: 500; }
+/* A page's title keeps its words one press away (round 3): a bigger "?", and the words at reading size. */
+.section-head.page { gap: var(--sp-2); }
+.section-head.page > .explain-toggle { width: 32px; height: 32px; margin: 0; }
+.explain-text.page { max-width: 720px; font-size: 14px; line-height: 1.55; }
+.explain-text.page p { margin: 0; }
+.explain-text.page p + p { margin-top: 8px; }
+@media (max-width: 767px) { .section-head.page > .explain-toggle { width: 44px; height: 44px; } }
 /* A pipeline step as a short thread: who hands it work, this step, who it hands work to. You wear
    the operator's dashed gold ring, as on the canvas. */
 .place-thread { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
@@ -846,6 +854,7 @@ button.thread-node:hover svg, button.thread-node:focus-visible svg { color: var(
    INLINE CONFIRM — bottom-centre, above the composer
    --------------------------------------------------------------------------- */
 .lw-confirm { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-3); border-color: color-mix(in srgb, var(--color-alert) 40%, transparent); }
+.lw-confirm.leave { flex-wrap: wrap; margin: 0 var(--sp-4); border-color: var(--color-hairline); }
 .lw-confirm .btn-danger-fill { background: var(--color-alert-fill); color: var(--color-alert-on-fill); border-color: transparent; }
 
 /* ---------------------------------------------------------------------------

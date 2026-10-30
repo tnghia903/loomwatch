@@ -7,6 +7,10 @@ import type { AgentConfig } from '../../lib/team-file/types'
 import { cascaded, goldFilled, heightOf, isGoldFill, PHONE } from '../../test/cascade'
 import type { AgentFigureProps } from '../agents/AgentFigure'
 import { TeamAgents, type TeamAgentsProps } from './TeamAgents'
+import { openBenchRows } from '../../test/benchRows'
+
+// Each setting is a row that opens; these tests are about the editors inside them.
+openBenchRows()
 
 // The bench is drawn with WebGL, which jsdom has none of: here it is only its labels, as buttons.
 vi.mock('../agents/AgentFigure', () => ({
@@ -56,14 +60,14 @@ describe('a team’s agents, the first of its views', () => {
     expect(within(within(add).getByText('Coder').closest('li')!).getByRole('button', { name: 'Add' })).toBeEnabled()
     // A new one is built in Your agents, which leads back to this team.
     expect(within(add).getByRole('link', { name: 'Build a new agent' })).toHaveAttribute('href', '/agents/new?team=digest.yaml')
-    fireEvent.click(within(add).getByRole('button', { name: 'Or start in Workflow' }))
-    expect(props.onShowWorkflow).toHaveBeenCalled()
+    // The sheet's close is the way back to the team; the chooser has no second one (ADR 0043).
+    expect(within(add).queryByRole('button', { name: /back to the team/i })).toBeNull()
   })
 
   it('keeps the old way in when the team can’t be changed here', () => {
     renderTeamAgents({ onAdd: undefined, editable: false })
     expect(screen.queryByRole('region', { name: 'Add an agent to this team' })).toBeNull()
-    expect(screen.getByRole('button', { name: 'Add one in Workflow' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Back to the team' })).toBeInTheDocument()
   })
 
   it('shows what a team’s own agent reads on its workbench, and takes one away there', () => {
@@ -77,15 +81,15 @@ describe('a team’s agents, the first of its views', () => {
       'EKIS hubNotion page · read when each run starts',
     ])
     expect(screen.getByText(/has 1 skill, and reads 1 folder, 1 file and 1 Notion page\./)).toBeInTheDocument()
-    // Given here or with a line in Workflow, it is the same card: either place changes it.
-    expect(block).toHaveTextContent('Each is a card in Workflow with a line to this agent')
+    // Given here or with a line on the Team tab, it is the same card: either place changes it.
+    expect(block).toHaveTextContent('Each is a card on the Team tab with a line to this agent')
     expect(within(block).getByRole('group', { name: 'Give it something to read' })).toBeInTheDocument()
     fireEvent.click(within(held).getByRole('button', { name: 'Stop reading brief.md' }))
     expect(props.onEdit).toHaveBeenLastCalledWith('scope', 'reads', [
       { name: 'sutd-final-project', path: '/Users/me/Developer/sutd-final-project' },
       { name: 'EKIS hub', notion: { page: 'abc123' } },
     ])
-    fireEvent.click(within(block).getByRole('button', { name: 'See it in Workflow' }))
+    fireEvent.click(within(block).getByRole('button', { name: 'See it on the Team tab' }))
     expect(props.onShowWorkflow).toHaveBeenCalled()
   })
 
@@ -98,7 +102,7 @@ describe('a team’s agents, the first of its views', () => {
     expect(within(give).getByRole('button', { name: 'Folder' })).toBeInTheDocument()
     expect(within(give).getByRole('button', { name: 'File' })).toBeInTheDocument()
     // Giving it something is right here, so there is no second way to it on this screen.
-    expect(within(block).queryByRole('button', { name: /in Workflow$/ })).toBeNull()
+    expect(within(block).queryByRole('button', { name: /on the Team tab$/ })).toBeNull()
   })
 
   it('gives a team’s own agent a folder, after what it reads already', async () => {
@@ -142,7 +146,7 @@ describe('a team’s agents, the first of its views', () => {
   it('says which tools it was given aren’t connected in LoomWatch, and takes one away', async () => {
     const props = renderTeamAgents({ agents: [scoper], selected: 'scope' })
     const block = screen.getByRole('region', { name: 'Tools it can use' })
-    expect(await within(block).findByText('Files, the web and commands; 2 tools aren’t connected')).toBeInTheDocument()
+    expect(await within(block).findByText('github and notion aren’t connected yet')).toBeInTheDocument()
     const has = within(block).getByRole('list', { name: 'Tools you gave it' })
     expect(names(has)).toEqual(['github', 'notion'])
     expect(has).toHaveTextContent('Not connected in LoomWatch, so it can’t use it yet.')
@@ -158,7 +162,7 @@ describe('a team’s agents, the first of its views', () => {
     const linear: AgentConfig = { ...scoper, capabilities: [{ kind: 'tool', name: 'Linear', alwaysAllow: ['create_issue'] }] }
     const props = renderTeamAgents({ agents: [linear], selected: 'scope' })
     const block = screen.getByRole('region', { name: 'Tools it can use' })
-    expect(await within(block).findByText('Files, the web and commands, plus Linear')).toBeInTheDocument()
+    expect(await within(block).findByText('Linear', { selector: '.byhand-row-says' })).toBeInTheDocument()
     const allowed = within(block).getByRole('list', { name: 'Always allowed for Linear' })
     expect(allowed).toHaveTextContent('Create issue')
     fireEvent.click(within(allowed).getByRole('button', { name: 'Ask again before Create issue' }))
@@ -172,7 +176,9 @@ describe('a team’s agents, the first of its views', () => {
   it('says what every agent can do without a tool', () => {
     renderTeamAgents({ agents: [{ ...scoper, capabilities: [{ kind: 'skill', name: 'algorithmic-art' }] }], selected: 'scope' })
     const block = screen.getByRole('region', { name: 'Tools it can use' })
-    expect(block).toHaveTextContent('Files, the web and commands, as you allow')
+    // Files, the web and commands are every agent's, as What it may do without asking allows.
+    expect(block.querySelector('.byhand-row-says')).toHaveTextContent('No tools yet')
+    expect(block).toHaveTextContent('Every agent can read and write files in its own folder, search and read the web, and run commands, as you allow under “What it may do without asking”.')
     expect(within(block).queryByRole('list', { name: 'Tools you gave it' })).toBeNull()
   })
 
@@ -306,7 +312,7 @@ describe('a team’s agents, the first of its views', () => {
     for (const offer of offers) expect(isGoldFill(offer)).toBe(false)
   })
 
-  // Opened from Workflow or the Agents tab, the bench of one of My agents is as wide as the page, as
+  // Opened from its card on the Team tab, the bench of one of My agents is as wide as the page, as
   // it is in My agents: a width held on it, or on anything between it and the page, left the right
   // half of a wide window empty.
   it('gives the bench of an agent placed from My agents the page’s whole width, in Build and in Chat', async () => {

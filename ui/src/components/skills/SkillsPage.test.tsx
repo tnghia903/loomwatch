@@ -122,9 +122,9 @@ describe('finding skills', () => {
     render(<SkillsPage />)
     const results = await searchFor()
     const icons = within(results).getAllByRole('listitem').map((card) => card.querySelector('.lw-skills-glyph svg')?.getAttribute('class'))
-    expect(icons[0]).toMatch(/file-text/)
-    expect(icons[1]).toMatch(/megaphone/)
-    expect(icons[2]).toMatch(/book-open-text/)
+    expect(icons[0]).toMatch(/lw-icon-page$/)
+    expect(icons[1]).toMatch(/lw-icon-megaphone$/)
+    expect(icons[2]).toMatch(/lw-icon-know$/)
   })
 
   it('shows one site’s results when the other doesn’t answer', async () => {
@@ -416,10 +416,11 @@ describe('the page’s words', () => {
     expect(document.body.textContent).not.toMatch(/sign[ -]?in|log[ -]?in|subscription|account/i)
   })
 
-  it('leads back to My agents and My team, named as their pages are', async () => {
+  it('has no header of its own: the dock is the way to every other place', async () => {
     daemon(on('GET', '/api/skills', () => folder([])))
     render(<SkillsPage />)
-    expect(await screen.findByRole('link', { name: 'My agents' })).toHaveAttribute('href', '/agents')
-    expect(screen.getByRole('link', { name: 'My team' })).toHaveAttribute('href', '/')
+    expect(await screen.findByRole('heading', { name: 'Skills', level: 1 })).toBeInTheDocument()
+    expect(screen.queryByRole('banner')).toBeNull()
+    expect(screen.queryByRole('link', { name: /My agents|My team|LoomWatch/ })).toBeNull()
   })
 })

@@ -1,4 +1,4 @@
-import { BookOpen, ChevronLeft, ChevronRight, FileSearch, MessagesSquare, Radio } from 'lucide-react'
+import { BookOpen, ChevronLeft, ChevronRight, FileSearch, MessagesSquare, Radio } from '../ui/icon'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { clock, momentAt, narrate, weave, type WeftAgent, type WeftKnot, type WeftLane } from '../../lib/story/weft'

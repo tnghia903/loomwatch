@@ -366,12 +366,12 @@ describe('Delivery Lane', () => {
       expect(cascaded(status, 'color')).toBe('var(--color-accent)')
     })
 
-    // "Stopped with a problem" was red words, which on the dark card pass 5.6:1 but read muddy (APCA
+    // "Didn’t finish" was red words, which on the dark card pass 5.6:1 but read muddy (APCA
     // Lc 43). The words are ink; the red is the pill's edge and the failed mark before them, so the
     // status is never told by colour alone.
     it('says a stage stopped with a problem in words that read in both themes, marked in red', () => {
       const { container } = setup({ phase: 'failed', agents: agents('failed') })
-      const words = within(stage('writer')).getByText('Stopped with a problem')
+      const words = within(stage('writer')).getByText('Didn’t finish')
       // What the words sit on: the nearest box with a fill of its own, the card.
       const fill = (element: Element) => { const value = background(element); return value && !/^(none|transparent)$/.test(value) ? value : null }
       let under: Element | null = words

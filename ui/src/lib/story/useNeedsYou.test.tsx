@@ -88,3 +88,18 @@ describe('the tab icon', () => {
     expect(dot()).toBeUndefined()
   })
 })
+
+// Every screen draws from the one poll, so an answer that isn't a list of runs (a proxy's page, an
+// older daemon) must read as an error there, never crash the dock and the screen with it.
+describe('the shared poll', () => {
+  function Said() {
+    const { error, tickets } = useNeedsYou()
+    return <p>{error ?? 'none'}|{tickets.length}</p>
+  }
+  it('reads an answer that is not a list of runs as an error, not a crash', async () => {
+    registry.runs = { root: '/teams', files: [], teams: [] } as unknown as RunRecord[]
+    const view = render(<Said />)
+    await waitFor(() => expect(view.container).toHaveTextContent('LoomWatch’s list of runs couldn’t be read.|0'))
+    registry.runs = []
+  })
+})

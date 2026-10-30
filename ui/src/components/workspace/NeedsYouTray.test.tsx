@@ -246,7 +246,7 @@ describe('the tray with several tickets open', () => {
     const dialog = screen.getByRole('dialog')
     const filled = () => [...dialog.querySelectorAll('.btn-primary')].map((button) => button.textContent)
     const active = () => [...dialog.querySelectorAll('li.active .btn-primary')].map((button) => button.textContent)
-    expect(filled()).toEqual(['Looks goodA'])
+    expect(filled()).toEqual(['ApproveA'])
     for (const main of ['AllowA', 'Answer…R', 'Add $5 and carry on']) {
       fireEvent.keyDown(dialog, { key: 'j' })
       expect(filled()).toEqual([main])
@@ -257,7 +257,7 @@ describe('the tray with several tickets open', () => {
     expect(filled()).toEqual(['AllowA'])
     expect(active()).toEqual(['AllowA'])
     fireEvent.keyDown(dialog, { key: 'k' })
-    expect(filled()).toEqual(['Looks goodA'])
+    expect(filled()).toEqual(['ApproveA'])
     // Replying keeps one fill: Send is filled while its ticket is active, and gives it up when you move on.
     fireEvent.click(screen.getByRole('button', { name: /^Add a note/ }))
     expect(filled()).toEqual(['Send'])
@@ -269,11 +269,11 @@ describe('the tray with several tickets open', () => {
   it('leaves focus on a button you Tab to in another ticket, and the fill follows it there', () => {
     render(<NeedsYouTray tickets={[review('tab-a', 'Team A'), review('tab-b', 'Team B')]} working={0} onAnswer={vi.fn()} onDismiss={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: /2 need you/ }))
-    const second = screen.getAllByRole('button', { name: /^Looks good/ })[1]
+    const second = screen.getAllByRole('button', { name: /^Approve/ })[1]
     act(() => second.focus())
     expect(document.activeElement).toBe(second)
     expect(second).toHaveClass('btn-primary')
-    expect(screen.getAllByRole('button', { name: /^Looks good/ })[0]).not.toHaveClass('btn-primary')
+    expect(screen.getAllByRole('button', { name: /^Approve/ })[0]).not.toHaveClass('btn-primary')
   })
 
   it('makes a filled button at least 32 px, and 44 px under a finger', () => {
@@ -321,7 +321,7 @@ describe('the bell on a phone', () => {
 })
 
 // Home on a phone. The bell sits mid-row in Home's header, and a tray as wide as the screen, hung
-// from the bell's right edge, began 155 px off the left edge at 390 px wide: Looks good and Open run
+// from the bell's right edge, began 155 px off the left edge at 390 px wide: Approve and Open run
 // could not be reached. The header's own buttons ran 87 px past the right edge, so the page scrolled
 // sideways. The placement is CSS, which jsdom doesn't apply, so these read the rules a phone gets.
 describe('the tray on Home on a phone', () => {
@@ -527,7 +527,7 @@ describe('the open tray beside the page’s own gold fill', () => {
       const run = screen.getByRole('button', { name: 'Run team' })
       expect(filled()).toEqual(['Run team'])
       fireEvent.click(screen.getByRole('button', { name: /2 need you/ }))
-      expect(filled()).toEqual(['Looks goodA'])
+      expect(filled()).toEqual(['ApproveA'])
       expect(background(run)).toBe('transparent')
       expect(cascaded(run, 'color')).toBe('var(--color-ink)')
       expect(cascaded(run, 'border-color')).toBe('var(--color-accent)')
@@ -537,14 +537,14 @@ describe('the open tray beside the page’s own gold fill', () => {
       run.setAttribute('data-hovered', '')
       expect(background(run)).toBe('var(--color-accent-tint)')
       expect(cascaded(run, 'filter')).toBe('none')
-      const [main] = screen.getAllByRole('button', { name: /^Looks good/ })
+      const [main] = screen.getAllByRole('button', { name: /^Approve/ })
       main.setAttribute('data-hovered', '')
       expect(gold).toContain(background(main))
       run.removeAttribute('data-hovered')
       // J moves the fill to the next ticket; the page stays a ring.
       fireEvent.keyDown(screen.getByRole('dialog'), { key: 'j' })
-      expect(filled()).toEqual(['Looks goodA'])
-      expect(screen.getAllByRole('button', { name: /^Looks good/ })[1]).toHaveClass('btn-primary')
+      expect(filled()).toEqual(['ApproveA'])
+      expect(screen.getAllByRole('button', { name: /^Approve/ })[1]).toHaveClass('btn-primary')
       // A press outside closes the tray first, so the page gets its fill back before the click lands.
       fireEvent.mouseDown(run)
       expect(screen.queryByRole('dialog')).toBeNull()
@@ -580,7 +580,7 @@ describe('the open tray beside the page’s own gold fill', () => {
     act(() => screen.getAllByRole('button', { name: /^Add a note/ })[1].focus())
     act(() => bell.focus())
     expect(screen.getByRole('dialog')).toBeInTheDocument()
-    expect(filled()).toEqual(['Looks goodA'])
+    expect(filled()).toEqual(['ApproveA'])
     act(() => screen.getByRole('button', { name: 'Run team' }).focus())
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(filled()).toEqual(['Run team'])

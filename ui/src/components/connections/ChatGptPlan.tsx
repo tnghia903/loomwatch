@@ -1,4 +1,4 @@
-import { ExternalLink } from 'lucide-react'
+import { ExternalLink } from '../ui/icon'
 import { useEffect, useId, useRef, useState } from 'react'
 
 import { AI_CHANNEL, type ChatGptStatus, type SignInOutcome, checkChatGpt, signOutChatGpt, startChatGptSignIn } from '../../lib/ai/client'

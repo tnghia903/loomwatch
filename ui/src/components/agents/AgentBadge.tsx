@@ -1,4 +1,4 @@
-import { Check, Pin } from 'lucide-react'
+import { Check, Pin } from '../ui/icon'
 
 import { modelNameFromId } from '../../lib/ai/modelIds'
 import type { AgentDraft } from '../../lib/library/draft'

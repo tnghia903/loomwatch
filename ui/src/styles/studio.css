@@ -11,10 +11,10 @@
 /* ---------- A figure at its desk, its state in its glow: one light per element ---------- */
 .desk-figure { display: inline-flex; flex: none; }
 .desk-figure img, .desk-figure .figure-still { display: block; }
-.desk-figure[data-glow="ready"] { --glow: var(--color-ok); }
-.desk-figure[data-glow="working"] { --glow: var(--color-live); }
-.desk-figure[data-glow="waiting"] { --glow: var(--color-accent); }
-.desk-figure[data-glow="failed"] { --glow: var(--color-alert); }
+.desk-figure[data-glow="ready"] { --glow: var(--glow-ready); }
+.desk-figure[data-glow="working"] { --glow: var(--glow-working); }
+.desk-figure[data-glow="waiting"] { --glow: var(--glow-waiting); }
+.desk-figure[data-glow="failed"] { --glow: var(--glow-failed); }
 .desk-figure[data-glow] { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 3px var(--glow)); }
 /* Somewhere else now: its own figure, faint and grey, with no glow, faded whole with what it wears. */
 .desk-figure.away { opacity: .55; filter: grayscale(1); }
@@ -256,8 +256,6 @@
 .project-room-page { position: absolute; inset: 0; z-index: 50; overflow-y: auto; display: flex; flex-direction: column; background: var(--color-ground); color: var(--color-ink); }
 .room-top { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3); padding: var(--sp-2) var(--sp-5); border-bottom: 1px solid var(--color-hairline); }
 .room-top h1 { flex: 1; margin: 0; font: 600 18px/24px var(--font-sans); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.room-home { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 6px; color: var(--color-ink-2); font-size: 13px; text-decoration: none; }
-.room-home:hover { color: var(--color-ink); }
 .room-badge { height: 24px; padding: 0 10px; border: 1px solid var(--color-hairline); border-radius: var(--r-full); color: var(--color-ink-3); font: 500 12px/22px var(--font-sans); box-sizing: border-box; }
 .room-rename { flex: 1; display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 .room-rename input { flex: 1; min-width: 160px; height: 36px; padding: 0 var(--sp-3); border: 1px solid var(--color-hairline); border-radius: var(--r-sm); background: var(--color-panel-solid); color: var(--color-ink); font: 600 16px var(--font-sans); }
@@ -361,6 +359,19 @@ button.wall-paper:focus-visible { outline: 2px solid var(--color-accent); outlin
 .glance-needs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
 .glance-needs li { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
 .glance-needs .btn { flex: none; min-height: 40px; }
+/* Home, the quiet desk: what needs you spans the row, and its first item steps up, bigger, its
+   line first. The crew's tiles stand under it. */
+.glance.glance-home { grid-template-columns: repeat(3, minmax(150px, 1fr)); }
+.glance.glance-home > .glance-tile:first-child { grid-column: 1 / -1; }
+.glance-needs li.glance-up { gap: var(--sp-4); padding-bottom: var(--sp-2); border-bottom: 1px solid var(--color-hairline); }
+.glance-needs li.glance-up .glance-need-words { font-size: 16px; line-height: 22px; font-weight: 600; }
+.glance-needs li.glance-up .glance-need-words small { font-size: 13px; font-weight: 400; }
+.glance-needs li.glance-up .btn { min-height: 44px; }
+/* Approve, with the work one press away to read first. */
+.glance-acts { flex: none; display: inline-flex; align-items: center; gap: var(--sp-1); }
+.glance-read { width: 40px; height: 40px; color: var(--color-ink-2); }
+.glance-said { margin: 0; color: var(--color-ink-2); }
+@media (max-width: 767px) { .glance-read, .glance-needs .btn { min-width: 44px; min-height: 44px; } }
 .glance-need-words { flex: 1; min-width: 0; display: flex; flex-direction: column; font-size: 13px; line-height: 18px; color: var(--color-ink); }
 .glance-need-words > span { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .glance-need-words small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--color-ink-2); }
@@ -431,8 +442,6 @@ button.wall-paper:focus-visible { outline: 2px solid var(--color-accent); outlin
 .work-box-to select:focus { outline: none; }
 .work-box-words { flex: 1 1 240px; display: flex; min-width: 0; }
 .work-box-words input { flex: 1; min-width: 0; height: 44px; padding: 0 var(--sp-2); border: 0; outline: 0; background: transparent; color: var(--color-ink); font: 400 15px var(--font-sans); }
-.work-box-attach { width: 44px; height: 44px; }
-.work-box-send { min-height: 44px; padding: 0 18px; }
 .work-box-files { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
 .work-box-files li { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 4px 0 10px; border: 1px solid var(--color-hairline); border-radius: var(--r-full); font-size: 12.5px; }
 .work-box-files li.failed { border-color: var(--color-alert); }
@@ -466,7 +475,7 @@ button.wall-paper:focus-visible { outline: 2px solid var(--color-accent); outlin
 .reader-sheet-body { position: relative; flex: 1; min-height: 0; }
 
 @media (max-width: 1000px) {
-  .glance { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .glance, .glance.glance-home { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .room-side { max-width: none; }
 }
 @media (max-width: 767px) {
@@ -480,8 +489,13 @@ button.wall-paper:focus-visible { outline: 2px solid var(--color-accent); outlin
 @media (max-width: 560px) {
   /* What needs you and this month across the width, the other two side by side, so the box is in
      reach; the box's words and Start on one line under "To". */
-  .glance { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .glance, .glance.glance-home { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .glance > .glance-tile:first-child, .glance > .glance-tile:last-child { grid-column: 1 / -1; }
+  /* The stepped-up item keeps its words beside a smaller figure, and its buttons drop under them. */
+  .glance-needs li.glance-up { flex-wrap: wrap; }
+  .glance-needs li.glance-up .desk-figure :is(img, .figure-still) { width: 56px; height: 56px; }
+  .glance-needs li.glance-up .glance-need-words { flex: 1 1 calc(100% - 72px); }
+  .glance-needs li.glance-up > :is(.btn, .glance-acts) { margin-left: auto; }
   .glance-tile { padding: 12px 14px; }
   .glance-number { font-size: 22px; line-height: 28px; }
   .work-box-to { flex: 1 1 100%; }

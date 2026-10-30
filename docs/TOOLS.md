@@ -1,7 +1,7 @@
 # Give agents tools
 
 Every agent can already read and write files in its own folder, search and read the web, and run
-commands, as you allow in its **What it may do without asking** block. A **tool** lets it use a
+commands, as you allow in its **What it may do without asking** row. A **tool** lets it use a
 service too: add a to-do to Todoist, search flights on Kiwi.com, read a page with Jina. Each thing a
 tool can do, such as "Create issue" or "Search flights", is an **action**.
 
@@ -10,7 +10,7 @@ never gets your sign-in.
 
 ## Connect a tool
 
-Open an agent's **Tools it can use** block and click **Connect a new tool**, or open
+Open an agent's **Tools it can use** row and click **Connect a new tool**, or open
 **Connections** and find **Tools**. Pick a topic to see its tools, type what you need (such as
 "jira" or "invoices") to find one, or paste a tool's address in the same box.
 
@@ -56,10 +56,10 @@ team files, and agents never get them.
 
 ## Give it to an agent
 
-Connected tools show under **Give it a tool you connected** in every agent's Tools block. Give one,
+Connected tools show under **Give it a tool you connected** in every agent's Tools row. Give one,
 and the agent can use that tool's actions. A tool from the list also says what to try asking, for
 example "Find the cheapest flight from Hanoi to Tokyo in mid-November." In a team, the tool also
-shows on the Workflow canvas as a card wired to the agent.
+shows on the team's canvas, on its Team tab, as a card wired to the agent.
 
 ## It asks you first
 
@@ -74,14 +74,14 @@ You can answer in three ways:
 - **Allow** lets it through this once.
 - **Allow for this run** lets that action through until the run ends.
 - **Always allow this** lets that one action through for that agent from now on. Its other actions
-  still ask. The agent's Tools block lists what it always may do, with a × to take each back.
+  still ask. The agent's Tools row lists what it always may do, with a × to take each back.
 
 On a schedule nobody is there to answer. So an action you haven't always allowed is declined, and
 the agent carries on without it.
 
 ## When something goes wrong
 
-- **Your sign-in has expired.** Click **Sign in again** in the agent's Tools block or in
+- **Your sign-in has expired.** Click **Sign in again** in the agent's Tools row or in
   Connections.
 - **Not connected in LoomWatch.** The team names a tool LoomWatch doesn't have (perhaps one you
   removed). The agent is told it doesn't have it and works without it. Connect it, or take it away.

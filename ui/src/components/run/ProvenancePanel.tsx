@@ -1,4 +1,4 @@
-import { X } from 'lucide-react'
+import { X } from '../ui/icon'
 import { useState } from 'react'
 
 import { formatOffset, type CoverageKey, type RunProjection } from '../../lib/watch/events'

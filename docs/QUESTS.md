@@ -55,9 +55,8 @@ After    the receipt says what the run did, and why it   (the run receipt, once,
 - **The Quests page** (`/quests`, `ui/src/components/quests/QuestsPage.tsx`) is how you find out
   that runs earn anything at all. It lists every accessory and figure: what you have, when you
   earned it and the run that did, and for each one still locked, what to try and how a run earns
-  it. Bobbin shows which of the five parts the wardrobe already holds. A **Quests** pill with the
-  count (`QuestsLink`) sits in Home's top bar, beside **Skills**; a team's and an agent's page have
-  **Quests…** in their ☰ menu, and ⌘K has **Quests…**.
+  it. Bobbin shows which of the five parts the wardrobe already holds. **Quests** is one of the
+  dock's places on every screen (ADR 0101), and ⌘K has **Quests…**.
 - **An agent's figure** (`FigurePicker`) sits beside its ID card in My agents, not on the
   workbench: the bench is how the agent works, the figure only how it looks. It has three parts
   side by side: **Shape** (the earned figures are locked silhouettes until earned), **Color**,

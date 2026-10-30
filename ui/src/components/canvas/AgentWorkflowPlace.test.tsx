@@ -16,7 +16,7 @@ const middle: AgentPlace = {
 describe('AgentWorkflowPlace', () => {
   it('says who hands the agent work, the agent, and who it hands work to, in that order', () => {
     render(<AgentWorkflowPlace agentId="checker" name="Fact checker" place={middle} onFocus={vi.fn()} />)
-    const region = screen.getByRole('region', { name: 'In the workflow' })
+    const region = screen.getByRole('region', { name: 'In the team' })
     expect(within(region).getByText('Step 2 of 3')).toBeInTheDocument()
     const [from, self, to] = [...region.querySelectorAll('.workflow-thread > li')]
     expect(from).toHaveTextContent(/Takes work from.*RAG researcher.*Researcher/)

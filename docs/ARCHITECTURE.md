@@ -454,9 +454,10 @@ In the app, Home is the studio (`components/studio/`, `lib/projects/studio.ts`).
 project's room open the same way, at a glance (`lib/projects/glance.ts`, `GlanceTiles`): four tiles
 that keep their places. Needs you counts by the bell's own rules (`ticketsFrom`), so the two never
 differ: what waits for the person, then work that stopped in the last day that the schedule won't
-try again and that wasn't dismissed. Each has the one press that answers it: Review for work to
-check, Answer for a question, a permission or a limit (on Home both open the bell's tray at that
-item; in a room, the work itself); for stopped work, the fix LoomWatch knows for why it stopped
+try again and that wasn't dismissed. Each has the one press that answers it: Approve for work to
+check (`approveRun`, the same words the tray's Approve sends, with a "Read it first" icon beside it
+that opens the bell's tray at that item on Home, or the work itself in a room), Answer for a
+question, a permission or a limit (which open the same places); for stopped work, the fix LoomWatch knows for why it stopped
 (`problemAction`, such as adding credits), or See why, which opens it in its chat. With nothing
 waiting it shows the last work that went well: the agent who answered it, drawn big, and what it
 was asked. Then Working now: the longest at work drawn big with what it was given, its team and how
@@ -754,12 +755,19 @@ at a little desk, whose workbench opens while it is pointed at. For the agent in
 
 - **Stack:** React + Vite + [React Flow](https://reactflow.dev) for the canvas, served by `axum`;
   `rust-embed` bakes the built `dist/` into `loomwatchd`, so the binary is self-contained.
-- **Teams open in place:** going to another team (the team rail, Home, Back and Forward) changes
-  the address without a page load (`ui/src/lib/team-file/teamPage.ts`). The next team's file is
-  read first, then the team's own part of the page, canvas included, starts fresh under a new
-  React key, as it would on a load. The page frame, the team rail and the app's own data (what
-  waits on you, the teams, your saved agents, the schema's checker) stay. With changes not saved,
-  the move is a page load, so the browser asks first.
+- **One frame (ADR 0101):** every screen sits beside the dock (`ui/src/components/frame/`): Home,
+  Projects, My agents, Skills, Quests, Ask and You, along the top on a phone. The place you are on
+  has the gold stitch, Home carries the count of what needs you, and each place's name shows until
+  it has been used `LABEL_USES` times. ⌘J opens Ask everywhere, through the panel the screen
+  registers (`registerAskToggle`), or Home's when it has none. One poll of the run registry serves
+  the dock and every screen (`useRunRecords` in `lib/story/useNeedsYou.ts`). A screen's own header
+  holds only what is its own; About you, Connections and Usage are You's tabs (`YouTabs`).
+- **Teams open in place:** going to another team (a room, the dock's Home or Projects, Back and
+  Forward) changes the address without a page load (`ui/src/lib/team-file/teamPage.ts`). The next
+  team's file is read first, then the team's own part of the page, canvas included, starts fresh
+  under a new React key, as it would on a load. The frame and the app's own data (what waits on
+  you, the teams, your saved agents, the schema's checker) stay, and the dock follows the address
+  (`MOVED_EVENT`). With changes not saved, the move is a page load, so the browser asks first.
 - **Look and feel:** eye-catching and minimal. Few primary surfaces, one obvious action per
   screen, progressive disclosure of everything else. A run is drawn as Prompt → Run → agents →
   evidence → Output, projected from archived events, never from prose.

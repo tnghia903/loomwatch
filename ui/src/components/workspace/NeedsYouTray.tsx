@@ -1,4 +1,4 @@
-import { ArrowUpRight, BellDot, Check, CornerDownLeft, X } from 'lucide-react'
+import { ArrowUpRight, BellDot, Check, CornerDownLeft, X } from '../ui/icon'
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react'
 
 import { plainWords } from '../../lib/chat/findWords'
@@ -8,6 +8,7 @@ import { historyRunUrl } from '../../lib/runs/history'
 import { ago, APPROVAL_TEXT, type Ticket } from '../../lib/story/needsYou'
 import { goToRun } from '../agents/route'
 import { InlineMarkdown } from '../ui/Markdown'
+import { stateLabel } from '../../lib/state/words'
 
 interface NeedsYouTrayProps {
   tickets: readonly Ticket[]
@@ -24,7 +25,7 @@ interface NeedsYouTrayProps {
   className?: string
 }
 
-const TAG: Record<Ticket['kind'], string> = { review: 'Review step', question: 'Question', permission: 'Permission', spend: 'Spending', failed: 'Stopped' }
+const TAG: Record<Ticket['kind'], string> = { review: 'Review step', question: 'Question', permission: 'Permission', spend: 'Spending', failed: stateLabel('failed') }
 /** A review's or a question's context is what an agent wrote, in Markdown; a permission's command is shown as it is. */
 const agentWrote = (ticket: Ticket) => ticket.kind === 'review' || ticket.kind === 'question'
 
@@ -238,7 +239,7 @@ export function NeedsYouTray({ tickets, working, onAnswer, onPermission, onSpend
                   </form>
                 ) : (
                   <div className="ticket-acts">
-                    {ticket.kind === 'review' && <button type="button" className={main(index)} disabled={busy === ticket.id} onClick={() => void send(ticket, APPROVAL_TEXT)}><Check size={13} aria-hidden="true" />Looks good<kbd>A</kbd></button>}
+                    {ticket.kind === 'review' && <button type="button" className={main(index)} disabled={busy === ticket.id} onClick={() => void send(ticket, APPROVAL_TEXT)}><Check size={13} aria-hidden="true" />Approve<kbd>A</kbd></button>}
                     {ticket.kind === 'review' && <button type="button" className="btn" onClick={() => startReply(ticket)}>{ticket.sendBackTo ? 'Send back…' : 'Add a note…'}<kbd>R</kbd></button>}
                     {ticket.kind === 'question' && <button type="button" className={main(index)} onClick={() => startReply(ticket)}>Answer…<kbd>R</kbd></button>}
                     {ticket.kind === 'permission' && onPermission && <>

@@ -58,7 +58,7 @@ describe('AgentMark', () => {
   it('breaks a thread when the agent failed, and says so', () => {
     const { container, getByRole } = render(<AgentMark id="writer" name="Writer" state="failed" />)
     expect(container.querySelector('.mk-break')).not.toBeNull()
-    expect(getByRole('img', { name: 'Writer, stopped with a problem' })).toBeInTheDocument()
+    expect(getByRole('img', { name: 'Writer, didn’t finish' })).toBeInTheDocument()
   })
 
   it('gives the review step a ring, with a halo while it waits for you', () => {
@@ -79,7 +79,7 @@ describe('markLabel', () => {
     expect(markLabel('thinking')).toBe('Thinking')
     expect(markLabel('writing')).toBe('Writing its reply')
     expect(markLabel('waiting')).toBe('Waiting for you')
-    expect(markLabel('failed')).toBe('Stopped with a problem')
+    expect(markLabel('failed')).toBe('Didn’t finish')
     expect(markLabel('turn')).toBe('Not started yet')
     expect(markLabel('still')).toBe('')
   })

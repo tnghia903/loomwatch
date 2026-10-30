@@ -1,4 +1,4 @@
-import { ChevronDown, ExternalLink, Search } from 'lucide-react'
+import { ChevronDown, ExternalLink, Search } from '../ui/icon'
 import { useState } from 'react'
 
 import { describeOrigin, displayName, errorText, formatSize, licenseLabel, originShort, removeSkill, shortPath, type SkillRecord, type SkillsFolder } from '../../lib/library/skillStore'

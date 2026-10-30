@@ -1,4 +1,4 @@
-import { Folder, X } from 'lucide-react'
+import { Folder, X } from '../ui/icon'
 import { useRef, useState } from 'react'
 
 import type { FolderEntry } from '../../lib/knowledge/client'

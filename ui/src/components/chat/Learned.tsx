@@ -1,4 +1,4 @@
-import { Lightbulb } from 'lucide-react'
+import { Lightbulb } from '../ui/icon'
 import { useEffect, useId, useRef, useState } from 'react'
 
 import { plainWords } from '../../lib/chat/findWords'

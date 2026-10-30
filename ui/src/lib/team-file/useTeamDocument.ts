@@ -788,7 +788,7 @@ export function useTeamDocument() {
   }, [externalChange, applyDiskYaml])
 
   /**
-   * One of My agents was saved (in the team's Agents tab, or on its own page): every agent of this
+   * One of My agents was saved (on its workbench over the team's Team tab, or on its own page): every agent of this
    * team that is it shows it as it is now. Nothing of the team's changed, so a clean team stays
    * clean (ADR 0094).
    */

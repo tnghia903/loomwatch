@@ -921,7 +921,7 @@ edges: []
     await act(async () => { await result.current.save() })
     expect(fetchMock.mock.calls.filter(([input]) => String(input).startsWith('/api/jobs/'))).toHaveLength(0)
 
-    // Saved on its workbench in the Agents tab: the team shows it as it is now, and stays clean.
+    // Saved on its workbench over the Team tab: the team shows it as it is now, and stays clean.
     await waitFor(() => expect(result.current.saveState).toBe('clean'))
     act(() => result.current.refillAgent({ id: 'researcher', file: '.jobs/researcher.yaml', name: 'Fact finder', instructions: 'Find facts.', model: 'anthropic/claude-sonnet-5.5', skills: ['cite'], version: 6 }))
     expect(result.current.nodes[0].data.agent).toMatchObject({ name: 'Fact finder', role: 'Find facts.', spawn: { cwd: 'work' } })

@@ -8,27 +8,9 @@
    animation behind `prefers-reduced-motion: no-preference`, and the glass panel never fades itself.
    =========================================================================== */
 
-/* ---- Header button ------------------------------------------------------- */
+/* ---- Header anchor (the bell's place; Ask itself is the dock's) ----------- */
 
 .needs-you-anchor { display: flex; align-items: center; gap: var(--sp-2); }
-.ask-button {
-  position: relative; display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px 0 10px;
-  border-radius: 99px; border: 1px solid var(--color-hairline); background: var(--color-panel-solid);
-  color: var(--color-ink-2); font: 500 12px/1 var(--font-sans); cursor: pointer; pointer-events: auto;
-  transition: color var(--t-quick) var(--ease-out), background-color var(--t-quick) var(--ease-out), border-color var(--t-quick) var(--ease-out);
-}
-.ask-button:hover { color: var(--color-ink); }
-.ask-button.open { color: var(--color-ink); background: var(--color-accent-tint); border-color: var(--color-accent); }
-.ask-button.open > svg { color: var(--color-accent); }
-.ask-button-live {
-  position: absolute; top: 3px; right: 5px; width: 7px; height: 7px; border-radius: var(--r-full);
-  box-shadow: 0 0 0 2px var(--color-panel-solid);
-}
-.ask-button-live { background: var(--color-live); }
-@media (max-width: 767px) {
-  .ask-button { padding: 0 10px; }
-  .ask-button-label { display: none; }
-}
 
 /* ---- The panel ------------------------------------------------------------ */
 
@@ -216,12 +198,6 @@
 }
 .ask-input textarea:focus-visible { outline: none; }
 .ask-input textarea::placeholder { color: var(--color-ink-3); }
-.ask-send {
-  flex: none; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 9px; border: 0; cursor: pointer;
-  background: var(--color-ink); color: var(--color-panel-solid);
-  transition: background-color var(--t-quick) var(--ease-out), opacity var(--t-quick) var(--ease-out);
-}
-.ask-send:disabled { background: var(--color-hairline); color: var(--color-ink-3); cursor: not-allowed; }
 
 .ask-switch { display: inline-flex; align-items: center; gap: 8px; font: 400 12px/16px var(--font-sans); color: var(--color-ink-2); cursor: pointer; user-select: none; }
 .ask-switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
@@ -280,7 +256,6 @@
 
 @media (max-width: 767px) {
   .ask-panel { left: var(--sp-3); right: var(--sp-3); width: auto; top: auto; bottom: var(--sp-3); height: min(72vh, 620px); }
-  .ask-send { width: 44px; height: 44px; }
   /* Under 16 px, iOS zooms the page into a field when it takes focus. */
   .ask-input textarea, .home-ask textarea { font-size: 16px; }
 }
@@ -304,7 +279,6 @@
   .ask-dots i { animation: ask-dot 1200ms ease-in-out infinite; }
   .ask-dots i:nth-child(2) { animation-delay: 160ms; }
   .ask-dots i:nth-child(3) { animation-delay: 320ms; }
-  .ask-button-live { animation: breathe var(--t-breathe) ease-in-out infinite; }
 
   /* A proposal's dashes travel round it until it is applied or discarded. */
   .ask-proposal.is-open .ask-dash rect { animation: ask-march var(--t-flow) linear infinite; }

@@ -7,12 +7,12 @@ import {
   ScanEye,
   Shapes,
   Telescope,
-  type LucideIcon,
-} from 'lucide-react'
+  type IconComponent,
+} from '../ui/icon'
 
-// docs/CANVAS_SPEC.md §2.6: "a fixed lucide map keyed by a lowercase substring of Agent.role,
+// docs/CANVAS_SPEC.md §2.6: "a fixed icon map keyed by a lowercase substring of Agent.role,
 // with Circle as the fallback." Order matters — first match wins.
-const ROLE_GLYPHS: readonly [substring: string, icon: LucideIcon][] = [
+const ROLE_GLYPHS: readonly [substring: string, icon: IconComponent][] = [
   ['research', Telescope],
   ['review', ScanEye],
   ['write', PenLine],
@@ -26,7 +26,7 @@ const ROLE_GLYPHS: readonly [substring: string, icon: LucideIcon][] = [
   ['design', Shapes],
 ]
 
-export function roleGlyph(role: string): LucideIcon {
+export function roleGlyph(role: string): IconComponent {
   const lower = role.toLowerCase()
   return ROLE_GLYPHS.find(([substring]) => lower.includes(substring))?.[1] ?? Circle
 }

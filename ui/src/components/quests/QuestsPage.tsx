@@ -1,13 +1,11 @@
-import { ArrowRight, Check, Lock, Moon, Sun } from 'lucide-react'
+import { ArrowRight, Check, Lock } from '../ui/icon'
 
 import { figureStill, type FigureKind } from '../../lib/library/figures'
 import { AREA_NAMES, AREAS, isAccessory, isGarment, QUESTS, type Quest } from '../../lib/quests/catalog'
 import { partsDone, useWardrobe, type EarnedItem, type Wardrobe } from '../../lib/quests/wardrobe'
 import { historyRunUrl } from '../../lib/runs/history'
-import type { LoomMarkState } from '../../lib/story/loomMark'
-import { useTheme } from '../../lib/theme'
 import { AccessoryIcon } from '../agents/AccessoryArt'
-import { LoomMark, LoomWordmark } from '../ui/glyphs'
+import { SectionHead } from '../ui/SectionHead'
 
 function earnedDate(entry: EarnedItem): string {
   const at = new Date(entry.at)
@@ -20,10 +18,9 @@ function earnedDate(entry: EarnedItem): string {
  * rather than teaches (docs/QUESTS.md): each quest says what to try and how a run earns it, and once
  * earned, why the practice works in one sentence. Nothing here is a task to tick.
  */
-export function QuestsPage({ wardrobe: given, mark }: { wardrobe?: Wardrobe; mark?: LoomMarkState } = {}) {
+export function QuestsPage({ wardrobe: given }: { wardrobe?: Wardrobe } = {}) {
   const read = useWardrobe()
   const wardrobe = given ?? read.wardrobe
-  const { resolved, toggle } = useTheme()
   const done = QUESTS.filter((quest) => wardrobe[quest.item]).length
   const clothes = QUESTS.filter((quest) => quest.reward === 'accessory' && isGarment(quest.item))
   const accessories = QUESTS.filter((quest) => quest.reward === 'accessory' && !isGarment(quest.item))
@@ -31,22 +28,16 @@ export function QuestsPage({ wardrobe: given, mark }: { wardrobe?: Wardrobe; mar
   return (
     <div className="lw-home lw-quests">
       <div className="ground" aria-hidden="true" />
-      <header className="home-top">
-        <a className="home-brand" href="/" aria-label="LoomWatch home"><LoomMark size={28} state={mark} /><LoomWordmark height={19} /></a>
-        <span className="home-top-acts">
-          <a className="btn" href="/agents">My agents</a>
-          <button type="button" className="iconbtn" onClick={toggle} aria-label={resolved === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}>{resolved === 'dark' ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />}</button>
-        </span>
-      </header>
       <main className="home-main quests-main">
         <section className="home-hero quests-hero">
-          <h1 className="t-display">Quests</h1>
-          <p>Your runs earn clothes, accessories and figures for your agents. Each quest is one good practice: try it on work you wanted done anyway, and the receipt of the run that shows it says what it earned. Everything goes into one wardrobe all your agents share.</p>
+          <SectionHead page as="h1" className="t-display" title="Quests" explain={<>
+            <p>Your runs earn clothes, accessories and figures for your agents. Each quest is one good practice: try it on work you wanted done anyway, and the receipt of the run that shows it says what it earned. Everything goes into one wardrobe all your agents share.</p>
+            <p>Only a run that finishes can earn, judged by what LoomWatch recorded, never by what an agent says about itself. Running more earns nothing.</p>
+          </>} />
           <div className="quests-progress" role="group" aria-label="Your progress">
             <span className="quests-progress-count"><b>{done}</b> of {QUESTS.length} earned</span>
             <span className="quests-progress-pips" aria-hidden="true">{QUESTS.map((quest) => <i key={quest.item} className={wardrobe[quest.item] ? 'on' : ''} />)}</span>
           </div>
-          <p className="quests-rule t-meta">Only a run that finishes can earn, judged by what LoomWatch recorded, never by what an agent says about itself. Running more earns nothing.</p>
         </section>
 
         <QuestGroup id="quests-clothes" title="Clothes" says="Any of your agents can wear one set at a time" quests={clothes} wardrobe={wardrobe} />

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { MoreHorizontal, Moon, Plus, Sun, UserRound } from 'lucide-react'
+import { MoreHorizontal, Plus, UserRound } from '../ui/icon'
 
 import { modelNameFromId } from '../../lib/ai/modelIds'
 import type { DetectedCapability } from '../../lib/library/client'
@@ -9,28 +9,19 @@ import { useSavedJobs, type SavedJob } from '../../lib/library/jobs'
 import { usePinnedAgent } from '../../lib/library/pinned'
 import { modelForPreset, ROLE_PRESETS } from '../../lib/library/roles'
 import { useAgentUses, type AgentUse } from '../../lib/library/uses'
-import { agentPresence } from '../../lib/rail/presence'
-import type { RunRecord } from '../../lib/runs/client'
-import type { LoomMarkState } from '../../lib/story/loomMark'
-import { useTheme } from '../../lib/theme'
-import { CrewRail, type LeaveGuard } from '../rail/CrewRail'
-import { LoomMark, LoomWordmark } from '../ui/glyphs'
+import { useRunRecords } from '../../lib/story/useNeedsYou'
 import { KnowYou } from '../you/KnowYou'
-import { AgentBadge } from './AgentBadge'
+import { AgentTile } from './AgentTile'
 import { AgentBuilder } from './AgentBuilder'
 import { AgentChip } from './AgentChip'
 import { AgentFrame, type AgentBarSlots } from './AgentFrame'
-import { FigureStill } from './FigureStill'
 import { RemoveAgentDialog } from './RemoveAgentDialog'
-import { navigate, useAgentsRoute, type AgentsRoute } from './route'
+import { navigate, useAgentsRoute } from './route'
+import { SectionHead } from '../ui/SectionHead'
 
 export interface AgentsPageProps {
   skills: DetectedCapability[]
   skillsLoading: boolean
-  /** What the header's mark says, from the needs-you poll. */
-  mark?: LoomMarkState
-  /** Every run the daemon knows, from the same poll: what each agent in the rail is doing. */
-  records?: readonly RunRecord[]
   /** The bell in an agent's header, as a team's has it: what waits on you. */
   tray?: ReactNode
 }
@@ -42,22 +33,18 @@ export interface AgentsPageProps {
  */
 export function AgentsPage(props: AgentsPageProps) {
   const route = useAgentsRoute()
-  const { resolved, toggle } = useTheme()
-  const { records = NO_RUNS, tray, mark, ...builder } = props
-  // What leaving the agent on screen would lose, kept by its builder and read by the rail.
-  const leave = useRef<LeaveGuard | null>(null)
+  const { tray, ...builder } = props
   // Where the agent on screen puts its name chip and tabs in the header.
   const [slots, setSlots] = useState<AgentBarSlots>(NO_SLOTS)
   if (route.kind !== 'list') {
-    // An agent's page, or a new one's, in a team page's frame: the rail, the header, then the page.
-    // The frame stays as you move between agents; only the agent in it changes.
+    // An agent's page, or a new one's: the header, then the page, beside the dock.
     const starting = route.kind === 'new' && !route.from
     return (
-      <AgentFrame mark={mark} tray={tray} rail={<AgentRail route={route} records={records} leave={() => leave.current} />} chip={starting ? <AgentChip name="New agent" state="new" detail="Start from a job" /> : undefined} onSlots={setSlots}>
+      <AgentFrame tray={tray} chip={starting ? <AgentChip name="New agent" state="new" detail="Start from a job" /> : undefined} onSlots={setSlots}>
         <main className="home-main agents-main">
           {starting
             ? <AgentTemplates team={route.team} />
-            : <AgentBuilder key={route.kind === 'agent' ? route.id : `new-${route.from ?? ''}`} id={route.kind === 'agent' ? route.id : null} startFrom={route.kind === 'new' ? route.from : null} cameFrom={route.team} view={route.view} run={route.kind === 'agent' ? route.run : null} leaveRef={leave} bar={slots} {...builder} />}
+            : <AgentBuilder key={route.kind === 'agent' ? route.id : `new-${route.from ?? ''}`} id={route.kind === 'agent' ? route.id : null} startFrom={route.kind === 'new' ? route.from : null} cameFrom={route.team} view={route.view} run={route.kind === 'agent' ? route.run : null} bar={slots} {...builder} />}
         </main>
       </AgentFrame>
     )
@@ -65,40 +52,13 @@ export function AgentsPage(props: AgentsPageProps) {
   return (
     <div className="lw-home lw-agents" data-tour="agents">
       <div className="ground" aria-hidden="true" />
-      <header className="home-top">
-        <a className="home-brand" href="/" aria-label="LoomWatch home"><LoomMark size={28} state={mark} /><LoomWordmark height={19} /></a>
-        <span className="home-top-acts">
-          <a className="btn" href="/" data-tour="your-teams">My team</a>
-          <button type="button" className="iconbtn" onClick={toggle} aria-label={resolved === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}>{resolved === 'dark' ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />}</button>
-        </span>
-      </header>
       <main className="home-main agents-main"><AgentsList /></main>
     </div>
   )
 }
 
-const NO_RUNS: readonly RunRecord[] = []
 const NO_SLOTS: AgentBarSlots = { chip: null, tabs: null }
 
-/**
- * My agents down the side of an agent's page: one click is another agent, on the same tab, so
- * moving between agents never goes back through the list. Each glows what it is doing in its own
- * chat, so one finishing, or waiting for you, is seen while you work with another.
- */
-function AgentRail({ route, records, leave }: { route: Exclude<AgentsRoute, { kind: 'list' }>; records: readonly RunRecord[]; leave: () => LeaveGuard | null }) {
-  const { jobs } = useSavedJobs()
-  const tab = route.view === 'chat' ? '?view=chat' : ''
-  const items = jobs.map((job) => ({
-    key: job.id,
-    href: `/agents/${encodeURIComponent(job.id)}${tab}`,
-    name: job.name,
-    detail: job.does || undefined,
-    presence: agentPresence(records, job.id),
-    current: route.kind === 'agent' && route.id === job.id,
-    art: <FigureStill className="crew-rail-figure" figure={figureFor(job.id, job.figure)} alt="" width={46} height={46} decoding="async" />,
-  }))
-  return <CrewRail label="My agents" items={items} find="Find an agent" none="No agents yet." add={{ label: 'New agent', href: '/agents/new', current: route.kind === 'new' }} go={(href) => navigate(href)} leave={leave} />
-}
 
 /**
  * Where building an agent starts: a job to start from, with working instructions on the model its
@@ -110,9 +70,8 @@ function AgentTemplates({ team }: { team: string | null }) {
   return (
     <>
       <section className="home-hero agents-hero">
-        <h1 className="t-display">Build an agent</h1>
-        <p>Start from a job: it comes with working instructions, on the model its kind of work suits, and you can change all of it. Or start blank and write your own.</p>
-        {team && <a className="link agent-back" href={`/?path=${encodeURIComponent(team)}&view=agents`}>Back to the team</a>}
+        <SectionHead page as="h1" className="t-display" title="Build an agent" explain="Start from a job: it comes with working instructions, on the model its kind of work suits, and you can change all of it. Or start blank and write your own." />
+        {team && <a className="link agent-back" href={`/?path=${encodeURIComponent(team)}`}>Back to the team</a>}
       </section>
       <section className="agents-start" aria-labelledby="agents-start-title" data-tour="agent-start">
         <h2 id="agents-start-title">Start from a job</h2>
@@ -131,6 +90,8 @@ function AgentsList() {
   const { jobs, problems, available, loaded, error } = useSavedJobs()
   const { uses } = useAgentUses()
   const { pinned } = usePinnedAgent()
+  // The one shared poll (round 3): what each agent is doing in its own chat lights its figure.
+  const { records } = useRunRecords()
   const usage = useMemo(() => {
     const byAgent = new Map<string, { teams: number; scheduled: number }>()
     for (const job of jobs) byAgent.set(job.id, { teams: 0, scheduled: 0 })
@@ -147,8 +108,7 @@ function AgentsList() {
   return (
     <>
       <section className="home-hero agents-hero">
-        <h1 className="t-display">My agents</h1>
-        <p>Build an agent once and work with it in its own chat. Then add it to any team: it is the same agent in every team it’s in.</p>
+        <SectionHead page as="h1" className="t-display" title="My agents" explain="Build an agent once and work with it in its own chat. Then add it to any team: it is the same agent in every team it’s in. Under each agent, a mark with a check is something it may do without asking; a dashed one, it asks you first." />
         <KnowYou />
         <div className="home-hero-acts">
           <button type="button" className="btn btn-primary btn-lg" onClick={() => open('/agents/new')} data-tour="new-agent"><Plus size={16} aria-hidden="true" />New agent</button>
@@ -168,9 +128,10 @@ function AgentsList() {
           <ul className="home-grid agents-grid">
             {jobs.map((job) => (
               <li key={job.id} className="agent-card-box">
-                <button type="button" className="home-card agent-card" onClick={() => open(`/agents/${encodeURIComponent(job.id)}`)}>
-                  <AgentBadge compact markId={job.id} figure={figureFor(job.id, job.figure)} draft={draftFromJob(job)} usedIn={usage.get(job.id)} pinned={pinned === job.id} />
+                <button type="button" className="home-card agent-card" title={job.model ? `${job.name} · on ${modelNameFromId(job.model)}` : job.name} onClick={() => open(`/agents/${encodeURIComponent(job.id)}`)}>
+                  <AgentTile id={job.id} figure={figureFor(job.id, job.figure)} draft={draftFromJob(job)} teams={usage.get(job.id)?.teams ?? 0} runs={records} pinned={pinned === job.id} />
                 </button>
+                {/* Beside the tile's button, never inside it: a button holds no other control. */}
                 <AgentCardMenu name={job.name} chat={`/agents/${encodeURIComponent(job.id)}?view=chat`} onRemove={() => setRemoving(job)} />
               </li>
             ))}

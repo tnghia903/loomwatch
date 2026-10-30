@@ -31,10 +31,10 @@ export function TurnedOffNote({ note, names, onDismiss }: TurnedOffNoteProps) {
   return <div className="instruction-update-bar turned-off-note" role="status">
     <span>
       {note.ownRead
-        ? <>Took {what} off {one ? name : list(note.agents.map((id) => names.get(id) ?? id))} in every team {one ? 'it’s' : 'they’re'} in, since {note.names.length === 1 ? `it’s one of ${whose} own reads` : `they’re ${whose} own reads`}. To give {things} back, open Agents.</>
+        ? <>Took {what} off {one ? name : list(note.agents.map((id) => names.get(id) ?? id))} in every team {one ? 'it’s' : 'they’re'} in, since {note.names.length === 1 ? `it’s one of ${whose} own reads` : `they’re ${whose} own reads`}. To give {things} back, select {one ? name : 'each one'} and press {one ? `Edit ${name}` : 'Edit'}.</>
         // Only in this team: the agent's own skills and tools stay its own in every other (ADR 0094).
         : one
-          ? <>Turned off {what} for {name} in this team only. Select {name} to turn {things} back on, or change its skills and tools in Agents for every team.</>
+          ? <>Turned off {what} for {name} in this team only. Select {name} to turn {things} back on, or press Edit {name} to change its skills and tools in every team.</>
           : <>Turned off {what} for {note.everyone ? 'every agent' : `${note.agents.length} agents`} in this team. Select an agent to turn {things} back on.</>}
     </span>
     <button type="button" className="btn" onClick={onDismiss}>OK</button>

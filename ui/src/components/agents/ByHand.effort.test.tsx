@@ -6,6 +6,10 @@ import { forgetKeyStatus } from '../../lib/ai/useKeyStatus'
 import { forgetModels } from '../../lib/ai/useModels'
 import { BLANK_DRAFT, type AgentDraft } from '../../lib/library/draft'
 import { ByHand } from './ByHand'
+import { openBenchRows } from '../../test/benchRows'
+
+// Each setting is a row that opens; these tests are about the editors inside them.
+openBenchRows()
 
 // The bench's 3D figure is beside the point here.
 vi.mock('./AgentFigure', () => ({ default: () => null }))
@@ -30,7 +34,7 @@ function renderByHand(draft: Partial<AgentDraft>) {
 describe('By hand: its model and how hard it thinks', () => {
   it('names the model it thinks with, and changes it from OpenRouter’s list', async () => {
     const set = renderByHand({})
-    fireEvent.click(await screen.findByRole('button', { name: /Claude Opus 5\.5/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /^Model Claude Opus 5\.5/ }))
     fireEvent.click(screen.getByRole('option', { name: /Claude Opus 5\.5/ }))
     expect(set).toHaveBeenCalledWith('model', opus.id)
   })

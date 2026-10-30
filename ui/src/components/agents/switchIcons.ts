@@ -1,4 +1,4 @@
-import { FilePen, Globe, SquareTerminal } from 'lucide-react'
+import { FilePen, Globe, SquareTerminal } from '../ui/icon'
 
 import type { AllowSwitch } from '../../lib/team-file/types'
 

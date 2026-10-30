@@ -1,9 +1,8 @@
-import { cleanup, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { partsDone, type Wardrobe } from '../../lib/quests/wardrobe'
 import { QuestsPage } from './QuestsPage'
-import { QuestsLink } from './QuestsLink'
 
 beforeEach(() => vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 404 }))))
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
@@ -16,6 +15,16 @@ const earned: Wardrobe = {
 const card = (name: string) => screen.getByText(name, { selector: '.quest-name b' }).closest('li') as HTMLElement
 
 describe('the Quests page', () => {
+  // Round 3: the page shows its state; how quests work is one press away, under its title's "?".
+  it('keeps how quests work behind its title’s ?, the fairness rule with it', () => {
+    render(<QuestsPage wardrobe={{}} />)
+    expect(screen.getByRole('heading', { level: 1, name: 'Quests' })).toBeInTheDocument()
+    expect(screen.queryByText(/Running more earns nothing/)).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'About Quests' }))
+    expect(screen.getByRole('note')).toHaveTextContent('Only a run that finishes can earn')
+    expect(screen.getByRole('note')).toHaveTextContent('Running more earns nothing.')
+  })
+
   it('lists every set of clothes, accessory and figure, and how many are earned', () => {
     render(<QuestsPage wardrobe={earned} />)
     expect(screen.getByRole('heading', { level: 1, name: 'Quests' })).toBeVisible()
@@ -49,13 +58,5 @@ describe('the Quests page', () => {
     const parts = within(card('Bobbin')).getByRole('list', { name: '2 of 5 parts so far' })
     expect(within(parts).getByText('Team shape').closest('li')).toHaveClass('on')
     expect(within(parts).getByText('Prompt').closest('li')).not.toHaveClass('on')
-  })
-
-  it('is reached from the top bar, with the count once the wardrobe is read', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ earned }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
-    render(<QuestsLink />)
-    const link = screen.getByRole('link', { name: /Quests/ })
-    expect(link).toHaveAttribute('href', '/quests')
-    expect(await within(link).findByLabelText('2 of 13 earned')).toHaveTextContent('2/13')
   })
 })

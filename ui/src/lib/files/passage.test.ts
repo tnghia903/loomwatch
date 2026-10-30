@@ -143,7 +143,7 @@ describe('what a bubble’s agent card says', () => {
     expect(bubbleCardLine(asked({ state: 'said', by: 'writer', text: 'y', at: null }), 'read', name)).toBe('You asked: why?')
     expect(bubbleCardLine(asked({ state: 'said', by: 'writer', text: 'y', at: null }), 'waiting', name)).toBe('New answer · You asked: why?')
     expect(bubbleCardLine(asked({ state: 'writing', by: 'writer' }), 'busy', name)).toBe('Writing its answer · You asked: why?')
-    expect(bubbleCardLine(asked({ state: 'failed', by: 'writer', text: 'z' }), 'failed', name)).toBe('Stopped · You asked: why?')
+    expect(bubbleCardLine(asked({ state: 'failed', by: 'writer', text: 'z' }), 'failed', name)).toBe('Didn’t finish · You asked: why?')
     expect(bubbleCardLine(asked({ state: 'unsent' }), 'failed', name)).toBe('Not sent · You asked: why?')
   })
 })

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import { listNames, relativeTime } from '../../lib/format'
 import { costLines, elapsedWords, placeOf, whenNext, type AtWork, type DoneBy, type MonthCost, type MonthSpend, type NeedsYouItem, type NextRun, type Spender } from '../../lib/projects/glance'
@@ -10,6 +10,7 @@ import { useNow } from '../../lib/useNow'
 import { formatCost } from '../../lib/watch/usage'
 import { FigureStill } from '../agents/FigureStill'
 import { FileChip } from '../ui/FileChip'
+import { Icon } from '../ui/icon'
 
 /** How many of what needs you a tile lists before "N more". */
 const LISTED = 2
@@ -30,14 +31,23 @@ function NeedsShape({ kind }: { kind: NeedsYouItem['kind'] }) {
 }
 
 /**
- * The one press that answers an item: Review for work to check, Answer for a question, a permission
- * or a limit; for work that stopped, the fix LoomWatch knows for why (adding credits, say), or See
- * why, which opens it where it stopped. The first item's is the screen's one gold fill.
+ * The one press that answers an item: Approve for work to check, with its work one press away to
+ * read first; Answer for a question, a permission or a limit; for work that stopped, the fix
+ * LoomWatch knows for why (adding credits, say), or See why, which opens it where it stopped. The
+ * first item's is the screen's one gold fill.
  */
-function ItemAction({ item, primary, onReview, onOpenRun }: { item: NeedsYouItem; primary: boolean; onReview: GlanceProps['onReview']; onOpenRun: GlanceProps['onOpenRun'] }) {
+function ItemAction({ item, primary, busy, onApprove, onReview, onOpenRun }: { item: NeedsYouItem; primary: boolean; busy: boolean; onApprove?: (item: NeedsYouItem) => void; onReview: GlanceProps['onReview']; onOpenRun: GlanceProps['onOpenRun'] }) {
   const className = primary ? 'btn btn-primary' : 'btn'
+  if (item.kind === 'waiting' && item.asks === 'check' && onApprove) {
+    return (
+      <span className="glance-acts">
+        <button type="button" className="iconbtn glance-read" onClick={() => onReview(item)} aria-label={`Read ${item.seat.name}’s work first`} title="Read it first"><Icon name="page" size={16} /></button>
+        <button type="button" className={className} disabled={busy} onClick={() => onApprove(item)} aria-label={`Approve: ${item.seat.name} ${item.says}`}>Approve</button>
+      </span>
+    )
+  }
   if (item.kind === 'waiting') {
-    const verb = item.asks === 'check' ? 'Review' : 'Answer'
+    const verb = item.asks === 'check' ? 'Approve' : 'Answer'
     return <button type="button" className={className} onClick={() => onReview(item)} aria-label={`${verb}: ${item.seat.name} ${item.says}`}>{verb}</button>
   }
   if (item.fix) {
@@ -50,8 +60,43 @@ function ItemAction({ item, primary, onReview, onOpenRun }: { item: NeedsYouItem
  * What needs you, each with the one press that answers it; or, with nothing waiting, the last work
  * that went well: who did it, drawn big, and what they were asked.
  */
-function NeedsTile({ needs, last, doneBy, figureOf, onReview, onOpenRun, onMore }: Pick<GlanceProps, 'needs' | 'last' | 'doneBy' | 'figureOf' | 'onReview' | 'onOpenRun' | 'onMore'>) {
+const STEPPED_UP = 'loomwatch:stepped-up'
+
+const steppedUpBefore = (key: string) => {
+  try { return window.sessionStorage.getItem(STEPPED_UP) === key } catch { return false }
+}
+
+/**
+ * The key of the item that steps up when it is new to this tab, so its figure pops once on arrival
+ * and not again on every visit to Home (motion.css). Remembered for the tab, where storage allows;
+ * worked out as the item changes, so the pop is never taken back while it plays.
+ */
+function usePoppedOnce(key: string | null): string | null {
+  const [popped, setPopped] = useState(() => ({ key, isNew: key !== null && !steppedUpBefore(key) }))
+  if (popped.key !== key) setPopped({ key, isNew: key !== null && !steppedUpBefore(key) })
+  useEffect(() => {
+    if (key) try { window.sessionStorage.setItem(STEPPED_UP, key) } catch { /* no storage: it pops each visit */ }
+  }, [key])
+  return popped.isNew ? popped.key : null
+}
+
+function NeedsTile({ needs, last, doneBy, figureOf, onApprove, onReview, onOpenRun, onMore, stepUp = false }: Pick<GlanceProps, 'needs' | 'last' | 'doneBy' | 'figureOf' | 'onApprove' | 'onReview' | 'onOpenRun' | 'onMore' | 'stepUp'>) {
   const [all, setAll] = useState(false)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [said, setSaid] = useState('')
+  const upKey = stepUp ? needs[0]?.key ?? null : null
+  const popped = usePoppedOnce(upKey)
+  const approve = onApprove && (async (item: NeedsYouItem) => {
+    setBusy(item.key)
+    setSaid('')
+    try {
+      if (await onApprove(item)) setSaid(`Approved. ${item.teamName} carries on.`)
+    } catch (caught) {
+      setSaid(`Couldn’t approve: ${caught instanceof Error ? caught.message : String(caught)}`)
+    } finally {
+      setBusy(null)
+    }
+  })
   if (needs.length === 0) {
     const by = last ? doneBy(last.run) : null
     return (
@@ -69,6 +114,7 @@ function NeedsTile({ needs, last, doneBy, figureOf, onReview, onOpenRun, onMore 
           </div>
         )}
         {last?.file && <FileChip path={last.file} />}
+        <p className="glance-said t-meta" aria-live="polite">{said}</p>
       </section>
     )
   }
@@ -79,18 +125,20 @@ function NeedsTile({ needs, last, doneBy, figureOf, onReview, onOpenRun, onMore 
       <h3 id="glance-needs" className="glance-label">Needs you · {needs.length}</h3>
       <ul className="glance-needs">
         {listed.map((item, index) => (
-          <li key={item.key}>
-            <span className="desk-figure" data-glow={item.kind}><FigureStill figure={figureOf(item.seat)} alt="" width={44} height={44} decoding="async" /></span>
+          // On Home the first steps up: the one that needs you most, drawn big, its line first.
+          <li key={item.key} className={stepUp && index === 0 ? 'glance-up' : undefined} data-new={stepUp && index === 0 && popped === item.key ? true : undefined}>
+            <span className="desk-figure" data-glow={item.kind}><FigureStill figure={figureOf(item.seat)} alt="" width={stepUp && index === 0 ? 88 : 44} height={stepUp && index === 0 ? 88 : 44} decoding="async" /></span>
             <span className="glance-need-words">
               <span><NeedsShape kind={item.kind} />{item.seat.name} {item.says}</span>
               <small title={item.reason}>{item.reason ? `${item.teamName} · ${item.reason}` : item.teamName}</small>
             </span>
-            <ItemAction item={item} primary={index === 0} onReview={onReview} onOpenRun={onOpenRun} />
+            <ItemAction item={item} primary={index === 0} busy={busy === item.key} onApprove={approve} onReview={onReview} onOpenRun={onOpenRun} />
           </li>
         ))}
       </ul>
       {/* Home's bell lists them all; a room, which has no bell, shows them here. */}
       {more > 0 && <button type="button" className="link glance-more" onClick={() => (onMore ? onMore() : setAll(true))}>Show {more} more</button>}
+      <p className="glance-said t-meta" aria-live="polite">{said}</p>
     </section>
   )
 }
@@ -258,11 +306,17 @@ export interface GlanceProps {
   /** Who gave a run's answer, to draw it, and where the work was given. */
   doneBy: (run: RunRecord) => DoneBy
   figureOf: FigureOf
+  /** Read an item's work first: where it waits (the bell's tray on Home, its run in a room). */
   onReview: (item: NeedsYouItem) => void
+  /** Approve work waiting to be checked, in one press; true once it is approved. Without it,
+      Approve opens the work, as onReview does. */
+  onApprove?: (item: NeedsYouItem) => Promise<boolean>
   /** Open a piece of work where it was given: its team's chat, at that work. */
   onOpenRun: (run: Pick<RunRecord, 'runId' | 'teamPath'>) => void
   /** Show everything that needs you; without it the tile lists the rest itself. */
   onMore?: () => void
+  /** Home, the quiet desk (ADR 0101): what needs you spans the row, and its first item steps up. */
+  stepUp?: boolean
 }
 
 /**
@@ -275,7 +329,7 @@ export function GlanceTiles(props: GlanceProps) {
   const { label = 'At a glance', next, finishedToday, spend, cost, spenders, figureOf } = props
   const lines = cost ? costLines(cost) : null
   return (
-    <div className="glance" role="group" aria-label={label}>
+    <div className={`glance${props.stepUp ? ' glance-home' : ''}`} role="group" aria-label={label}>
       <NeedsTile {...props} />
 
       <WorkingTile {...props} />

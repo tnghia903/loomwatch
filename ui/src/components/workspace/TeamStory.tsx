@@ -1,4 +1,4 @@
-import { CalendarClock, Wand2 } from 'lucide-react'
+import { CalendarClock, Wand2 } from '../ui/icon'
 
 import { figureHue, type FigureChoice } from '../../lib/library/figures'
 import { FigureStill } from '../agents/FigureStill'

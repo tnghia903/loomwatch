@@ -1,4 +1,4 @@
-import { ChevronLeft, Folder, MoreHorizontal, Plus, X } from 'lucide-react'
+import { Folder, MoreHorizontal, Plus, X } from '../ui/icon'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { FileReaderContext, type FileToRead } from '../../lib/files/reader'
@@ -7,7 +7,7 @@ import { fetchJobs, saveJob, type SavedJob } from '../../lib/library/jobs'
 import { addProjectNote, NOTE_CHARS, ABOUT_CHARS, projectFile, projectsChanged, saveProject, useProjects, type Project, type ProjectEntry } from '../../lib/projects/client'
 import { crewOf, doneByOf, lastFinished, madeHere, monthCost, monthSpend, monthSpenders, needsYou, nextWork, workingNow, type MadeFile } from '../../lib/projects/glance'
 import { useMonthUsage } from '../../lib/projects/useMonthUsage'
-import { loadDismissed } from '../../lib/story/useNeedsYou'
+import { approveRun, loadDismissed } from '../../lib/story/useNeedsYou'
 import { moveTeam } from '../../lib/projects/move'
 import { inOpenedOrder, roomsOf } from '../../lib/projects/studio'
 import { useTeamShapes } from '../../lib/projects/useTeamShapes'
@@ -176,7 +176,7 @@ function AddAnAgent({ jobs, project, teams, initial, onClose }: { jobs: readonly
             {teams.map((team) => <option key={team.path} value={team.path}>{team.name}</option>)}
           </select>
         </label>
-        {where && <p className="set-up-hint">It joins the team, whose workflow opens for you to connect it.</p>}
+        {where && <p className="set-up-hint">It joins the team, whose Team tab opens for you to connect it.</p>}
         {error && <p role="alert" className="wall-error">{error}</p>}
         <span className="wall-paper-acts">
           <button type="button" className="btn" onClick={onClose} disabled={busy}>Cancel</button>
@@ -276,7 +276,6 @@ export function ProjectRoom({ id }: { id: string }) {
   return (
     <div className="project-room-page" data-tour="room">
       <header className="room-top">
-        <a className="room-home" href="/"><ChevronLeft size={14} aria-hidden="true" />Home</a>
         <ProjectMark id={project.id} mark={project.mark} />
         {renaming ? (
           <form className="room-rename" onSubmit={(event) => { event.preventDefault(); const name = new FormData(event.currentTarget).get('name'); void keep({ name: String(name ?? '') }).then(() => setRenaming(false), () => {}) }}>
@@ -325,6 +324,7 @@ export function ProjectRoom({ id }: { id: string }) {
               spenders={monthSpenders(usage, teams.map((team) => team.name), shown, jobs)}
               doneBy={doneByOf(shown, root)}
               figureOf={figureOf}
+              onApprove={(item) => approveRun(item.runId).then((done) => { if (done) readRuns(); else openRun(item); return done })}
               onReview={openRun}
               onOpenRun={openRun}
             />

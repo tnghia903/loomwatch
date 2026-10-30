@@ -4,10 +4,9 @@ Notion is one of the tools you connect in **Connections**, and one sign-in does 
 it: agents you give the Notion tool can search and write pages, asking you first; LoomWatch sends
 your teams' answers to a Notion page; and agents read the Notion pages you give them.
 
-Open **Connections** from the ☰ menu (top right of Home or of a team's canvas) or at
-`/connections` on the same local daemon as the editor. The menu is the discoverable route;
-`⌘K → Connections…` and the URL reach the same surface. A team's canvas hides that menu in
-windows narrower than 768px; Home's stays, so a narrow window reaches Connections from Home.
+Open **Connections** under **You** in the dock, on every screen, or at `/connections` on the same
+local daemon as the editor. `⌘K → Connections…` and the URL reach the same surface. A line on a
+team's page that says Notion isn't connected links to Connections.
 Where the canvas says Notion isn't connected, it opens `/connections?tool=notion`, which starts
 connecting Notion, or opens the Notion card's page list once Notion is connected.
 

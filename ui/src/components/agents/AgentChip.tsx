@@ -1,4 +1,4 @@
-import { ChevronDown, Pin } from 'lucide-react'
+import { ChevronDown, Pin } from '../ui/icon'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 import { PINNED_SHORTCUT, PINNED_SHORTCUT_WORDS } from '../../island/bridge'

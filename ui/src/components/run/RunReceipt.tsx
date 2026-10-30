@@ -1,4 +1,4 @@
-import { ArrowRight, Check, ChevronDown, ChevronRight, ClipboardCopy } from 'lucide-react'
+import { ArrowRight, Check, ChevronDown, ChevronRight, ClipboardCopy } from '../ui/icon'
 import { useId, useState } from 'react'
 
 import { figureStill, type FigureKind } from '../../lib/library/figures'

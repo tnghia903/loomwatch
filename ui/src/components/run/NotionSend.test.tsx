@@ -48,9 +48,9 @@ describe('the answer’s Notion line (ADR 0038)', () => {
     daemon({ connection: { connected: false } })
     render(<NotionSend run={run({ delivery: delivery('failed', { message: 'Notion is not connected. Open Connections and choose a destination page.' }) })} answered />)
     expect(await screen.findByText('Not sent to Notion — Notion isn’t connected yet.')).toBeInTheDocument()
-    // Connections opens from the menu, its one way in (ADR 0043): the line says where, not a second link.
-    expect(screen.getByText('Connect Notion under Tools in Connections, from the menu.')).toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: /Connect Notion/ })).toBeNull()
+    // Connections is under You, and nothing else on a team's page reaches it, so the line links there.
+    expect(screen.getByText((_, node) => node?.classList.contains('notion-send-note') === true && node.textContent === 'Connect Notion under Tools in Connections.')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Connections' })).toHaveAttribute('href', '/connections')
     cleanup()
 
     daemon({ deliver: () => ({ ...run(), delivery: delivery('skipped', { message: 'A page with this title already exists.' }) }) })
@@ -66,7 +66,7 @@ describe('the answer’s Notion line (ADR 0038)', () => {
     cleanup()
     daemon({ connection: { connected: true, name: 'Acme', destination: null } })
     render(<NotionSend run={run()} answered />)
-    expect(await screen.findByText('To send this answer, connect Notion under Tools in Connections, from the menu.')).toBeInTheDocument()
-    expect(screen.queryByRole('link')).toBeNull()
+    expect(await screen.findByText((_, node) => node?.classList.contains('notion-send-note') === true && node.textContent === 'To send this answer, connect Notion under Tools in Connections.')).toBeInTheDocument()
+    expect(screen.getAllByRole('link').map((link) => link.getAttribute('href'))).toEqual(['/connections'])
   })
 })

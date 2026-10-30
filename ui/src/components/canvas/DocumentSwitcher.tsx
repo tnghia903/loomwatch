@@ -1,4 +1,4 @@
-import { ChevronDown } from 'lucide-react'
+import { ChevronDown } from '../ui/icon'
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 
 import { baseName } from '../../lib/files/paths'

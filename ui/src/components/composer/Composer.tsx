@@ -1,4 +1,4 @@
-import { ArrowRight, MessageSquare, Asterisk, Square, Workflow } from 'lucide-react'
+import { ArrowRight, MessageSquare, Asterisk, Square, Workflow } from '../ui/icon'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 import { Markdown } from '../ui/Markdown'
