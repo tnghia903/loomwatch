@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import { listNames, relativeTime } from '../../lib/format'
 import { costLines, elapsedWords, placeOf, whenNext, type AtWork, type DoneBy, type MonthCost, type MonthSpend, type NeedsYouItem, type NextRun, type Spender } from '../../lib/projects/glance'
@@ -60,10 +60,32 @@ function ItemAction({ item, primary, busy, onApprove, onReview, onOpenRun }: { i
  * What needs you, each with the one press that answers it; or, with nothing waiting, the last work
  * that went well: who did it, drawn big, and what they were asked.
  */
+const STEPPED_UP = 'loomwatch:stepped-up'
+
+const steppedUpBefore = (key: string) => {
+  try { return window.sessionStorage.getItem(STEPPED_UP) === key } catch { return false }
+}
+
+/**
+ * The key of the item that steps up when it is new to this tab, so its figure pops once on arrival
+ * and not again on every visit to Home (motion.css). Remembered for the tab, where storage allows;
+ * worked out as the item changes, so the pop is never taken back while it plays.
+ */
+function usePoppedOnce(key: string | null): string | null {
+  const [popped, setPopped] = useState(() => ({ key, isNew: key !== null && !steppedUpBefore(key) }))
+  if (popped.key !== key) setPopped({ key, isNew: key !== null && !steppedUpBefore(key) })
+  useEffect(() => {
+    if (key) try { window.sessionStorage.setItem(STEPPED_UP, key) } catch { /* no storage: it pops each visit */ }
+  }, [key])
+  return popped.isNew ? popped.key : null
+}
+
 function NeedsTile({ needs, last, doneBy, figureOf, onApprove, onReview, onOpenRun, onMore, stepUp = false }: Pick<GlanceProps, 'needs' | 'last' | 'doneBy' | 'figureOf' | 'onApprove' | 'onReview' | 'onOpenRun' | 'onMore' | 'stepUp'>) {
   const [all, setAll] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [said, setSaid] = useState('')
+  const upKey = stepUp ? needs[0]?.key ?? null : null
+  const popped = usePoppedOnce(upKey)
   const approve = onApprove && (async (item: NeedsYouItem) => {
     setBusy(item.key)
     setSaid('')
@@ -104,7 +126,7 @@ function NeedsTile({ needs, last, doneBy, figureOf, onApprove, onReview, onOpenR
       <ul className="glance-needs">
         {listed.map((item, index) => (
           // On Home the first steps up: the one that needs you most, drawn big, its line first.
-          <li key={item.key} className={stepUp && index === 0 ? 'glance-up' : undefined}>
+          <li key={item.key} className={stepUp && index === 0 ? 'glance-up' : undefined} data-new={stepUp && index === 0 && popped === item.key ? true : undefined}>
             <span className="desk-figure" data-glow={item.kind}><FigureStill figure={figureOf(item.seat)} alt="" width={stepUp && index === 0 ? 88 : 44} height={stepUp && index === 0 ? 88 : 44} decoding="async" /></span>
             <span className="glance-need-words">
               <span><NeedsShape kind={item.kind} />{item.seat.name} {item.says}</span>
