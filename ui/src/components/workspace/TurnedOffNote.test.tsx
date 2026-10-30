@@ -18,7 +18,7 @@ describe('TurnedOffNote', () => {
 
   it('names the one agent a removed line turned it off for, in this team only', () => {
     render(<TurnedOffNote note={{ names: ['agentmemory'], agents: ['plan'], everyone: false }} names={names} onDismiss={vi.fn()} />)
-    expect(screen.getByRole('status')).toHaveTextContent('Turned off agentmemory for Plan writer in this team only. Select Plan writer to turn it back on, or change its skills and tools in Agents for every team.')
+    expect(screen.getByRole('status')).toHaveTextContent('Turned off agentmemory for Plan writer in this team only. Select Plan writer to turn it back on, or press Edit Plan writer to change its skills and tools in every team.')
   })
 
   it('counts the agents when it was not every one, and says where to turn it back on', () => {
@@ -28,6 +28,6 @@ describe('TurnedOffNote', () => {
 
   it('says a read of the agent’s own came off it in every team it’s in', () => {
     render(<TurnedOffNote note={{ names: ['Style guide'], agents: ['plan'], everyone: false, ownRead: true }} names={names} onDismiss={vi.fn()} />)
-    expect(screen.getByRole('status')).toHaveTextContent('Took Style guide off Plan writer in every team it’s in, since it’s one of its own reads. To give it back, open Agents.')
+    expect(screen.getByRole('status')).toHaveTextContent('Took Style guide off Plan writer in every team it’s in, since it’s one of its own reads. To give it back, select Plan writer and press Edit Plan writer.')
   })
 })

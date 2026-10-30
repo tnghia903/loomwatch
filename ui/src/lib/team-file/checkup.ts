@@ -522,6 +522,9 @@ export type InstructionPart = 'job' | 'method' | 'check' | 'reply'
 /** Every part, in that order. */
 export const INSTRUCTION_PARTS: readonly InstructionPart[] = ['job', 'method', 'check', 'reply']
 
+/** Each part's name, as the instructions box says it. */
+export const PART_LABELS: Record<InstructionPart, string> = { job: 'Its job', method: 'How to work', check: 'How it checks', reply: 'What it replies with' }
+
 /** What the agent panel inserts to start a missing part; the operator writes the rest. */
 export const PART_STARTERS: Record<Exclude<InstructionPart, 'job'>, string> = {
   method: 'How to work:\n- ',

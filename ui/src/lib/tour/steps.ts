@@ -124,7 +124,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
     view: () => present('[data-tour="agent-blocks"]')
       ? {
           title: 'Give it a name and a job',
-          body: 'Each row is one of its settings and says what it is set to: its name, its instructions, its model, its skills, and what it may do without asking. Press a row, or that part of the figure at the bench, to change it. Type a name, and in Instructions say what it does and what it replies with.',
+          body: 'Each row is one of its settings and says what it is set to: its name, its instructions, its model, its skills, and what it may do without asking. Press a row, or its label on the bench, to change it. Type a name, and in Instructions say what it does and what it replies with.',
           target: ['[data-tour="agent-blocks"]'],
           sides: ['left', 'right', 'top', 'bottom'],
           advance: 'next',
@@ -324,13 +324,22 @@ export const TOUR_STEPS: readonly TourStep[] = [
           advance: 'next',
           dim: true,
         }
-      : {
-          title: 'Open the Team tab',
-          body: 'The Team tab shows how the team’s agents hand work along. Click Team at the top.',
-          target: ['[data-tour="tab-workflow"]', '[data-tour="view-tabs"]'],
-          sides: ['bottom'],
-          advance: 'action',
-        },
+      // An agent's workbench is open over the Team tab: its close goes back to the team.
+      : teamView() === 'agents'
+        ? {
+            title: 'Back to the team',
+            body: 'This is one agent’s workbench. Close it to see the team’s agents together.',
+            target: ['[data-tour="bench-close"]'],
+            sides: ['left', 'bottom'],
+            advance: 'action',
+          }
+        : {
+            title: 'Open the Team tab',
+            body: 'The Team tab shows how the team’s agents hand work along. Click Team at the top.',
+            target: ['[data-tour="tab-workflow"]', '[data-tour="view-tabs"]'],
+            sides: ['bottom'],
+            advance: 'action',
+          },
   },
   {
     id: 'run-team',

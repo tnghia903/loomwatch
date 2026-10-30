@@ -1,13 +1,13 @@
 import { Check, Plus } from '../ui/icon'
 import type { RefObject } from 'react'
 
-import { appendToRole, instructionShape, PART_STARTERS, type InstructionPart } from '../../lib/team-file/checkup'
+import { appendToRole, instructionShape, PART_LABELS, PART_STARTERS, type InstructionPart } from '../../lib/team-file/checkup'
 
 const PARTS: readonly { part: InstructionPart; label: string; missing: string }[] = [
-  { part: 'job', label: 'Its job', missing: 'Say what this agent does, and what it leaves to others.' },
-  { part: 'method', label: 'How to work', missing: 'Start a list of how it should work' },
-  { part: 'check', label: 'How it checks', missing: 'Start saying how it checks its work before it replies' },
-  { part: 'reply', label: 'What it replies with', missing: 'Start saying what it replies with' },
+  { part: 'job', label: PART_LABELS.job, missing: 'Say what this agent does, and what it leaves to others.' },
+  { part: 'method', label: PART_LABELS.method, missing: 'Start a list of how it should work' },
+  { part: 'check', label: PART_LABELS.check, missing: 'Start saying how it checks its work before it replies' },
+  { part: 'reply', label: PART_LABELS.reply, missing: 'Start saying what it replies with' },
 ]
 
 export interface InstructionShapeProps {

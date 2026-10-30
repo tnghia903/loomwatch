@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState, type MutableRefObject } from 'react'
 import { Network, Plus, UserRoundPlus, X } from '../ui/icon'
 
 import type { DetectedCapability } from '../../lib/library/client'
@@ -16,6 +16,7 @@ import { useBenchDetails } from '../../lib/runs/useBenchDetails'
 import { AgentAnswer, AgentChat, AgentFile } from '../agents/AgentChat'
 import { AgentDetails } from '../agents/AgentDetails'
 import { AgentBuilder, AgentHead } from '../agents/AgentBuilder'
+import type { LeaveGuard } from '../agents/leave'
 import { ByHand, type ByHandProps } from '../agents/ByHand'
 import type { AgentView } from '../agents/route'
 import { withAllowed } from '../../lib/tools/allow'
@@ -42,6 +43,8 @@ export interface TeamAgentsProps {
   /** One of My agents was saved here: the team shows it as it is now (ADR 0094). */
   onAgentSaved: (job: SavedJob) => void
   onShowWorkflow: () => void
+  /** Kept up to date with what closing the workbench of one of My agents would lose. */
+  leaveRef?: MutableRefObject<LeaveGuard | null>
   /** Put one of Your agents in this team. Absent when the team can't be changed here. */
   onAdd?: (job: SavedJob) => void
   /** A model picked for a team's own agent, and whether it now follows its suggestion (ADR 0072).
@@ -55,13 +58,12 @@ export interface TeamAgentsProps {
 const NO_MOVES: ReadonlyMap<string, ModelMove> = new Map()
 
 /**
- * THE TEAM'S AGENTS, the first of a team's three views (Agents, Team, Chat): every agent of the
- * team on its workbench. A team starts here, with the agents you built in My agents or a new one;
- * Workflow is where they are connected. Every agent is one of My agents (ADR 0094), so its workbench
- * is its own: saving it changes it in every team it's in. One the team hasn't saved yet is edited
- * with the team and joins My agents when the team is saved.
+ * THE TEAM'S AGENTS, each on its workbench: a sheet over the Team tab, opened from an agent's card
+ * (round 3). Every agent is one of My agents (ADR 0094), so its workbench is its own: saving it
+ * changes it in every team it's in. One the team hasn't saved yet is edited with the team and joins
+ * My agents when the team is saved.
  */
-export function TeamAgents({ agents, responder, selected, onSelect, teamName, teamPath, editable, skills, skillsLoading, savedJobs, savedJobsLoaded = true, onEdit, onAgentSaved, onShowWorkflow, onAdd, onPickModel, modelMoves = NO_MOVES, onUndoModelMove }: TeamAgentsProps) {
+export function TeamAgents({ agents, responder, selected, onSelect, teamName, teamPath, editable, skills, skillsLoading, savedJobs, savedJobsLoaded = true, onEdit, onAgentSaved, onShowWorkflow, leaveRef, onAdd, onPickModel, modelMoves = NO_MOVES, onUndoModelMove }: TeamAgentsProps) {
   const agent = agents.find((candidate) => candidate.id === selected) ?? agents[0] ?? null
   const mine = agent?.from ? savedJobs.find((job) => job.id === agent.from?.agent) ?? null : null
   // What the team gives it to read, kept the same list while the team file doesn't change it.
@@ -91,18 +93,18 @@ export function TeamAgents({ agents, responder, selected, onSelect, teamName, te
       {!agent && !onAdd && (
         <div className="team-agents-empty">
           <p>This team has no agents yet.</p>
-          <button type="button" className="btn btn-primary" onClick={onShowWorkflow}><Network size={14} aria-hidden="true" />Add one on the Team tab</button>
+          <button type="button" className="btn btn-primary" onClick={onShowWorkflow}><Network size={14} aria-hidden="true" />Back to the team</button>
         </div>
       )}
 
       {agent && agent.from && (
         <div className="team-agents-linked" key={agent.id}>
           {mine
-            ? <AgentBuilder id={mine.id} skills={[...skills]} skillsLoading={skillsLoading} inTeam={{ name: teamName, onSaved: onAgentSaved, reads, knowledge, onShowWorkflow }} />
+            ? <AgentBuilder id={mine.id} skills={[...skills]} skillsLoading={skillsLoading} inTeam={{ name: teamName, onSaved: onAgentSaved, reads, knowledge, onShowWorkflow }} leaveRef={leaveRef} />
             : savedJobsLoaded && (
               <div className="team-agents-empty">
                 <p>This agent isn’t in My agents any more, so this team can’t run. On the Team tab, select it, press Delete and save.</p>
-                <button type="button" className="btn" onClick={onShowWorkflow}><Network size={14} aria-hidden="true" />Open the Team tab</button>
+                <button type="button" className="btn" onClick={onShowWorkflow}><Network size={14} aria-hidden="true" />Back to the team</button>
               </div>
             )}
         </div>
@@ -146,7 +148,7 @@ function AddAgents({ jobs, inTeam, teamPath, first, onAdd, onClose, onShowWorkfl
       )}
       <div className="team-agents-add-acts">
         <a className={`btn${jobs.length === 0 ? ' btn-primary' : ''}`} href={`/agents/new${teamPath ? `?team=${encodeURIComponent(teamPath)}` : ''}`}><UserRoundPlus size={14} aria-hidden="true" />Build a new agent</a>
-        {first && <button type="button" className="link" onClick={onShowWorkflow}>Or start on the Team tab</button>}
+        {first && <button type="button" className="link" onClick={onShowWorkflow}>Or go back to the team</button>}
       </div>
     </section>
   )

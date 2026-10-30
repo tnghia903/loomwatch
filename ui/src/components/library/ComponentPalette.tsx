@@ -307,7 +307,8 @@ export function ComponentPalette({ capabilityInventory, capabilitiesLoading = fa
   </section>
   const visible = <T,>(name: string, items: readonly T[]) => items.slice(0, query || expanded[name] ? undefined : limitFor(name))
 
-  if (collapsed) return <button className="palette-reopen" onClick={expand} title={`Open the panel (${keys('⌘\\')})`}>
+  // Folded, it is still where the guide points to add an agent: the button opens it.
+  if (collapsed) return <button type="button" className="palette-reopen" onClick={expand} title={`Open the panel (${keys('⌘\\')})`} data-tour="palette">
     <PanelLeftOpen size={16} />Add agents
   </button>
   const scanned = capabilitiesScannedAt ? `Skills listed at ${capabilitiesScannedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Listing LoomWatch’s skills'

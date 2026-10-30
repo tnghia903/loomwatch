@@ -252,7 +252,7 @@ describe('GettingStarted', () => {
     tick(250)
     expect(readTourState()?.step).toBe('workflow')
     tick(250)
-    expect(screen.getByRole('heading', { name: 'Open the Team tab' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Back to the team' })).toBeInTheDocument()
 
     showPage(workspace('<div class="react-flow__node-agent" data-tour="card"></div>', 1, 'workflow'))
     tick(250)

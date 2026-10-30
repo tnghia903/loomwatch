@@ -40,7 +40,7 @@ const documentState = vi.hoisted(() => ({
   modeSwitchBanner: false, pendingEdgeRemoval: null,
   createNewDocument: vi.fn(), applyYaml: vi.fn(() => true), closeDocument: vi.fn(), teamsRoot: null as string | null, reloadFromDisk: vi.fn(), keepMine: vi.fn(), useDisk: vi.fn(), saveCopy: vi.fn(), layoutNodes: vi.fn(),
   settleNodeCollision: vi.fn(), capturePositionHistory: vi.fn(), undo: vi.fn(), redo: vi.fn(), onNodesChange: vi.fn(), onEdgesChange: vi.fn(),
-  onConnect: vi.fn(), addAgentFromDrop: vi.fn(), save: vi.fn(async () => true), touchField: vi.fn(), renameAgent: vi.fn(), updateAgentModel: vi.fn(),
+  onConnect: vi.fn(), addAgentFromDrop: vi.fn(), refillAgent: vi.fn(), save: vi.fn(async () => true), touchField: vi.fn(), renameAgent: vi.fn(), updateAgentModel: vi.fn(),
   updateAgentCwd: vi.fn(), updateAgentAllowRecruiting: vi.fn(), promoteEntrypoint: vi.fn(), promoteResponder: vi.fn(),
   removeAgent: vi.fn(), updateTeamSchedule: vi.fn(), removeTeamSchedule: vi.fn(), dismissRefusal: vi.fn(), keepLastEdgeRemoval: vi.fn(), undoLastEdgeRemoval: vi.fn(),
   updateAgentMemory: vi.fn(), addBriefEntry: vi.fn(), removeBriefEntry: vi.fn(),
@@ -190,7 +190,7 @@ describe('Workspace', () => {
     expect(cascaded(chat, ['inset', 'right'], PHONE)).not.toMatch(/inspector/)
   })
 
-  // Only the screen's own chat moves. An agent's chat on the Agents tab sits in its column, where
+  // Only the screen's own chat moves. An agent's chat on its workbench sits in its column, where
   // `right` would slide it over the bench; and beside Details on a wide screen the chat is already
   // the column on the left. Below 1100px Details covers the chat or steps aside from it, so there
   // the chat still stops short of Ask.
@@ -813,7 +813,7 @@ describe('Workspace', () => {
       expect(screen.queryByText(/in every team it’s in/)).toBeNull()
 
       act(() => flowRuntime.onEdgesChange?.([{ id: 'capability:reviewer->knowledge@/Users/me/style', type: 'remove' }]))
-      const note = (await screen.findByText(/off Reviewer in every team it’s in, since it’s one of its own reads\. To give it back, open Agents\./)).closest('[role="status"]')
+      const note = (await screen.findByText(/off Reviewer in every team it’s in, since it’s one of its own reads\. To give it back, select Reviewer and press Edit Reviewer\./)).closest('[role="status"]')
       expect(note).toHaveTextContent(/^Took style off Reviewer/)
     } finally {
       view.unmount()
@@ -1418,17 +1418,114 @@ describe('Workspace', () => {
         const tabs = screen.getByRole('navigation', { name: 'Workspace view' })
         expect(within(tabs).getAllByRole('button').map((tab) => tab.textContent)).toEqual(['Team', 'Chat'])
         const team = within(tabs).getByRole('button', { name: 'Team' })
-        fireEvent.click(within(screen.getByRole('complementary', { name: 'Selected node settings' })).getByRole('button', { name: 'Open its workbench' }))
+        fireEvent.click(within(screen.getByRole('complementary', { name: 'Selected node settings' })).getByRole('button', { name: 'Edit Researcher' }))
         const bench = screen.getByRole('region', { name: /’s agents$/ })
         expect(team).toHaveAttribute('aria-pressed', 'true')
         expect(window.location.search).toContain('view=agents')
-        fireEvent.click(within(bench).getByRole('button', { name: 'Close the workbench' }))
+        // A sheet: the keyboard is in it, and the canvas under it can't be reached.
+        expect(bench).toHaveFocus()
+        expect(screen.getByRole('application', { name: 'Team canvas' })).toHaveAttribute('inert')
+        fireEvent.click(within(bench).getByRole('button', { name: 'Back to the team' }))
         expect(screen.queryByRole('region', { name: /’s agents$/ })).toBeNull()
         expect(window.location.search).not.toContain('view=agents')
         expect(team).toHaveAttribute('aria-pressed', 'true')
+        expect(screen.getByRole('application', { name: 'Team canvas' })).not.toHaveAttribute('inert')
+        expect(team).toHaveFocus()
       } finally {
         view.unmount()
         researcher.selected = false
+      }
+    })
+
+    // The newcomer review: the X, the tabs and the other agents' chips closed the workbench and
+    // dropped what was changed there without a word.
+    it('asks before an agent’s workbench closes on changes not saved, and saves them on Save', async () => {
+      const researcher = documentState.nodes[0]
+      researcher.selected = true
+      Object.assign(researcher.data.agent, { from: { agent: 'researcher' } })
+      const stubbed = vi.mocked(fetch)
+      const answer = stubbed.getMockImplementation()!
+      const job = { id: 'researcher', file: '.jobs/researcher.yaml', name: 'Researcher', instructions: 'Find it.', version: 1 }
+      stubbed.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        if (url === '/api/jobs') return new Response(JSON.stringify({ folder: '.jobs', jobs: [job], problems: [] }), { status: 200 })
+        if (url === '/api/jobs/researcher' && init?.method === 'PUT') return new Response(JSON.stringify({ ...job, ...JSON.parse(String(init.body)), version: 2 }), { status: 200 })
+        return answer(input, init)
+      })
+      const view = renderWorkspace()
+      try {
+        fireEvent.click(within(screen.getByRole('complementary', { name: 'Selected node settings' })).getByRole('button', { name: 'Edit Researcher' }))
+        const bench = screen.getByRole('region', { name: /’s agents$/ })
+        fireEvent.click(await within(bench).findByRole('button', { name: /^Name\b/ }))
+        fireEvent.change(within(bench).getByRole('textbox', { name: 'Name' }), { target: { value: 'Scout' } })
+        const asked = () => screen.queryByRole('alertdialog', { name: 'Save changes to Scout?' })
+
+        // The X asks; Cancel keeps the workbench and its change.
+        fireEvent.click(within(bench).getByRole('button', { name: 'Back to the team' }))
+        expect(asked()).toBeInTheDocument()
+        expect(screen.getByRole('region', { name: /’s agents$/ })).toBeInTheDocument()
+        fireEvent.click(within(asked()!).getByRole('button', { name: 'Cancel' }))
+        expect(asked()).toBeNull()
+        expect(within(bench).getByRole('textbox', { name: 'Name' })).toHaveValue('Scout')
+
+        // So do the tabs and Esc; Don’t save goes where it was going.
+        const tabs = screen.getByRole('navigation', { name: 'Workspace view' })
+        fireEvent.click(within(tabs).getByRole('button', { name: 'Team' }))
+        expect(asked()).toBeInTheDocument()
+        fireEvent.keyDown(asked()!, { key: 'Escape' })
+        expect(asked()).toBeNull()
+        fireEvent.keyDown(document.body, { key: 'Escape' })
+        expect(asked()).toBeInTheDocument()
+        expect(vi.mocked(fetch).mock.calls.some(([url, init]) => String(url) === '/api/jobs/researcher' && init?.method === 'PUT')).toBe(false)
+
+        // Save saves, then closes.
+        fireEvent.click(within(asked()!).getByRole('button', { name: 'Save' }))
+        await waitFor(() => expect(screen.queryByRole('region', { name: /’s agents$/ })).toBeNull())
+        const put = vi.mocked(fetch).mock.calls.find(([url, init]) => String(url) === '/api/jobs/researcher' && init?.method === 'PUT')
+        expect(JSON.parse(String(put?.[1]?.body))).toMatchObject({ name: 'Scout' })
+        expect(documentState.refillAgent).toHaveBeenCalledWith(expect.objectContaining({ id: 'researcher', name: 'Scout' }))
+      } finally {
+        view.unmount()
+        researcher.selected = false
+        Reflect.deleteProperty(researcher.data.agent, 'from')
+      }
+    })
+
+    it('closes an agent’s workbench without asking when nothing changed, and drops changes on Don’t save', async () => {
+      const researcher = documentState.nodes[0]
+      researcher.selected = true
+      Object.assign(researcher.data.agent, { from: { agent: 'researcher' } })
+      const stubbed = vi.mocked(fetch)
+      const answer = stubbed.getMockImplementation()!
+      stubbed.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => String(input) === '/api/jobs'
+        ? new Response(JSON.stringify({ folder: '.jobs', jobs: [{ id: 'researcher', file: '.jobs/researcher.yaml', name: 'Researcher', instructions: 'Find it.', version: 1 }], problems: [] }), { status: 200 })
+        : answer(input, init))
+      const view = renderWorkspace()
+      const open = async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Edit Researcher' }))
+        const bench = screen.getByRole('region', { name: /’s agents$/ })
+        await within(bench).findByRole('button', { name: /^Name\b/ })
+        return bench
+      }
+      try {
+        let bench = await open()
+        fireEvent.click(within(bench).getByRole('button', { name: 'Back to the team' }))
+        expect(screen.queryByRole('alertdialog')).toBeNull()
+        expect(screen.queryByRole('region', { name: /’s agents$/ })).toBeNull()
+
+        act(() => flowRuntime.onNodesChange?.([{ id: 'researcher', type: 'select', selected: true }]))
+        bench = await open()
+        fireEvent.click(within(bench).getByRole('button', { name: /^Name\b/ }))
+        fireEvent.change(within(bench).getByRole('textbox', { name: 'Name' }), { target: { value: 'Scout' } })
+        fireEvent.click(within(screen.getByRole('navigation', { name: 'Workspace view' })).getByRole('button', { name: 'Chat' }))
+        fireEvent.click(within(screen.getByRole('alertdialog', { name: 'Save changes to Scout?' })).getByRole('button', { name: 'Don’t save' }))
+        expect(screen.queryByRole('region', { name: /’s agents$/ })).toBeNull()
+        expect(screen.queryByRole('alertdialog')).toBeNull()
+        expect(vi.mocked(fetch).mock.calls.some(([url, init]) => String(url) === '/api/jobs/researcher' && init?.method === 'PUT')).toBe(false)
+      } finally {
+        view.unmount()
+        researcher.selected = false
+        Reflect.deleteProperty(researcher.data.agent, 'from')
       }
     })
 
@@ -1440,7 +1537,7 @@ describe('Workspace', () => {
       const view = renderWorkspace()
       try {
         const panel = screen.getByRole('complementary', { name: 'Selected node settings' })
-        expect(within(panel).getByRole('button', { name: 'Open its workbench' })).toBeInTheDocument()
+        expect(within(panel).getByRole('button', { name: 'Edit Researcher' })).toBeInTheDocument()
         for (const field of ['Name', 'Instructions']) expect(within(panel).queryByRole('textbox', { name: field })).not.toBeInTheDocument()
         expect(within(panel).queryByRole('button', { name: 'Thinking effort and more settings' })).not.toBeInTheDocument()
         expect(within(panel).queryByRole('group', { name: 'Allowed without asking' })).not.toBeInTheDocument()

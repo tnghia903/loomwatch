@@ -16,7 +16,7 @@ import { modelLabelForAgent } from '../../lib/models'
 
 export function BuildInspector(props: InspectorProps & {
   startAdvanced?: boolean
-  /** Open this agent on its workbench, in the team's Agents tab. */
+  /** Open this agent's workbench, over the Team tab. */
   onOpenWorkbench?: () => void
   /** The figure each agent wears, for the agent and its neighbours. */
   figures?: ReadonlyMap<string, FigureChoice>
@@ -59,7 +59,7 @@ export function BuildInspector(props: InspectorProps & {
   return <aside className="node-inspector agent-in-team" aria-label="Selected node settings" onKeyDown={e => { if (e.key === 'Escape') onClose() }}>
     {head(node.data.modelLabel ?? modelLabelForAgent(node.data.agent), figure ? <FigureStill className="inspector-figure" figure={figure} headOnly alt="" /> : undefined)}
     <div className="inspector-fields">
-      {props.onOpenWorkbench && <button type="button" className="btn btn-primary inspector-workbench" onClick={props.onOpenWorkbench} title="Its name, instructions, model, skills, tools and what it may do"><Wrench size={14} aria-hidden="true" />Open its workbench</button>}
+      {props.onOpenWorkbench && <button type="button" className="btn btn-primary inspector-workbench" onClick={props.onOpenWorkbench} title="Its name, instructions, model, skills, tools and what it may do"><Wrench size={14} aria-hidden="true" />Edit {node.data.agent.name.trim() || 'this agent'}</button>}
       {props.instructionUpdate && <InstructionsUpdated {...props.instructionUpdate} agent={node.data.agent} readOnly={readOnly} />}
       {props.place && <AgentWorkflowPlace agentId={node.id} name={node.data.agent.name} place={props.place} figures={props.figures} onFocus={props.onFocusAgent} onPromoteEntrypoint={props.onPromoteEntrypoint} readOnly={readOnly} />}
       {props.checkStep && <CheckStep {...props.checkStep} readOnly={readOnly} />}

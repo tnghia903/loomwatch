@@ -65,7 +65,7 @@ describe('an agent’s settings, in plain words', () => {
     // Each row says its setting before its button, so the button reads as what pressing it does.
     const rows = within(block).getAllByRole('listitem')
     expect(rows.map((row) => row.querySelector('em')?.textContent?.split('.')[0])).toEqual(['Allowed', 'Asks you first', 'Asks you first'])
-    expect(block.querySelector('.byhand-row-says')).toHaveTextContent('Searches the web without asking; asks you before it edits files or runs commands')
+    expect(block.querySelector('.byhand-row-says')).toHaveTextContent('Searches the web; asks you before it edits files or runs commands')
     fireEvent.click(within(block).getByRole('button', { name: 'Allow: edit files' }))
     expect(document.querySelector('.byhand-say')).toHaveTextContent('It searches the web and edits files without asking, and asks you before it runs commands.')
     fireEvent.click(within(block).getByRole('button', { name: 'Ask me first: search the web' }))

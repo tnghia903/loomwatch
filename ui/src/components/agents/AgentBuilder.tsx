@@ -21,6 +21,7 @@ import { isMac } from '../../lib/platform'
 import { PINNED_SHORTCUT_WORDS } from '../../island/bridge'
 import type { RunRecord } from '../../lib/runs/client'
 import type { LeaveGuard } from './leave'
+import { holdPage } from '../../lib/team-file/inPlace'
 import type { ChipState } from '../ui/glyphs'
 import { SegmentThumb } from '../ui/SegmentThumb'
 import { AgentChip } from './AgentChip'
@@ -49,13 +50,13 @@ export interface AgentBuilderProps {
   /** A piece of its chat the address names (`historyRunUrl`), opened with its Details. */
   run?: string | null
   /**
-   * Shown inside a team's Agents tab: there is no page to go back to, and after each save the team
+   * Shown on a team's workbench sheet, over its Team tab: there is no page to go back to, and after each save the team
    * shows the agent as it is now (ADR 0094). What the team gives it to read besides its own stays
    * the team's (lib/team-file/myAgents.ts), so its file drawer shows both, and what its chat sends
    * from here reads the same (`knowledge`).
    */
   inTeam?: { name: string; onSaved: (job: SavedJob) => void; reads: readonly ReadSource[]; knowledge: TeamKnowledge; onShowWorkflow?: () => void }
-  /** Kept up to date with what moving to another agent would lose (the rail asks it first). */
+  /** Kept up to date with what closing this workbench would lose (a team's page asks it first). */
   leaveRef?: MutableRefObject<LeaveGuard | null>
   /**
    * On its own page in My agents: the places in the page's header (AgentFrame) for its name chip
@@ -137,13 +138,15 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
   const changed = base ? draftChanged(draft, base) : true
   const problem = !draft.name.trim() ? 'Give it a name.' : !draft.instructions.trim() ? 'Write its instructions.' : null
   // What leaving would lose: changes to a saved agent, or a new one changed since it began. The
-  // browser asks before the page goes (the brand, a menu item, closing it); the rail asks itself.
+  // browser asks before the page goes (the dock, closing it), and the page holds, so a team's page
+  // goes as a page load rather than in place; a team's page asks itself before its workbench closes.
   const unsaved = base ? changed : startedAs !== null && draftChanged(draft, startedAs)
   useEffect(() => {
     if (!unsaved) return
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault() }
     window.addEventListener('beforeunload', warn)
-    return () => window.removeEventListener('beforeunload', warn)
+    const release = holdPage()
+    return () => { window.removeEventListener('beforeunload', warn); release() }
   }, [unsaved])
 
   const set = <K extends keyof AgentDraft>(key: K, value: AgentDraft[K]) => { setDraft((current) => ({ ...current, [key]: value })); if (save.kind !== 'saving') setSave({ kind: 'idle' }) }
@@ -179,7 +182,7 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
   }
 
   useEffect(() => {
-    if (leaveRef) leaveRef.current = unsaved ? { save: doSave, problem } : null
+    if (leaveRef) leaveRef.current = unsaved ? { save: doSave, problem, name: draft.name.trim() || null } : null
   })
   useEffect(() => () => { if (leaveRef) leaveRef.current = null }, [leaveRef])
 
@@ -242,8 +245,8 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
   const saveButton = <button type="button" className="btn btn-primary" data-tour="save-agent" disabled={!changed || Boolean(problem) || save.kind === 'saving'} title={problem ?? undefined} onClick={() => void doSave()}>{save.kind === 'saving' ? 'Saving…' : saveLabel}</button>
   const saveSaid = save.kind === 'saved' ? 'Saved.'
     : save.kind === 'error' ? <span className="agent-save-error">{save.message}</span> : null
-  // Back to the team's agents, where an agent is added.
-  const backToTeam = cameFrom && <a className="link agent-back" href={`/?path=${encodeURIComponent(cameFromUse?.teamPath ?? cameFrom)}&view=agents`}>Back to {cameFromUse?.teamName ?? 'the team'}</a>
+  // Back to the team it came from, on its Team tab.
+  const backToTeam = cameFrom && <a className="link agent-back" href={`/?path=${encodeURIComponent(cameFromUse?.teamPath ?? cameFrom)}`}>Back to {cameFromUse?.teamName ?? 'the team'}</a>
   const bench = (
     <ByHand
       fresh={!id}
@@ -272,7 +275,7 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
                 : <ul className="agent-uses">
                   {mine.map((use) => (
                     <li key={`${use.teamPath}#${use.agentId}`}>
-                      {/* To the team's Agents tab with this agent open. */}
+                      {/* To that team, with this agent's workbench open over its Team tab. */}
                       <a href={teamAgentHref(use)}>{use.teamName}<ExternalLink size={12} aria-hidden="true" /></a>
                       {use.scheduled && <span className="t-meta">on a schedule</span>}
                     </li>
@@ -320,7 +323,8 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
     <div className="agent-builder" data-tour="agent-builder" data-tour-saved={saved && !changed ? true : undefined}>
       <AgentHead
         above={inTeam ? <span className="agent-backs t-meta">One of My agents: saving changes it in every team it’s in.</span> : <span className="agent-backs">
-          <a className="link agent-back" href="/agents" onClick={(event) => { event.preventDefault(); navigate('/agents') }}><ArrowLeft size={14} aria-hidden="true" />My agents</a>
+          {/* With changes not saved it goes as a page load, so the browser asks first. */}
+          <a className="link agent-back" href="/agents" onClick={(event) => { if (unsaved) return; event.preventDefault(); navigate('/agents') }}><ArrowLeft size={14} aria-hidden="true" />My agents</a>
           {backToTeam}
         </span>}
         name={name}
@@ -340,7 +344,7 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
 
 /**
  * The head of an agent's page, the same wherever an agent is edited: in My agents, and in a team's
- * Agents tab for one from My agents or one of the team's own. Read top down: the way back or where
+ * workbench sheet for one from My agents or one of the team's own. Read top down: the way back or where
  * it comes from (`above`), its name, how it is kept (`status`), then its two tabs, then the bench's
  * summary below it. The tabs sit under the name, on the left, so they are read with the agent they
  * belong to and right above what they switch; the far side (`children`) is for saving it.

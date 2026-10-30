@@ -1,5 +1,5 @@
 import { Suspense, useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
-import { ExternalLink, FilePlus2, FileText, Folder, FolderPlus, Icon, Network, NotebookText, Plug, Plus, Puzzle, Search, Store, Wrench, X, type IconName } from '../ui/icon'
+import { ExternalLink, FilePlus2, FileText, Folder, FolderPlus, Icon, Network, NotebookText, Plug, Plus, Puzzle, Search, Store, Wrench, X } from '../ui/icon'
 
 import { shortName } from '../../lib/ai/client'
 import { effortWord, modelEfforts, placeEffort } from '../../lib/ai/efforts'
@@ -23,7 +23,7 @@ import type { BenchKit } from '../../lib/watch/workPhase'
 import { ALLOW_SWITCHES } from '../../lib/team-file/allow'
 import { allowedFor, withoutAllowed } from '../../lib/tools/allow'
 import { actionCount, toolNamed, useConnectedTools, type ConnectedTool } from '../../lib/tools/client'
-import { INSTRUCTION_PARTS, instructionShape } from '../../lib/team-file/checkup'
+import { INSTRUCTION_PARTS, instructionShape, PART_LABELS } from '../../lib/team-file/checkup'
 import { suggestedOfDraft } from '../../lib/team-file/agentSetup'
 import type { ModelSuggestionInput } from '../../lib/team-file/modelSuggestion'
 import type { AllowSwitch } from '../../lib/team-file/types'
@@ -121,15 +121,15 @@ export interface ByHandProps {
  * picture, and a block never names the object it is drawn as, so nobody decodes a metaphor to set
  * one up. Picking a thing on the bench brings its block into view instead.
  */
-const BLOCKS: readonly { part: FigurePart; title: string; icon: IconName }[] = [
-  { part: 'name', title: 'Name', icon: 'agent' },
-  { part: 'job', title: 'Instructions', icon: 'page' },
-  { part: 'mind', title: 'Model', icon: 'chip' },
-  { part: 'skills', title: 'Skills', icon: 'skills' },
-  { part: 'reads', title: 'What it reads', icon: 'folder' },
-  { part: 'tools', title: 'Tools it can use', icon: 'tools' },
-  { part: 'keys', title: 'What it may do without asking', icon: 'key' },
-  { part: 'reply', title: 'What it hands back', icon: 'send-back' },
+const BLOCKS: readonly { part: FigurePart; title: string }[] = [
+  { part: 'name', title: 'Name' },
+  { part: 'job', title: 'Instructions' },
+  { part: 'mind', title: 'Model' },
+  { part: 'skills', title: 'Skills' },
+  { part: 'reads', title: 'What it reads' },
+  { part: 'tools', title: 'Tools it can use' },
+  { part: 'keys', title: 'What it may do without asking' },
+  { part: 'reply', title: 'What it hands back' },
 ]
 
 
@@ -260,22 +260,25 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
   // boxes already say all of it, and a line above them said the name twice.
   const says: Record<Exclude<FigurePart, 'app'>, string> = {
     name: '',
-    job: draft.instructions.trim() ? `Says ${parts} of the ${INSTRUCTION_PARTS.length} things good instructions say: its job, how to work, how it checks its work, and what it replies with` : 'Nothing written yet',
+    job: !draft.instructions.trim() ? 'Nothing written yet'
+      : parts === INSTRUCTION_PARTS.length ? `All ${parts} parts`
+      : `${parts} of ${INSTRUCTION_PARTS.length} parts · add ${listNames(INSTRUCTION_PARTS.filter((part) => !shape[part]).map((part) => PART_LABELS[part]))}`,
     mind: `Thinks with ${thinks}`,
     skills: draft.skills.length ? `${draft.skills.length} skill${draft.skills.length === 1 ? '' : 's'} it opens when the work calls for one` : 'No skills yet',
     reads: readsSay(ownReads, teamGiven, Boolean(teamOwn)),
-    tools: toolsSay(givenTools, connected.state === 'loading'),
+    tools: toolsRowSays(givenTools, connected.state === 'loading'),
     keys: keysSay(draft.allow),
     reply: replyPart ? replySays(replyPart.text) : 'Its instructions don’t say yet',
   }
-  const labels = benchLabels({ draft, model, effort: effort?.name.toLowerCase() ?? null, reads, readsSaid: says.reads, toolsSaid: says.tools, asked })
+  const labels = benchLabels({ draft, model, effort: effort?.name.toLowerCase() ?? null, reads, readsSaid: says.reads, toolsSaid: toolsSay(givenTools, connected.state === 'loading'), asked })
 
   const block = (part: Exclude<FigurePart, 'app'>, body: ReactNode, extra?: ReactNode) => {
     const meta = BLOCKS.find((item) => item.part === part)!
     const flashing = flash?.part === part
     const open = opened.has(part)
     // Closed, Name's row says the name itself and what it does; open, its boxes say them, once.
-    const summary = part === 'name' ? (open ? '' : [draft.name.trim() || 'No name yet', draft.does.trim()].filter(Boolean).join(' · ')) : says[part]
+    // Instructions' parts are said under its box once it is open.
+    const summary = part === 'name' ? (open ? '' : [draft.name.trim() || 'No name yet', draft.does.trim()].filter(Boolean).join(' · ')) : part === 'job' && open ? '' : says[part]
     return (
       <section
         key={part}
@@ -291,7 +294,6 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
         {/* A row: what it is, and what it is set to; pressing it opens the setting to change it. */}
         <h3 className="byhand-row-head">
           <button type="button" className="byhand-row" aria-expanded={open} aria-controls={`${ids}-${part}-body`} onClick={() => toggleRow(part)}>
-            <Icon name={meta.icon} size={18} className="byhand-row-icon" />
             <span id={`${ids}-${part}`} className="byhand-row-title">{meta.title}</span>{' '}
             <span className="byhand-row-says">{summary}</span>
             <Icon name="chevron-down" size={14} className="byhand-row-chev" />
@@ -312,7 +314,7 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
       <div className="byhand-main">
         <div className="byhand-stage">
           {failed
-            ? <div className="bench-fallback"><p className="t-meta">The bench can’t be drawn in this browser ({failed}). Every setting is in the blocks.</p></div>
+            ? <div className="bench-fallback"><p className="t-meta">The bench can’t be drawn in this browser ({failed}). Every setting is in the rows.</p></div>
             : <Suspense fallback={<div className="bench-stage"><p className="bench-loading t-meta">Setting up the bench…</p></div>}>
                 <AgentFigure
                   view={view}
@@ -376,7 +378,7 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
           />)}
 
           {block('tools', <>
-            <p className="t-meta">Every agent can read and write files in its own folder, search and read the web, and run commands, as you allow below.</p>
+            <p className="t-meta">Every agent can read and write files in its own folder, search and read the web, and run commands, as you allow in What it may do without asking.</p>
             {givenTools.length > 0 && <ul className="byhand-tools" aria-label="Tools you gave it">
               {givenTools.map(({ name, tool }) => {
                 const allowed = allowedFor(draft.toolAllow, name)
@@ -541,7 +543,18 @@ function keysSay(allow: AgentDraft['allow']): string {
   const asks = FIGURE_KEYS.filter(({ key }) => !allow[key]).map(({ key }) => DOES[key])
   if (!has.length) return `Asks you before it ${orList(asks)}`
   const goes = listNames(has)
-  return `${goes.charAt(0).toUpperCase()}${goes.slice(1)} without asking${asks.length ? `; asks you before it ${orList(asks)}` : ''}`
+  return `${goes.charAt(0).toUpperCase()}${goes.slice(1)}${asks.length ? `; asks you before it ${orList(asks)}` : ''}`
+}
+
+/** The tools added to it, by name, and which of them aren't connected yet; files, the web and
+    commands are What it may do without asking's, so they aren't counted here. */
+function toolsRowSays(given: readonly { name: string; tool: unknown }[], loading: boolean): string {
+  if (!given.length) return 'None connected yet'
+  if (loading) return listNames(given.map((item) => item.name))
+  const usable = given.filter((item) => item.tool).map((item) => item.name)
+  const missing = given.filter((item) => !item.tool).map((item) => item.name)
+  const away = `${listNames(missing)} ${missing.length === 1 ? 'isn’t' : 'aren’t'} connected yet`
+  return !missing.length ? listNames(usable) : !usable.length ? away : `${listNames(usable)}; ${away}`
 }
 
 /** "a, b or c". */

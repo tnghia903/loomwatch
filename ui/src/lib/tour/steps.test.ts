@@ -65,7 +65,10 @@ describe('getting-started guide steps', () => {
     document.body.innerHTML = '<div data-tour="workspace" data-tour-agents="1" data-tour-view="workflow" data-tour-proposal="showing"></div>'
     expect(step('team-agents').done?.({ runAtStepStart: null })).toBe(false)
     expect(step('team-agents').view(ready)).toMatchObject({ title: 'Keep the team', target: ['[data-tour="apply-proposal"]'] })
+    // From an agent's workbench over the Team tab, its close; from the chat, the Team tab.
     document.body.innerHTML = '<div data-tour="workspace" data-tour-agents="1" data-tour-view="agents"></div>'
+    expect(step('workflow').view(ready)).toMatchObject({ title: 'Back to the team', target: ['[data-tour="bench-close"]'], advance: 'action' })
+    document.body.innerHTML = '<div data-tour="workspace" data-tour-agents="1" data-tour-view="chat"></div>'
     expect(step('workflow').view(ready)).toMatchObject({ title: 'Open the Team tab', advance: 'action' })
     document.body.innerHTML = '<div data-tour="workspace" data-tour-agents="1" data-tour-view="workflow"></div>'
     expect(step('workflow').view(ready)).toMatchObject({ title: 'Connect them on the Team tab', advance: 'next' })
