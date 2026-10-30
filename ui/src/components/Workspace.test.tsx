@@ -1408,6 +1408,30 @@ describe('Workspace', () => {
       }
     })
 
+    // Round 3: a team's tabs are Team and Chat. Its agents are on the Team tab, and each one's
+    // workbench opens over it from its card, with Team still marked, and closes back to the team.
+    it('has two tabs, Team and Chat, and opens an agent’s workbench over the Team tab', () => {
+      const researcher = documentState.nodes[0]
+      researcher.selected = true
+      const view = renderWorkspace()
+      try {
+        const tabs = screen.getByRole('navigation', { name: 'Workspace view' })
+        expect(within(tabs).getAllByRole('button').map((tab) => tab.textContent)).toEqual(['Team', 'Chat'])
+        const team = within(tabs).getByRole('button', { name: 'Team' })
+        fireEvent.click(within(screen.getByRole('complementary', { name: 'Selected node settings' })).getByRole('button', { name: 'Open its workbench' }))
+        const bench = screen.getByRole('region', { name: /’s agents$/ })
+        expect(team).toHaveAttribute('aria-pressed', 'true')
+        expect(window.location.search).toContain('view=agents')
+        fireEvent.click(within(bench).getByRole('button', { name: 'Close the workbench' }))
+        expect(screen.queryByRole('region', { name: /’s agents$/ })).toBeNull()
+        expect(window.location.search).not.toContain('view=agents')
+        expect(team).toHaveAttribute('aria-pressed', 'true')
+      } finally {
+        view.unmount()
+        researcher.selected = false
+      }
+    })
+
     // The user: the panel showed what the agent's workbench already sets. It now says only what this
     // team makes of the agent, and the workbench is one click away.
     it('leaves what the workbench sets to the workbench', () => {

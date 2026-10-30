@@ -68,7 +68,7 @@ import { BuildResourceInspector } from './canvas/BuildResourceInspector'
 import { NotionPagePicker } from './canvas/NotionPagePicker'
 import { BuildInspector } from './canvas/BuildInspector'
 import { ComponentPalette } from './library/ComponentPalette'
-import { Bot, MessageSquareText, MessagesSquare, Network, X } from './ui/icon'
+import { MessageSquareText, MessagesSquare, Network, X } from './ui/icon'
 import { Composer, type ComposerState } from './composer/Composer'
 import { RoutineNote } from './composer/RoutineNote'
 import { CAPABILITY_DRAG_MIME, CONNECTION_DRAG_MIME, LIBRARY_DRAG_MIME } from './library'
@@ -2689,7 +2689,9 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
         )}
 
         {agentsView && !runView && !runSetup && (
-          <div className="team-agents-page">
+          // An agent's workbench, over the Team tab: opened from its card, closed back to the team.
+          <div className="team-agents-page" role="region" aria-label={`${doc.teamName || 'This team'}’s agents`}>
+            <button type="button" className="iconbtn team-agents-close" onClick={showWorkflow} aria-label="Close the workbench" title="Back to the team"><X size={16} aria-hidden="true" /></button>
             <TeamAgents
               agents={doc.nodes.map((node) => node.data.agent).filter((agent) => agent.kind !== 'operator')}
               responder={responderFromDoc}
@@ -2725,9 +2727,9 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
           <div className="needs-you-anchor">{needsYouTray(runView ? activeRunId : null)}</div>
           <nav className="workspace-view-tabs" aria-label="Workspace view" data-tour="view-tabs">
             <SegmentThumb />
-            {/* In the order a team is made: its agents, then how they work together (Team), then its chat. */}
-            <button type="button" aria-pressed={!runView && !runSetup && agentsView} onClick={() => { const chosen = inspectedNode?.id ?? null; clearSelection(); closeRun(); showAgents(chosen) }} data-tour="tab-agents"><Bot size={15} />Agents</button>
-            <button type="button" aria-pressed={!runView && !runSetup && !agentsView} onClick={() => { clearSelection(); closeRun(); showWorkflow() }} data-tour="tab-workflow"><Network size={15} />Team</button>
+            {/* In the order a team is made: its agents working together (Team), then its chat. */}
+            {/* A team's agents are on its Team tab; each one's workbench opens over it from its card (round 3). */}
+            <button type="button" aria-pressed={!runView && !runSetup} onClick={() => { clearSelection(); closeRun(); showWorkflow() }} data-tour="tab-workflow"><Network size={15} />Team</button>
             <button type="button" aria-pressed={runView || runSetup} onClick={() => { clearSelection(); if (!activeRunId) setRunSetup(true) }} data-tour="tab-chat"><MessagesSquare size={15} />Chat</button>
           </nav>
           <DocumentSwitcher

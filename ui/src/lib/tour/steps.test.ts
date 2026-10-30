@@ -58,6 +58,9 @@ describe('getting-started guide steps', () => {
     expect(step('team-agents').done?.({ runAtStepStart: null })).toBe(false)
     document.body.innerHTML = '<div data-tour="workspace" data-tour-agents="1" data-tour-view="agents"></div>'
     expect(step('team-agents').done?.({ runAtStepStart: null })).toBe(true)
+    // With no Agents tab, an empty team on its Team tab is pointed at My agents in the add panel.
+    document.body.innerHTML = '<div data-tour="workspace" data-tour-agents="0" data-tour-view="workflow"><aside data-tour="palette"></aside></div>'
+    expect(step('team-agents').view(ready)).toMatchObject({ title: 'Add your agent', target: ['[data-tour="palette"]'] })
     // Ask's team on the canvas has agents but isn't saved: it is applied first.
     document.body.innerHTML = '<div data-tour="workspace" data-tour-agents="1" data-tour-view="workflow" data-tour-proposal="showing"></div>'
     expect(step('team-agents').done?.({ runAtStepStart: null })).toBe(false)

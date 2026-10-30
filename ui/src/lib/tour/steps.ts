@@ -298,16 +298,16 @@ export const TOUR_STEPS: readonly TourStep[] = [
       : present('[data-tour="agent-picker"]')
       ? {
           title: 'Add your agent',
-          body: 'A team starts on Agents. Press Add beside the agent you built, and it joins the team as you saved it. More agents join the same way.',
+          body: 'A team starts with its agents. Press Add beside the agent you built, and it joins the team as you saved it. More agents join the same way.',
           target: ['[data-tour="agent-picker"]'],
           sides: ['bottom', 'right', 'left'],
           advance: 'action',
         }
       : {
           title: 'Add your agent',
-          body: 'This team has no agents yet. Click Agents at the top to add the one you built.',
-          target: ['[data-tour="tab-agents"]', '[data-tour="view-tabs"]'],
-          sides: ['bottom'],
+          body: 'This team has no agents yet. Add the one you built from My agents, on the left.',
+          target: ['[data-tour="palette"]'],
+          sides: ['right', 'bottom'],
           advance: 'action',
         },
     done: () => agentCount() > 0 && !proposalShowing(),

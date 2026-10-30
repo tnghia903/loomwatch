@@ -388,7 +388,7 @@ add, connect and rename agents to match. To run a team on a schedule, ask
 <td align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="site/assets/app/workflow-dark.webp">
-  <img src="site/assets/app/workflow-light.webp" alt="A team's Team tab, beside LoomWatch's dock with Projects marked. A daily schedule feeds Gatherer, then Reader, then Writer, which produces the team response. At the top of the canvas the team is read back as one sentence, with each agent's figure: every day at 9:00 AM and whenever you ask, Gatherer collects what is needed, then Reader does its part, and finally Writer writes the answer. Beside it, the Add to your team panel lists My agents with the models they think with. The heading says Your team is ready, beside Run team. Along the top, the team's name, saved, the Agents, Team and Chat tabs, the bell and the ⋯.">
+  <img src="site/assets/app/workflow-light.webp" alt="A team's Team tab, beside LoomWatch's dock with Projects marked. A daily schedule feeds Gatherer, then Reader, then Writer, which produces the team response. At the top of the canvas the team is read back as one sentence, with each agent's figure: every day at 9:00 AM and whenever you ask, Gatherer collects what is needed, then Reader does its part, and finally Writer writes the answer. Beside it, the Add to your team panel lists My agents with the models they think with. The heading says Your team is ready, beside Run team. Along the top, the team's name, saved, the Team and Chat tabs, the bell and the ⋯.">
 </picture>
 <br><sub><strong>Team.</strong> Your agents on the canvas, connected in order and read back as one sentence.</sub>
 </td>
@@ -777,11 +777,11 @@ with what should change; under its new version, **Continue with the team** runs 
 
    Ready-made teams are saved straight away, each agent on the model its job suits, so you can run
    them immediately.
-4. A team has three tabs: **Agents**, **Team** and **Chat**. On **Agents**, click **Add an
-   agent** to bring in one from My agents. On **Team**, add more from **My agents** in the
-   panel on the left; to make a new one, choose **Build a new agent** and start from a job such as
-   Researcher or Writer. Select a card to edit its name, instructions, model and how hard it
-   thinks. Drag from the dot on a card's right edge to the next card to make them work in order, and
+4. A team has two tabs: **Team** and **Chat**. A new team starts by choosing its agents: click
+   **Add** beside one from My agents. On **Team**, add more from **My agents** in the panel on the
+   left; to make a new one, choose **Build a new agent** and start from a job such as Researcher or
+   Writer. Select a card and press **Open its workbench** to change its name, instructions, model
+   and how hard it thinks. Drag from the dot on a card's right edge to the next card to make them work in order, and
    add **You (review step)** wherever you want to approve work before the team continues.
 5. Click **Run team**, or open **Chat**, describe what you want in plain words, and press
    <kbd>Enter</kbd>.
