@@ -54,7 +54,8 @@ code, kbd, pre { font-family: var(--font-mono); }
 .react-flow__node.dragging, .lw-shell.node-dragging .react-flow__node { transition: none; }
 .react-flow__node:focus, .react-flow__node:focus-visible { outline: 0; }
 .react-flow__node:focus-visible > .node,
-.react-flow__node:focus-visible > .rt {
+.react-flow__node:focus-visible > .rt,
+.react-flow__node:focus-visible .build-node {
   box-shadow: 0 0 0 1px var(--color-panel-solid), 0 0 0 3px var(--lw-node-ring);
 }
 .react-flow__edge:focus, .react-flow__edge:focus-visible { outline: 0; }
@@ -853,7 +854,7 @@ button.thread-node:hover svg, button.thread-node:focus-visible svg { color: var(
    INLINE CONFIRM — bottom-centre, above the composer
    --------------------------------------------------------------------------- */
 .lw-confirm { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-3); border-color: color-mix(in srgb, var(--color-alert) 40%, transparent); }
-.lw-confirm.leave { flex-wrap: wrap; border-color: var(--color-hairline); }
+.lw-confirm.leave { flex-wrap: wrap; margin: 0 var(--sp-4); border-color: var(--color-hairline); }
 .lw-confirm .btn-danger-fill { background: var(--color-alert); color: var(--color-white); border-color: transparent; }
 
 /* ---------------------------------------------------------------------------

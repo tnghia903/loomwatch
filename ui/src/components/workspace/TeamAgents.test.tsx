@@ -60,8 +60,8 @@ describe('a team’s agents, the first of its views', () => {
     expect(within(within(add).getByText('Coder').closest('li')!).getByRole('button', { name: 'Add' })).toBeEnabled()
     // A new one is built in Your agents, which leads back to this team.
     expect(within(add).getByRole('link', { name: 'Build a new agent' })).toHaveAttribute('href', '/agents/new?team=digest.yaml')
-    fireEvent.click(within(add).getByRole('button', { name: 'Or go back to the team' }))
-    expect(props.onShowWorkflow).toHaveBeenCalled()
+    // The sheet's close is the way back to the team; the chooser has no second one (ADR 0043).
+    expect(within(add).queryByRole('button', { name: /back to the team/i })).toBeNull()
   })
 
   it('keeps the old way in when the team can’t be changed here', () => {
@@ -177,8 +177,8 @@ describe('a team’s agents, the first of its views', () => {
     renderTeamAgents({ agents: [{ ...scoper, capabilities: [{ kind: 'skill', name: 'algorithmic-art' }] }], selected: 'scope' })
     const block = screen.getByRole('region', { name: 'Tools it can use' })
     // Files, the web and commands are every agent's, as What it may do without asking allows.
-    expect(block.querySelector('.byhand-row-says')).toHaveTextContent('None connected yet')
-    expect(block).toHaveTextContent('Every agent can read and write files in its own folder, search and read the web, and run commands, as you allow in What it may do without asking.')
+    expect(block.querySelector('.byhand-row-says')).toHaveTextContent('No tools yet')
+    expect(block).toHaveTextContent('Every agent can read and write files in its own folder, search and read the web, and run commands, as you allow under “What it may do without asking”.')
     expect(within(block).queryByRole('list', { name: 'Tools you gave it' })).toBeNull()
   })
 

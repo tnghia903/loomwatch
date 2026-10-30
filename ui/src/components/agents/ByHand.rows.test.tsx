@@ -67,7 +67,7 @@ it('opens the row for the part picked on the bench, and puts the focus in it', a
 it('says which parts its instructions have and which to add, and the tools added to it', () => {
   render(<Bench start={{ name: 'Writer', instructions: 'Write a short draft of each blog post.\n\nReply with the draft and its title.' }} />)
   expect(row(/^Instructions\b/)).toHaveAccessibleName('Instructions 2 of 4 parts · add How to work and How it checks')
-  expect(row(/^Tools it can use\b/)).toHaveAccessibleName('Tools it can use None connected yet')
+  expect(row(/^Tools it can use\b/)).toHaveAccessibleName('Tools it can use No tools yet')
   // Open, its box shows its parts, so the row doesn't say them again.
   fireEvent.click(row(/^Instructions\b/))
   expect(row(/^Instructions\b/)).toHaveAccessibleName('Instructions')

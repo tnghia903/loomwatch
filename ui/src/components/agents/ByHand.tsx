@@ -378,7 +378,7 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
           />)}
 
           {block('tools', <>
-            <p className="t-meta">Every agent can read and write files in its own folder, search and read the web, and run commands, as you allow in What it may do without asking.</p>
+            <p className="t-meta">Every agent can read and write files in its own folder, search and read the web, and run commands, as you allow under “What it may do without asking”.</p>
             {givenTools.length > 0 && <ul className="byhand-tools" aria-label="Tools you gave it">
               {givenTools.map(({ name, tool }) => {
                 const allowed = allowedFor(draft.toolAllow, name)
@@ -549,7 +549,7 @@ function keysSay(allow: AgentDraft['allow']): string {
 /** The tools added to it, by name, and which of them aren't connected yet; files, the web and
     commands are What it may do without asking's, so they aren't counted here. */
 function toolsRowSays(given: readonly { name: string; tool: unknown }[], loading: boolean): string {
-  if (!given.length) return 'None connected yet'
+  if (!given.length) return 'No tools yet'
   if (loading) return listNames(given.map((item) => item.name))
   const usable = given.filter((item) => item.tool).map((item) => item.name)
   const missing = given.filter((item) => !item.tool).map((item) => item.name)

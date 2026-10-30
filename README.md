@@ -779,7 +779,7 @@ with what should change; under its new version, **Continue with the team** runs 
    them immediately.
 4. A team has two tabs: **Team** and **Chat**. On **Team**, add agents from **My agents** in the
    panel on the left; to make a new one, choose **Build a new agent** and start from a job such as
-   Researcher or Writer. Select a card and press **Edit** with its name to change its name,
+   Researcher or Writer. Select a card and press its **Edit** button, such as **Edit Writer**, to change its name,
    instructions, model and how hard it thinks; each setting is a row that says what it is set to. Drag from the dot on a card's right edge to the next card to make them work in order, and
    add **You (review step)** wherever you want to approve work before the team continues.
 5. Click **Run team**, or open **Chat**, describe what you want in plain words, and press

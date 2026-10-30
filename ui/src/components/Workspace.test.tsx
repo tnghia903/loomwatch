@@ -1517,6 +1517,12 @@ describe('Workspace', () => {
         bench = await open()
         fireEvent.click(within(bench).getByRole('button', { name: /^Name\b/ }))
         fireEvent.change(within(bench).getByRole('textbox', { name: 'Name' }), { target: { value: 'Scout' } })
+        // Adding another agent from the sheet moves the workbench to it: that asks too.
+        fireEvent.click(within(bench).getByRole('button', { name: /^Add an agent/ }))
+        fireEvent.click(within(screen.getByRole('region', { name: 'Add an agent to this team' })).getByRole('button', { name: /^Add/ }))
+        expect(screen.getByRole('alertdialog', { name: 'Save changes to Scout?' })).toBeInTheDocument()
+        expect(documentState.addAgentFromDrop).not.toHaveBeenCalled()
+        fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Cancel' }))
         fireEvent.click(within(screen.getByRole('navigation', { name: 'Workspace view' })).getByRole('button', { name: 'Chat' }))
         fireEvent.click(within(screen.getByRole('alertdialog', { name: 'Save changes to Scout?' })).getByRole('button', { name: 'Don’t save' }))
         expect(screen.queryByRole('region', { name: /’s agents$/ })).toBeNull()

@@ -328,7 +328,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
       : teamView() === 'agents'
         ? {
             title: 'Back to the team',
-            body: 'This is one agent’s workbench. Close it to see the team’s agents together.',
+            body: 'You’re editing one agent here. Close it to see the whole team.',
             target: ['[data-tour="bench-close"]'],
             sides: ['left', 'bottom'],
             advance: 'action',

@@ -50,7 +50,7 @@ export function AgentTile({ id, figure, draft, teams, runs, pinned = false }: {
           const on = draft.allow[key] === true
           const said = `${label}: ${on ? 'allowed' : 'asks you'}`
           const Mark = SWITCH_ICONS[key]
-          return <span key={key} className={`agent-tile-mark ${on ? 'on' : 'asks'}`} role="img" aria-label={said} title={said}><Mark size={14} aria-hidden="true" />{on && <Icon name="check" size={10} strokeWidth={3} className="agent-tile-check" aria-hidden="true" />}</span>
+          return <span key={key} className={`agent-tile-mark ${on ? 'on' : 'asks'}`} role="img" aria-label={said} title={said}><Mark size={14} aria-hidden="true" />{on && <Icon name="check" size={12} strokeWidth={2.5} className="agent-tile-check" aria-hidden="true" />}</span>
         })}
         {skills > 0 && <span className="agent-tile-mark count" role="img" aria-label={`${skills} skill${skills === 1 ? '' : 's'}`} title={`${skills} skill${skills === 1 ? '' : 's'}: ${draft.skills.join(', ')}`}><Icon name="skills" size={14} />{skills}</span>}
         <span className="agent-tile-mark count" role="img" aria-label={teamsSaid} title={teamsSaid}><Icon name="network" size={14} />{teams}</span>

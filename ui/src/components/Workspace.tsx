@@ -2738,7 +2738,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
               onAgentSaved={doc.refillAgent}
               onShowWorkflow={closeBench}
               leaveRef={benchLeave}
-              onAdd={editable ? addSavedAgent : undefined}
+              onAdd={editable ? (job) => leaveBench(() => addSavedAgent(job)) : undefined}
               onPickModel={(agentId, model, follow) => doc.applyAgentFields(agentId, { model, followsSuggestion: follow ? true : undefined })}
               modelMoves={modelFollowing.moves}
               onUndoModelMove={modelFollowing.undo}
