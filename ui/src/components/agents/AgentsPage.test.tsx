@@ -129,6 +129,12 @@ describe('Removing an agent from its card', () => {
     const [left, right] = screen.getAllByRole('menu')
     expect(left.closest('li')).toBe(screen.getByRole('button', { name: 'More for Writer' }).closest('li'))
     expect(cascaded(left, 'left', PHONE)).toBe('0')
+    // Measured from the tile's own left edge: the "…" sits in a strip across the tile's top, which
+    // lets every other press through to the tile.
+    const strip = left.parentElement as HTMLElement
+    expect(strip).toHaveClass('agent-card-menu')
+    expect(cascaded(strip, 'left', PHONE)).toBe('6px')
+    expect(cascaded(strip, 'pointer-events', PHONE)).toBe('none')
     expect(cascaded(left, 'right', PHONE)).toBe('auto')
     expect(cascaded(right, 'right', PHONE)).toBe('0')
     // A wide window has room on the left: every menu opens from its tile's right.

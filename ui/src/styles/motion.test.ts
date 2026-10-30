@@ -53,9 +53,13 @@ describe('round 3’s screens move', () => {
     expect(animation(at('#scrim'))).toMatch(/^fade-in /)
     expect(animation(at('.lw-deleteteam'))).toMatch(/^dialog-in /)
     // Opened after the page's parts, it is a later child: no arrival delay holds it back.
-    const late = page('<div class="studio"><section></section><section></section><section></section><section></section><section></section><div id="scrim" class="lw-scrim dim"></div></div>')
-    expect(cascaded(late('#scrim'), 'animation-delay')).toBeNull()
-    expect(cascaded(late('section:nth-child(5)'), 'animation-delay')).toBe('160ms')
+    // Wherever it lands among them: second to sixth and after.
+    for (const before of [1, 2, 3, 4, 5]) {
+      const late = page(`<div class="studio">${'<section></section>'.repeat(before)}<div id="scrim" class="lw-scrim dim"></div></div>`)
+      expect(cascaded(late('#scrim'), 'animation-delay'), `after ${before}`).toBeNull()
+    }
+    const parts = page('<div class="studio"><section></section><section></section><section></section><section></section><section id="fifth"></section></div>')
+    expect(cascaded(parts('#fifth'), 'animation-delay')).toBe('160ms')
   })
 
   it('keep a lifted team card’s open menu above the cards after it', () => {
