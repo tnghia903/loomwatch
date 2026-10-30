@@ -63,7 +63,7 @@ and asks.
 <td width="50%" valign="middle">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="site/assets/app/agents-dark.webp">
-  <img src="site/assets/app/agents-light.webp" alt="Building an agent called Writer. Along the top, the name Writer, marked as saved, the Build and Chat tabs, and the bell saying All clear. Down the left edge, a column of My agents' figures, with Writer's marked; pick one to open it. Under the top bar, one sentence sums the agent up: Writer thinks with Claude Opus 5.5, has 1 skill, and reads nothing yet. It asks you before it searches the web, edits files or runs commands. Below it, Writer's figure sits at a desk, with a label on each part: The job, its instructions pinned up; Skills · 1, a note for its house style; Thinks with Claude Opus 5.5; Allowed · nothing; Asks you first · Web, Edit files, Commands; Hands back · said in its instructions; Reads · nothing yet; Tools · none yet. On the right, the same settings in blocks, starting with Name, What it does and Instructions.">
+  <img src="site/assets/app/agents-light.webp" alt="Building an agent called Writer. Down the left, LoomWatch's dock: Home with a count of 1, Projects, My agents marked, Skills, Quests, then Ask and You. Along the top, the name Writer, saved a minute ago, the Build and Chat tabs, and the bell saying 1 needs you. Under the top bar, one sentence sums the agent up: Writer thinks with Claude Sonnet 5.5, has no skills yet, and reads nothing yet. It asks you before it searches the web, edits files or runs commands. Below it, Writer's figure sits at a desk, with a label on each part: The job, its instructions pinned up; Skills · none yet; Thinks with Claude Sonnet 5.5; Allowed · nothing; Asks you first · Web, Edit files, Commands; Hands back · said in its instructions; Reads · nothing yet; Tools · none yet. On the right, the same settings in blocks, starting with Name, Instructions and Model.">
 </picture>
 </td>
 <td width="50%" valign="middle">
@@ -379,7 +379,7 @@ add, connect and rename agents to match. To run a team on a schedule, ask
 <td align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="site/assets/app/home-dark.webp">
-  <img src="site/assets/app/home-light.webp" alt="Home: first Your desk, where Researcher brought work for you to check, with the Review and Chat with one agent buttons. Under Projects, a room for each project with its team's agents at their desks: in SUTD final project, Researcher is drawn faint because it is at your desk, then the gold ring where you check; in Bakery website, Writer is working; and in My thesis, Writer is drawn faint because it is working in the Website team. Then a New project tile, and an agent in no project yet. At the top right are search, Skills, Quests, Ask, the bell saying 1 needs you, and the menu.">
+  <img src="site/assets/app/home-light.webp" alt="Home. Down the left, LoomWatch's dock: Home, marked, with a count of 1, then Projects, My agents, Skills, Quests, Ask and You. At the top, the box to give work: To Daily tech digest, What should Daily tech digest do?, a clip to add files and the send arrow. Under it, Needs you · 1 across the row: Researcher's figure, drawn big, brought work for you to check in Review stop demo, with a page icon to read it first and Approve. Then Working now (nobody is working, 8 ready, their figures), Finished today and This month. Under Projects, a room for each project with its team's agents: Review stop demo, where Researcher is waiting for you; Daily tech digest, which runs every day at 9:00 AM; and Research and review, ready. At the top right, the bell saying 1 needs you, and search.">
 </picture>
 <br><sub><strong>Home.</strong> Your desk first, with whoever waits for you, then a room for each project, with its agents at their desks.</sub>
 </td>
@@ -388,7 +388,7 @@ add, connect and rename agents to match. To run a team on a schedule, ask
 <td align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="site/assets/app/workflow-dark.webp">
-  <img src="site/assets/app/workflow-light.webp" alt="A team's Workflow tab: a daily schedule feeds Gatherer, then Reader, then Writer, which produces the team response. At the top of the canvas the team is read back as one sentence, with each agent's figure. Down the left edge, a column shows each of your teams by its agents' figures, with this one marked; pick one to switch. Beside it, the Add to your team panel lists My agents with the models they think with, the Build a new agent link, then Workflow steps with You (review step). The heading says Your team is ready, beside Run team.">
+  <img src="site/assets/app/workflow-light.webp" alt="A team's Workflow tab, beside LoomWatch's dock with Projects marked. A daily schedule feeds Gatherer, then Reader, then Writer, which produces the team response. At the top of the canvas the team is read back as one sentence, with each agent's figure: every day at 9:00 AM and whenever you ask, Gatherer collects what is needed, then Reader does its part, and finally Writer writes the answer. Beside it, the Add to your team panel lists My agents with the models they think with. The heading says Your team is ready, beside Run team. Along the top, the team's name, saved, the Agents, Workflow and Chat tabs, the bell and the ⋯.">
 </picture>
 <br><sub><strong>Workflow.</strong> Your agents on the canvas, connected in order and read back as one sentence.</sub>
 </td>
@@ -397,7 +397,7 @@ add, connect and rename agents to match. To run a team on a schedule, ask
 <td align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="site/assets/app/chat-dark.webp">
-  <img src="site/assets/app/chat-light.webp" alt="A team's Chat tab: the request @team Prepare a short getting-started guide for new users; under it, Waiting for you: Researcher's work is ready for your review, with Details, Stop and Researcher's figure with 1 reply on the right. Below, in the chat, Researcher's handover to you, then Approve and Send back to Researcher, and the message box ready for your review note.">
+  <img src="site/assets/app/chat-light.webp" alt="A team's Chat tab, beside LoomWatch's dock with Projects marked: the request Prepare a short getting-started guide for new users; under it, Waiting for you: Researcher's work is ready for your review, with Details, Stop and Researcher's figure with 1 reply on the right. Below, in the chat, Researcher's handover to you, then Approve and Send back to Researcher, and the box ready for your review note.">
 </picture>
 <br><sub><strong>Chat.</strong> Your review waits in the chat, under what the agents said, and Details opens every step beside the chat.</sub>
 </td>
