@@ -440,8 +440,11 @@ fn supervise(
     // The installer an update downloaded may still be finishing: what can't go now goes next time.
     let _ = std::fs::remove_dir_all(paths.update_work());
     loop {
+        // Connected to LoomWatch on another computer (ADR 0102): this PC runs none of its own,
+        // and shows that one instead.
+        let remote = paths.state.join(crate::CONNECTED_FILE).is_file();
         // One LoomWatch per run history: one started from a terminal on another port holds it.
-        if history_in_use(&paths.state) {
+        if !remote && history_in_use(&paths.state) {
             say(
                 "Already running in a terminal window: stop it there, then quit and reopen LoomWatch",
             );
@@ -465,7 +468,7 @@ fn supervise(
             }
         };
         *slot.lock().unwrap_or_else(PoisonError::into_inner) = Some(child);
-        if wait_until_healthy(port, slot) {
+        if wait_until_healthy(port, slot, remote) {
             let _ = proxy.send_event(UserEvent::Ready(port));
         } else if !stopping.load(Ordering::SeqCst) {
             say("Still starting… (see Show log)");
@@ -493,6 +496,11 @@ fn supervise(
         };
         if stopping.load(Ordering::SeqCst) {
             return;
+        }
+        // Connected to another computer, or back to this one's own: started again the other way.
+        if exit == Some(crate::EXIT_TO_SWITCH) {
+            say("Switching…");
+            continue;
         }
         // Update and restart: loomwatchd stopped for this app to install the release it named.
         if exit == Some(update::EXIT_TO_UPDATE) {
@@ -669,6 +677,8 @@ fn start_daemon(
     handoff: &std::result::Result<PathBuf, String>,
     failed: Option<String>,
 ) -> Result<Child> {
+    // Connected to LoomWatch on another computer (ADR 0102): show that one, run none here.
+    let connected = paths.state.join(crate::CONNECTED_FILE).is_file();
     if let Some(folder) = paths.log.parent() {
         std::fs::create_dir_all(folder)?;
     }
@@ -678,10 +688,12 @@ fn start_daemon(
         .open(&paths.log)
         .with_context(|| format!("can't write {}", paths.log.display()))?;
     let mut command = Command::new(&paths.daemon);
+    if connected {
+        command.arg("connect");
+    } else {
+        command.arg("serve").arg("--teams-root").arg(&paths.teams);
+    }
     command
-        .arg("serve")
-        .arg("--teams-root")
-        .arg(&paths.teams)
         .arg("--listen")
         .arg(format!("127.0.0.1:{port}"))
         // Held open by this app until it quits: see `Supervisor::stop`.
@@ -808,10 +820,17 @@ fn running_loomwatch(ports: std::ops::RangeInclusive<u16>) -> Option<String> {
     })
 }
 
-fn wait_until_healthy(port: u16, slot: &Mutex<Option<Child>>) -> bool {
+/// Whether `loomwatchd` answers before [`START_TIMEOUT`]. Connected to another computer, its own
+/// address answering is enough: when the other computer can't be reached, its page says so.
+fn wait_until_healthy(port: u16, slot: &Mutex<Option<Child>>, connected: bool) -> bool {
     let deadline = Instant::now() + START_TIMEOUT;
     while Instant::now() < deadline {
-        if get(port, "/api/health").is_some_and(|body| body.trim() == "ok") {
+        let healthy = if connected {
+            get(port, "/connector/v0/state").is_some()
+        } else {
+            get(port, "/api/health").is_some_and(|body| body.trim() == "ok")
+        };
+        if healthy {
             return true;
         }
         let exited = slot

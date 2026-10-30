@@ -26,6 +26,14 @@ yourself.
 - **Stay on your computer.** The app and its API answer only on `127.0.0.1`. Requests from other
   websites, and from pages that rebind their address to `127.0.0.1`, are refused. In Docker, its
   port is published on `127.0.0.1` only.
+- **Let in only the devices you connect.** Your iPhone or another computer reaches LoomWatch only
+  through a second door on `127.0.0.1` that you share on your own Tailscale, from Connections. Each
+  device you connect gets a key of its own, shown to it once; LoomWatch keeps only the key's
+  SHA-256, and Remove ends that device at once. A pairing code works once, for ten minutes. An
+  iPhone may see, answer, approve, start and stop work and chat, never keys, sign-ins or settings.
+  A connected computer may do everything you can at this one, so connect only your own. On that
+  computer the key is kept in the Keychain as `LoomWatch.Connection` (Credential Manager on
+  Windows).
 - **Keep your keys and your ChatGPT sign-in to itself.** You paste an OpenRouter or Claude API key
   into LoomWatch, which checks it with its company before keeping it. LoomWatch takes only a Claude
   API key: it refuses a Claude sign-in token (`sk-ant-oat…`) and an Admin key. On a Mac the

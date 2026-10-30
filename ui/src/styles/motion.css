@@ -214,6 +214,7 @@
   .team-agents-page { animation: sheet-in var(--t-move) var(--ease-out) backwards; }
   .byhand-row-body:not([hidden]) { animation: pop-in var(--t-quick) var(--ease-out) backwards; }
   .explain-text { animation: pop-in var(--t-quick) var(--ease-out) backwards; }
+  .lw-devices-connect { animation: pop-in var(--t-quick) var(--ease-out) backwards; }
   .lw-confirm { animation: pop-in-up var(--t-quick) var(--ease-out) backwards; }
   :is(.instruction-update-bar, .lw-notice, .home-empty.alert) { animation: rise-in var(--t-move) var(--ease-out) backwards; }
 }

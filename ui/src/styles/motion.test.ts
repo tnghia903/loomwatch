@@ -63,12 +63,13 @@ describe('round 3’s screens move', () => {
     expect(animation(at('#w'))).toBe('none')
   })
 
-  it('open what opens toward you: the workbench, a row, a question', () => {
-    const at = page('<div class="team-agents-page"></div><div class="byhand-row-body"></div><div class="byhand-row-body" hidden></div><div class="e2 lw-confirm leave"></div>')
+  it('open what opens toward you: the workbench, a row, a question, connecting a device', () => {
+    const at = page('<div class="team-agents-page"></div><div class="byhand-row-body"></div><div class="byhand-row-body" hidden></div><div class="e2 lw-confirm leave"></div><div class="lw-devices-connect"></div>')
     expect(animation(at('.team-agents-page'))).toMatch(/^sheet-in /)
     expect(animation(document.querySelectorAll('.byhand-row-body')[0])).toMatch(/^pop-in /)
     expect(animation(document.querySelectorAll('.byhand-row-body')[1])).toBeNull()
     expect(animation(at('.lw-confirm'))).toMatch(/^pop-in-up /)
+    expect(animation(at('.lw-devices-connect'))).toMatch(/^pop-in /)
   })
 
   it('lift the agent you point at on My agents', () => {

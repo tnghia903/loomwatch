@@ -83,6 +83,20 @@ enum Commands {
         )]
         allow_container_listener: bool,
     },
+    /// Show `LoomWatch` on the other computer this one is connected to (ADR 0102): this computer's
+    /// own address answers, and everything goes on to the other computer with this one's key.
+    Connect {
+        #[arg(long, default_value = "127.0.0.1:3000")]
+        listen: SocketAddr,
+        #[command(flatten)]
+        database: DatabaseArgs,
+    },
+    /// Stop being connected to another computer: its address and this computer's key for it are
+    /// forgotten here.
+    Disconnect {
+        #[command(flatten)]
+        database: DatabaseArgs,
+    },
     /// Run one turn of a team's entrypoint agent.
     Run {
         #[arg(long)]
@@ -476,6 +490,8 @@ async fn main() -> Result<()> {
             // daemon exit for it.
             let updates = loomwatch_backend::updates::Updates::from_env(&state_dir);
             updates.spawn_start_check();
+            // Pressed once this computer is connected to LoomWatch on another one (ADR 0102).
+            let switch = loomwatch_backend::devices::connected::switch();
             let updates_api = loomwatch_backend::updates::router(
                 updates.clone(),
                 registry.clone(),
@@ -524,20 +540,57 @@ async fn main() -> Result<()> {
                     state_dir.clone(),
                     loomwatch_backend::platform::home_dir().unwrap_or_default(),
                 ));
+                // Other devices connected to this computer (ADR 0102): their door, on this
+                // computer's own address, which the person's own Tailscale brings them to; and
+                // the list and pairing codes. Never behind a container's published port.
+                let devices = loomwatch_backend::devices::Devices::open(&state_dir);
+                let door = match loomwatch_backend::devices::door_address(
+                    std::env::var("LOOMWATCH_DEVICES_LISTEN").ok().as_deref(),
+                ) {
+                    Ok(Some(door)) if listen.ip().is_loopback() => {
+                        if loomwatch_backend::devices::open_door(devices.clone(), door, address)
+                            .await
+                        {
+                            loomwatch_backend::devices::api::Door::Open(door)
+                        } else {
+                            loomwatch_backend::devices::api::Door::Unavailable
+                        }
+                    }
+                    Ok(_) => loomwatch_backend::devices::api::Door::TurnedOff,
+                    Err(why) => {
+                        eprintln!("warning: {why}");
+                        loomwatch_backend::devices::api::Door::Unavailable
+                    }
+                };
+                app = app.merge(loomwatch_backend::devices::api::router(devices, door));
+                // Connecting this computer to LoomWatch on another one: once connected, this
+                // LoomWatch stops for the app to start it again, showing the other computer.
+                app = app.merge(loomwatch_backend::devices::connected::api_router(
+                    state_dir.clone(),
+                    loomwatch_backend::devices::connected::KeyPlace::open(&state_dir),
+                    switch.clone(),
+                ));
             }
-            // After "Update and restart": stop taking requests, give the open ones a moment (the
-            // app's live streams never end by themselves), then exit with the status that has the
-            // launcher install the release and start LoomWatch again.
+            // After "Update and restart", or connecting to another computer: stop taking
+            // requests, give the open ones a moment (the app's live streams never end by
+            // themselves), then exit with the status that has the app start LoomWatch again.
             let stopping = updates.clone();
+            let switching = switch.clone();
             let serving = axum::serve(listener, app)
                 .with_graceful_shutdown(async move {
-                    stopping.restart_requested().await;
+                    tokio::select! {
+                        _ = stopping.restart_requested() => {}
+                        () = loomwatch_backend::devices::connected::switched(&switching) => {}
+                    }
                 })
                 .into_future();
             let served = tokio::select! {
                 outcome = serving => outcome,
                 () = async {
-                    updates.restart_requested().await;
+                    tokio::select! {
+                        _ = updates.restart_requested() => {}
+                        () = loomwatch_backend::devices::connected::switched(&switch) => {}
+                    }
                     tokio::time::sleep(loomwatch_backend::updates::STOP_GRACE).await;
                 } => Ok(()),
             };
@@ -546,6 +599,20 @@ async fn main() -> Result<()> {
             if updates.restarting() {
                 std::process::exit(loomwatch_backend::updates::EXIT_TO_UPDATE);
             }
+            if *switch.borrow() {
+                std::process::exit(loomwatch_backend::devices::connected::EXIT_TO_SWITCH);
+            }
+        }
+        Commands::Connect { listen, database } => {
+            let state_dir = database.state_dir()?;
+            loomwatch_backend::devices::connected::serve_connected(listen, &state_dir).await?;
+            std::process::exit(loomwatch_backend::devices::connected::EXIT_TO_SWITCH);
+        }
+        Commands::Disconnect { database } => {
+            let state_dir = database.state_dir()?;
+            let keys = loomwatch_backend::devices::connected::KeyPlace::open(&state_dir);
+            loomwatch_backend::devices::connected::disconnect(&state_dir, &keys).await?;
+            println!("This computer runs its own LoomWatch again.");
         }
         Commands::Run {
             team,
