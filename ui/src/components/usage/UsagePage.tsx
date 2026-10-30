@@ -12,6 +12,7 @@ import { MakerMark } from '../models/MakerMark'
 import { SourceChip } from '../models/ModelPicker'
 import { DailyBars, type DayValue } from './DailyBars'
 import { YouTabs } from '../you/YouTabs'
+import { SectionHead } from '../ui/SectionHead'
 
 /** "Oct 1", from a UTC date (`2026-10-01`). */
 function shortDate(day: string): string {
@@ -73,8 +74,7 @@ export function UsagePage() {
       <div className="lw-settings-column usage-column">
         <YouTabs />
         <div className="lw-settings-head">
-          <h1 className="t-display">Usage</h1>
-          <p className="t-body">What your agents and Ask used in the last {DAYS} days, by how it was paid. Each way of paying counts it differently, and each card links to where you see the exact figure.</p>
+          <SectionHead page as="h1" className="t-display" title="Usage" explain={`What your agents and Ask used in the last ${DAYS} days, by how it was paid. Each way of paying counts it differently, and each card links to where you see the exact figure.`} />
         </div>
         {error && <p role="alert" className="inline-error t-body">{error}</p>}
         {!report && !error && <p role="status" className="t-meta lw-settings-quiet">Loading usage…</p>}

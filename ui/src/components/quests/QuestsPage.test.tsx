@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { partsDone, type Wardrobe } from '../../lib/quests/wardrobe'
@@ -15,6 +15,16 @@ const earned: Wardrobe = {
 const card = (name: string) => screen.getByText(name, { selector: '.quest-name b' }).closest('li') as HTMLElement
 
 describe('the Quests page', () => {
+  // Round 3: the page shows its state; how quests work is one press away, under its title's "?".
+  it('keeps how quests work behind its title’s ?, the fairness rule with it', () => {
+    render(<QuestsPage wardrobe={{}} />)
+    expect(screen.getByRole('heading', { level: 1, name: 'Quests' })).toBeInTheDocument()
+    expect(screen.queryByText(/Running more earns nothing/)).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'About Quests' }))
+    expect(screen.getByRole('note')).toHaveTextContent('Only a run that finishes can earn')
+    expect(screen.getByRole('note')).toHaveTextContent('Running more earns nothing.')
+  })
+
   it('lists every set of clothes, accessory and figure, and how many are earned', () => {
     render(<QuestsPage wardrobe={earned} />)
     expect(screen.getByRole('heading', { level: 1, name: 'Quests' })).toBeVisible()

@@ -5,6 +5,7 @@ import { AREA_NAMES, AREAS, isAccessory, isGarment, QUESTS, type Quest } from '.
 import { partsDone, useWardrobe, type EarnedItem, type Wardrobe } from '../../lib/quests/wardrobe'
 import { historyRunUrl } from '../../lib/runs/history'
 import { AccessoryIcon } from '../agents/AccessoryArt'
+import { SectionHead } from '../ui/SectionHead'
 
 function earnedDate(entry: EarnedItem): string {
   const at = new Date(entry.at)
@@ -29,13 +30,14 @@ export function QuestsPage({ wardrobe: given }: { wardrobe?: Wardrobe } = {}) {
       <div className="ground" aria-hidden="true" />
       <main className="home-main quests-main">
         <section className="home-hero quests-hero">
-          <h1 className="t-display">Quests</h1>
-          <p>Your runs earn clothes, accessories and figures for your agents. Each quest is one good practice: try it on work you wanted done anyway, and the receipt of the run that shows it says what it earned. Everything goes into one wardrobe all your agents share.</p>
+          <SectionHead page as="h1" className="t-display" title="Quests" explain={<>
+            <p>Your runs earn clothes, accessories and figures for your agents. Each quest is one good practice: try it on work you wanted done anyway, and the receipt of the run that shows it says what it earned. Everything goes into one wardrobe all your agents share.</p>
+            <p>Only a run that finishes can earn, judged by what LoomWatch recorded, never by what an agent says about itself. Running more earns nothing.</p>
+          </>} />
           <div className="quests-progress" role="group" aria-label="Your progress">
             <span className="quests-progress-count"><b>{done}</b> of {QUESTS.length} earned</span>
             <span className="quests-progress-pips" aria-hidden="true">{QUESTS.map((quest) => <i key={quest.item} className={wardrobe[quest.item] ? 'on' : ''} />)}</span>
           </div>
-          <p className="quests-rule t-meta">Only a run that finishes can earn, judged by what LoomWatch recorded, never by what an agent says about itself. Running more earns nothing.</p>
         </section>
 
         <QuestGroup id="quests-clothes" title="Clothes" says="Any of your agents can wear one set at a time" quests={clothes} wardrobe={wardrobe} />

@@ -16,6 +16,7 @@ import { AgentChip } from './AgentChip'
 import { AgentFrame, type AgentBarSlots } from './AgentFrame'
 import type { LeaveGuard } from './leave'
 import { navigate, useAgentsRoute } from './route'
+import { SectionHead } from '../ui/SectionHead'
 
 export interface AgentsPageProps {
   skills: DetectedCapability[]
@@ -70,8 +71,7 @@ function AgentTemplates({ team }: { team: string | null }) {
   return (
     <>
       <section className="home-hero agents-hero">
-        <h1 className="t-display">Build an agent</h1>
-        <p>Start from a job: it comes with working instructions, on the model its kind of work suits, and you can change all of it. Or start blank and write your own.</p>
+        <SectionHead page as="h1" className="t-display" title="Build an agent" explain="Start from a job: it comes with working instructions, on the model its kind of work suits, and you can change all of it. Or start blank and write your own." />
         {team && <a className="link agent-back" href={`/?path=${encodeURIComponent(team)}&view=agents`}>Back to the team</a>}
       </section>
       <section className="agents-start" aria-labelledby="agents-start-title" data-tour="agent-start">
@@ -106,8 +106,7 @@ function AgentsList() {
   return (
     <>
       <section className="home-hero agents-hero">
-        <h1 className="t-display">My agents</h1>
-        <p>Build an agent once and work with it in its own chat. Then add it to any team: it is the same agent in every team it’s in.</p>
+        <SectionHead page as="h1" className="t-display" title="My agents" explain="Build an agent once and work with it in its own chat. Then add it to any team: it is the same agent in every team it’s in." />
         <KnowYou />
         <div className="home-hero-acts">
           <button type="button" className="btn btn-primary btn-lg" onClick={() => open('/agents/new')} data-tour="new-agent"><Plus size={16} aria-hidden="true" />New agent</button>

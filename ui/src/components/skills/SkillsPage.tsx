@@ -10,6 +10,7 @@ import { Finder, Topics } from './Finder'
 import { Results, type ResultState } from './Results'
 import { Shelf } from './Shelf'
 import { Toast } from './Toast'
+import { SectionHead } from '../ui/SectionHead'
 
 type Search = { query: string; loading: boolean; found: FoundSkills | null; error: string }
 type ToastState = { text: string; action?: string; onAction?: () => void }
@@ -155,8 +156,9 @@ export function SkillsStore({ heading, intro, initialQuery = '', onAdded, onFold
     <>
       <main className="home-main lw-skills-main">
         <section className="home-hero lw-skills-hero">
-          <h1 className="t-display">{heading}</h1>
-          <p>{intro}</p>
+          {typeof heading === 'string'
+            ? <SectionHead page as="h1" className="t-display" title={heading} explain={intro} />
+            : <><h1 className="t-display">{heading}</h1><p>{intro}</p></>}
         </section>
         <div className="lw-skills-layout">
           <div className="lw-skills-browse">

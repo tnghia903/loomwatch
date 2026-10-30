@@ -585,6 +585,13 @@ select.input, .inspector-fields label > select { appearance: none; -webkit-appea
 .explain-text > div + div { margin-top: 6px; }
 .explain-text { display: block; padding: 8px 10px; border-left: 2px solid color-mix(in srgb, var(--color-accent) 50%, transparent); border-radius: 0 var(--r-xs) var(--r-xs) 0; background: color-mix(in srgb, var(--color-ink) 4%, transparent); color: var(--color-ink-2); font: 400 12px/1.5 var(--font-sans); letter-spacing: normal; text-transform: none; user-select: text; -webkit-user-select: text; }
 .explain-text b { color: var(--color-ink); font-weight: 500; }
+/* A page's title keeps its words one press away (round 3): a bigger "?", and the words at reading size. */
+.section-head.page { gap: var(--sp-2); }
+.section-head.page > .explain-toggle { width: 32px; height: 32px; margin: 0; }
+.explain-text.page { max-width: 720px; font-size: 14px; line-height: 1.55; }
+.explain-text.page p { margin: 0; }
+.explain-text.page p + p { margin-top: 8px; }
+@media (max-width: 767px) { .section-head.page > .explain-toggle { width: 44px; height: 44px; } }
 /* A pipeline step as a short thread: who hands it work, this step, who it hands work to. You wear
    the operator's dashed gold ring, as on the canvas. */
 .place-thread { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
