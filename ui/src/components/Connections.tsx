@@ -1,6 +1,7 @@
 import { YouTabs } from './you/YouTabs'
 
 import { ConnectedTools } from './connections/ConnectedTools'
+import { Devices } from './connections/Devices'
 import { Sources } from './connections/Sources'
 import { SectionHead } from './ui/SectionHead'
 
@@ -14,10 +15,11 @@ export default function Connections() {
       <div className="lw-settings-column">
         <YouTabs />
         <div className="lw-settings-head">
-          <SectionHead page as="h1" className="t-display" title="Connections" explain="Choose how your agents’ models are paid, connect your tools, and choose where your work belongs." />
+          <SectionHead page as="h1" className="t-display" title="Connections" explain="Choose how your agents’ models are paid, connect your tools and your other devices, and choose where your work belongs." />
         </div>
         <Sources />
         <ConnectedTools />
+        <Devices />
       </div>
     </main>
   )

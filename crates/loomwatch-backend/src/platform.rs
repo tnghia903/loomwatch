@@ -167,6 +167,71 @@ fn installed_office_programs() -> Vec<PathBuf> {
     }
 }
 
+/// What this computer is called in its own settings, such as `Nghia's MacBook Pro`: how another
+/// computer lists it among its connected devices (ADR 0102).
+#[must_use]
+pub fn computer_name() -> Option<String> {
+    #[cfg(target_os = "macos")]
+    let name = std::process::Command::new("/usr/sbin/scutil")
+        .args(["--get", "ComputerName"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).into_owned());
+    #[cfg(windows)]
+    let name = std::env::var("COMPUTERNAME").ok();
+    #[cfg(not(any(target_os = "macos", windows)))]
+    let name = std::fs::read_to_string("/etc/hostname").ok();
+    name.map(|name| name.trim().to_owned())
+        .filter(|name| !name.is_empty())
+}
+
+/// Where Tailscale's command line is on this computer, if it is (ADR 0102): where its app and
+/// installers put it, then on the search path. An app started at login has a short search path, so
+/// the usual places are named.
+#[must_use]
+pub fn tailscale_program() -> Option<PathBuf> {
+    let on_path = std::env::var_os("PATH")
+        .map(|search| std::env::split_paths(&search).collect::<Vec<_>>())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|folder| folder.join("tailscale"));
+    installed_tailscale_programs()
+        .into_iter()
+        .chain(on_path)
+        .flat_map(|path| program_candidates(&path))
+        .find(|path| path.is_file())
+}
+
+fn installed_tailscale_programs() -> Vec<PathBuf> {
+    #[cfg(target_os = "macos")]
+    {
+        [
+            "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+            "/opt/homebrew/bin/tailscale",
+            "/usr/local/bin/tailscale",
+        ]
+        .into_iter()
+        .map(PathBuf::from)
+        .collect()
+    }
+    #[cfg(windows)]
+    {
+        ["ProgramFiles", "ProgramW6432"]
+            .into_iter()
+            .filter_map(std::env::var_os)
+            .map(|folder| PathBuf::from(folder).join(r"Tailscale\tailscale.exe"))
+            .collect()
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
+    {
+        ["/usr/bin/tailscale", "/usr/local/bin/tailscale"]
+            .into_iter()
+            .map(PathBuf::from)
+            .collect()
+    }
+}
+
 /// Everything one command started, ended together.
 ///
 /// Windows has no process groups, and ending cmd.exe leaves whatever it started running with

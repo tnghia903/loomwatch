@@ -33,6 +33,17 @@ mod edit_keys;
 // Update and restart: the app downloading the next release and putting it in its own place.
 mod update;
 
+/// The exit status `loomwatchd` asks to be started again the other way with (ADR 0102): connected
+/// to `LoomWatch` on another computer, or running this computer's own
+/// (`devices::connected::EXIT_TO_SWITCH`).
+#[cfg_attr(not(any(target_os = "macos", windows)), allow(dead_code))]
+const EXIT_TO_SWITCH: i32 = 76;
+
+/// In `loomwatchd`'s state folder while this computer shows `LoomWatch` on another one
+/// (`devices::connected::FILE`): then the app starts `loomwatchd connect`, not `serve`.
+#[cfg_attr(not(any(target_os = "macos", windows)), allow(dead_code))]
+const CONNECTED_FILE: &str = "connected.json";
+
 #[cfg(target_os = "macos")]
 fn main() -> anyhow::Result<()> {
     mac::run()

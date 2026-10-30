@@ -295,6 +295,8 @@ The backend is `loomwatchd`, a single binary the user runs locally. Its job:
 - **Event archive:** one SQLite file, the durable and unbounded history
 - **UI host:** serves the single-page web UI (static assets), a WebSocket for live events, and a
   REST surface (see §5)
+- **Other devices:** the door a phone or another computer comes in by, and `loomwatchd connect`
+  on a computer that shows LoomWatch on another one (`devices/`, see Other devices below)
 
 **Why Rust:** the agent loop needs no vendor SDK. Every model call is one streamed HTTP request
 in OpenAI's chat shape, through OpenRouter, so a JavaScript ecosystem advantage disappears. What
@@ -351,6 +353,42 @@ apps' Update and restart saves one before it installs a release, and so does the
 Docker; 0.5.0 is the last release that copies such a history into the file. `loomwatchd` runs as a native process. The container
 image (`Dockerfile`, `docker-compose.yml`) runs the same binary, with the state folder on a
 volume. There the keys are in `keys.json` and `plans.json`.
+
+### Other devices
+
+One computer runs LoomWatch: its agents, keys, sign-ins, files and run history (ADR 0102). An
+iPhone or another computer connects to it and keeps nothing but a key of its own (`devices/`).
+
+- **The door.** `loomwatchd serve` opens a second listener on this computer's own address,
+  `127.0.0.1:3440` (`LOOMWATCH_DEVICES_LISTEN` moves it, `off` closes it; a taken port leaves
+  LoomWatch running without it). Nothing outside reaches it unless the person shares it: Your
+  devices, on Connections, runs `tailscale serve` on the press of Let my devices in, on a free one
+  of the ports 443, 8443 and 10000, and never changes what Tailscale already shares (`reach.rs`;
+  `LOOMWATCH_TAILSCALE` names Tailscale's program when it isn't in a usual place).
+- **Pairing.** Connections makes a code for an iPhone or a computer. It works once, for ten
+  minutes; five wrong codes in a row end it; a new code ends the one before. It travels as
+  `loomwatch://pair?address=…&code=…`, as a QR code for an iPhone and a link for a computer. The
+  device trades it at `POST /devices/v0/claim` for a 256-bit key it is shown once. LoomWatch
+  keeps only the key's SHA-256, in `devices.json` in the state folder, so Remove ends a device at
+  once and nothing else changes. Making codes, the list and Remove answer only on this computer's
+  own address, from its own page (`api.rs`).
+- **What each may do.** Every request at the door carries its key. An iPhone gets the phone's
+  routes (`/phone/v0/*`) and the short list in `phone::ALLOWED`: see, answer, approve, start,
+  stop, chat, Ask, and small changes to an agent or a team, never keys, sign-ins or settings
+  (`phone/`). A computer gets everything a person at this computer can do: its requests go on as
+  a local program's would, without its key, cookies or the page it came from, and marked
+  `x-loomwatch-via-device` so LoomWatch keeps a few things, such as connecting this computer to
+  another, to its own screen (`door.rs`, `pass.rs`). Live connections are joined byte for byte.
+- **A connected computer.** Connecting starts on that computer's own Connections page: Connect to
+  another computer takes the link, trades its code, keeps the key in the Keychain (Credential
+  Manager on Windows, `connection-key.json` elsewhere), writes `connected.json`, and exits with
+  76. The Mac and Windows apps then start `loomwatchd connect` instead of `serve`, on the same
+  port, so the notch, the menu bar and the browser show the other computer
+  (`connected.rs`). It applies this computer's own address and same-page checks, then passes
+  everything on with its key. A file opens on the computer it is on, so Open is refused here with
+  words that say so. When the other computer can't be reached or has removed this one, a page says
+  which, with Try again and Use LoomWatch on this computer, which forgets the connection and exits
+  with 76 again. `loomwatchd disconnect` does the same from a terminal.
 
 ### Schedules
 

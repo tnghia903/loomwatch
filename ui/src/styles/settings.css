@@ -347,3 +347,44 @@
 
 /* A connected tool's call, as its maker describes it: Markdown and all, two lines at most. */
 .lw-call-desc { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; color: var(--color-ink-3); }
+
+/* ---- Your devices (ADR 0102) ------------------------------------------------ */
+/* The iPhones and computers connected to LoomWatch here, as Tools lists what is connected. The
+   section's quiet lines sit where the e1 sheen is brightest in dark mode: ink-3 falls under 4.5:1
+   there, so they are ink-2. */
+.lw-devices .lw-settings-quiet { color: var(--color-ink-2); }
+.lw-devices .t-meta .link { font: inherit; font-weight: 500; }
+.lw-devices-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-2); }
+.lw-devices-list > li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-2) var(--sp-3); padding: var(--sp-3) var(--sp-4); border: 1px solid var(--color-hairline); border-radius: var(--r-md); }
+.lw-devices-list > li > .link { margin-left: auto; }
+.lw-devices-name { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.lw-devices-name b { font-size: 14px; font-weight: 600; color: var(--color-ink); overflow-wrap: anywhere; }
+.lw-devices-name .t-meta { color: var(--color-ink-2); }
+.lw-devices-connect { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-4); border: 1px solid var(--color-hairline); border-radius: var(--r-md); }
+.lw-devices-other { align-self: flex-start; }
+/* iPhone or computer: the picked one as the app's other picked choices show it (Connect a tool's
+   topics): a gold edge on a gold tint, never a fill, so it doesn't read as a button to press. */
+.lw-devices-kind { display: inline-flex; align-self: flex-start; gap: 2px; padding: 2px; border: 1px solid var(--color-hairline); border-radius: var(--r-md); }
+.lw-devices-kind button { min-height: 32px; padding: 0 var(--sp-4); border: 1px solid transparent; border-radius: calc(var(--r-md) - 2px); background: none; color: var(--color-ink-2); font: 500 13px/18px var(--font-sans); cursor: pointer; }
+.lw-devices-kind button:hover:not([aria-pressed="true"]) { color: var(--color-ink); border-color: var(--color-hairline); }
+.lw-devices-kind button[aria-pressed="true"] { border-color: var(--color-accent); box-shadow: inset 0 0 0 1px var(--color-accent); background: var(--color-accent-tint); color: var(--color-ink); font-weight: 600; }
+.lw-devices-kind button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+.lw-devices-step { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-2); }
+.lw-devices-step p, .lw-devices-link p, .lw-devices-qr p, .lw-devices-connect > p { margin: 0; overflow-wrap: anywhere; }
+/* The code stays dark on paper in both themes: phone cameras read that best. */
+.lw-devices-qr { margin: 0; display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-2); }
+.lw-devices-qr svg { width: 196px; height: 196px; max-width: 100%; border-radius: var(--r-md); }
+.lw-devices-qr .paper { fill: var(--color-paper); }
+.lw-devices-qr .ink { fill: var(--color-paper-ink); }
+.lw-devices-link { display: flex; flex-direction: column; gap: var(--sp-2); }
+.lw-devices-link-row { display: flex; gap: var(--sp-2); }
+.lw-devices-link-row .input { flex: 1; min-width: 0; font: 400 12px/17px var(--font-mono); }
+.lw-devices-link-row .btn { height: 32px; }
+/* A phone's width: room to tap, and the link field gets the whole line. The button's 44 px is
+   said again here, since the 32 px above outranks app.css's narrow rule. */
+@media (max-width: 767px) {
+  .lw-devices-kind button { min-height: 44px; }
+  .lw-devices .link { display: inline-flex; align-items: center; min-height: 44px; }
+  .lw-devices-link-row { flex-direction: column; }
+  .lw-devices-link-row .btn { height: 44px; align-self: flex-start; }
+}

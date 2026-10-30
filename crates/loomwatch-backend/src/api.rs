@@ -2384,7 +2384,7 @@ fn ensure_under_teams_root(
 /// The temporary file lives beside the destination so the final rename stays on one
 /// filesystem and is atomic. Syncing it before the rename also prevents a successful
 /// response from referring to bytes that are still only in userspace buffers.
-fn atomic_write(path: &Path, contents: &[u8], create: bool) -> io::Result<()> {
+pub(crate) fn atomic_write(path: &Path, contents: &[u8], create: bool) -> io::Result<()> {
     let parent = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())

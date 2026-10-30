@@ -20,6 +20,7 @@ pub mod connected_tools;
 pub mod control;
 pub mod db;
 pub mod delivery;
+pub mod devices;
 pub mod documents;
 pub mod engine;
 mod files;
