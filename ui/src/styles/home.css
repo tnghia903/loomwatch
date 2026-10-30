@@ -207,6 +207,10 @@
 .lw-deleteteam h2 { margin: 0 0 var(--sp-1); font: 600 19px/1.3 var(--font-sans); letter-spacing: -.01em; color: var(--color-ink); overflow-wrap: anywhere; }
 .lw-deleteteam p { margin: 0; font-size: 14px; line-height: 1.5; color: var(--color-ink-2); overflow-wrap: anywhere; }
 .lw-deleteteam .dt-alert { color: var(--color-alert); }
+/* A team at work is a wait, not something wrong: said in ink, with Delete or Remove held. */
+.lw-deleteteam .dt-wait { color: var(--color-ink-2); }
+.lw-deleteteam .input { height: 40px; font-size: 15px; }
+@media (max-width: 767px) { .lw-deleteteam .input { height: 44px; font-size: 16px; } }
 .lw-deleteteam .dt-acts { display: flex; justify-content: flex-end; gap: var(--sp-2); margin-top: var(--sp-2); }
 .lw-deleteteam .btn-danger-fill { background: var(--color-alert-fill); color: var(--color-alert-on-fill); border-color: transparent; }
 .lw-deleteteam form { display: flex; flex-direction: column; gap: var(--sp-3); }

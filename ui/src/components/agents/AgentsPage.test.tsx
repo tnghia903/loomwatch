@@ -97,7 +97,12 @@ describe('Removing an agent from its card', () => {
   it('says which teams it comes off, and takes it off them before it goes', async () => {
     window.history.replaceState({}, '', '/agents')
     page()
-    fireEvent.click(await screen.findByRole('button', { name: 'More for Writer' }, { timeout: 3000 }))
+    const more = await screen.findByRole('button', { name: 'More for Writer' }, { timeout: 3000 })
+    // A tile is one button: its "…" sits beside it, never inside it, and pressing it opens no agent.
+    expect(more.closest('.agent-card')).toBeNull()
+    expect(more.closest('li')?.querySelector('.agent-card')).not.toBeNull()
+    fireEvent.click(more)
+    expect(window.location.pathname).toBe('/agents')
     fireEvent.click(within(screen.getByRole('menu', { name: 'Writer' })).getByRole('menuitem', { name: 'Remove from My agents…' }))
     const dialog = await screen.findByRole('alertdialog', { name: 'Remove “Writer” from My agents?' })
     // "the team": a team called Blog isn't the person's blog.
@@ -123,7 +128,7 @@ describe('Removing an agent from its card', () => {
     fireEvent.click(screen.getByRole('button', { name: 'More for Editor' }))
     const [left, right] = screen.getAllByRole('menu')
     expect(left.closest('li')).toBe(screen.getByRole('button', { name: 'More for Writer' }).closest('li'))
-    expect(cascaded(left, ['left', 'right'], PHONE)).toBe('0')
+    expect(cascaded(left, 'left', PHONE)).toBe('0')
     expect(cascaded(left, 'right', PHONE)).toBe('auto')
     expect(cascaded(right, 'right', PHONE)).toBe('0')
     // A wide window has room on the left: every menu opens from its tile's right.

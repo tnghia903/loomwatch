@@ -7,7 +7,7 @@ import { readTourState, resetTourForTests } from '../../lib/tour/store'
 import { forgetYou } from '../../lib/you/client'
 import type { RunRecord } from '../../lib/runs/client'
 import { APPROVAL_TEXT } from '../../lib/story/needsYou'
-import { cascaded, goldFilled, isGoldFill, PHONE } from '../../test/cascade'
+import { cascaded, DESKTOP, goldFilled, isGoldFill, PHONE } from '../../test/cascade'
 import { figureFor, figureStill } from '../../lib/library/figures'
 import { Home } from './Home'
 
@@ -423,6 +423,9 @@ describe('Home, the studio (ADR 0097)', () => {
     fireEvent.click(within(blog).getByRole('button', { name: 'Project settings for Blog' }))
     fireEvent.click(within(screen.getByRole('menu', { name: 'Project settings for Blog' })).getByRole('menuitem', { name: 'Rename…' }))
     const rename = screen.getByRole('dialog', { name: 'Rename project' })
+    // A finger-sized field on a phone, with text big enough that Safari doesn't zoom in on it.
+    expect(cascaded(within(rename).getByRole('textbox', { name: 'Project name' }), 'font-size', PHONE)).toBe('16px')
+    expect(cascaded(within(rename).getByRole('textbox', { name: 'Project name' }), 'height', PHONE)).toBe('44px')
     fireEvent.change(within(rename).getByRole('textbox', { name: 'Project name' }), { target: { value: 'Blog posts' } })
     fireEvent.click(within(rename).getByRole('button', { name: 'Rename' }))
     await waitFor(() => expect(puts).toEqual([{ url: '/api/projects/blog', body: { name: 'Blog posts' } }]))
@@ -470,6 +473,12 @@ describe('Home, the studio (ADR 0097)', () => {
     localStorage.removeItem('loomwatch:studio-view')
     // One pick: the button opens your projects, and the one picked takes the team.
     fireEvent.click(within(row).getByRole('button', { name: 'Move to a project: Weekly posts' }))
+    // In a narrow window the list hangs under the whole row, so a long name never runs off the left.
+    const list = screen.getByRole('menu', { name: 'Move to a project: Weekly posts' })
+    expect(cascaded(list, 'left', PHONE)).toBe('0')
+    expect(cascaded(list, 'right', PHONE)).toBe('0')
+    expect(cascaded(list, 'width', PHONE)).toBe('auto')
+    expect(cascaded(list, 'width', DESKTOP)).toBe('max-content')
     fireEvent.click(within(screen.getByRole('menu', { name: 'Move to a project: Weekly posts' })).getByRole('menuitem', { name: 'SUTD final project' }))
     await waitFor(() => expect(calls).toEqual(['PUT /api/team']))
     expect(saved).toContain('project: sutd')

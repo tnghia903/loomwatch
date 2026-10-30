@@ -166,7 +166,7 @@
 @media (prefers-reduced-motion: no-preference) {
   :is(.room-card, .room-tile, .room-new, .pick-up-chat, .team-card):hover { translate: 0 -1px; box-shadow: var(--e1-shadow); }
   /* A lifted card is its own layer: one with its Move to menu open stays above the cards after it. */
-  .team-card:has([aria-expanded="true"]) { z-index: 3; }
+  :is(.team-card, .room-card):has([aria-expanded="true"]) { z-index: 3; }
   /* Home's cards (and My agents' tiles) ease into a press, as into their hover (home.css). */
   .home-card { transition: border-color var(--t-quick) var(--ease-out), transform var(--t-quick) var(--ease-out), box-shadow var(--t-quick) var(--ease-out), scale var(--t-instant) var(--ease-out); }
   /* On My agents, the agent you point at looks up from its desk. */
@@ -189,15 +189,15 @@
   :is(.home-grid, .room-list, .glance-needs) > li {
     animation: rise-in var(--t-entrance) var(--ease-out) backwards;
   }
-  :is(.studio, .agents-main, .quests-main, .lw-skills-main, .lw-settings) > :nth-child(2),
+  :is(.studio, .agents-main, .quests-main, .lw-skills-main, .lw-settings) > :nth-child(2):not(.set-up-backdrop, .lw-scrim),
   :is(.home-grid, .room-list, .glance-needs) > li:nth-child(2) { animation-delay: 40ms; }
-  :is(.studio, .agents-main, .quests-main, .lw-skills-main, .lw-settings) > :nth-child(3),
+  :is(.studio, .agents-main, .quests-main, .lw-skills-main, .lw-settings) > :nth-child(3):not(.set-up-backdrop, .lw-scrim),
   :is(.home-grid, .room-list, .glance-needs) > li:nth-child(3) { animation-delay: 80ms; }
-  :is(.studio, .agents-main, .quests-main, .lw-skills-main, .lw-settings) > :nth-child(4),
+  :is(.studio, .agents-main, .quests-main, .lw-skills-main, .lw-settings) > :nth-child(4):not(.set-up-backdrop, .lw-scrim),
   :is(.home-grid, .room-list, .glance-needs) > li:nth-child(4) { animation-delay: 120ms; }
-  :is(.studio, .agents-main, .quests-main, .lw-skills-main, .lw-settings) > :nth-child(5),
+  :is(.studio, .agents-main, .quests-main, .lw-skills-main, .lw-settings) > :nth-child(5):not(.set-up-backdrop, .lw-scrim),
   :is(.home-grid, .room-list, .glance-needs) > li:nth-child(5) { animation-delay: 160ms; }
-  :is(.studio, .agents-main, .quests-main, .lw-skills-main, .lw-settings) > :nth-child(1n+6),
+  :is(.studio, .agents-main, .quests-main, .lw-skills-main, .lw-settings) > :nth-child(1n+6):not(.set-up-backdrop, .lw-scrim),
   :is(.home-grid, .room-list, .glance-needs) > li:nth-child(1n+6) { animation-delay: 200ms; }
 
   /* What needs you first steps up: when it is new, its figure pops up (the spring, DESIGN.md § 9),

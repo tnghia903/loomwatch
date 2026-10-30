@@ -75,7 +75,7 @@ export function DeleteTeamDialog({ path, name, onDeleted, onClose }: DeleteTeamD
         <h2 id={titleId}>Delete “{name}”?</h2>
         <p title={`${isWindows() ? 'The' : 'The hidden'} .trash folder inside your teams folder. Moving them back restores the team.`}>It leaves Home. LoomWatch keeps a copy in your teams folder, with its notes and any files you added to its agents.</p>
         <p>LoomWatch keeps its past runs, so they come back if you restore it.</p>
-        {live && <p role="alert" className="dt-alert">“{name}” is running right now. Stop the run or wait for it to finish, then delete the team.</p>}
+        {live && <p role="alert" className="dt-wait">“{name}” is running right now. Stop the run or wait for it to finish, then delete the team.</p>}
         {error && <p role="alert" className="dt-alert">{error}</p>}
         <div className="dt-acts">
           <button type="button" className="btn" autoFocus onClick={onClose} disabled={busy}>Cancel</button>

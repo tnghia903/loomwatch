@@ -541,8 +541,12 @@ button.wall-paper:focus-visible { outline: 2px solid var(--color-accent); outlin
 .idle-agent-menu button.menu-alert:hover:not(:disabled) { background: color-mix(in srgb, var(--color-alert) 10%, transparent); }
 /* As wide as its longest item, so "Remove from My agents…" stays on one line. */
 :is(.room-card-menu, .agent-card-menu, .move-to-project) .idle-agent-menu { width: max-content; }
-/* An open "…" looks open, as a card's menu button on Home does. */
-:is(.room-card-menu, .agent-card-menu) .iconbtn[aria-expanded="true"] { background: var(--color-accent-tint); color: var(--color-ink); }
+/* An open "…" or Add list looks open, as a card's menu button on Home does; the ring shows it on the
+   dark panel, where the tint alone barely does. */
+:is(.room-card-menu, .agent-card-menu) .iconbtn[aria-expanded="true"],
+.move-to-project > .btn[aria-expanded="true"] { background: var(--color-accent-tint); color: var(--color-ink); box-shadow: inset 0 0 0 1px var(--color-accent-dim); }
+.move-to-project > .btn > svg { transition: rotate var(--t-quick) var(--ease-out); }
+.move-to-project > .btn[aria-expanded="true"] > svg { rotate: 180deg; }
 
 /* ---------- A team in no project, under "Not in a project" (ADR 0100) ---------- */
 /* Each on its line as in a room's card, then its one step into a project and its "…". In a narrow
@@ -553,4 +557,11 @@ button.wall-paper:focus-visible { outline: 2px solid var(--color-accent); outlin
 .move-to-project { position: relative; flex: none; margin-left: auto; }
 .move-to-project > .btn { gap: 6px; min-height: 36px; }
 .loose-team > .room-card-menu { margin: 0; }
+/* In a narrow window the list of projects hangs under the whole row, as wide as it, so a long
+   project name never pushes it off the window's left edge. */
+@media (max-width: 767px) {
+  .loose-team { position: relative; }
+  .loose-team > .move-to-project { position: static; }
+  .loose-team > .move-to-project > .idle-agent-menu { left: 0; right: 0; width: auto; }
+}
 .not-in-project > :is(.loose-moved, .alert) { flex-basis: 100%; margin: 0; }

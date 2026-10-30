@@ -101,7 +101,7 @@ export function RemoveAgentDialog({ agent, uses, onRemoved, onClose }: RemoveAge
             </span>
           </div>
         ))}
-        {working.length > 0 && <p role="alert" className="dt-alert">{listNames(working)} {working.length === 1 ? 'is' : 'are'} working right now. Wait for {working.length === 1 ? 'it' : 'them'} to finish, then remove {agent.name}.</p>}
+        {working.length > 0 && <p role="alert" className="dt-wait">{listNames(working)} {working.length === 1 ? 'is' : 'are'} working right now. Wait for {working.length === 1 ? 'it' : 'them'} to finish, then remove {agent.name}.</p>}
         {/* A copy, not "nothing is erased": the teams it leaves are saved closed up around it. */}
         <p title={emptied.length > 0 ? '.jobs/.removed and .trash, inside your teams folder' : '.jobs/.removed, inside your teams folder'}>LoomWatch keeps a copy of {emptied.length > 0 ? 'it, and of the teams it deletes,' : 'it'} in your teams folder.</p>
         {error && <p role="alert" className="dt-alert">{error}</p>}

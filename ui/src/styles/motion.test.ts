@@ -52,11 +52,22 @@ describe('round 3’s screens move', () => {
     const at = page('<div class="studio"><section id="desk"></section><div id="scrim" class="lw-scrim dim"><div class="pop e2 lw-deleteteam"></div></div></div>')
     expect(animation(at('#scrim'))).toMatch(/^fade-in /)
     expect(animation(at('.lw-deleteteam'))).toMatch(/^dialog-in /)
+    // Opened after the page's parts, it is a later child: no arrival delay holds it back.
+    const late = page('<div class="studio"><section></section><section></section><section></section><section></section><section></section><div id="scrim" class="lw-scrim dim"></div></div>')
+    expect(cascaded(late('#scrim'), 'animation-delay')).toBeNull()
+    expect(cascaded(late('section:nth-child(5)'), 'animation-delay')).toBe('160ms')
   })
 
   it('keep a lifted team card’s open menu above the cards after it', () => {
     const at = page('<div class="team-card"><button aria-expanded="true"></button></div>')
     expect(cascaded(at('.team-card'), 'z-index')).toBe('3')
+  })
+
+  // ADR 0100: a project card on Home lifts under the pointer, which stays on its open "…".
+  it('keep a lifted project card’s open "…" above the cards after it', () => {
+    const at = page('<article class="room-card"><span class="room-card-menu"><button aria-expanded="true"></button></span></article><article id="closed" class="room-card"></article>')
+    expect(cascaded(at('.room-card'), 'z-index')).toBe('3')
+    expect(cascaded(at('#closed'), 'z-index')).toBeNull()
   })
 
   it('breathe a working figure’s glow, and hold the others still', () => {

@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { RunRecord } from '../../lib/runs/client'
+import { cascaded } from '../../test/cascade'
 import { teamPathUnderRoot, type DeletedTeam } from '../../lib/team-file/client'
 import { DeleteTeamDialog } from './DeleteTeamDialog'
 
@@ -68,6 +69,8 @@ describe('DeleteTeamDialog', () => {
     renderDialog()
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })
     expect(screen.getByRole('alert')).toHaveTextContent('“Trip planner” is running right now. Stop the run or wait for it to finish')
+    // A team at work is a wait, not a fault: ink, not the alert red.
+    expect(cascaded(screen.getByRole('alert'), 'color')).toBe('var(--color-ink-2)')
     const remove = screen.getByRole('button', { name: 'Delete team' })
     expect(remove).toBeDisabled()
     fireEvent.click(remove)
