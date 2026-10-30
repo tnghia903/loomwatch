@@ -100,7 +100,7 @@ function AddATeam({ here, shapes, projects, onAdd }: { here: string; shapes: rea
     .sort((a, b) => a.first.name.localeCompare(b.first.name))
   if (teams.length === 0) return null
   return (
-    <CardMenu label="Add a team" title={null} face={<>Add a team</>} className="move-to-project add-a-team">
+    <CardMenu label="Add a team" title={null} face={<>Add a team</>} className="add-a-team">
       {(pick) => teams.map(({ first, where, alone }) => (
         <button key={first.path} type="button" role="menuitem" onClick={pick(() => onAdd(first, alone))}>
           <span className="add-a-team-name">{first.name}<small>{alone ? 'In no project' : `In ${listNames(where)}`}</small></span>

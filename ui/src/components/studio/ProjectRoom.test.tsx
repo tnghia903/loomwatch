@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { cascaded, isGoldFill } from '../../test/cascade'
+import { cascaded, isGoldFill, PHONE } from '../../test/cascade'
 import { ProjectRoom } from './ProjectRoom'
 
 let fetchMock: ReturnType<typeof vi.fn>
@@ -118,9 +118,12 @@ describe('a project’s room (ADR 0097)', () => {
     render(<ProjectRoom id="sutd" />)
     fireEvent.click(await screen.findByRole('button', { name: 'More for Research and design' }))
     const menu = screen.getByRole('menu', { name: 'More for Research and design' })
+    // The open "…" looks open, as Home's do, however the pointer moves.
+    expect(cascaded(screen.getByRole('button', { name: 'More for Research and design' }), 'box-shadow')).toBe('inset 0 0 0 1px var(--color-accent-dim)')
     fireEvent.click(within(menu).getByRole('menuitem', { name: 'Add to another project' }))
-    // Only the other projects: never the one it is in.
+    // Only the other projects: never the one it is in. The keyboard's place moves to the first.
     expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['My thesis'])
+    expect(within(menu).getByRole('menuitem', { name: 'My thesis' })).toHaveFocus()
     fireEvent.click(within(menu).getByRole('menuitem', { name: 'My thesis' }))
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/team/places', expect.objectContaining({ method: 'POST' })))
     const post = fetchMock.mock.calls.find(([url]) => url === '/api/team/places')
@@ -199,6 +202,8 @@ describe('a project’s room (ADR 0097)', () => {
       await waitFor(() => expect(card).toHaveTextContent('Also in My thesis'))
       fireEvent.click(within(card).getByRole('button', { name: 'More for Research and design' }))
       fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Delete team…' }))
+      // Three buttons wrap on a phone rather than push the dialog sideways.
+      expect(cascaded(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Cancel' }).parentElement as HTMLElement, 'flex-wrap')).toBe('wrap')
       fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Only take out of SUTD final project' }))
       await waitFor(() => expect(calls).toEqual(['POST /api/team/take-out']))
       expect(await screen.findByRole('status')).toHaveTextContent('Research and design is out of SUTD final project. It still works in My thesis.')
@@ -221,10 +226,19 @@ describe('a project’s room (ADR 0097)', () => {
       return daemon(url, init)
     })
     render(<ProjectRoom id="sutd" />)
-    fireEvent.click(await screen.findByRole('button', { name: 'Add a team' }))
+    const add = await screen.findByRole('button', { name: 'Add a team' })
+    // It stands as Add an agent and New team do beside it.
+    expect(cascaded(add, 'min-height')).toBe(cascaded(screen.getByRole('button', { name: 'New team' }), 'min-height'))
+    fireEvent.click(add)
     const menu = screen.getByRole('menu', { name: 'Add a team' })
+    // In a narrow window it hangs under the whole toolbar, so a long name never runs off the left.
+    expect(cascaded(menu, 'left', PHONE)).toBe('0')
+    expect(cascaded(menu, 'width', PHONE)).toBe('auto')
+    expect(cascaded(menu.parentElement as HTMLElement, 'position', PHONE)).toBe('static')
     // Each of yours not here yet, saying where it works now; never one already here.
     await waitFor(() => expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['PricesIn My thesis', 'Weekly briefIn no project']))
+    // Where each works reads on a hovered row too: ink-2, not ink-3.
+    expect(cascaded(within(menu).getByText('In My thesis'), 'color')).toBe('var(--color-ink-2)')
     fireEvent.click(within(menu).getByRole('menuitem', { name: /^Prices/ }))
     await waitFor(() => expect(calls).toEqual([{ url: '/api/team/places', body: { path: 'thesis/prices.yaml', project: 'sutd' } }]))
     expect(await screen.findByRole('status')).toHaveTextContent('Prices works here too, with a chat and work of its own.')

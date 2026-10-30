@@ -38,15 +38,17 @@ export function TeamGrid({ teams, figureOf, newest, menu }: {
           <article key={team.path} className="team-card" data-state={team.state} aria-label={team.name}>
             <div className="team-card-head">
               {/* When no desk shows what the team is doing (it stopped, or nobody is at work yet), its name says it. */}
-              <a className="room-team-name" href={teamHref(team.path, 'chat')}>
-                <b>{team.name}</b>
-                {words && <>{' '}<span className={`room-state ${team.state}`}>{words}</span></>}
-                {team.schedule && <>{' '}<span className="room-team-when">{words ? `· ${team.schedule}` : team.schedule}</span></>}
-              </a>
+              <span className="team-card-title">
+                <a className="room-team-name" href={teamHref(team.path, 'chat')}>
+                  <b>{team.name}</b>
+                  {words && <>{' '}<span className={`room-state ${team.state}`}>{words}</span></>}
+                  {team.schedule && <>{' '}<span className="room-team-when">{words ? `· ${team.schedule}` : team.schedule}</span></>}
+                </a>
+                {/* The same team works in other projects too, each with its own work (ADR 0103). */}
+                {team.alsoIn?.length ? <span className="team-card-also">Also in {listNames(team.alsoIn.map((project) => project.name))}</span> : null}
+              </span>
               {menu?.(team)}
             </div>
-            {/* The same team works in other projects too, each with its own work (ADR 0103). */}
-            {team.alsoIn?.length ? <span className="team-card-also">Also in {listNames(team.alsoIn.map((project) => project.name))}</span> : null}
             <TeamDesks team={team} figureOf={figureOf} size={one ? 56 : 40} all />
             {file && <div className="team-card-made"><FileChip path={file.path} /></div>}
           </article>

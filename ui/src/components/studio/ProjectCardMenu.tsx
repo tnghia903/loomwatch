@@ -84,8 +84,9 @@ function PlacesItems({ here, projects, onAdd, onTakeOut, onDelete, pick }: { her
     return (
       <>
         <span className="room-team-move-head" aria-hidden="true">Add to</span>
-        {projects.map((project) => (
-          <button key={project.id} type="button" role="menuitem" onClick={pick(() => onAdd(project.id))}><ProjectMark id={project.id} mark={project.mark} />{project.name}</button>
+        {/* The list takes the place of the item that opened it: focus moves to its first project. */}
+        {projects.map((project, at) => (
+          <button key={project.id} type="button" role="menuitem" autoFocus={at === 0} onClick={pick(() => onAdd(project.id))}><ProjectMark id={project.id} mark={project.mark} />{project.name}</button>
         ))}
       </>
     )
