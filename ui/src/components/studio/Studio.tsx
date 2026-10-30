@@ -14,7 +14,7 @@ import { useTeamShapes } from '../../lib/projects/useTeamShapes'
 import { benchChatId } from '../../lib/rail/presence'
 import { historyRunUrl } from '../../lib/runs/history'
 import type { RunRecord } from '../../lib/runs/client'
-import { teamDisplayName, type TeamSummary } from '../../lib/team-file/client'
+import { TeamFileApiError, teamDisplayName, type TeamSummary } from '../../lib/team-file/client'
 import { teamHref } from '../../lib/team-file/teamHref'
 import { openTeam, useTeamList } from '../../lib/team-file/useTeamList'
 import { formatCost } from '../../lib/watch/usage'
@@ -240,7 +240,8 @@ export function Studio({ runs, onSetUp, setUpUnavailable, asking = false, part =
       setMoved(null)
       moveTeam(room.id.slice('team:'.length), id).then(
         () => setMoved({ team: room.name, to }),
-        (caught: unknown) => setMoved({ team: room.name, to, failed: caught instanceof Error ? caught.message : String(caught) }),
+        // Changed since Home read it (412): the daemon's words are about saving a file, which Home has no button for.
+        (caught: unknown) => setMoved({ team: room.name, to, failed: caught instanceof TeamFileApiError && caught.status === 412 ? 'It changed just now. Reload the page and try again.' : caught instanceof Error ? caught.message : String(caught) }),
       )
     },
     onDelete: (room) => setDeletingTeam({ path: room.id.slice('team:'.length), name: room.name }),

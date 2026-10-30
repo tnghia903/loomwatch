@@ -78,14 +78,18 @@ export function RemoveAgentDialog({ agent, uses, onRemoved, onClose }: RemoveAge
     }
   }
 
-  const each = (where: readonly string[]) => (where.length === teams.length && teams.length > 1 ? (teams.length === 2 ? 'both' : 'each') : listNames(where))
+  // "Blog starts with", "Both start with", "Each starts with", "Blog and Notes start with".
+  const startsWith = (where: readonly string[]) => (where.length === teams.length && teams.length > 1
+    ? (teams.length === 2 ? 'Both start with' : 'Each starts with')
+    : `${listNames(where)} ${where.length === 1 ? 'starts' : 'start'} with`)
   return (
     <div className="lw-scrim dim" onMouseDown={() => { if (!busy) onClose() }}>
       <div role="alertdialog" aria-modal="true" aria-labelledby={titleId} className="pop e2 lw-deleteteam" onMouseDown={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === 'Escape' && !busy) { event.stopPropagation(); onClose() } }}>
         <h2 id={titleId}>Remove “{agent.name}” from My agents?</h2>
         {!uses && <p role="status">Checking its teams…</p>}
-        {teams.length > 0 && <p>It leaves {listNames(teams)} too.</p>}
-        {[...starters.values()].map(({ starter, withoutCheck, teams: where }) => <p key={`${starter}:${where.join()}`}>In {each(where)}, {starter} starts the work instead{withoutCheck ? `, and your review of ${agent.name}’s work goes too` : ''}.</p>)}
+        {/* "the team": a team's name is often everyday words ("Blog posts"), which alone reads as your posts. */}
+        {teams.length > 0 && <p>It leaves the {teams.length === 1 ? 'team' : 'teams'} {listNames(teams)} too.</p>}
+        {[...starters.values()].map(({ starter, withoutCheck, teams: where }) => <p key={`${starter}:${where.join()}`}>{startsWith(where)} {starter} now{withoutCheck ? `, and your review of ${agent.name}’s work goes too` : ''}.</p>)}
         {emptied.length > 0 && <p>{listNames(emptied.map((use) => use.teamName))} {emptied.length === 1 ? 'has no other agent, so that team is deleted too.' : 'have no other agent, so those teams are deleted too.'}</p>}
         {choose.map((use) => (
           <div key={use.teamPath} className="ra-choose" role="group" aria-label={`Who starts ${use.teamName} instead?`}>
@@ -98,7 +102,8 @@ export function RemoveAgentDialog({ agent, uses, onRemoved, onClose }: RemoveAge
           </div>
         ))}
         {working.length > 0 && <p role="alert" className="dt-alert">{listNames(working)} {working.length === 1 ? 'is' : 'are'} working right now. Wait for {working.length === 1 ? 'it' : 'them'} to finish, then remove {agent.name}.</p>}
-        <p title={emptied.length > 0 ? '.jobs/.removed and .trash, inside your teams folder' : '.jobs/.removed, inside your teams folder'}>Nothing is erased: LoomWatch keeps {emptied.length > 0 ? 'the files' : 'its file'} in your teams folder.</p>
+        {/* A copy, not "nothing is erased": the teams it leaves are saved closed up around it. */}
+        <p title={emptied.length > 0 ? '.jobs/.removed and .trash, inside your teams folder' : '.jobs/.removed, inside your teams folder'}>LoomWatch keeps a copy of {emptied.length > 0 ? 'it, and of the teams it deletes,' : 'it'} in your teams folder.</p>
         {error && <p role="alert" className="dt-alert">{error}</p>}
         <div className="dt-acts">
           <button type="button" className="btn" autoFocus onClick={onClose} disabled={busy}>Cancel</button>

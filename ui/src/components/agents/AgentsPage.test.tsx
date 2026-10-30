@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { parse } from 'yaml'
 
 import { forgetYou } from '../../lib/you/client'
+import { cascaded, DESKTOP, PHONE } from '../../test/cascade'
 import { AgentsPage } from './AgentsPage'
 
 // The builder is its own page of tests; here it only has to say which job it started from.
@@ -99,14 +100,34 @@ describe('Removing an agent from its card', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'More for Writer' }, { timeout: 3000 }))
     fireEvent.click(within(screen.getByRole('menu', { name: 'Writer' })).getByRole('menuitem', { name: 'Remove from My agents…' }))
     const dialog = await screen.findByRole('alertdialog', { name: 'Remove “Writer” from My agents?' })
-    expect(await within(dialog).findByText('It leaves Blog too.')).toBeInTheDocument()
+    // "the team": a team called Blog isn't the person's blog.
+    expect(await within(dialog).findByText('It leaves the team Blog too.')).toBeInTheDocument()
     // The one it handed work to starts the team in its place, called by its name in My agents.
-    expect(within(dialog).getByText('In Blog, Editor starts the work instead.')).toBeInTheDocument()
+    expect(within(dialog).getByText('Blog starts with Editor now.')).toBeInTheDocument()
+    // A copy is kept; it doesn't promise the teams can be put back as they were.
+    expect(dialog).toHaveTextContent('LoomWatch keeps a copy of it in your teams folder.')
+    expect(dialog).not.toHaveTextContent('Nothing is erased')
     expect(calls).toEqual([])
     fireEvent.click(within(dialog).getByRole('button', { name: 'Remove' }))
     await vi.waitFor(() => expect(calls).toEqual(['PUT /api/team', 'DELETE /api/jobs/writer']))
     expect(saved).not.toContain('id: writer')
     expect(saved).toContain('entrypoint: editor')
+  })
+
+  // At phone width the tiles stand two by two: a menu opened on the left one opens from its left edge,
+  // so it never runs off the window; on the right one, from its right.
+  it('opens a tile’s menu toward the middle of the window at phone width', async () => {
+    window.history.replaceState({}, '', '/agents')
+    page()
+    fireEvent.click(await screen.findByRole('button', { name: 'More for Writer' }, { timeout: 3000 }))
+    fireEvent.click(screen.getByRole('button', { name: 'More for Editor' }))
+    const [left, right] = screen.getAllByRole('menu')
+    expect(left.closest('li')).toBe(screen.getByRole('button', { name: 'More for Writer' }).closest('li'))
+    expect(cascaded(left, ['left', 'right'], PHONE)).toBe('0')
+    expect(cascaded(left, 'right', PHONE)).toBe('auto')
+    expect(cascaded(right, 'right', PHONE)).toBe('0')
+    // A wide window has room on the left: every menu opens from its tile's right.
+    expect(cascaded(left, 'right', DESKTOP)).toBe('0')
   })
 
   it('asks who starts a team it started and handed work to more than one, and starts it with the one picked', async () => {

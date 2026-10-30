@@ -1135,9 +1135,9 @@ its agents lose the files added to them. In Finder, press <kbd>⌘</kbd><kbd>⇧
 delete its folder from `.trash`.
 
 To delete a project, open the **⋯** on its card on Home, or in its room, and choose **Delete
-project…**. Its teams stay on Home as cards of their own: only the `project:` line leaves each
-team's file, and your own folders stay where they are. A team's card then has its own **⋯**, to
-move it into another project or delete it. The project's file, with its About and notes, moves to
+project…**. Its teams stay on Home, under **Not in a project**: only the `project:` line leaves each
+team's file, and your own folders stay where they are. There, **Move to a project** beside a team
+opens your projects, and the one you pick takes it; its **⋯** has **Delete team…**. The project's file, with its About and notes, moves to
 `.projects/.removed` inside your teams folder. To bring a project back, move its file from
 `.projects/.removed` back into `.projects`; its teams don't go back into it with it.
 

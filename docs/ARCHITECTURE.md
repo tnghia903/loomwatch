@@ -475,7 +475,9 @@ with "To" when there is more than one. The first thing to do is the screen's one
 first item's answer, or Start while nothing waits.
 
 Home then has where the person left off (the newest things made, their chats with one agent, and
-Chat with one agent), a card per project, and their agents in no project. A card lists the
+Chat with one agent), a card per project, and what is in no project: each team in none on its line,
+as a card has it, with Move to a project (one pick moves it, ADR 0100) and a "…" with Delete team…,
+then the agents in no team. A card lists the
 project's teams, one per line, waiting first, then working, then stopped, then the next to run on a
 schedule: a shape and words for how each is, its agents' figures, and its name opening its chat;
 then the newest thing made there and this month's cost. A room (`/projects/<id>`) has its teams as

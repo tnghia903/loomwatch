@@ -36,7 +36,7 @@ export function DeleteProjectDialog({ project, teams, onDeleted, onClose }: Dele
         <h2 id={titleId}>Delete the project “{project.name}”?</h2>
         {teams.length === 1 && <p>Its team, {teams[0]}, stays on Home, under Not in a project.</p>}
         {teams.length > 1 && <p>Its teams stay on Home, under Not in a project: {listNames(teams)}.</p>}
-        <p title=".projects/.removed, inside your teams folder">Its About and notes go with it. Nothing is erased: LoomWatch keeps them in your teams folder, and your own folders stay where they are.</p>
+        <p title=".projects/.removed, inside your teams folder">Its About and notes go too. LoomWatch keeps a copy in your teams folder. Your own folders aren’t touched.</p>
         {error && <p role="alert" className="dt-alert">{error}</p>}
         <div className="dt-acts">
           <button type="button" className="btn" autoFocus onClick={onClose} disabled={busy}>Cancel</button>

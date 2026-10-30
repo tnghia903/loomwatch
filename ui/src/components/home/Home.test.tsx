@@ -480,6 +480,23 @@ describe('Home, the studio (ADR 0097)', () => {
     await waitFor(() => expect(calls).toEqual(['PUT /api/team', 'DELETE /api/team?path=blog.yaml']))
   })
 
+  it('says a team changed just now when a move finds it changed, in words for Home, not for a save', async () => {
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === '/api/projects') return respond({ projects: [{ id: 'sutd', name: 'SUTD final project', teams: ['sutd/gate.yaml'] }], loose: ['blog.yaml'], missing: [], removed: [] })
+      if (url === '/api/team' && init?.method === 'PUT') return respond({ error: 'The team file changed or the destination already exists. Reload before saving.' }, 412)
+      if (url === '/api/runs') return respond([])
+      if (url === '/api/teams') return respond({ root: '/teams', files: ['blog.yaml', 'sutd/gate.yaml'], teams: [{ path: 'blog.yaml', name: 'Weekly posts', agentCount: 1 }, { path: 'sutd/gate.yaml', name: 'Research and design', agentCount: 3 }] })
+      return studio(url)
+    })
+    render(<Home onPalette={vi.fn()} runs={[]} />)
+    const teams = await screen.findByRole('list', { name: 'Teams in no project' })
+    fireEvent.click(within(teams).getByRole('button', { name: 'Move to a project: Weekly posts' }))
+    fireEvent.click(within(screen.getByRole('menu', { name: 'Move to a project: Weekly posts' })).getByRole('menuitem', { name: 'SUTD final project' }))
+    const said = await screen.findByText(/Couldn’t move/)
+    expect(said).toHaveTextContent('Couldn’t move Weekly posts. It changed just now. Reload the page and try again.')
+    expect(said.closest('section')).toBe(teams.closest('section'))
+  })
+
   it('offers no move for a team in no project while there is no project to move it to', async () => {
     fetchMock.mockImplementation((url: string) => {
       if (url === '/api/projects') return respond({ projects: [], loose: ['blog.yaml'], missing: [], removed: [] })

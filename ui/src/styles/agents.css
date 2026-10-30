@@ -431,8 +431,15 @@
 .agent-card-box { position: relative; }
 /* Only its top row shares the corner with the "…", so only that row makes room for it. */
 .agent-card-box .agent-badge-head { padding-right: calc(44px - var(--sp-3)); }
-.agent-card-menu { position: absolute; top: 6px; right: 6px; z-index: 2; }
+/* A strip along the tile's top holds the "…" at its right and lets a press anywhere else through to
+   the tile. Its menu opens under the "…", toward the tile's middle: in a phone's left column from the
+   tile's left edge, so it never runs off the window. */
+.agent-card-menu { position: absolute; top: 6px; left: 6px; right: 6px; z-index: 2; display: flex; justify-content: flex-end; pointer-events: none; }
+.agent-card-menu > * { pointer-events: auto; }
 .agent-card-menu:has([aria-expanded="true"]) { z-index: 3; }
+@media (max-width: 560px) {
+  .agents-grid > li:nth-child(odd) > .agent-card-menu > .idle-agent-menu { right: auto; left: 0; }
+}
 /* Each card rises in on its own layer, so the card with the open menu is lifted over the next. */
 .agents-grid > li:has(.agent-card-menu [aria-expanded="true"]) { z-index: 1; }
 .agent-card-menu .iconbtn { width: 44px; height: 44px; }
