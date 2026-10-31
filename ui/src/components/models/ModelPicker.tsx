@@ -8,6 +8,7 @@ import { useSetupReading } from '../../lib/ai/reading'
 import { SOURCE_INFO, connectedSources } from '../../lib/ai/sources'
 import { useAiStatus } from '../../lib/ai/useKeyStatus'
 import { useModels } from '../../lib/ai/useModels'
+import { effortWord, modelEfforts } from '../../lib/ai/efforts'
 import { type ModelSuggestionInput, suggestModel } from '../../lib/team-file/modelSuggestion'
 import { MakerMark } from './MakerMark'
 import { AiChoice } from './AiChoice'
@@ -44,13 +45,15 @@ export function SourceChip({ source }: { source: ModelSource }) {
   return <span className={`model-source-chip ${source}`}>{SOURCE_INFO[source].chip}</span>
 }
 
-function Row({ id, model, selected, active, why, plain = false, follow, onPoint, onPick }: {
+function Row({ id, model, selected, active, why, effort, plain = false, follow, onPoint, onPick }: {
   id: string
   model: Model
   selected: boolean
   active: boolean
   /** In place of the model's own note: why it suits this agent. */
   why?: string
+  /** On the suggestion: the thinking effort picking it sets, for a model that reasons. */
+  effort?: string
   /** A button, not one of the list's options: the suggestion while the list shows search results. */
   plain?: boolean
   /** On the suggestion of an agent that could follow it: what picking it does. */
@@ -66,7 +69,7 @@ function Row({ id, model, selected, active, why, plain = false, follow, onPoint,
         <MakerMark maker={maker} />
         {selected && <span className="model-row-tick" aria-hidden="true"><Check size={10} strokeWidth={3} /></span>}
       </span>
-      <span className="name t-body">{shortName(model)}</span>
+      <span className="name t-body">{shortName(model)}{effort && <>{' '}<span className="t-meta model-row-effort" title={`Thinking effort: ${effortWord(effort)}`}>· {effortWord(effort).toLowerCase()} effort</span></>}</span>
       <span className="aside t-meta">
         {model.free && source === 'openrouter' ? <span className="badge">Free</span> : costOf(model, source)}
       </span>
@@ -76,6 +79,13 @@ function Row({ id, model, selected, active, why, plain = false, follow, onPoint,
       </span>
     </button>
   )
+}
+
+/** What a move left: "Claude Opus 5.5", "Claude Opus 5.5 at medium thinking effort", or the effort alone when only it moved. */
+function movedFrom(moved: { from: string; fromEffort?: string }, now: string): string {
+  if (moved.fromEffort === undefined) return modelNameFromId(moved.from)
+  const effort = moved.fromEffort ? `${effortWord(moved.fromEffort).toLowerCase()} thinking effort` : 'the model’s default thinking effort'
+  return moved.from === now ? effort : `${modelNameFromId(moved.from)} at ${effort}`
 }
 
 /** A source with nothing connected: one row that says what it costs and where to connect it. */
@@ -142,9 +152,10 @@ function useSuggestion(suggestFor: ModelSuggestionInput | undefined, active: boo
  *
  * `follows` says whether the agent's model follows its suggestion (ADR 0072); absent where following
  * isn't offered. Picking the suggestion has the agent follow it, and picking any other model pins
- * it: `onPick`'s second value.
+ * it: `onPick`'s second value. Picking the suggestion of a model that reasons sets its thinking
+ * effort too (ADR 0062), `onPick`'s third; any other pick leaves the effort as it is.
  */
-export function ModelChoices({ value, suggestFor, follows, onPick }: { value: string; suggestFor?: ModelSuggestionInput; follows?: boolean; onPick: (id: string, follow: boolean) => void }) {
+export function ModelChoices({ value, suggestFor, follows, onPick }: { value: string; suggestFor?: ModelSuggestionInput; follows?: boolean; onPick: (id: string, follow: boolean, effort?: string) => void }) {
   const { catalog, error } = useModels()
   const { ai, connected, read, suggestion } = useSuggestion(suggestFor, Boolean(suggestFor))
   const offered = (source: ModelSource) => source !== 'chatgpt' || ai?.chatgpt.available === true
@@ -162,6 +173,7 @@ export function ModelChoices({ value, suggestFor, follows, onPick }: { value: st
   // Shown only when a list has it: a suggestion is a price and a pick, never a dead row.
   const suggested = suggestion ? all.find((model) => model.id === suggestion.model) : undefined
   const suggestedSource = suggested ? parseModelRef(suggested.id).source : undefined
+  const thinks = suggested && suggestion && modelEfforts(suggested.id, ai, catalog).levels.length > 0 ? suggestion.effort : undefined
   // The same kind of model on each other connected source, so the person compares what it costs.
   const alsoGood = suggested && suggestion && connected
     ? connected.filter((source) => source !== suggestedSource).map((source) => all.find((model) => model.id === modelForTier(suggestion.tier, [source]))).filter((model): model is Model => Boolean(model))
@@ -184,7 +196,8 @@ export function ModelChoices({ value, suggestFor, follows, onPick }: { value: st
   const optionId = (index: number) => `${listId}-${index}`
 
   function pick(id: string, follow = false) {
-    onPick(id, follow)
+    if (follow && thinks) onPick(id, follow, thinks)
+    else onPick(id, follow)
     setQuery('')
   }
 
@@ -213,7 +226,7 @@ export function ModelChoices({ value, suggestFor, follows, onPick }: { value: st
 
   const followNote = follows === false ? 'Pick it, and this agent’s model follows its configuration from now on.' : undefined
   const row = (model: Model, index: number, why?: string) => (
-    <Row key={model.id} id={optionId(index)} model={model} selected={model.id === value} active={index === activeIndex} why={why} follow={why ? followNote : undefined} onPoint={() => setActiveIndex(index)} onPick={(id) => pick(id, Boolean(why))} />
+    <Row key={model.id} id={optionId(index)} model={model} selected={model.id === value} active={index === activeIndex} why={why} effort={why ? thinks : undefined} follow={why ? followNote : undefined} onPoint={() => setActiveIndex(index)} onPick={(id) => pick(id, Boolean(why))} />
   )
   const why = suggestion && suggestedSource ? `${suggestion.why} It runs ${SOURCE_INFO[suggestedSource].on}.` : suggestion?.why
   let index = suggested ? 1 : 0
@@ -230,7 +243,7 @@ export function ModelChoices({ value, suggestFor, follows, onPick }: { value: st
           </div>
           <div className="model-group" role="group" id={`${listId}-suggested-group`} aria-labelledby={`${listId}-suggested`}>
             {query
-              ? <Row id={`${listId}-suggested-row`} model={suggested} selected={suggested.id === value} active={false} why={why} plain follow={followNote} onPoint={() => {}} onPick={(id) => pick(id, true)} />
+              ? <Row id={`${listId}-suggested-row`} model={suggested} selected={suggested.id === value} active={false} why={why} effort={thinks} plain follow={followNote} onPoint={() => {}} onPick={(id) => pick(id, true)} />
               : row(suggested, 0, why)}
           </div>
           {nudge && <p className="t-meta model-connect-nudge">{nudge} <a className="link" href="/connections">Open Connections</a></p>}
@@ -284,8 +297,8 @@ export function ModelChoices({ value, suggestFor, follows, onPick }: { value: st
  */
 export function ModelPicker({ value, onChange, label = 'Model', disabled = false, field, suggestFor, follows, moved }: {
   value: string
-  /** The model picked, and whether the agent now follows its suggestion (ADR 0072). */
-  onChange: (id: string, follow: boolean) => void
+  /** The model picked, whether the agent now follows its suggestion (ADR 0072), and the effort picking the suggestion sets. */
+  onChange: (id: string, follow: boolean, effort?: string) => void
   label?: string
   disabled?: boolean
   field?: string
@@ -293,7 +306,7 @@ export function ModelPicker({ value, onChange, label = 'Model', disabled = false
   /** Whether its model follows its suggestion; absent where following isn't offered. */
   follows?: boolean
   /** Its model just moved with its configuration: from what, and how to put it back. */
-  moved?: { from: string; onUndo: () => void }
+  moved?: { from: string; fromEffort?: string; onUndo: () => void }
 }) {
   const { catalog } = useModels()
   const [open, setOpen] = useState(false)
@@ -339,11 +352,11 @@ export function ModelPicker({ value, onChange, label = 'Model', disabled = false
         <ChevronDown className="model-picker-arrow" size={16} aria-hidden="true" />
       </button>
       {moved && !open && <p className="t-meta model-moved" role="status">
-        Its configuration changed, so it moved from {modelNameFromId(moved.from)}.
+        Its configuration changed, so it moved from {movedFrom(moved, value)}.
         {!disabled && <> <button type="button" className="link" onClick={moved.onUndo}>Undo</button></>}
       </p>}
       {open && <div className="e2 model-picker-pop" id={listId}>
-        <ModelChoices value={value} suggestFor={suggestFor} follows={follows} onPick={(id, follow) => { onChange(id, follow); close() }} />
+        <ModelChoices value={value} suggestFor={suggestFor} follows={follows} onPick={(...picked) => { onChange(...picked); close() }} />
       </div>}
     </div>
   )

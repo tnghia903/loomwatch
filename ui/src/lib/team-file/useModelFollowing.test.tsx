@@ -1,7 +1,8 @@
 import { act, cleanup, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { DEFAULT_MODEL, FAST_MODEL } from '../ai/modelIds'
+import { CHECK_MODEL, DEFAULT_MODEL, FAST_MODEL } from '../ai/modelIds'
+import { CHECKER_ROLE } from '../library/checker'
 import { forgetReadings } from '../ai/reading'
 import { forgetKeyStatus } from '../ai/useKeyStatus'
 import { onTheFastTier } from '../library/onTheFastTier'
@@ -111,7 +112,7 @@ describe('useModelFollowing', () => {
     // Added after the team opened, still on the model it was made with.
     rerender({ agents: [writer, { ...pinned, role: roleOf('researcher') }, { ...gathering, id: 'scout', name: 'Scout' }] })
     await settle()
-    expect(move).toHaveBeenCalledWith('scout', FAST_MODEL)
+    expect(move).toHaveBeenCalledWith('scout', FAST_MODEL, 'medium')
     expect(result.current.moves.size).toBe(0)
   }))
 
@@ -138,6 +139,41 @@ describe('useModelFollowing', () => {
     expect(pin).toHaveBeenCalledWith('helper', DEFAULT_MODEL)
     expect(result.current.moves.size).toBe(0)
   }))
+
+  // ADR 0062: the effort the same table gives its kind of work moves with it, and Undo puts it back.
+  it('moves the effort with the model while the effort is still its suggestion’s, and puts both back on Undo', async () => {
+    const asAsk = { ...helper, thinkingEffort: 'medium' }
+    const { rerender, result, move, pin } = follow([writer, asAsk])
+    await settle()
+    rerender({ agents: [writer, { ...asAsk, role: CHECKER_ROLE }] })
+    await settle()
+    expect(move).toHaveBeenCalledWith('helper', CHECK_MODEL, 'high')
+    expect(result.current.moves.get('helper')).toEqual({ from: DEFAULT_MODEL, to: CHECK_MODEL, fromEffort: 'medium' })
+    act(() => result.current.undo('helper'))
+    expect(pin).toHaveBeenCalledWith('helper', DEFAULT_MODEL, 'medium')
+  })
+
+  it('moves the effort alone when the model stays', async () => {
+    const asAsk = { ...helper, thinkingEffort: 'medium' }
+    const { rerender, move } = follow([writer, asAsk])
+    await settle()
+    rerender({ agents: [writer, { ...asAsk, role: roleOf('editor') }] })
+    await settle()
+    expect(move).toHaveBeenCalledWith('helper', DEFAULT_MODEL, 'low')
+  })
+
+  it('leaves an effort set by hand where it is, and still moves the model', async () => {
+    for (const thinkingEffort of ['low', undefined]) {
+      cleanup()
+      const byHand = { ...helper, thinkingEffort }
+      const { rerender, move } = follow([writer, byHand])
+      await settle()
+      rerender({ agents: [writer, { ...byHand, role: CHECKER_ROLE }] })
+      await settle()
+      expect(move).toHaveBeenCalledTimes(1)
+      expect(move).toHaveBeenCalledWith('helper', CHECK_MODEL)
+    }
+  })
 
   it('with Let AI choose on, moves an unclear agent by AI’s reading, and stays put when AI can’t read it', async () => {
     readingOn = true

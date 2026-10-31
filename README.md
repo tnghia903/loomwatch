@@ -804,7 +804,8 @@ Each agent's model says how it is paid: `chatgpt:gpt-6.1-sol` on your ChatGPT pl
 suggests a model for the agent, and searches every model you can use. The suggestion picks the
 model first, for the kind of work: Claude Opus 5.5 for most agents, and for a check step a model
 from another company, so the work is read by a model that didn't write it. Then it runs on a plan
-you've connected that offers that model, or else through OpenRouter.
+you've connected that offers that model, or else through OpenRouter. It names how hard the model
+thinks as well, as Ask does: more for checking, analysis and code, less for tidying.
 
 > [!IMPORTANT]
 > Real runs are paid the way each agent's model is: from your ChatGPT plan's limits, from your

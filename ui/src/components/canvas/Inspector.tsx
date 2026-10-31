@@ -39,9 +39,9 @@ export interface InspectorProps {
   onAddKnowledge?: (added: CapabilityRef[]) => void
   onRename: (field: 'name' | 'role', value: string) => void
   /** The model picked, and whether it now follows its suggestion (ADR 0072). */
-  onModelChange: (value: string, follow: boolean) => void
+  onModelChange: (value: string, follow: boolean, effort?: string) => void
   /** Its model just moved with its configuration (ADR 0072): from what, and Undo. */
-  modelMove?: { from: string; onUndo: () => void }
+  modelMove?: { from: string; fromEffort?: string; onUndo: () => void }
   /** The agent's own guard on what one run may spend on it, or none with `null` (ADR 0068). */
   onSpendChange?: (perRun: number | null) => void
   /** `undefined` takes the effort out, so the model runs at its own default. */
@@ -157,7 +157,7 @@ export function Inspector({ node, place, inheritedMemory = [], onRemoveCapabilit
         </div>
         {checkup && <AgentCheckup {...checkup} readOnly={readOnly} headClassName="zone-head t-micro" />}
         <div className={`field ${zoneClass('model')}`}>
-          <ModelPicker field="model" value={canonicalModel(agent.model)} disabled={readOnly} suggestFor={suggestFor} follows={agent.followsSuggestion === true} moved={modelMove} onChange={(id, follow) => { onModelChange(id, follow); onFieldBlur('model') }} />
+          <ModelPicker field="model" value={canonicalModel(agent.model)} disabled={readOnly} suggestFor={suggestFor} follows={agent.followsSuggestion === true} moved={modelMove} onChange={(...picked) => { onModelChange(...picked); onFieldBlur('model') }} />
           <span className="hint t-meta">{runtime?.status === 'running' ? 'The model this run uses.' : hint('model', 'The model this agent thinks with, and which of your connections pays for it. Prices are per million tokens.')}</span>
         </div>
         <EffortSlider model={canonicalModel(agent.model)} value={agent.thinkingEffort ?? splitModelSelector(agent.model ?? '').thinkingEffort} disabled={readOnly} onChange={onThinkingEffortChange} />

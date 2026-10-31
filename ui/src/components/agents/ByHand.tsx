@@ -102,7 +102,7 @@ export interface ByHandProps {
   suggestFor?: ModelSuggestionInput
   /** A team's own agent (ADR 0072): whether its model follows its suggestion, a move to show with
       Undo, and what a pick writes, in place of setting `model` on the draft. */
-  following?: { follows: boolean; moved?: { from: string; onUndo: () => void }; onPick: (id: string, follow: boolean) => void }
+  following?: { follows: boolean; moved?: { from: string; fromEffort?: string; onUndo: () => void }; onPick: (id: string, follow: boolean, effort?: string) => void }
   /**
    * Its chat (its Chat tab), shown beside the bench instead of the blocks: the figure
    * works there as the chat's newest run says. The bench stays the same one, so it is never drawn
@@ -346,7 +346,7 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
           </>)}
 
           {block('mind', <>
-            <ModelPicker value={draft.model} disabled={readOnly} suggestFor={suggestFor ?? { agent: suggestedOfDraft(draft) }} follows={following?.follows} moved={following?.moved} onChange={(id, follow) => { if (readOnly) return; if (following) following.onPick(id, follow); else set('model', id) }} />
+            <ModelPicker value={draft.model} disabled={readOnly} suggestFor={suggestFor ?? { agent: suggestedOfDraft(draft) }} follows={following?.follows} moved={following?.moved} onChange={(id, follow, effort) => { if (readOnly) return; if (following) following.onPick(id, follow, effort); else { set('model', id); if (effort !== undefined) set('effort', effort) } }} />
             <EffortSlider className="thinking-field agent-field" model={draft.model} value={draft.effort} disabled={readOnly} onChange={(effort) => set('effort', effort ?? '')} />
             <p className="t-meta">A bigger model can think more through, and costs more per run or uses more of your plan. Prices are per million tokens.</p>
             {/* ADR 0079: on by default, as the way a big task is done well; off, it works alone. */}

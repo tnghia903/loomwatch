@@ -283,14 +283,18 @@ daemon makes one call at a time, at most 50 a day, and none for ten minutes afte
 `model-reading.json` holds the switch and what readings have cost. Only the agent's own setup is
 sent, by name: never a skill's text, a file, a folder's path, the Brief or its teammates. Its
 instructions go as written, up to 6,000 characters, so whatever they mention goes with them.
-`modelSuggestion.eval.test.ts` measures the suggestion with and without readings.
+`modelSuggestion.eval.test.ts` measures the suggestion with and without readings. The suggestion
+also names a thinking effort, from the same `schemas/model-tiers.json` row Ask and the templates
+use (ADR 0062): a check step's is the checker's, a built-in job's its own, any other agent's a new
+agent's. Picking the suggestion of a model that reasons sets `thinkingEffort` with `model`.
 
 An agent with `followsSuggestion: true` in its team file follows its suggestion (ADR 0072): a team's
 own agent added in the app starts that way, picking the suggestion in its model list sets it, and
 picking any other model takes it out. `ui/src/lib/team-file/useModelFollowing.ts` watches the open
 team: when a following agent's configuration settles after a change, it works the suggestion out
 again (with a reading when Let AI choose is on) and moves `model`, and the model list says what it
-was, with Undo, which pins it back. The team as it opened is left as it is, except who pays: a
+was, with Undo, which pins it back. `thinkingEffort` moves with it, on a model that reasons, while
+it is still the effort the last suggestion gave; an effort set by hand stays. The team as it opened is left as it is, except who pays: a
 following agent whose model a plan connected since offers moves onto that plan. A following agent
 moves from OpenRouter onto a plan, or onto its tier's first choice, but never onto OpenRouter by
 itself. The daemon never reads the flag; a run uses `model`.
