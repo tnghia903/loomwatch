@@ -1677,9 +1677,19 @@ impl RunRegistry {
             });
         }
         let record = entry.record.clone();
+        // A yes to the web gives the agent the web until its work in the run ends (ADR 0104), so
+        // it is one for the rest of the run from any client: a card, the tray, the notch or a
+        // phone. A later piece of the same agent's work in the run doesn't ask again.
+        let web = request.switch.as_deref() == Some("web");
+        let decision = if web && decision == PermissionDecision::AllowOnce {
+            PermissionDecision::AllowRun
+        } else {
+            decision
+        };
         let grantee = match decision {
-            crate::permissions::PermissionDecision::AllowRun => Some(grantee_of(&request.agent)),
-            crate::permissions::PermissionDecision::AllowTeam => Some(WHOLE_TEAM),
+            PermissionDecision::AllowRun => Some(grantee_of(&request.agent)),
+            PermissionDecision::Edit if web => Some(grantee_of(&request.agent)),
+            PermissionDecision::AllowTeam => Some(WHOLE_TEAM),
             _ => None,
         };
         if let Some(grantee) = grantee {
@@ -4854,6 +4864,42 @@ pub(crate) mod tests {
         assert!(!registry.allowed_for_run(&run_id, "a~1", "execute"));
     }
 
+    /// ADR 0104: Allow on a request for the web, from any client, gives the agent the web for the
+    /// rest of the run, as the session's yes does; Allow on a command is still for that one.
+    #[tokio::test]
+    async fn allowing_the_web_once_is_for_the_rest_of_the_run() {
+        use crate::permissions::PermissionDecision;
+        let team = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: x\n      cwd: .\n    model: m\n",
+        )
+        .unwrap();
+        let registry = RunRegistry::default();
+        let run =
+            RunRecord::queued("t.yaml".into(), "go".into(), &team, RunTrigger::Manual).unwrap();
+        let run_id = run.run_id.clone();
+        registry.insert(run);
+        let web = registry
+            .open_permission_request(&run_id, permission_request("w1", "fetch"))
+            .expect("open");
+        registry
+            .answer_permission(&run_id, "w1", PermissionDecision::AllowOnce, None)
+            .expect("open");
+        assert_eq!(web.await.unwrap().decision, PermissionDecision::AllowRun);
+        assert!(registry.allowed_for_run(&run_id, "a", "fetch"));
+
+        let command = registry
+            .open_permission_request(&run_id, permission_request("c1", "execute"))
+            .expect("open");
+        registry
+            .answer_permission(&run_id, "c1", PermissionDecision::AllowOnce, None)
+            .expect("open");
+        assert_eq!(
+            command.await.unwrap().decision,
+            PermissionDecision::AllowOnce
+        );
+        assert!(!registry.allowed_for_run(&run_id, "a", "execute"));
+    }
+
     /// ADR 0040: a person-started run can be asked, a routine cannot; an answer reaches the waiting
     /// agent once and only once; "allow for this run" is remembered per agent and kind until the
     /// run ends; and ending a run lets go of everything it was waiting on.
@@ -5114,8 +5160,9 @@ pub(crate) mod tests {
             RunRecord::queued("t.yaml".into(), "go".into(), &team, RunTrigger::Manual).unwrap();
         let run_id = record.run_id.clone();
         registry.insert(record);
+        // A command's: a yes to the web is always for the rest of the run (ADR 0104).
         let waiting = registry
-            .open_permission_request(&run_id, permission_request("p1", "fetch"))
+            .open_permission_request(&run_id, permission_request("p1", "execute"))
             .expect("open");
         let app = router(None, dir.0.clone(), registry.clone());
         let answer = |body: Value| {
@@ -7116,6 +7163,7 @@ pub(crate) mod tests {
                     usage: crate::agent::Usage::default(),
                     messages_written: 0,
                     links: Vec::new(),
+                    web: false,
                 },
             )
             .await

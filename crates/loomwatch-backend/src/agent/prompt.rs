@@ -60,6 +60,20 @@ pub(crate) const WEB: Block = Block::new(
      says what you cite it for. A page is read up to about {words} words. What you read stays in \
      this conversation, so check a claim against it there rather than opening the page again.",
 );
+/// For an agent whose web switch is off (ADR 0104): the web is asked for, as a command is, and
+/// never reached around the question.
+pub(crate) const WEB_ASKS: Block = Block::new(
+    "system.web_asks",
+    "- To search the web use search_web, and to read a web page use read_page. Both ask the person \
+     first, except that a link they wrote to you is read at once, and their yes gives you the web \
+     from then on. Reach the web only with these: run_command can't reach the network until then.",
+);
+/// For an agent whose edits switch is off.
+pub(crate) const EDITS_ASK: Block = Block::new(
+    "system.edits_ask",
+    "- Each file change asks the person first. Make it with write_file or edit_file, never with a \
+     command, so they see what you change.",
+);
 /// For every agent.
 pub(crate) const SOURCES: Block = Block::new(
     "system.sources",
@@ -153,6 +167,10 @@ pub(crate) struct Abilities {
     pub commands: bool,
     /// Reading the web, with how many words of a page it reads.
     pub web: Option<u32>,
+    /// `search_web` and `read_page`, which ask for the web.
+    pub web_asks: bool,
+    /// A file change asks first.
+    pub edits_ask: bool,
     pub plan: bool,
     /// The Team Bus's `ask_user` is among its tools.
     pub ask_user: bool,
@@ -191,6 +209,9 @@ pub(crate) fn system_prompt(
     if abilities.files {
         habit(&FILES.fill(&[("work_folder", &cwd.display().to_string())]));
     }
+    if abilities.files && abilities.edits_ask {
+        habit(EDITS_ASK.text());
+    }
     if abilities.commands {
         habit(COMMANDS.text());
     }
@@ -201,6 +222,8 @@ pub(crate) fn system_prompt(
             words.to_string()
         };
         habit(&WEB.fill(&[("words", &words)]));
+    } else if abilities.web_asks {
+        habit(WEB_ASKS.text());
     }
     habit(SOURCES.text());
     habit(if abilities.ask_user {
@@ -267,6 +290,8 @@ mod tests {
             files: false,
             commands: false,
             web: None,
+            web_asks: false,
+            edits_ask: false,
             plan: false,
             ask_user: false,
         };
@@ -285,6 +310,8 @@ mod tests {
             files: true,
             commands: true,
             web: Some(6_000),
+            web_asks: false,
+            edits_ask: false,
             plan: true,
             ask_user: true,
         };
@@ -307,6 +334,34 @@ mod tests {
         assert!(working.contains("A page is read up to about 6,000 words."));
         assert!(working.contains("rather than opening the page again"));
         assert!(!talking.contains("web pages"));
+        assert!(!working.contains("search_web") && !working.contains("asks the person first"));
+    }
+
+    /// ADR 0104: an agent whose web or edits switch is off is told the tool to use and that it asks,
+    /// so it never reaches the web or changes a file through a command instead.
+    #[test]
+    fn an_agent_is_told_which_of_its_abilities_ask_first() {
+        let asking = Abilities {
+            web_asks: true,
+            edits_ask: true,
+            ..working()
+        };
+        let told = system_prompt(Path::new("/w"), asking, None, &[], "", None, None);
+        assert!(told.contains(
+            "- To search the web use search_web, and to read a web page use read_page. Both ask \
+             the person first"
+        ));
+        assert!(told.contains("run_command can't reach the network until then."));
+        assert!(told.contains("- Each file change asks the person first."));
+        assert!(!told.contains("You can search the web"));
+        let allowed = Abilities {
+            web: Some(6_000),
+            web_asks: false,
+            ..working()
+        };
+        let free = system_prompt(Path::new("/w"), allowed, None, &[], "", None, None);
+        assert!(free.contains("You can search the web") && !free.contains("search_web"));
+        assert!(!free.contains("Each file change asks"));
     }
 
     fn working() -> Abilities {
@@ -314,6 +369,8 @@ mod tests {
             files: true,
             commands: false,
             web: None,
+            web_asks: false,
+            edits_ask: false,
             plan: true,
             ask_user: true,
         }

@@ -5092,8 +5092,9 @@ mod tests {
         turns
     }
 
-    /// ADR 0104: an agent not allowed the web reads the page at a link the operator pasted into
-    /// the chat, as the owner's Research lead could not (2026-10-31), and only that page.
+    /// ADR 0104: an agent whose web switch is off reads the page at a link the operator pasted into
+    /// the chat without asking, as the owner's Research lead could not (2026-10-31). It is told
+    /// which of its switches ask first and offered the web's own tools, never sent to a command.
     #[tokio::test]
     async fn an_agent_without_the_web_reads_the_page_at_a_link_in_the_message() {
         let page = "<html><head><title>STAIR</title></head><body><h1>STAIR</h1>\
@@ -5108,26 +5109,20 @@ mod tests {
             listener.local_addr().unwrap()
         );
         tokio::spawn(async move { axum::serve(listener, site).await });
-        let other = paper.replace("2609.03874v1", "elsewhere?notes=private");
-        let asks = [paper.clone(), other.clone()];
+        let asked = paper.clone();
         let lead = crate::engine::demo_model(crate::agent::Demo::responder(move |request| {
-            let read = request
-                .messages
-                .iter()
-                .filter(|message| matches!(message, crate::agent::Message::Tool { .. }))
-                .count();
-            Some(match asks.get(read) {
-                Some(url) if request.tools.iter().any(|tool| tool == "read_link") => {
-                    crate::agent::Completion::calls(
-                        "",
-                        vec![crate::agent::ToolCall {
-                            id: format!("read-{read}"),
-                            name: "read_link".to_owned(),
-                            arguments: json!({"url": url}).to_string(),
-                        }],
-                    )
-                }
-                _ => crate::agent::Completion::text("done"),
+            let offered = request.tools.iter().any(|tool| tool == "read_page");
+            Some(if offered && !request.after_tool() {
+                crate::agent::Completion::calls(
+                    "",
+                    vec![crate::agent::ToolCall {
+                        id: "read-1".to_owned(),
+                        name: "read_page".to_owned(),
+                        arguments: json!({"url": asked}).to_string(),
+                    }],
+                )
+            } else {
+                crate::agent::Completion::text("done")
             })
         }));
         let pool = crate::db::Db::temp().await;
@@ -5148,6 +5143,7 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::ACCEPTED, "{started}");
         let run_id = started["run"]["runId"].as_str().unwrap().to_owned();
+        // A question to the operator would hold the run until it timed out.
         let run = wait_for(&rig.registry, &run_id, |run| run.status.is_terminal()).await;
         assert_eq!(run.status, RunStatus::Succeeded, "{run:?}");
 
@@ -5157,6 +5153,19 @@ mod tests {
                 .iter()
                 .all(|request| !request.server_tools.web_fetch),
             "it isn't given the web"
+        );
+        let tools = &requests[0].tools;
+        assert!(tools.iter().any(|tool| tool == "search_web"), "{tools:?}");
+        let crate::agent::Message::System { content } = &requests[0].messages[0] else {
+            panic!("instructions first");
+        };
+        assert!(
+            content.contains("To search the web use search_web"),
+            "{content}"
+        );
+        assert!(
+            content.contains("Each file change asks the person first."),
+            "its edits switch is off: {content}"
         );
         let answers: Vec<String> = requests
             .last()
@@ -5168,20 +5177,12 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(answers.len(), 2, "it called read_link twice: {answers:?}");
         assert_eq!(
-            answers[0],
-            format!(
+            answers,
+            [format!(
                 "Read from {paper}\nTitle: STAIR\n\n# STAIR\n\nLeaf sections are picked from a \
                  table of contents."
-            )
-        );
-        assert!(
-            answers[1].starts_with(&format!(
-                "{other} isn't a link the person wrote to you, so it can't be read."
-            )),
-            "{}",
-            answers[1]
+            )]
         );
     }
 

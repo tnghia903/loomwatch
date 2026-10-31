@@ -5238,3 +5238,138 @@ async fn a_claude_on_openrouter_is_refused_in_openrouters_terms() {
     assert_eq!(end.reply, "Hello.");
     assert_eq!(*stand.paths.lock().unwrap(), ["/api/v1/messages"; 3]);
 }
+
+/// The words of every tool answer in the conversation `demo` was last sent, in order.
+fn tool_answers(demo: &Demo) -> Vec<String> {
+    demo.requests()
+        .last()
+        .map(|request| {
+            request
+                .messages
+                .iter()
+                .filter_map(|message| match message {
+                    Message::Tool { content, .. } => Some(content.clone()),
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// ADR 0104: an agent whose web switch is off still has the web's own tool, `search_web`, and is
+/// told so. Each use asks the person; a no leaves it without the web, and a yes gives it the
+/// provider's web search and page reading, and its commands the network, from its next call, with
+/// no question after that.
+#[tokio::test]
+async fn an_agent_whose_web_is_off_asks_for_it_and_gets_it_on_a_yes() {
+    let folder = Folder::new();
+    let search = |id: &str| call(id, "search_web", &json!({"query": "STAIR retrieval"}));
+    let demo = Demo::scripted(vec![
+        Completion::calls("", vec![search("s1")]),
+        Completion::calls("", vec![search("s2")]),
+        Completion::calls("", vec![search("s3")]),
+        Completion::text("found it"),
+    ]);
+    let answers = Answers::new(vec![Decision::Deny, Decision::Allow]);
+    let mut session = session(
+        &folder,
+        Provider::Demo(demo.clone()),
+        Arc::new(Recorded::default()),
+        answers.clone(),
+    );
+    assert!(
+        !session.snapshot().web,
+        "a new agent whose switch is off has no web"
+    );
+    let end = tokio::time::timeout(Duration::from_secs(10), session.prompt("find the paper"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(end.reply, "found it");
+
+    let requests = demo.requests();
+    assert!(requests[0].tools.contains(&"search_web".to_owned()));
+    assert!(requests[0].tools.contains(&"read_page".to_owned()));
+    let Message::System { content } = &requests[0].messages[0] else {
+        panic!("instructions first");
+    };
+    assert!(
+        content.contains("To search the web use search_web"),
+        "{content}"
+    );
+    assert_eq!(
+        requests
+            .iter()
+            .map(|request| request.server_tools.web_search && request.server_tools.web_fetch)
+            .collect::<Vec<_>>(),
+        [false, false, true, true],
+        "the web from the call after the yes"
+    );
+    assert_eq!(
+        requests[2].tools, requests[0].tools,
+        "its own tools stay as they were"
+    );
+
+    let asked = answers.asked.lock().unwrap().clone();
+    assert_eq!(asked.len(), 2, "asked until the yes, and not again");
+    assert_eq!(asked[0].kind, ToolKind::Fetch);
+    assert_eq!(asked[0].title, "Search the web: STAIR retrieval");
+    let answered = tool_answers(&demo);
+    assert!(
+        answered[0].starts_with("The person declined this."),
+        "{answered:?}"
+    );
+    assert!(
+        answered[1].starts_with("You may use the web now.") && answered[2] == answered[1],
+        "{answered:?}"
+    );
+    assert!(
+        session.snapshot().web,
+        "a parked conversation keeps the yes"
+    );
+}
+
+/// ADR 0104: `read_page` reads a link the person wrote without asking, and asks for any other.
+#[tokio::test]
+async fn read_page_asks_only_for_an_address_the_person_did_not_write() {
+    let folder = Folder::new();
+    let site = axum::Router::new().route(
+        "/paper",
+        axum::routing::get(|| async { "plain words of the paper" }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let paper = format!("http://{}/paper", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, site).await });
+    let other = format!("{paper}?notes=private");
+    let demo = Demo::scripted(vec![
+        Completion::calls("", vec![call("r1", "read_page", &json!({"url": paper}))]),
+        Completion::calls("", vec![call("r2", "read_page", &json!({"url": other}))]),
+        Completion::text("read"),
+    ]);
+    let answers = Answers::new(vec![Decision::Deny]);
+    let mut session = session(
+        &folder,
+        Provider::Demo(demo.clone()),
+        Arc::new(Recorded::default()),
+        answers.clone(),
+    );
+    session.allow_links(std::slice::from_ref(&paper));
+    tokio::time::timeout(Duration::from_secs(10), session.prompt("read my link"))
+        .await
+        .unwrap()
+        .unwrap();
+    let asked = answers.asked.lock().unwrap().clone();
+    assert_eq!(asked.len(), 1, "only the address the person didn't write");
+    assert_eq!(asked[0].title, format!("Read {other}"));
+    assert_eq!(asked[0].kind, ToolKind::Fetch);
+    let answered = tool_answers(&demo);
+    assert_eq!(
+        answered[0],
+        format!("Read from {paper}\n\nplain words of the paper")
+    );
+    assert!(
+        answered[1].starts_with("The person declined this."),
+        "{answered:?}"
+    );
+    assert!(!session.snapshot().web);
+}

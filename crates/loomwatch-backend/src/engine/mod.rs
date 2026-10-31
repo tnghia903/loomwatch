@@ -59,7 +59,7 @@ pub struct ProcessSpec {
     /// and then not again: the conversation keeps them.
     pub pictures: Vec<PathBuf>,
     /// The links the person wrote in the run's message and their notes (ADR 0104), which the agent
-    /// may read with `read_link` when it isn't allowed the web.
+    /// reads with `read_page` without asking when its web switch is off.
     pub links: Vec<String>,
 }
 
@@ -1084,6 +1084,10 @@ impl AgentRun {
         }
         config.lessons.clone_from(&self.spec.lessons);
         if let Some(policy) = &self.spec.permissions {
+            // What it is told asks first (ADR 0104), as the policy will ask.
+            config.asks = crate::agent::Asks {
+                edits: !policy.allow().edits,
+            };
             config.turned_off = policy.turned_off_skills();
             config.web = policy.web_limits();
             config.knowledge = policy.connected_folders().to_vec();

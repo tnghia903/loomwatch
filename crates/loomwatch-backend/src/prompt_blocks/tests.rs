@@ -77,6 +77,8 @@ fn system_prompts(out: &mut String) {
         files: false,
         commands: false,
         web: None,
+        web_asks: false,
+        edits_ask: false,
         plan: false,
         ask_user: false,
     };
@@ -97,6 +99,8 @@ fn system_prompts(out: &mut String) {
         files: true,
         commands: true,
         web: Some(6_000),
+        web_asks: false,
+        edits_ask: false,
         plan: true,
         ask_user: true,
     };
@@ -124,6 +128,8 @@ fn system_prompts(out: &mut String) {
         files: true,
         commands: false,
         web: Some(800),
+        web_asks: false,
+        edits_ask: false,
         plan: false,
         ask_user: false,
     };
@@ -140,9 +146,12 @@ fn system_prompts(out: &mut String) {
         files: false,
         commands: true,
         web: None,
+        web_asks: false,
+        edits_ask: false,
         plan: false,
         ask_user: true,
     };
+    asking_prompt(out);
     let unnamed = AboutYou {
         about: Some("Keep it short.".into()),
         ..AboutYou::default()
@@ -159,6 +168,24 @@ fn system_prompts(out: &mut String) {
             None,
             None,
         ),
+    );
+}
+
+/// An agent with every switch off (ADR 0104): the web and file changes ask first.
+fn asking_prompt(out: &mut String) {
+    let asking = Abilities {
+        files: true,
+        commands: true,
+        web: None,
+        web_asks: true,
+        edits_ask: true,
+        plan: true,
+        ask_user: true,
+    };
+    section(
+        out,
+        "system: every switch off, so the web and file changes ask",
+        &system_prompt(Path::new("/w"), asking, None, &[], "", None, None),
     );
 }
 

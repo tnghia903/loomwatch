@@ -34,6 +34,8 @@ export interface Ticket {
   since: string
   /** A permission ticket's request, which its answer names. */
   requestId?: string
+  /** The switch a permission ticket's request falls under: a yes to `web` is for the rest of the run. */
+  switch?: string | null
   /** A permission ticket's run has more than one agent, so "Allow for the whole team" means more. */
   team?: boolean
   /** A spend ticket's stop, which its answer names, and the words of its two answers. */
@@ -69,6 +71,7 @@ export function ticketsFrom(records: readonly RunRecord[], names: ReadonlyMap<st
         context: permissionWhat(request),
         since: request.since,
         requestId: request.id,
+        switch: request.switch ?? null,
         team: record.agentIds.length > 1,
       })
     }

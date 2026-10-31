@@ -210,8 +210,8 @@ pub struct RunLineage {
     /// where they are, under its task, and the agent it starts with is shown the pictures.
     pub files: Vec<chat_files::ChatFile>,
     /// The links the operator wrote in the message that starts the run (ADR 0104): every agent the
-    /// run starts may read them with `read_link`. Empty for a run another team's agent asked for,
-    /// whose words aren't the operator's.
+    /// run starts may read them with `read_page` without asking. Empty for a run another team's
+    /// agent asked for, whose words aren't the operator's.
     pub links: Vec<String>,
     /// A one-agent turn (ADR 0051): the one agent this run executes. It starts there, stops after
     /// it, and its reply is the run's answer.

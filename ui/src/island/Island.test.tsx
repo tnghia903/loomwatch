@@ -183,8 +183,9 @@ describe('the island page', () => {
 
     fireEvent.click(card.getByRole('button', { name: 'Allow' }))
     await waitFor(() => expect(posted).toEqual([{ url: '/api/runs/r1/permissions', body: { requestId: 'p1', decision: 'allow_once' } }]))
-    // It says what it did before the card goes.
-    expect(await card.findByText('Allowed once.')).toBeTruthy()
+    // It says what it did before the card goes: a yes to the web is for the rest of the run (ADR
+    // 0104), which the daemon makes of an Allow from anywhere.
+    expect(await card.findByText('Allowed for the rest of the run.')).toBeTruthy()
     expect(card.queryByRole('button', { name: 'Allow' })).toBeNull()
   })
 

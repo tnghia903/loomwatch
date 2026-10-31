@@ -1,10 +1,11 @@
-//! `read_link`: the page at a link the person wrote, for an agent not allowed the web (ADR 0104).
+//! `read_page`: the page at an address, for an agent whose web switch is off (ADR 0104).
 //!
-//! The person's own messages are where the links come from: a link in a file, a web page, a
-//! teammate's brief or another team's request can't be read with it, so an agent can't send what it
-//! read anywhere by writing an address of its own. The daemon fetches the page itself, outside the
-//! command sandbox, and gives the agent its words: a web page as text, a PDF's text, or text as it
-//! is.
+//! A link the person wrote is read at once. The person's own messages are where those links come
+//! from: a link in a file, a web page, a teammate's brief or another team's request is not one, so
+//! an agent can't send what it read anywhere by writing an address of its own. Any other address
+//! asks the person first (the session asks; [`Context::web`] says they said yes). The daemon fetches
+//! the page itself, outside the command sandbox, and gives the agent its words: a web page as text,
+//! a PDF's text, or text as it is.
 //! - A redirect is followed, but never from a site on the internet to one on this computer or its
 //!   network.
 //! - A page is read up to [`MAX_BYTES`], and its text up to [`MAX_TEXT_CHARS`]. A long text is set
@@ -75,6 +76,12 @@ fn normal(link: &str) -> Option<url::Url> {
     }
     url.set_fragment(None);
     Some(url)
+}
+
+/// Whether `asked` is one of the person's `links`, which `read_page` reads without asking.
+#[must_use]
+pub(crate) fn is_among(asked: &str, links: &[String]) -> bool {
+    among(asked, links).is_some()
 }
 
 /// The link the agent asked for, if it is one of the person's `links`.
@@ -199,18 +206,30 @@ fn looks_like_html(start: &[u8]) -> bool {
 /// Reads the link in `input`, when the person wrote it.
 pub(super) async fn run(input: &Value, context: &Context<'_>) -> Output {
     let asked = input.get("url").and_then(Value::as_str).unwrap_or_default();
-    let Some(url) = among(asked, context.links) else {
-        return Output::failed(if context.links.is_empty() {
-            "The person hasn't written a link to you, so there is nothing read_link may read. You \
-             aren't allowed the web: ask the person for the page, or say what you couldn't read."
-                .to_owned()
-        } else {
-            format!(
-                "{asked} isn't a link the person wrote to you, so it can't be read. read_link reads \
-                 only these: {}.",
-                context.links.join(", ")
-            )
-        });
+    let url = match among(asked, context.links) {
+        Some(url) => url,
+        // An address of the agent's own, once it may use the web: never one on this computer or
+        // its network, which the provider's own page reading can't reach either.
+        None => match normal(asked) {
+            Some(url) if context.web && !on_this_network(&url) => url,
+            Some(url) if context.web => {
+                return Output::failed(format!(
+                    "{url} is on this computer or its network, which read_page reads only when the \
+                     person wrote the link."
+                ));
+            }
+            Some(_) => {
+                return Output::failed(format!(
+                    "{asked} isn't a link the person wrote to you, and you may not use the web, so \
+                     it wasn't read."
+                ));
+            }
+            None => {
+                return Output::failed(format!(
+                    "{asked} isn't a web address: read_page reads http:// and https:// pages."
+                ));
+            }
+        },
     };
     tokio::select! {
         output = read(url) => output,
@@ -238,7 +257,7 @@ async fn read(url: url::Url) -> Output {
     let status = response.status();
     if status.is_redirection() {
         return Output::failed(format!(
-            "{url} sent the reader to an address on this computer or its network, which read_link \
+            "{url} sent the reader to an address on this computer or its network, which read_page \
              doesn't follow."
         ));
     }
@@ -257,7 +276,7 @@ async fn read(url: url::Url) -> Output {
             Ok(Some(chunk)) => {
                 if bytes.len() + chunk.len() > MAX_BYTES {
                     return Output::failed(format!(
-                        "{url} is more than the {} MB read_link reads.",
+                        "{url} is more than the {} MB read_page reads.",
                         MAX_BYTES / 1024 / 1024
                     ));
                 }
@@ -271,7 +290,7 @@ async fn read(url: url::Url) -> Output {
     }
     let Some(page) = Page::of(&content_type, &bytes) else {
         return Output::failed(format!(
-            "{url} is {}, which read_link doesn't read: it reads web pages, PDFs and text.",
+            "{url} is {}, which read_page doesn't read: it reads web pages, PDFs and text.",
             if content_type.is_empty() {
                 "a file of no stated kind".to_owned()
             } else {
@@ -290,7 +309,7 @@ async fn read(url: url::Url) -> Output {
     let text = text.trim();
     if text.is_empty() {
         return Output::failed(format!(
-            "{url} has no words in it that read_link can read. A page that builds itself with \
+            "{url} has no words in it that read_page can read. A page that builds itself with \
              script shows its words only in a browser."
         ));
     }
@@ -305,7 +324,7 @@ async fn read(url: url::Url) -> Output {
             out.push_str(&text[..cut]);
             let _ = write!(
                 out,
-                "\n… The rest is past the {MAX_TEXT_CHARS} characters read_link reads from one page."
+                "\n… The rest is past the {MAX_TEXT_CHARS} characters read_page reads from one page."
             );
         }
         None => out.push_str(text),

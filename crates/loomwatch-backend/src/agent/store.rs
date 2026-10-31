@@ -161,6 +161,7 @@ mod tests {
             },
             messages_written: 3,
             links: vec!["https://arxiv.org/html/2609.03874v1".to_owned()],
+            web: true,
         }
     }
 

@@ -60,7 +60,8 @@ async fn site() -> String {
     format!("http://{address}")
 }
 
-async fn read_link(url: &str, links: &[String]) -> Output {
+/// `read_page` of `url`, by an agent the person wrote `links` to, which may use the web or not.
+async fn read_page_as(url: &str, links: &[String], web: bool) -> Output {
     let (_cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
     let cancel = Cancel::new(cancel_rx);
     let settings = super::super::CommandSettings::default();
@@ -71,10 +72,15 @@ async fn read_link(url: &str, links: &[String]) -> Output {
         command: &settings,
         pictures: super::super::Pictures::default(),
         links,
+        web,
     };
     tokio::time::timeout(Duration::from_secs(20), run(&json!({"url": url}), &context))
         .await
-        .expect("read_link answered")
+        .expect("read_page answered")
+}
+
+async fn read_link(url: &str, links: &[String]) -> Output {
+    read_page_as(url, links, false).await
 }
 
 #[test]
@@ -238,12 +244,35 @@ async fn a_link_the_person_wrote_is_read_as_words_and_any_other_is_refused() {
     let other = read_link(&format!("{site}/html/other"), &links).await;
     assert!(other.failed);
     assert!(
-        other.text.contains("isn't a link the person wrote"),
+        other
+            .text
+            .contains("isn't a link the person wrote to you, and you may not use the web"),
         "{}",
         other.text
     );
 
     let none = read_link(&paper, &[]).await;
     assert!(none.failed);
-    assert!(none.text.contains("hasn't written a link"), "{}", none.text);
+    assert!(
+        none.text.contains("you may not use the web"),
+        "{}",
+        none.text
+    );
+
+    // Once the person let it use the web, an address of the agent's own is read, but never one on
+    // this computer or its network: only a link the person wrote reaches those.
+    let own = read_page_as(&format!("{site}/notes.txt"), &[], true).await;
+    assert!(own.failed);
+    assert!(
+        own.text.contains("is on this computer or its network"),
+        "{}",
+        own.text
+    );
+    let not_web = read_page_as("file:///etc/passwd", &[], true).await;
+    assert!(not_web.failed);
+    assert!(
+        not_web.text.contains("isn't a web address"),
+        "{}",
+        not_web.text
+    );
 }

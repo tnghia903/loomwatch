@@ -115,7 +115,7 @@ struct TeamBusState {
     /// was saved when it was first brought in ([`crate::bring_in`], ADR 0092).
     guests: std::sync::Mutex<BTreeMap<String, AgentConfig>>,
     /// The links the operator wrote in the run's message (ADR 0104): every agent the bus starts may
-    /// read them with `read_link`.
+    /// read them with `read_page` without asking.
     links: std::sync::Mutex<Vec<String>>,
 }
 

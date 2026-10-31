@@ -27,6 +27,7 @@
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use serde::{Deserialize, Serialize};
@@ -121,11 +122,12 @@ pub struct ToolSet {
     /// Reading, searching and changing files.
     pub files: bool,
     pub commands: bool,
-    /// The provider's web search and fetch. Offered only to an agent allowed the web.
+    /// The provider's web search and fetch, for an agent whose web switch is on.
     pub web: bool,
-    /// `read_link`: the pages at the links the person wrote (ADR 0104), for an agent without the
-    /// web, which has no other way to read them.
-    pub links: bool,
+    /// `search_web` and `read_page`, for an agent whose web switch is off (ADR 0104): the web,
+    /// asked for as a command or a file change is. A link the person wrote is read without asking,
+    /// and their yes gives the agent the provider's web tools.
+    pub web_asks: bool,
     /// `update_plan`.
     pub plan: bool,
 }
@@ -137,22 +139,30 @@ impl ToolSet {
         files: false,
         commands: false,
         web: false,
-        links: false,
+        web_asks: false,
         plan: false,
     };
 
-    /// Everything, with the web as the agent's `allow.web` says, and the person's links when it
-    /// isn't allowed the web.
+    /// Everything: the web as the agent's `allow.web` says, or asked for when it is off.
     #[must_use]
     pub fn all(web: bool) -> Self {
         Self {
             files: true,
             commands: true,
             web,
-            links: !web,
+            web_asks: !web,
             plan: true,
         }
     }
+}
+
+/// Which of the agent's switches are off (ADR 0037), so what it does under them asks the person
+/// first. Its instructions say so, so it reaches for the right tool and expects the question
+/// rather than working around it. The web's is [`ToolSet::web_asks`]; a command's instructions
+/// always say it may ask.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Asks {
+    pub edits: bool,
 }
 
 /// Tools the daemon serves itself: the Team Bus, Ask's tools, and the tools the operator connected
@@ -216,6 +226,8 @@ pub struct SessionConfig {
     /// The team file's effort, if any: `low`, `medium`, `high`, `xhigh`, `max`, …
     pub effort: Option<String>,
     pub tools: ToolSet,
+    /// Which switches are off. Nothing, unless the engine says.
+    pub asks: Asks,
     /// Folders of the agent's own skills, which are always listed.
     pub skill_roots: Vec<PathBuf>,
     /// `LoomWatch`'s library of skills: listed whole while small, else by what the work calls for.
@@ -275,6 +287,7 @@ impl SessionConfig {
             model: model.to_owned(),
             effort: None,
             tools: ToolSet::all(false),
+            asks: Asks::default(),
             skill_roots: Vec::new(),
             skill_library: Vec::new(),
             skill_focus: None,
@@ -401,9 +414,12 @@ pub struct Snapshot {
     pub usage: Usage,
     #[serde(default)]
     pub messages_written: u64,
-    /// The links the person wrote, which `read_link` may read (ADR 0104).
+    /// The links the person wrote, which `read_page` reads without asking (ADR 0104).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub links: Vec<String>,
+    /// The person let the agent use the web part way through, though its switch is off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub web: bool,
 }
 
 /// Cancels the turn a session is running, from anywhere.
@@ -441,9 +457,13 @@ pub struct Session {
     /// The pictures opened by the message whose calls are running, and their base64 bytes: they
     /// join the conversation only once all its calls are done, and count against its room before.
     unsent_pictures: (usize, usize),
-    /// The links the person wrote, which `read_link` may read (ADR 0104): only the engine adds to
-    /// them, from the person's own messages, never from what the agent reads or is handed.
+    /// The links the person wrote, which `read_page` reads without asking (ADR 0104): only the
+    /// engine adds to them, from the person's own messages, never from what the agent reads or is
+    /// handed.
     links: Vec<String>,
+    /// The person answered yes when the agent, its web switch off, asked for the web: from the
+    /// next call on it has the provider's web tools, and its commands the network.
+    web_granted: AtomicBool,
 }
 
 impl Session {
@@ -486,6 +506,7 @@ impl Session {
             spend: Arc::new(Unmetered),
             unsent_pictures: (0, 0),
             links: Vec::new(),
+            web_granted: AtomicBool::new(false),
         }
     }
 
@@ -521,6 +542,7 @@ impl Session {
             spend: Arc::new(Unmetered),
             unsent_pictures: (0, 0),
             links: snapshot.links,
+            web_granted: AtomicBool::new(snapshot.web),
         }
     }
 
@@ -536,11 +558,18 @@ impl Session {
             usage: self.usage,
             messages_written: self.messages_written,
             links: self.links.clone(),
+            web: self.web_granted.load(Ordering::Relaxed),
         }
     }
 
-    /// Let `read_link` read `links` too (ADR 0104). Only for links the person wrote: a link the
-    /// agent could have made up would let it send what it read to any address.
+    /// Whether the agent may use the web now: its switch is on, or the person said yes when it
+    /// asked.
+    fn uses_web(&self) -> bool {
+        self.config.tools.web || self.web_granted.load(Ordering::Relaxed)
+    }
+
+    /// Let `read_page` read `links` without asking (ADR 0104). Only for links the person wrote: a
+    /// link the agent could have made up would let it send what it read to any address.
     pub fn allow_links<'a>(&mut self, links: impl IntoIterator<Item = &'a String>) {
         for link in links {
             if !self.links.contains(link) {
@@ -994,8 +1023,9 @@ impl Session {
                 | Builtin::EditFile => set.files,
                 Builtin::RunCommand => set.commands,
                 Builtin::UpdatePlan => set.plan,
-                // Offered whether or not a link has been written yet, so the list never changes.
-                Builtin::ReadLink => set.links,
+                // Offered from the first call, before anything is asked, and kept once the person
+                // says yes, so these never change the list.
+                Builtin::ReadPage | Builtin::SearchWeb => set.web_asks,
                 // Added last, with the daemon's tools.
                 Builtin::ReadToolOutput => false,
             })
@@ -1042,7 +1072,9 @@ impl Session {
             effort,
             messages: &self.history,
             tools: &tools,
-            server_tools: if offered && self.config.tools.web {
+            // Once the person says yes to an agent whose switch is off, from its next call: the list
+            // grows once, which the provider's cache reads again from the tools on.
+            server_tools: if offered && self.uses_web() {
                 ServerTools {
                     web_search: true,
                     web_fetch: true,
@@ -1420,7 +1452,7 @@ impl Session {
         call: &ToolCall,
         mut input: Value,
     ) -> Result<Result<Value, Output>, AgentError> {
-        let prepared = match tool.prepare(&input, &self.config.cwd, &self.config.knowledge) {
+        let mut prepared = match tool.prepare(&input, &self.config.cwd, &self.config.knowledge) {
             Ok(prepared) => prepared,
             Err(said) => {
                 self.emit(events::tool_call(
@@ -1444,6 +1476,9 @@ impl Session {
             &prepared.locations,
         ))
         .await?;
+        if self.web_goes_ahead(tool, &input) {
+            prepared.needs_permission = false;
+        }
         if prepared.needs_permission {
             let request = PermissionRequest {
                 session_id: self.config.session_id.clone(),
@@ -1454,7 +1489,7 @@ impl Session {
                 locations: prepared.locations.clone(),
             };
             match self.permissions.request(&request).await {
-                Decision::Allow => {}
+                Decision::Allow => self.grant_web(tool),
                 Decision::AllowEdited(edited) => {
                     if let Err(said) =
                         tool.prepare(&edited, &self.config.cwd, &self.config.knowledge)
@@ -1464,6 +1499,7 @@ impl Session {
                             .await?;
                         return Ok(Err(Output::failed(said)));
                     }
+                    self.grant_web(tool);
                     input = edited;
                 }
                 Decision::Deny => {
@@ -1485,6 +1521,43 @@ impl Session {
         Ok(Ok(input))
     }
 
+    /// Whether a call for the web goes ahead without asking (ADR 0104): a link the person wrote,
+    /// or anything once the agent may use the web.
+    fn web_goes_ahead(&self, tool: Builtin, input: &Value) -> bool {
+        match tool {
+            Builtin::ReadPage => {
+                self.uses_web()
+                    || input
+                        .get("url")
+                        .and_then(Value::as_str)
+                        .is_some_and(|url| tools::is_link_among(url, &self.links))
+            }
+            Builtin::SearchWeb => self.uses_web(),
+            _ => false,
+        }
+    }
+
+    /// The person said yes to the web: the agent may use it from its next call.
+    fn grant_web(&self, tool: Builtin) {
+        if matches!(tool, Builtin::ReadPage | Builtin::SearchWeb) {
+            self.web_granted.store(true, Ordering::Relaxed);
+        }
+    }
+
+    /// What `search_web` answers once the agent may use the web: the provider searches, from the
+    /// next call, with the habits an agent allowed the web from the start is given.
+    fn web_search_answer(input: &Value) -> Output {
+        let query = input
+            .get("query")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        Output::ok(format!(
+            "You may use the web now. From your next step you have the web search and page \
+             reading tools: search for \"{query}\" with them. Prefer primary sources, and check \
+             that a source says what you cite it for."
+        ))
+    }
+
     /// Runs an allowed call and records how it ended.
     async fn finish_builtin(
         &self,
@@ -1496,9 +1569,10 @@ impl Session {
         let output = match tool {
             Builtin::UpdatePlan => self.update_plan(input).await?,
             Builtin::ReadToolOutput => self.read_output(input),
+            Builtin::SearchWeb => Self::web_search_answer(input),
             _ => {
                 let settings = CommandSettings {
-                    network: self.config.tools.web,
+                    network: self.uses_web(),
                     writable: self.config.writable.clone(),
                 };
                 let context = Context {
@@ -1515,6 +1589,7 @@ impl Session {
                         }
                     },
                     links: &self.links,
+                    web: self.uses_web(),
                 };
                 tool.run(input, &context).await
             }
@@ -2051,6 +2126,8 @@ fn instructions(
         files: config.tools.files,
         commands: config.tools.commands,
         web: config.tools.web.then(|| config.web.page_words()),
+        web_asks: config.tools.web_asks,
+        edits_ask: config.asks.edits,
         plan: config.tools.plan,
         ask_user: host.specs().iter().any(|tool| tool.name == "ask_user"),
     };
