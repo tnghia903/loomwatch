@@ -88,7 +88,6 @@ const FRESH_MS = 1_400
 /** The answer's size before it has been measured. */
 const ANSWER_GUESS = { width: 360, height: 96 }
 const NO_PASSAGES: readonly AskedPassage[] = []
-const NO_PICTURES: readonly string[] = []
 const NO_TEAM: readonly string[] = []
 const NO_FACES: readonly AgentFacts[] = []
 /** Teammates' faces shown in the bubble beside the one asked; past this the rest are a list away. */
@@ -141,9 +140,7 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
   const figures = useContext(TeamFiguresContext)
   const figureOf = (id: string) => figures.get(id) ?? figures.get(wearerOf(id)) ?? null
   const maker = drawnKind === 'slides' && from ? figureOf(from) : null
-  const makerPicture = useFigurePictures(maker ? [figureStill(maker)] : NO_PICTURES)
-  const face = maker ? makerPicture.get(figureStill(maker)) ?? null : null
-  const drawn = useDrawnPage(drawnKind ? path : null, drawnKind, baseName(path), String(content.changes), look ?? PAPER_LOOK, face)
+  const drawn = useDrawnPage(drawnKind ? path : null, drawnKind, baseName(path), String(content.changes), look ?? PAPER_LOOK, maker ? figureStill(maker) : null)
   // Until it is drawn, or can't be, it is neither its pages nor only its words.
   const drawing = drawnKind !== null && !drawn
   const asPages = format === 'pdf'
