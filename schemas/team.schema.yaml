@@ -492,6 +492,16 @@ $defs:
           minimum: 1
           maximum: 1440
         default: [1, 2, 5, 10, 30]
+      waitForYouMinutes:
+        description: >-
+          How long a routine's run waits for you when it asks something: a permission, more money
+          at its spending limit, or an agent's question. Then the permission is declined, the team
+          finishes with what it has, or the agent goes on with its best assumption and says which.
+          Review stops in the team wait as long as it takes.
+        type: integer
+        minimum: 1
+        maximum: 10080
+        default: 720
 
   Deliver:
     type: object

@@ -9,7 +9,7 @@ import { questionBackOf, SAID } from '../../lib/chat/reply'
 import { autoNote, permissionAsks, permissionWhat } from '../../lib/runs/permissionRequests'
 import { clock, describeEvidence } from '../../lib/story/weft'
 import type { Evidence } from '../../lib/watch/events'
-import { REACHED_WORD, reachedLine, type AskRefusal, type PermissionOutcome, type TeamMessage } from '../../lib/watch/messages'
+import { LOOMWATCH_ID, REACHED_WORD, reachedLine, type AskRefusal, type PermissionOutcome, type TeamMessage } from '../../lib/watch/messages'
 import { broughtInLine } from '../../lib/chat/guests'
 import { MentionChip, MentionedText } from '../chat/SaidText'
 import { useAgentFaces } from '../../lib/chat/faces'
@@ -135,7 +135,7 @@ export function AgentMessages({ messages, order, predecessors, evidence, live, o
   const member = (id: string): Member => {
     const known = members.get(id)
     if (known) return known
-    const name = order.find((party) => party.id === id)?.name ?? guests.get(id) ?? id
+    const name = id === LOOMWATCH_ID ? LOOMWATCH_NAME : order.find((party) => party.id === id)?.name ?? guests.get(id) ?? id
     const worn = figures.get(id)
     return { id, name, you: false, number: null, initials: initialsOf(name), hue: worn ? figureHue(worn) : 1 }
   }
@@ -396,7 +396,8 @@ function ChatMessage({ bubble, member, mentionable, alone, continued, open, flas
   const quoted = quote ? { what: quoteWhat(quote, member), text: quote.part === 'reply' && quote.item.line.message.reply?.asksBack ? questionBackOf(quote.text) : spoken(quote, member) } : null
   // What you can reply to: anything an agent said, other than a permission request (answered with
   // its own buttons) and a message that never arrived.
-  const toReply = onReply && speaker && !mine && part !== 'waiting' && !asking && !failed && text.trim() ? replyFor(bubble, speaker.id, mentions) : null
+  // Nor LoomWatch's own answer in your place (ADR 0090): there is nobody there to reach.
+  const toReply = onReply && speaker && !mine && speaker.id !== LOOMWATCH_ID && part !== 'waiting' && !asking && !failed && text.trim() ? replyFor(bubble, speaker.id, mentions) : null
   // A reply's quote already says whom it answers; it names someone only when it goes elsewhere, as
   // your approval does when it passes the work on.
   const addressed = quote ? mentions.filter((person) => !quote.from.includes(person.id)) : mentions
@@ -426,7 +427,7 @@ function ChatMessage({ bubble, member, mentionable, alone, continued, open, flas
       </li>
     )}
     <li
-      className={`chat-msg ${mine ? 'mine' : ''} ${continued ? 'continued' : ''} ${flash ? 'flash' : ''} ${failed ? 'failed' : ''} hue-${speaker?.hue ?? 0}`}
+      className={`chat-msg ${mine ? 'mine' : ''} ${continued ? 'continued' : ''} ${flash ? 'flash' : ''} ${failed ? 'failed' : ''} hue-${speaker?.id === LOOMWATCH_ID ? 'quiet' : speaker?.hue ?? 0}`}
       data-bubble={bubble.key}
       tabIndex={-1}
       aria-label={label}
@@ -618,6 +619,14 @@ function Context({ text }: { text: string }) {
 function Avatar({ member, size, plain = false }: { member: Member; size: number; plain?: boolean }) {
   // In a team's chat an agent's face has its own card, and @mentions it when clicked.
   const faces = useAgentFaces()
+  // LoomWatch itself answered for you (ADR 0090): the same face, never a teammate's.
+  if (member.id === LOOMWATCH_ID) {
+    return (
+      <span className="chat-loomwatch" role="img" aria-label={LOOMWATCH_NAME} title={`Nobody answered in time, so ${LOOMWATCH_NAME} answered for you`}>
+        <LoomFace size={size} />
+      </span>
+    )
+  }
   // LoomWatch's own check (ADR 0098) wears LoomWatch's face: it is no agent, so it has no card.
   if (member.id === LOOMWATCH_CHECK_ID) {
     return (
@@ -647,7 +656,9 @@ function membersOf(lanes: readonly Party[], order: readonly Party[], figures: Re
     // A helper (ADR 0079) wears its agent's figure and colour, and its own number.
     const helper = helperOf(lane.id)
     const figure = figures.get(lane.id) ?? figures.get(wearerOf(lane.id))
-    members.set(lane.id, { id: lane.id, name: lane.operator ? 'You' : lane.name, you: lane.operator, number: helper ? helper.number : number.get(lane.id) ?? null, initials: initialsOf(lane.name), hue: lane.operator ? 0 : figure ? figureHue(figure) : (hue++ % FIGURE_HUES) + 1 })
+    // LoomWatch's own answer (ADR 0090) wears no teammate's colour, nor takes one from a helper.
+    const own = lane.operator || lane.id === LOOMWATCH_ID
+    members.set(lane.id, { id: lane.id, name: lane.operator ? 'You' : lane.name, you: lane.operator, number: helper ? helper.number : number.get(lane.id) ?? null, initials: initialsOf(lane.name), hue: own ? 0 : figure ? figureHue(figure) : (hue++ % FIGURE_HUES) + 1 })
   }
   return members
 }

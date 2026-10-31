@@ -442,10 +442,12 @@ Response (`202 Accepted`):
   an agent's `limitUsd` is its own guard. `spentUsd` adds up the dollars of every call of the run:
   the exact cost OpenRouter reported, or a Claude call's cost at list prices. Calls on the ChatGPT
   plan cost no dollars. `stopped` is `finished` once the operator finished the run at its limit,
-  or `nobody_to_ask` once a scheduled run stopped there. It is stored with the run; runs recorded
+  or `nobody_to_ask` once a scheduled run stopped there, in runs recorded before ADR 0090; since
+  then a scheduled run waits at its stop like any other. It is stored with the run; runs recorded
   before spend limits have none.
 - `spendStops` lists the limits the run is waiting at: `{id, agent?, name?, limitUsd, spentUsd,
-  addUsd, since}`, with `agent` set when it is that agent's own guard. Every agent that reaches
+  addUsd, since, expiresAt?}`, with `agent` set when it is that agent's own guard, and
+  `expiresAt` in a scheduled run: when it finishes with what it has if nobody answers (ADR 0090). Every agent that reaches
   the limit waits at the same stop, and nothing is spent while it waits. It is live only, like
   `permissionRequests`. `POST /api/runs/{id}/spend` with `{ "stopId": "…", "decision": "add" |
   "finish", "addUsd": 0.5 }` answers one and returns `200` with the record. `add` grows this run's
@@ -453,7 +455,8 @@ Response (`202 Accepted`):
   at the team's limit ends the run with what it has. At an agent's guard, it stops that agent and
   the rest of the team carries on. It returns 404 when the stop is no longer waiting. A run that
   ended at its limit has `stopReason: "spend_limit"`. If the operator finished it, it `succeeded`,
-  with the last words an agent wrote as its `reply`. A scheduled run `failed` with `errorCode:
+  with the last words an agent wrote as its `reply`, and so did a scheduled run nobody answered by
+  its deadline (ADR 0090). A scheduled run recorded before then `failed` with `errorCode:
   "spend_limit"`. Either way its checkpoints are kept. The archive records `session_meta` events
   with `phase: "awaiting_spend"`, `"spend_answered"` (`decision`, `limitUsd`, `addedUsd`) and
   `"spend_stopped"` (`reason: "nobody_to_ask"`), each with the stop's `stopId`, `scope` (`team` or
@@ -471,13 +474,14 @@ Response (`202 Accepted`):
   and hands `text` back to the agent as the tool's result. Both need a `text` of at most 4,000
   characters; without one, or for an `edit` of a request that has nothing to change, it returns 409
   and the request keeps waiting. It returns 404 when that request is no longer waiting: it was
-  answered, timed out after 10 minutes, or its run ended. The app's **Always allow** is `allow_run`
+  answered, timed out at its `expiresAt` (10 minutes, or a scheduled run's `waitForYouMinutes`),
+  or its run ended. The app's **Always allow** is `allow_run`
   plus switching that switch on for the agent in the team file. The archive records `session_meta`
   events with `phase: "awaiting_permission"` (with the request's `requestId`, `title`, `kind`,
   `switch`, `detail`, `expiresAt` and `autoNote`) and `phase: "permission_answered"` (`outcome`:
   `allow_once`, `allow_run`, `allow_team`, `allowed_for_run`, `auto_approved`, `deny`, `edited`
   with the command that ran as `edited`, `answered` with your words as `answer`, `timed_out`, or
-  `not_asked` in a routine's run) between the request and the answer the agent gets. The team chat
+  `not_asked` once the run has ended) between the request and the answer the agent gets. The team chat
   shows each asked request as the agent's message to you, answered there, and keeps how it was
   settled in the conversation. While a request waits, Details says the agent is waiting for you,
   and its timeline names what it asked to do: the call is open in the record, but has not run.
@@ -498,6 +502,7 @@ schedule:
     notion:
       title: "AI, tech & business news — {{date}}"   # optional, default "{{team}} — {{date}}"
   retryAfterMinutes: [1, 2, 5, 10, 30]   # optional, this is the default; [] never tries again
+  waitForYouMinutes: 720        # optional, default 12 hours: how long a run waits when it asks you
 ```
 
 - **Templates** in `prompt` and `title`: `{{date}}` → `YYYY-MM-DD`, `{{weekday}}` →
@@ -592,13 +597,26 @@ bold, italic and code; at most 500 blocks. The outcome is stored on the run reco
 
 ### Unattended runs
 
-A routine only works if its agents never have to ask. A routine's run has nobody to ask, so
-every request that an agent's `allow:` switches (or the team's Auto mode) do not already cover is
-declined at once, recorded as `not_asked`, and the agent carries on without it. Reading inside an
-agent's own folder and what it was given needs no switch; for a news digest, `web: true` is all
-the agents need. [`examples/usecases/daily-tech-digest.yaml`](../examples/usecases/daily-tech-digest.yaml)
-is the worked example: only its web switches are on. A routine also needs each of its agents' ways
-of paying connected, and credit or plan allowance for its models. Before it fires, it checks every
+A routine's run asks you like a run you started (ADR 0090). A permission request, a spend stop or an
+agent's question waits in Needs you, the menu bar and the notch, for the schedule's
+`waitForYouMinutes` (12 hours by default), counted by the clock so a computer that slept through it
+still settles it on waking. If nobody answers by then, the safe thing happens:
+
+- a permission request is declined (`timed_out`), and the agent carries on without it;
+- a spend stop finishes the team with what it has, or at an agent's own limit stops that agent
+  (`spend_answered` with `reason: no_answer`, and the run's `spend.stopped` is `no_answer`);
+- an agent's question is answered by LoomWatch in your place, telling the agent to make the most
+  reasonable assumption and say which one it made. The archived answer carries `noAnswer: true`,
+  and the chat shows it as LoomWatch's, not yours. The run's `waitingOn.expiresAt` says when.
+
+Review stops in the team wait as long as it takes. A run that waits holds its routine, so that
+routine's next timed fire is skipped until it ends.
+
+A routine still runs most smoothly when its agents rarely need to ask. Reading inside an agent's own
+folder and what it was given needs no switch; for a news digest, `web: true` is all the agents need.
+[`examples/usecases/daily-tech-digest.yaml`](../examples/usecases/daily-tech-digest.yaml) is the
+worked example: only its web switches are on. A routine also needs each of its agents' ways of
+paying connected, and credit or plan allowance for its models. Before it fires, it checks every
 agent's way of paying is connected; one that isn't is recorded as the routine's problem instead of
 a failed run each time. One that fails for credit or a plan's limit mid-run shows up as a `failed`
 run, not a delivery.

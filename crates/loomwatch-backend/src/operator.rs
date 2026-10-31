@@ -143,6 +143,11 @@ pub struct WaitingOn {
     /// back work as they do at a review stop, and a screen that does not know this field shows one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub check: Option<CheckWait>,
+    /// RFC 3339: when the agent goes on with its best assumption if nobody answers, for a question
+    /// asked in a run nobody started by hand (ADR 0090). Absent otherwise: a question in a run
+    /// someone started, and every review stop, waits as long as it takes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<String>,
 }
 
 /// What a check step that stopped to ask shows: the checks still not met after it sent the work
@@ -206,6 +211,38 @@ pub struct OperatorAnswer {
     /// the `operator_questions` row so the question and the evidence it produced read as one
     /// thing.
     pub answer_event_id: String,
+    /// Nobody answered by the question's deadline, so `LoomWatch` answered in the person's place
+    /// (ADR 0090): [`Self::text`] tells the agent to go on with its best assumption, and the
+    /// archive marks the answer as not the person's.
+    pub unanswered: bool,
+}
+
+impl OperatorAnswer {
+    /// What `LoomWatch` answers for the person once a question has waited `waited` with no answer.
+    #[must_use]
+    pub fn unanswered(waited: chrono::Duration) -> Self {
+        Self {
+            text: format!(
+                "Nobody answered your question within {}. Make the most reasonable assumption, \
+                 say in your answer which one you made, and carry on.",
+                plain_duration(waited)
+            ),
+            send_back: None,
+            answer_event_id: crate::engine::new_event_id(),
+            unanswered: true,
+        }
+    }
+}
+
+/// "12 hours", "90 minutes", "1 hour": how long something waited, as a sentence says it.
+fn plain_duration(waited: chrono::Duration) -> String {
+    let minutes = waited.num_minutes().max(1);
+    let (count, unit) = if minutes % 60 == 0 {
+        (minutes / 60, "hour")
+    } else {
+        (minutes, "minute")
+    };
+    format!("{count} {unit}{}", if count == 1 { "" } else { "s" })
 }
 
 /// The run task's end of the rendezvous. Dropping it is how a cancelled run stops waiting.
@@ -213,22 +250,48 @@ pub struct OperatorWait {
     run_id: String,
     node: String,
     receiver: oneshot::Receiver<OperatorAnswer>,
+    /// When `LoomWatch` answers in the person's place, and how long that will have been: set for a
+    /// question in a run nobody started by hand (ADR 0090).
+    deadline: Option<(chrono::DateTime<Utc>, chrono::Duration)>,
+    registry: RunRegistry,
 }
 
 impl OperatorWait {
     /// Block this run's loop — and nothing else — until an answer arrives.
     ///
-    /// There is no timeout here on purpose. Nothing is in flight: the agent is parked in the
-    /// database, no model request is racing anybody, and a stop that waits an hour costs exactly
-    /// what a stop that waits a minute costs. The only thing that ends this wait
-    /// other than an answer is the run being cancelled, which drops the whole task.
+    /// A review stop, and a question in a run someone started, have no timeout on purpose.
+    /// Nothing is in flight: the agent is parked in the database, no model request is racing
+    /// anybody, and a stop that waits an hour costs exactly what a stop that waits a minute costs.
+    /// A question in a routine's run waits until its deadline, by the wall clock, and is then
+    /// answered for the person with [`OperatorAnswer::unanswered`] (ADR 0090). The only other thing
+    /// that ends this wait is the run being cancelled, which drops the whole task.
     ///
     /// # Errors
     ///
     /// Returns an error only when the waiting room dropped the sender without an answer, which is
     /// a daemon-side fault rather than anything the operator did.
-    pub async fn answer(self) -> Result<OperatorAnswer, OperatorError> {
-        self.receiver.await.map_err(|_| {
+    pub async fn answer(mut self) -> Result<OperatorAnswer, OperatorError> {
+        if let Some((deadline, waited)) = self.deadline {
+            tokio::select! {
+                answer = &mut self.receiver => return self.answered(answer),
+                () = crate::deadline::passed(deadline) => {}
+            }
+            // Take the question off the record, unless an answer got there first: then it is on
+            // its way down the channel.
+            if self.registry.take_wait(&self.run_id, &self.node).is_ok() {
+                self.registry.persist_quietly(&self.run_id).await;
+                return Ok(OperatorAnswer::unanswered(waited));
+            }
+        }
+        let answer = (&mut self.receiver).await;
+        self.answered(answer)
+    }
+
+    fn answered(
+        &self,
+        answer: Result<OperatorAnswer, oneshot::error::RecvError>,
+    ) -> Result<OperatorAnswer, OperatorError> {
+        answer.map_err(|_| {
             OperatorError::not_found(format!(
                 "the wait for {} on run {} was discarded before an answer arrived",
                 self.node, self.run_id
@@ -464,6 +527,16 @@ impl OperatorDesk {
         run_id: &str,
         mut waiting: WaitingOn,
     ) -> Result<OperatorWait, OperatorError> {
+        // A question in a routine's run waits for the person by the schedule's deadline (ADR
+        // 0090); a review stop is one they designed, and waits as long as it takes.
+        let deadline = match (waiting.kind, self.registry.wait_for_you(run_id)) {
+            (StopKind::Question, Some(wait)) => {
+                let at = Utc::now() + wait;
+                waiting.expires_at = Some(crate::deadline::stamp(at));
+                Some((at, wait))
+            }
+            _ => None,
+        };
         if let Some(questions) = &self.questions {
             let id = questions
                 .open(
@@ -490,6 +563,8 @@ impl OperatorDesk {
             run_id: run_id.to_owned(),
             node: waiting.node,
             receiver,
+            deadline,
+            registry: self.registry.clone(),
         })
     }
 
@@ -629,6 +704,7 @@ mod tests {
             send_back_available: true,
             question_id: None,
             check: None,
+            expires_at: None,
         };
         let value = waiting.to_value();
         assert_eq!(value["park"], "reloadable");

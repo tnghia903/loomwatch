@@ -39,6 +39,21 @@ export function clockTime(iso: string | null | undefined): string {
   return Number.isNaN(time) ? '' : clock.format(time)
 }
 
+/**
+ * When something is due, as "If nobody answers by …" says it: "21:40" today, "tomorrow 07:10",
+ * "Monday 07:10" later in the week. A time of day, not a countdown, so a line nobody re-renders
+ * never goes stale (ADR 0090). Empty when `iso` isn't a time.
+ */
+export function dueAt(iso: string, now = Date.now()): string {
+  const time = Date.parse(iso)
+  if (Number.isNaN(time)) return ''
+  const days = Math.round((startOfDay(time) - startOfDay(now)) / DAY_MS)
+  const at = clockTime(iso)
+  if (days <= 0) return at
+  if (days === 1) return `tomorrow ${at}`
+  return `${new Date(time).toLocaleDateString(undefined, { weekday: 'long' })} ${at}`
+}
+
 /** "12 s", "4 min", "1 h 5 min". */
 export function took(from: string | null | undefined, to: string | null | undefined): string {
   if (!from || !to) return ''

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { RunRecord } from '../runs/client'
+import { dueAt } from '../chat/format'
 import { ago, teamLabel, ticketsFrom } from './needsYou'
 
 const NOW = Date.parse('2026-10-01T04:00:00Z')
@@ -23,6 +24,30 @@ describe('ticketsFrom', () => {
     expect(tickets.map((ticket) => [ticket.kind, ticket.runId])).toEqual([['review', 'r1'], ['question', 'r2'], ['failed', 'f1']])
     expect(tickets[0]).toMatchObject({ teamName: 'Daily news', node: 'review', sendBackTo: 'editor', text: 'Send these 5 stories on?' })
     expect(tickets[2].text).toBe('Coder could not open slides.pptx')
+  })
+
+  // ADR 0090: what happens by itself if nobody answers is said on the ticket, as a time of day so a
+  // ticket the tray keeps never goes stale. A scheduled run's question and spend stop carry their
+  // deadline; a run you started waits for those as long as it takes. A permission always has one.
+  it('says by when a scheduled run goes on by itself, and says nothing when it waits as long as it takes', () => {
+    const stop = { id: 's1', limitUsd: 1, spentUsd: 1.02, addUsd: 0.5, since: '2026-10-01T03:59:00Z' }
+    const request = { id: 'p1', agent: 'researcher', name: 'Researcher', title: 'Web search', kind: 'fetch', switch: 'web' as const, detail: null, since: '2026-10-01T03:58:00Z', expiresAt: '2026-10-01T15:58:00Z' }
+    const tickets = ticketsFrom([
+      run('q1', { status: 'running', waitingOn: { ...waiting('question', '2026-10-01T03:50:00Z'), expiresAt: '2026-10-01T15:50:00Z' } }),
+      run('s1', { status: 'running', spendStops: [{ ...stop, expiresAt: '2026-10-01T15:59:00Z' }] }),
+      run('s3', { status: 'running', spendStops: [{ ...stop, id: 's3', agent: 'r', name: 'Researcher', expiresAt: '2026-10-01T15:59:00Z' }] }),
+      run('p1', { status: 'running', permissionRequests: [request] }),
+      run('q2', { status: 'running', waitingOn: waiting('question', '2026-10-01T03:55:00Z') }),
+      run('s2', { status: 'running', spendStops: [{ ...stop, id: 's2' }] }),
+    ], names, new Set(), NOW)
+    const until = (runId: string) => tickets.find((ticket) => ticket.runId === runId)?.until
+    const by = (iso: string) => dueAt(iso, NOW)
+    expect(until('q1')).toBe(`If nobody answers by ${by('2026-10-01T15:50:00Z')}, Editor goes on with its best guess.`)
+    expect(until('s1')).toBe(`If nobody answers by ${by('2026-10-01T15:59:00Z')}, the team finishes with what it has.`)
+    expect(until('s3')).toBe(`If nobody answers by ${by('2026-10-01T15:59:00Z')}, Researcher stops here.`)
+    expect(until('p1')).toBe(`If nobody answers by ${by('2026-10-01T15:58:00Z')}, it is declined.`)
+    expect(until('q2')).toBeUndefined()
+    expect(until('s2')).toBeUndefined()
   })
 
   it('drops dismissed and day-old failures, and finished runs', () => {

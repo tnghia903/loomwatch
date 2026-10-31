@@ -8,8 +8,9 @@
 # the cut. Turn on "Send every answer to Notion" in the app to have each digest land there too.
 #
 # The schedule reads 9:00 in this computer's time zone, and LoomWatch must be running then: a fire
-# missed while it is stopped or the computer is asleep is skipped, not caught up. Nobody is there to
-# answer a permission request in a scheduled run, so only the web switches below are on.
+# missed while it is stopped or the computer is asleep is skipped, not caught up. A scheduled run
+# asks you like any run and waits 12 hours for an answer; with only the web switches below on, it
+# rarely needs to.
 schemaVersion: 1
 id: daily-tech-digest
 name: Daily tech digest

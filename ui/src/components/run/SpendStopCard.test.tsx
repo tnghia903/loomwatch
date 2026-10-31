@@ -25,6 +25,19 @@ describe('the spend stop (ADR 0068)', () => {
     expect(onRun).toHaveBeenCalledWith({ runId: 'r1' })
   })
 
+  // ADR 0090: a scheduled run's stop has a deadline, and the card says what happens by then.
+  it('in a scheduled run, says by when the team finishes or the agent stops by itself', () => {
+    const at = new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString()
+    render(<SpendStopCard run={{ runId: 'r1', spendStops: [stop({ expiresAt: at })] }} />)
+    expect(screen.getByText(/^If nobody answers by .+, the team finishes with what it has\.$/)).toHaveClass('permission-until')
+    cleanup()
+    render(<SpendStopCard run={{ runId: 'r1', spendStops: [stop({ agent: 'r', name: 'Researcher', limitUsd: 0.3, spentUsd: 0.3, addUsd: 0.15, expiresAt: at })] }} />)
+    expect(screen.getByText(/If nobody answers by .+, Researcher stops here\./)).toBeInTheDocument()
+    cleanup()
+    render(<SpendStopCard run={{ runId: 'r1', spendStops: [stop()] }} />)
+    expect(screen.queryByText(/If nobody answers/)).toBeNull()
+  })
+
   it('never blames one call for what parallel work spent past the limit', () => {
     // A lead's two dispatches to the Researcher each cost $0.00316 and crossed a $0.003 guard
     // together: $0.00332 over, more than any one call cost.

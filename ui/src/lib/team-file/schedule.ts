@@ -12,10 +12,12 @@ import type { ScheduleConfig } from './types'
 export type ScheduleFrequency = 'daily' | 'weekdays' | 'manual'
 
 /** Every property `$defs/Schedule` accepts; anything else is an `additionalProperties` failure. */
-const SCHEDULE_KEYS = ['cron', 'timezone', 'prompt', 'enabled', 'deliver', 'retryAfterMinutes'] as const
+const SCHEDULE_KEYS = ['cron', 'timezone', 'prompt', 'enabled', 'deliver', 'retryAfterMinutes', 'waitForYouMinutes'] as const
 /** `$defs/Schedule.retryAfterMinutes`: at most this many waits, each from 1 minute to a day. */
 const MAX_RETRIES = 20
 const MAX_RETRY_MINUTES = 24 * 60
+/** `$defs/Schedule.waitForYouMinutes`: from 1 minute to a week. */
+const MAX_WAIT_FOR_YOU_MINUTES = 7 * 24 * 60
 
 export interface ScheduleDraft {
   cron: string
@@ -23,10 +25,10 @@ export interface ScheduleDraft {
   prompt: string
 }
 
-/** `enabled`, `deliver` and `retryAfterMinutes` are not editable on the canvas, so they are carried
- * forward — but only in the shapes the schema accepts. A `deliver` block or a list of waits that is
- * anything else is dropped rather than preserved, since keeping it would mean the operator can
- * never save from this editor. */
+/** `enabled`, `deliver`, `retryAfterMinutes` and `waitForYouMinutes` are not editable on the
+ * canvas, so they are carried forward — but only in the shapes the schema accepts. A `deliver`
+ * block or a wait that is anything else is dropped rather than preserved, since keeping it would
+ * mean the operator can never save from this editor. */
 export function normalizeSchedule(draft: ScheduleDraft, previous?: Partial<ScheduleConfig> | null): ScheduleConfig {
   // Key order follows `$defs/Schedule` so a rewritten block still reads like a hand-written one.
   const cron = draft.cron.trim()
@@ -41,6 +43,10 @@ export function normalizeSchedule(draft: ScheduleDraft, previous?: Partial<Sched
   const waits: unknown = previous?.retryAfterMinutes
   if (Array.isArray(waits) && waits.length <= MAX_RETRIES && waits.every((wait) => Number.isInteger(wait) && wait >= 1 && wait <= MAX_RETRY_MINUTES)) {
     next.retryAfterMinutes = [...(waits as number[])]
+  }
+  const waitForYou: unknown = previous?.waitForYouMinutes
+  if (Number.isInteger(waitForYou) && (waitForYou as number) >= 1 && (waitForYou as number) <= MAX_WAIT_FOR_YOU_MINUTES) {
+    next.waitForYouMinutes = waitForYou as number
   }
   return next
 }

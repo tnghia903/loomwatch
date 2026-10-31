@@ -37,6 +37,8 @@
   white-space: nowrap;
 }
 .permission-note { margin: 0; font-size: 12px; color: var(--color-ink-3); }
+/* What happens by itself if nobody answers (ADR 0090): the one line that matters most, so it reads stronger. */
+.permission-note.permission-until { color: var(--color-ink-2); }
 /* Why Auto mode left a command to you (ADR 0061). */
 .permission-auto { margin: 0; font-size: 12px; line-height: 1.4; color: var(--color-ink-3); }
 .permission-acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }

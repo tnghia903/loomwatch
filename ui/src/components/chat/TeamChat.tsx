@@ -218,7 +218,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
       if (!waiting) continue
       const from = waiting.kind === 'review_stop' ? waiting.handoverFrom ?? waiting.node : waiting.node
       const backTo = waiting.kind === 'review_stop' && waiting.sendBackAvailable ? waiting.handoverFrom ?? null : null
-      return { runId: run.runId, node: waiting.node, kind: waiting.kind, from, fromName: team.names.get(from) ?? from, backTo }
+      return { runId: run.runId, node: waiting.node, kind: waiting.kind, from, fromName: team.names.get(from) ?? from, backTo, expiresAt: waiting.expiresAt ?? null }
     }
     return null
   }, [chat.live, team.names])

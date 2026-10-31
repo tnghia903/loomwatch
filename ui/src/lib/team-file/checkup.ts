@@ -328,11 +328,12 @@ export function checkup({ agents, edges, entrypoint, responder, scheduled = fals
       if (agent.allow?.[allow.key] || !asksFor(role, allow.needs)) continue
       add({
         rule: allow.rule, severity: scheduled ? 'fix' : 'improve', agentId: agent.id,
-        // permissions.rs: what is not switched on waits for the operator, up to 10 minutes, and a
-        // scheduled run declines it at once (AgentPermissions says the same under its "?").
-        title: scheduled ? `${agent.name} can't ${allow.to} when the team runs on schedule` : `${agent.name} must ask you each time it ${allow.doing}`,
+        // permissions.rs: what is not switched on waits for the operator, 10 minutes in a run you
+        // start and 12 hours in a scheduled one, then is declined (ADR 0090; AgentPermissions says
+        // the same under its "?").
+        title: scheduled ? `${agent.name} must ask you each time it ${allow.doing}, even on a schedule` : `${agent.name} must ask you each time it ${allow.doing}`,
         why: scheduled
-          ? 'Its instructions need it, and a scheduled run declines anything not allowed here, so that part of the work won’t get done.'
+          ? 'Its instructions need it. On a schedule the run waits up to 12 hours for your answer, then goes on without it. Allow it here if you trust this agent with it.'
           : 'Its instructions need it, so the run waits for your answer each time. Allow it here if you trust this agent with it.',
         fix: { label: allow.switchLabel, change: { kind: 'allow', agentId: agent.id, key: allow.key } },
       })

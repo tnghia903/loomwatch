@@ -86,6 +86,18 @@ describe('what a review ticket quotes', () => {
   })
 })
 
+// ADR 0090: a ticket says what happens by itself if nobody answers, and by when; one that waits as
+// long as it takes says nothing of the kind.
+describe('what happens if nobody answers', () => {
+  it('says it under the ticket when there is a deadline, and nothing when there is none', () => {
+    const stop: Ticket = { ...ticket, id: 'r2:spend:s1', kind: 'spend', runId: 'r2', text: 'The team used its $1.00', context: null, requestId: undefined, stopId: 's1', until: 'If nobody answers by 21:40, the team finishes with what it has.' }
+    render(<NeedsYouTray tickets={[stop, ticket]} working={0} onAnswer={vi.fn()} onPermission={vi.fn()} onDismiss={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: /2 need you/ }))
+    expect(screen.getByText('If nobody answers by 21:40, the team finishes with what it has.')).toBeInTheDocument()
+    expect(screen.getByRole('dialog').querySelectorAll('.ticket-until')).toHaveLength(1)
+  })
+})
+
 // Another team's run opens as the team rail opens a team: in place, where a team page follows the address.
 describe('Open run', () => {
   it('opens that team’s run in place', () => {

@@ -488,8 +488,12 @@ policy answers it (`permissions.rs`), from the agent's `allow:` switches (`web`,
   - edit the command or address, then allow it, and the agent runs the edited version;
   - answer in the agent's place, so nothing runs and the agent reads the answer as the tool's
     result.
-- **Declined:** a request nobody answers within ten minutes, or one nobody can be asked about,
-  such as a request from a scheduled run.
+- **Declined:** a request nobody answers by its deadline, or one nobody can be asked about, such as
+  a request from a run that has ended. The deadline is ten minutes in a run someone started, and
+  the schedule's `waitForYouMinutes` (twelve hours by default) in a scheduled run. It is counted
+  by the wall clock (`deadline.rs`), so a computer that slept through it still declines on waking
+  (ADR 0090). A scheduled run's spend stop and agents' questions wait the same way: then the team
+  finishes with what it has, or the agent goes on with its best assumption.
 
 Every decision that was not the policy's own is recorded with who made it. Ask and one-turn
 helpers have no policy, and they are offered no tool that would need one.

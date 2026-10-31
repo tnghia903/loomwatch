@@ -49,6 +49,17 @@ describe('normalizeSchedule', () => {
     expect(unsupportedScheduleKeys(loaded)).toEqual([])
   })
 
+  it('keeps how long a routine waits for you, and drops a wait the schema rejects (ADR 0090)', () => {
+    const loaded: ScheduleConfig = { cron: '0 8 * * *', prompt: 'x', waitForYouMinutes: 90 }
+    const saved = normalizeSchedule({ cron: '30 9 * * 1-5', prompt: 'x' }, loaded)
+    expect(saved.waitForYouMinutes).toBe(90)
+    expect(Object.keys(saved)).toEqual(['cron', 'prompt', 'waitForYouMinutes'])
+    expect(unsupportedScheduleKeys(loaded)).toEqual([])
+    for (const wait of [0, 1.5, 10081, '90']) {
+      expect(normalizeSchedule({ cron: '0 8 * * *', prompt: 'x' }, { ...loaded, waitForYouMinutes: wait } as unknown as ScheduleConfig)).not.toHaveProperty('waitForYouMinutes')
+    }
+  })
+
   it('trims, and omits an empty timezone instead of writing an empty string', () => {
     expect(normalizeSchedule({ cron: ' 0 8 * * * ', timezone: '   ', prompt: '  Digest.  ' }, null))
       .toEqual({ cron: '0 8 * * *', prompt: 'Digest.' })

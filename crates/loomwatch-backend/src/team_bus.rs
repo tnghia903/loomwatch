@@ -1903,6 +1903,7 @@ impl TeamBus {
             send_back_available: false,
             question_id: None,
             check: None,
+            expires_at: None,
         };
         let wait = desk
             .park(&run_id, waiting)

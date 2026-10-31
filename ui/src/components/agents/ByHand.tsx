@@ -425,7 +425,7 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
               : connected.state === 'ready'
                 ? <button type="button" className="btn byhand-tools-connect" onClick={() => setConnecting('new')}><Plug size={14} aria-hidden="true" />Connect a new tool</button>
                 : connected.state === 'unavailable' && <p className="t-meta">{connected.message}</p>}
-            {givenTools.length > 0 && <p className="t-meta">A tool works in your own account on its site, so it asks you before each action, and the card lets you always allow one. On a schedule nobody can answer, so actions you haven’t always allowed are declined.</p>}
+            {givenTools.length > 0 && <p className="t-meta">A tool works in your own account on its site, so it asks you before each action, and the card lets you always allow one. On a schedule, an action nobody answers within 12 hours is declined.</p>}
           </>)}
 
           {block('keys', <ul className="byhand-keys">
@@ -438,7 +438,7 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
                   <Icon size={15} aria-hidden="true" />
                   {/* The setting comes first, in the bench's words, so the button can only read as
                       what pressing it does. */}
-                  <span><b>{info.label}</b><em>{on ? `Allowed. ${info.on}` : 'Asks you first. On a schedule nobody can answer, so it is declined.'}</em></span>
+                  <span><b>{info.label}</b><em>{on ? `Allowed. ${info.on}` : 'Asks you first. On a schedule, it is declined if nobody answers in 12 hours.'}</em></span>
                   {/* Not the page's main action: Save is its one gold fill. */}
                   <button type="button" className="btn" aria-label={`${on ? 'Ask me first' : 'Allow'}: ${info.label.toLowerCase()}`} onClick={() => giveKey(key, !on)}>{on ? 'Ask me first' : 'Allow'}</button>
                 </li>

@@ -11,6 +11,7 @@ import { answersDecision, replyWhat, replyWords } from '../../lib/chat/reply'
 import type { ChipAt } from '../../lib/chat/chipField'
 import { destination, findMention, mentionChoices, mentionQuery, mentionsIn, type ChatAgent, type Destination } from '../../lib/chat/route'
 import { InlineMarkdown } from '../ui/Markdown'
+import { ifNobodyAnswers } from '../../lib/story/needsYou'
 import { Swap } from './Appearing'
 import { ChipField, type ChipFieldHandle } from './ChipField'
 import { MentionChip } from './SaidText'
@@ -25,6 +26,8 @@ export interface OpenDecision {
   /** Who asked: the agent with the question, or whose handover is under review. */
   from: string
   fromName: string
+  /** When the agent goes on with its best guess if nobody answers: a question in a scheduled run (ADR 0090). */
+  expiresAt?: string | null
   /** The agent a review's note can send the work back to, as its Send back does; `null` when none can. */
   backTo: string | null
 }
@@ -265,6 +268,9 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
   // An empty box has nothing above it; once there are words, it says where they will go. A chat
   // with one agent has only one place a message can go, so it says that from the start.
   const quiet = !solo && !answering && !trimmed && !replyTo
+  // What happens by itself if nobody answers a scheduled run's question (ADR 0090): a quiet hint
+  // beside the label, not part of the gold "act here" words.
+  const untilHint = answering?.kind === 'question' && answering.expiresAt ? ifNobodyAnswers(answering.expiresAt, `${answering.fromName} goes on with its best guess`) : undefined
   const answeringLabel = answering
     ? answering.kind === 'question'
       ? `Your answer to ${answering.fromName}'s question`
@@ -302,6 +308,7 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
         <div className={`tc-where route-${route ?? 'answer'}`} id={whereId} aria-live="polite">
           {icon}
           <Swap key={answeringLabel ?? where.label} className="tc-where-label">{answeringLabel ?? where.label}</Swap>
+          {untilHint && <em className="tc-where-hint">{untilHint}</em>}
           {answering && (
             <button type="button" className="tc-where-escape" onClick={() => setTeamInstead(true)}>
               <X size={12} aria-hidden="true" />{solo ? 'Write a note instead' : 'Write to the team instead'}

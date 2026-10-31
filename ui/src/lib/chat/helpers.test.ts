@@ -32,6 +32,8 @@ describe('helpers (ADR 0079)', () => {
     const names = new Map([['ada', 'Ada']])
     expect(nameWithHelpers(names, 'ada')).toBe('Ada')
     expect(nameWithHelpers(names, 'ada~3')).toBe('Ada’s helper 3')
+    // ADR 0090: LoomWatch, when it answered a question in your place, is named, never its marker id.
+    expect(nameWithHelpers(names, 'loomwatch:app')).toBe('LoomWatch')
     expect(nameWithHelpers(names, 'bob~1')).toBe('bob’s helper 1')
     expect(nameWithHelpers(names, 'bob')).toBeNull()
   })

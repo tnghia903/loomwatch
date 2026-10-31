@@ -20,6 +20,7 @@ pub mod config;
 pub mod connected_tools;
 pub mod control;
 pub mod db;
+mod deadline;
 pub mod delivery;
 pub mod devices;
 pub mod documents;
@@ -1092,7 +1093,7 @@ async fn run_pipeline_nodes(
             session = resumed;
             reply = session
                 .process
-                .prompt_turn(&mut session.recorder, &answer_turn(&answer.text))
+                .prompt_turn(&mut session.recorder, &turn_for(&answer))
                 .await
                 .with_context(|| format!("pipeline node {} failed after your answer", agent.id))?;
         }
@@ -1457,7 +1458,7 @@ pub(crate) async fn answer_parked_questions(
         session = resumed;
         reply = session
             .process
-            .prompt_turn(&mut session.recorder, &answer_turn(&answer.text))
+            .prompt_turn(&mut session.recorder, &turn_for(&answer))
             .await?;
     }
     Ok((session, reply))
@@ -1780,6 +1781,16 @@ fn answer_turn(answer: &str) -> String {
     )
 }
 
+/// The turn a parked question's answer becomes: the person's direction, or, when nobody answered
+/// in time, `LoomWatch` saying so (ADR 0090). That one is not framed as the person's words.
+fn turn_for(answer: &operator::OperatorAnswer) -> String {
+    if answer.unanswered {
+        format!("## No answer came\n{}", answer.text)
+    } else {
+        answer_turn(&answer.text)
+    }
+}
+
 /// A review stop: the pipeline pauses on the operator the way it would on any stage.
 ///
 /// Nothing is spawned. The run's status stays `running` — it has not failed and nothing is
@@ -1864,6 +1875,7 @@ async fn run_review_stop(
             send_back_available: tier == operator::ParkTier::Reloadable,
             question_id: None,
             check: None,
+            expires_at: None,
         };
         log.append(
             &node.id,
@@ -1986,7 +1998,14 @@ async fn archive_operator_answer(
                 "messageId": null,
                 "content": {"type": "text", "text": answer.text},
             }),
-            Some(operator_answer_raw(asked_by, answer.send_back.as_deref())),
+            Some({
+                let mut raw = operator_answer_raw(asked_by, answer.send_back.as_deref());
+                // Not the person's words: nobody answered in time, and `LoomWatch` did (ADR 0090).
+                if answer.unanswered {
+                    raw["noAnswer"] = serde_json::json!(true);
+                }
+                raw
+            }),
         )
         .await
     {
@@ -5131,6 +5150,7 @@ async fn ask_about_checks(
             send_back_available: live,
             question_id: None,
             check: Some(check.clone()),
+            expires_at: None,
         };
         log.append(
             &step.checker.id,
@@ -10930,6 +10950,7 @@ mod tests {
             text: text.to_owned(),
             send_back: send_back.map(str::to_owned),
             answer_event_id: uuid::Uuid::new_v4().to_string(),
+            unanswered: false,
         }
     }
 

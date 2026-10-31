@@ -36,7 +36,7 @@ export function AgentPermissions({ agent, readOnly = false, onChange, headClassN
   return (
     <div className="agent-context agent-permissions">
       <SectionHead title="Allowed without asking" className={headClassName} explain={<>
-        <div>Anything else this agent asks to do waits for your answer during a run, and is declined if nobody answers within 10 minutes. Scheduled runs decline it straight away.</div>
+        <div>Anything else it asks to do waits for your answer. If nobody answers, it is declined: after 10 minutes, or after 12 hours in a scheduled run.</div>
         {ALLOW_SWITCHES.map(({ key, label, off }) => <div key={key}><b>{label}</b> off: {off.charAt(0).toLowerCase()}{off.slice(1)}</div>)}
         {teamAuto && <div><b>Auto</b>: the team is in Auto mode, so a command that only reads files or downloads a page runs on its own, and anything else asks you. Change it beside the team chat’s message box.</div>}
       </>} />

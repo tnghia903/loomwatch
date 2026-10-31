@@ -1,4 +1,5 @@
 import type { Evidence, RunEvent } from '../watch/events'
+import { LOOMWATCH_ID } from '../watch/messages'
 import { STATE_WORDS } from '../state/words'
 
 /**
@@ -42,7 +43,8 @@ export function helperShortName(number: number): string {
 export function nameWithHelpers(names: ReadonlyMap<string, string>, id: string): string | null {
   const own = names.get(id)
   if (own) return own
-  if (id === LOOMWATCH_CHECK_ID) return LOOMWATCH_NAME
+  // LoomWatch itself: its own check (ADR 0098), or its answer in your place (ADR 0090).
+  if (id === LOOMWATCH_CHECK_ID || id === LOOMWATCH_ID) return LOOMWATCH_NAME
   const helper = helperOf(id)
   if (!helper) return null
   const lead = names.get(helper.lead) ?? helper.lead

@@ -58,10 +58,21 @@ export function permissionWhat(request: Pick<PermissionRequest, 'title' | 'detai
   return request.detail ? `${request.title} · ${request.detail}` : request.title
 }
 
+/**
+ * How long until `expiresAt`, as a sentence says it: "in 11 hours" once it is two hours or more
+ * away (a scheduled run waits twelve, ADR 0090), "in 95 min" below that, "in under a minute" once
+ * it is close. `null` when it isn't a time.
+ */
+export function timeLeft(expiresAt: string, now = Date.now()): string | null {
+  const left = Date.parse(expiresAt) - now
+  if (!Number.isFinite(left)) return null
+  const minutes = Math.floor(left / 60000)
+  if (minutes >= 120) return `in ${Math.floor(minutes / 60)} hours`
+  return minutes >= 1 ? `in ${minutes} min` : 'in under a minute'
+}
+
 /** "Declines by itself in 9 min" — or "in under a minute" once it is close. */
 export function permissionDeadline(expiresAt: string, now = Date.now()): string {
-  const left = Date.parse(expiresAt) - now
-  if (!Number.isFinite(left)) return 'Declines by itself if nobody answers.'
-  const minutes = Math.floor(left / 60000)
-  return minutes >= 1 ? `Declines by itself in ${minutes} min if nobody answers.` : 'Declines by itself in under a minute if nobody answers.'
+  const left = timeLeft(expiresAt, now)
+  return left ? `Declines by itself ${left} if nobody answers.` : 'Declines by itself if nobody answers.'
 }

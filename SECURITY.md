@@ -99,7 +99,7 @@ yourself.
   for this run**, **Allow for the whole team**, **Always allow** or **Deny**. **Edit, then allow**
   changes a command before it runs, this once. **Answer instead** sends your words back to the
   agent as the tool's answer, and nothing runs. A request nobody answers within 10 minutes is
-  declined, and a scheduled run, with nobody to ask, declines at once. In Auto mode, commands that
+  declined; a scheduled run waits 12 hours, then declines it. In Auto mode, commands that
   only read files, or download pages for an agent allowed the web, run without asking; everything
   else still asks.
 - **Give agents no tools that reach past the run.** An agent's tools are its files, the web,

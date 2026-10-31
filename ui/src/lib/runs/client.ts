@@ -92,6 +92,9 @@ export interface WaitingOn {
   /** Set when a check step stopped to ask (ADR 0062, `whenStillNotMet: ask`): the stop is a review of
       `handoverFrom`'s work, and this is what is still not met. */
   check?: CheckWait | null
+  /** When the agent goes on with its best guess if nobody answers: a question in a scheduled run
+      (ADR 0090). Absent when it waits as long as it takes. */
+  expiresAt?: string | null
 }
 
 /** What a check step that stopped to ask shows beside the work it checked. */
@@ -119,10 +122,13 @@ export interface CheckWait {
 export interface RunSpend {
   limitUsd?: number | null
   spentUsd: number
-  agents?: Record<string, { spentUsd: number; limitUsd?: number | null; stopped?: boolean }>
+  /** `unanswered`: the agent was stopped at its own limit because nobody answered in time (ADR 0090). */
+  agents?: Record<string, { spentUsd: number; limitUsd?: number | null; stopped?: boolean; unanswered?: boolean }>
   added?: { agent?: string | null; atUsd: number; addUsd: number }[]
-  /** `finished`: you finished the run at its limit. `nobody_to_ask`: a scheduled run stopped there. */
-  stopped?: 'finished' | 'nobody_to_ask' | null
+  /** `finished`: you finished the run at its limit. `no_answer`: a scheduled run finished there
+      because nobody answered in time (ADR 0090). `nobody_to_ask`: a scheduled run stopped there,
+      in runs recorded before then. */
+  stopped?: 'finished' | 'no_answer' | 'nobody_to_ask' | null
 }
 
 /**
@@ -139,6 +145,9 @@ export interface SpendStop {
   /** What "Add and carry on" adds. */
   addUsd: number
   since: string
+  /** When the team finishes with what it has if nobody answers: a scheduled run's stop (ADR 0090).
+      Absent when it waits as long as it takes. */
+  expiresAt?: string | null
 }
 
 /** `add` grows this run's limit and carries on; `finish` ends the run with what it has (or stops that agent). */

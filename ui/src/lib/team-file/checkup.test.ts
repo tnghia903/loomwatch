@@ -109,7 +109,7 @@ describe('checkup', () => {
     expect(rules(run({ agents: [coder] }))).toEqual(['needs-edits:coder', 'needs-commands:coder'])
     const [web] = run({ agents: [agent('scout', 'Search the web for this week’s AI news and reply with five bullet points, each with a link.')] })
     expect(web).toMatchObject({ rule: 'needs-web', severity: 'improve', fix: { change: { kind: 'allow', agentId: 'scout', key: 'web' } } })
-    expect(run({ agents: [agent('scout', 'Search the web for this week’s AI news and reply with five bullet points, each with a link.')], scheduled: true })[0]).toMatchObject({ rule: 'needs-web', severity: 'fix', title: 'Scout can\'t search the web when the team runs on schedule' })
+    expect(run({ agents: [agent('scout', 'Search the web for this week’s AI news and reply with five bullet points, each with a link.')], scheduled: true })[0]).toMatchObject({ rule: 'needs-web', severity: 'fix', title: 'Scout must ask you each time it searches the web, even on a schedule' })
     expect(run({ agents: [{ ...coder, allow: { edits: true, commands: true } }] })).toEqual([])
   })
 

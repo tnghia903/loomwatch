@@ -23,7 +23,7 @@ import { checkAnswer, type AnswerCheck } from '../../lib/story/answerCheck'
 import { APPROVAL_TEXT } from '../../lib/story/needsYou'
 import { bubbles as layOut, converse, expectsAnswer, fold, type Bubble, type Party } from '../../lib/story/conversation'
 import type { ReceiptLine } from '../../lib/story/receipt'
-import { OPERATOR_ID, type TeamMessage } from '../../lib/watch/messages'
+import { LOOMWATCH_ID, OPERATOR_ID, type TeamMessage } from '../../lib/watch/messages'
 import type { AutoRan } from '../../lib/watch/events'
 import { workPhase } from '../../lib/watch/workPhase'
 import type { AgentConfig } from '../../lib/team-file/types'
@@ -316,8 +316,9 @@ export function WorkPiece({ item, newest = false, approveFilled = true, fixFille
   }, [session.projection.messages, team.parties, team.predecessors, guests])
   const speakers = useMemo(() => {
     const ids = [...said.flatMap((bubble) => bubble.from), ...(live ? working : []), ...(said.length > 0 && answer.trim() ? [run.responder] : [])]
-    // LoomWatch's own check (ADR 0098) is no agent of the team: its rows say so, its face isn't here.
-    const agents = [...new Set(ids)].filter((id) => !helperOf(id) && id !== OPERATOR_ID && id !== LOOMWATCH_CHECK_ID && !team.operators.has(id))
+    // LoomWatch is no agent of the team, whether it checked the work (ADR 0098) or answered for you
+    // (ADR 0090): its rows say so, its face isn't here.
+    const agents = [...new Set(ids)].filter((id) => !helperOf(id) && id !== OPERATOR_ID && id !== LOOMWATCH_CHECK_ID && id !== LOOMWATCH_ID && !team.operators.has(id))
     return (agents.length > 0 ? agents : workers).slice(0, FACES_SHOWN)
   }, [said, live, working, answer, run.responder, team.operators, workers])
   // An answer is drawn after what it answers, so the last drawn is not always the last said.
@@ -644,7 +645,8 @@ function permitted(message: TeamMessage, agent: string): ReactNode {
  * you said it, so your own words do not vanish into the fold. Unfolded, the talk shows them.
  */
 function Decisions({ messages, autoRan = [], operators, name }: { messages: readonly TeamMessage[]; autoRan?: readonly AutoRan[]; operators: ReadonlySet<string>; name: (id: string) => string }) {
-  const yours = messages.filter((message) => message.reply && (operators.has(message.reply.from) || message.reply.from === 'operator') && (message.kind === 'handover' || message.kind === 'question' || message.kind === 'permission'))
+  // A question nobody answered in time is said here too, as LoomWatch's answer, not yours (ADR 0090).
+  const yours = messages.filter((message) => message.reply && (operators.has(message.reply.from) || message.reply.from === 'operator' || message.reply.noAnswer) && (message.kind === 'handover' || message.kind === 'question' || message.kind === 'permission'))
   if (yours.length === 0 && autoRan.length === 0) return null
   const lastAuto = autoRan.at(-1)
   return (
@@ -668,11 +670,13 @@ function Decisions({ messages, autoRan = [], operators, name }: { messages: read
         const whose = message.kind === 'question' ? message.from ?? '' : message.handedBy?.from[0] ?? message.from ?? ''
         const label = message.kind === 'permission'
           ? permitted(message, name(message.from ?? ''))
+          : reply.noAnswer
+          ? `Nobody answered “${message.text.trim().slice(0, 80)}” in time, so ${name(message.from ?? '')} went on with its best guess`
           : message.kind === 'question'
           ? <>You → {name(message.from ?? '')} · your answer to “<InlineMarkdown clickable={false}>{message.text.trim().split('\n')[0] ?? ''}</InlineMarkdown>”</>
           : reply.sentBackTo ? `You sent it back to ${name(reply.sentBackTo)}` : `You approved ${name(whose)}'s work`
         // A send-back from a check's stop may carry no words (ADR 0098): then there is nothing to show.
-        const quiet = message.kind === 'permission' || !reply.text.trim() || (message.kind === 'handover' && !reply.sentBackTo && reply.text.trim() === APPROVAL_TEXT)
+        const quiet = message.kind === 'permission' || Boolean(reply.noAnswer) || !reply.text.trim() || (message.kind === 'handover' && !reply.sentBackTo && reply.text.trim() === APPROVAL_TEXT)
         return (
           <Appearing key={message.id} className="chat-msg mine tc-decided">
             <div className="chat-stack">
