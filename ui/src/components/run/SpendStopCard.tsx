@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRevealOnArrival } from '../../lib/chat/follow'
 import { answerSpend, type RunRecord, type SpendDecision, type SpendStop } from '../../lib/runs/client'
 import { dollars, stopActions, stopSentence } from '../../lib/runs/spend'
+import { ifNobodyAnswers } from '../../lib/story/needsYou'
 
 interface SpendStopCardProps {
   run: Pick<RunRecord, 'runId' | 'spendStops'>
@@ -62,6 +63,8 @@ function Stop({ runId, stop, onDecide, onRun, onAnswered }: {
   }
   // A call's cost is only known once it is made, so the calls under way when the limit is reached,
   // one for each agent at work, can take the run a little over.
+  // A scheduled run's stop says what happens by itself, and by when (ADR 0090).
+  const until = stop.expiresAt ? ifNobodyAnswers(stop.expiresAt, stop.agent ? `${stop.name || stop.agent} stops here` : 'the team finishes with what it has') : undefined
   const over = stop.spentUsd > stop.limitUsd ? ` (calls already under way took it ${dollars(stop.spentUsd - stop.limitUsd)} over)` : ''
   return (
     <article ref={element} className="permission-ask" aria-live="polite">
@@ -72,6 +75,7 @@ function Stop({ runId, stop, onDecide, onRun, onAnswered }: {
       <p className="permission-note">
         Spent {dollars(stop.spentUsd)}{over}. {stop.agent ? `${stop.name || stop.agent} waits` : 'The agents wait'}, and nothing more is spent until you answer.
       </p>
+      {until && <p className="permission-note permission-until">{until}</p>}
       <div className="permission-acts">
         <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void answer('add')}>{words.add}</button>
         <button type="button" className="btn" disabled={busy} onClick={() => void answer('finish')}

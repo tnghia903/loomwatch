@@ -1,4 +1,5 @@
 import type { Evidence, RunEvent } from '../watch/events'
+import { LOOMWATCH_ID } from '../watch/messages'
 
 /**
  * Helpers (ADR 0079): an agent working alone brings in copies of itself for the parts of a big
@@ -33,6 +34,8 @@ export function helperShortName(number: number): string {
 export function nameWithHelpers(names: ReadonlyMap<string, string>, id: string): string | null {
   const own = names.get(id)
   if (own) return own
+  // LoomWatch itself, when it answered a question in your place (ADR 0090).
+  if (id === LOOMWATCH_ID) return 'LoomWatch'
   const helper = helperOf(id)
   if (!helper) return null
   const lead = names.get(helper.lead) ?? helper.lead

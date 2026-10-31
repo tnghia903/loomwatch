@@ -467,7 +467,7 @@ pub struct PermissionReply {
 /// How a request the policy declined was finally answered.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AskOutcome {
-    /// Nobody could be asked: a routine, a finished run, or no run at all. Declined.
+    /// Nobody could be asked: a finished run, or no run at all. Declined.
     NotAsked,
     /// The operator allowed this kind for the rest of the run earlier; allowed without asking.
     AllowedForRun,
@@ -478,7 +478,8 @@ pub enum AskOutcome {
     Edited(String),
     /// Not run: the operator answered in the agent's place with these words.
     AnsweredInstead(String),
-    /// Nobody answered within [`PERMISSION_WAIT`]. Declined.
+    /// Nobody answered by the request's deadline: [`PERMISSION_WAIT`], or a routine's
+    /// `waitForYouMinutes` (ADR 0090). Declined.
     TimedOut,
 }
 
@@ -699,6 +700,18 @@ impl PermissionAsker {
         self.desk.registry().spend_stopped(&self.run_id)
     }
 
+    /// Answer the spend stop `stop_id` "Finish" because nobody answered it by its deadline (ADR
+    /// 0090), and store the run as it now is. Whether this answered it: `false` when someone else
+    /// did first, or the run ended.
+    pub(crate) async fn finish_unanswered_spend(&self, stop_id: &str) -> bool {
+        let registry = self.desk.registry();
+        let finished = registry.finish_unanswered_spend(&self.run_id, stop_id);
+        if finished {
+            registry.persist_quietly(&self.run_id).await;
+        }
+        finished
+    }
+
     /// What Auto mode makes of `request` (ADR 0061), when this run is in Auto mode and the request
     /// is one of the app's own commands; `policy` is the asking agent's.
     #[must_use]
@@ -714,17 +727,20 @@ impl PermissionAsker {
     }
 
     /// Put one declined `session/request_permission` on the run record for the operator to answer,
-    /// with why Auto mode left it to them, when it did. `None` when nobody can be asked — a
-    /// routine, or a run that has ended — and the request is declined at once, as every request
-    /// was before ADR 0040.
+    /// with why Auto mode left it to them, when it did. It waits [`PERMISSION_WAIT`] in a run
+    /// someone started, and its schedule's `waitForYouMinutes` in a routine's (ADR 0090). `None`
+    /// when nobody can be asked — a run that has ended — and the request is declined at once, as
+    /// every request was before ADR 0040.
     #[must_use]
     pub fn open(&self, request: &Value, auto: Option<String>) -> Option<OpenRequest> {
         let (title, kind, detail) = describe(request);
         let now = chrono::Utc::now();
-        let wait = chrono::Duration::from_std(PERMISSION_WAIT).unwrap_or_default();
-        let stamp = |at: chrono::DateTime<chrono::Utc>| {
-            at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
-        };
+        let wait = self
+            .desk
+            .registry()
+            .wait_for_you(&self.run_id)
+            .unwrap_or_else(|| chrono::Duration::from_std(PERMISSION_WAIT).unwrap_or_default());
+        let stamp = crate::deadline::stamp;
         let request = PermissionRequest {
             id: uuid::Uuid::new_v4().to_string(),
             agent: self.agent.clone(),
@@ -765,28 +781,39 @@ pub struct OpenRequest {
 }
 
 impl OpenRequest {
-    /// Wait for the operator, at most [`PERMISSION_WAIT`], then take the request off the record.
-    /// The app is blocked on this answer, so nothing races the ACP request timeout: that only
-    /// runs while a line is being awaited.
+    /// Wait for the operator until the request's `expires_at`, by the wall clock so a computer
+    /// that sleeps through it still declines on waking (ADR 0090), then take the request off the
+    /// record. The app is blocked on this answer, so nothing races the ACP request timeout: that
+    /// only runs while a line is being awaited.
     pub async fn wait(self) -> AskOutcome {
-        let outcome = match tokio::time::timeout(PERMISSION_WAIT, self.answer).await {
-            Ok(Ok(PermissionReply {
-                decision: PermissionDecision::Edit,
-                text: Some(text),
-            })) => AskOutcome::Edited(text),
-            Ok(Ok(PermissionReply {
-                decision: PermissionDecision::Answer,
-                text: Some(text),
-            })) => AskOutcome::AnsweredInstead(text),
-            Ok(Ok(reply)) => AskOutcome::Answered(reply.decision),
-            // The waiting room dropped the request: the run ended while it was open.
-            Ok(Err(_)) => AskOutcome::NotAsked,
-            Err(_) => AskOutcome::TimedOut,
+        let Self {
+            asker,
+            request,
+            answer,
+        } = self;
+        let deadline = crate::deadline::parse(&request.expires_at).unwrap_or_else(|| {
+            chrono::Utc::now() + chrono::Duration::from_std(PERMISSION_WAIT).unwrap_or_default()
+        });
+        let outcome = tokio::select! {
+            reply = answer => match reply {
+                Ok(PermissionReply {
+                    decision: PermissionDecision::Edit,
+                    text: Some(text),
+                }) => AskOutcome::Edited(text),
+                Ok(PermissionReply {
+                    decision: PermissionDecision::Answer,
+                    text: Some(text),
+                }) => AskOutcome::AnsweredInstead(text),
+                Ok(reply) => AskOutcome::Answered(reply.decision),
+                // The waiting room dropped the request: the run ended while it was open.
+                Err(_) => AskOutcome::NotAsked,
+            },
+            () = crate::deadline::passed(deadline) => AskOutcome::TimedOut,
         };
-        self.asker
+        asker
             .desk
             .registry()
-            .close_permission_request(&self.asker.run_id, &self.request.id);
+            .close_permission_request(&asker.run_id, &request.id);
         outcome
     }
 }

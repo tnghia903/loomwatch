@@ -415,6 +415,21 @@ pub struct ScheduleConfig {
     /// source, one try per entry: as many tries as entries. Empty never tries again.
     #[serde(default = "default_retry_after_minutes")]
     pub retry_after_minutes: Vec<u32>,
+    /// How long a routine's run waits for the person when it asks them something: a permission,
+    /// more money at its spending limit, or an agent's question. Then the permission is declined,
+    /// the run finishes with what it has, or the agent goes on with its best assumption.
+    #[serde(default = "default_wait_for_you_minutes")]
+    pub wait_for_you_minutes: u32,
+}
+
+/// A routine's run waits twelve hours for the person: long enough to cover a night's sleep or a
+/// day away from the computer, short enough that tomorrow's run isn't held up behind it.
+pub const DEFAULT_WAIT_FOR_YOU_MINUTES: u32 = 12 * 60;
+/// The longest `schedule.waitForYouMinutes` may be: a week.
+const MAX_WAIT_FOR_YOU_MINUTES: u32 = 7 * 24 * 60;
+
+const fn default_wait_for_you_minutes() -> u32 {
+    DEFAULT_WAIT_FOR_YOU_MINUTES
 }
 
 /// A timed fire that could not reach its AI source tries again after 1, 2, 5, 10 and 30 minutes:
@@ -1168,7 +1183,18 @@ impl ScheduleConfig {
                 "each wait in schedule.retryAfterMinutes must be from 1 to {MAX_RETRY_MINUTES} minutes"
             );
         }
+        if !(1..=MAX_WAIT_FOR_YOU_MINUTES).contains(&self.wait_for_you_minutes) {
+            bail!(
+                "schedule.waitForYouMinutes must be from 1 to {MAX_WAIT_FOR_YOU_MINUTES} minutes"
+            );
+        }
         Ok(())
+    }
+
+    /// How long this routine's runs wait for the person when they ask something.
+    #[must_use]
+    pub fn wait_for_you(&self) -> chrono::Duration {
+        chrono::Duration::minutes(i64::from(self.wait_for_you_minutes))
     }
 
     /// How long to wait before trying a timed fire again once its first `tries` tries could not
@@ -2634,6 +2660,34 @@ edges:
         assert!(waits("  retryAfterMinutes: [-1]\n").is_err(), "not a wait");
     }
 
+    /// A routine's run waits twelve hours for the person when it asks something, unless the
+    /// schedule says otherwise, and a wait it can't keep is refused before anything runs.
+    #[test]
+    fn a_routine_waits_for_you_as_long_as_it_says() {
+        let schedule = |yaml: &str| {
+            scheduled_team(&format!("  cron: \"0 8 * * *\"\n  prompt: go\n{yaml}"))
+                .map(|team| team.schedule.unwrap())
+        };
+        assert_eq!(
+            schedule("").unwrap().wait_for_you(),
+            chrono::Duration::hours(12)
+        );
+        assert_eq!(
+            schedule("  waitForYouMinutes: 90\n")
+                .unwrap()
+                .wait_for_you(),
+            chrono::Duration::minutes(90)
+        );
+        for minutes in [0, 7 * 24 * 60 + 1] {
+            let error = schedule(&format!("  waitForYouMinutes: {minutes}\n"))
+                .expect_err("a wait it can't keep");
+            assert_eq!(
+                error.to_string(),
+                "schedule.waitForYouMinutes must be from 1 to 10080 minutes"
+            );
+        }
+    }
+
     #[test]
     fn next_fire_and_templates_follow_the_schedule_zone() {
         let schedule = scheduled_team(
@@ -2755,6 +2809,7 @@ edges:
                 enabled: true,
                 deliver: None,
                 retry_after_minutes: Vec::new(),
+                wait_for_you_minutes: DEFAULT_WAIT_FOR_YOU_MINUTES,
             }
             .describe()
         };

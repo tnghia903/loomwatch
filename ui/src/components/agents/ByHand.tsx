@@ -389,7 +389,7 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
               : connected.state === 'ready'
                 ? <button type="button" className="btn byhand-tools-connect" onClick={() => setConnecting('new')}><Plug size={14} aria-hidden="true" />Connect a new tool</button>
                 : connected.state === 'unavailable' && <p className="t-meta">{connected.message}</p>}
-            {givenTools.length > 0 && <p className="t-meta">A tool works in your own account on its site, so it asks you before each action, and the card lets you always allow one. On a schedule nobody can answer, so actions you haven’t always allowed are declined.</p>}
+            {givenTools.length > 0 && <p className="t-meta">A tool works in your own account on its site, so it asks you before each action, and the card lets you always allow one. On a schedule, an action nobody answers within 12 hours is declined.</p>}
           </>)}
 
           {block('keys', <ul className="byhand-keys">
@@ -399,7 +399,7 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
               return (
                 <li key={key} className={on ? 'on' : ''}>
                   <KeyRound size={15} aria-hidden="true" />
-                  <span><b>{word}</b> · {info.label.toLowerCase()}<em>{on ? info.on : 'It asks you first. On a schedule nobody is there to answer, so it is declined.'}</em></span>
+                  <span><b>{word}</b> · {info.label.toLowerCase()}<em>{on ? info.on : 'It asks you first. On a schedule, it is declined if nobody answers in 12 hours.'}</em></span>
                   {/* A key is offered, not the page's main action: Save is its one gold fill. */}
                   <button type="button" className="btn" onClick={() => giveKey(key, !on)}>{on ? 'Take it back' : 'Hand it over'}</button>
                 </li>

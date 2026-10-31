@@ -207,6 +207,20 @@ describe('messages between agents', () => {
     })
   })
 
+  // ADR 0090: in a scheduled run, a question nobody answers by its deadline is answered by
+  // LoomWatch in your place. It closes the question, and is never said as yours.
+  it('says a question nobody answered in time was answered by LoomWatch, not by you', () => {
+    seq = 0
+    const { messages } = projectRun([
+      bus(1, 'lead', 'u', 'ask_user', { question: 'Which budget applies?' }),
+      settled(1, 'lead', 'u', { parked: true }),
+      event(1, 'lead', 'session_meta', { phase: 'awaiting_operator', kind: 'question', node: 'lead', question: 'Which budget applies?' }, loomwatch('awaiting_operator')),
+      answer(43_200, 'operator', 'Nobody answered your question within 12 hours. Make the most reasonable assumption, say in your answer which one you made, and carry on.', { askedBy: 'lead', noAnswer: true }),
+    ])
+    expect(messages).toHaveLength(1)
+    expect(messages[0]).toMatchObject({ kind: 'question', from: 'lead', state: 'answered', reply: { from: 'loomwatch:app', noAnswer: true } })
+  })
+
   it('turns a permission request LoomWatch put to you into a message, settled by your answer or the clock', () => {
     seq = 0
     const asked = (seconds: number, agentId: string, requestId: string, extra: Record<string, unknown> = {}) =>

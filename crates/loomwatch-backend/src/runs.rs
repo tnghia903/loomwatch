@@ -120,6 +120,16 @@ pub enum RunTrigger {
     Schedule,
 }
 
+impl RunTrigger {
+    /// Whether nobody started this run by hand, so nobody may be at the screen while it works: a
+    /// routine's run. It still asks the person, but waits for them by the schedule's
+    /// `waitForYouMinutes` rather than the ten minutes a run someone just started does.
+    #[must_use]
+    pub const fn is_unattended(self) -> bool {
+        matches!(self, Self::Schedule)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DeliveryTarget {
@@ -296,6 +306,13 @@ pub struct RunRecord {
     /// as it says it failed. Not shown or stored.
     #[serde(skip)]
     pub try_again_after: Option<chrono::Duration>,
+    /// How long this run waits for the person when it asks them something, for a run nobody
+    /// started by hand ([`RunTrigger::is_unattended`]): its schedule's `waitForYouMinutes`, fixed
+    /// at launch. `None` for a run someone started, whose permission requests wait ten minutes and
+    /// whose other questions wait as long as it takes. Not shown or stored: each request carries
+    /// its own deadline.
+    #[serde(skip)]
+    pub wait_for_you: Option<chrono::Duration>,
 }
 
 /// What the schedule says about a run it starts: the run it tries again from the start, and how
@@ -444,6 +461,7 @@ impl RunRecord {
             spend_stops: Vec::new(),
             next_try_at: None,
             try_again_after: None,
+            wait_for_you: None,
         })
     }
 }
@@ -779,6 +797,7 @@ pub(crate) fn decode_run(row: &sqlx::sqlite::SqliteRow) -> Result<StoredRun, sql
             spend_stops: Vec::new(),
             next_try_at: None,
             try_again_after: None,
+            wait_for_you: None,
         },
         start_key: row.try_get("start_key")?,
         start_fingerprint: row.try_get("start_fingerprint")?,
@@ -1219,10 +1238,18 @@ impl RunRegistry {
         })
     }
 
+    /// How long `run_id` waits for the person when it asks them something, when nobody started it
+    /// by hand ([`RunRecord::wait_for_you`]). `None` for a run someone started, or one the
+    /// registry doesn't know.
+    pub(crate) fn wait_for_you(&self, run_id: &str) -> Option<chrono::Duration> {
+        let inner = self.inner.read().unwrap_or_else(PoisonError::into_inner);
+        inner.runs.get(run_id)?.record.wait_for_you
+    }
+
     /// Open a permission request on a live run so the operator can answer it (ADR 0040), and hand
-    /// back the end its decision arrives on. `None` when nobody can be asked: the run is unknown
-    /// or finished, or it is a routine, whose runs have no one watching — those decline at once,
-    /// as every request did before ADR 0040.
+    /// back the end its decision arrives on. A routine's run asks too, and waits for the person by
+    /// its own deadline (ADR 0090). `None` when nobody can be asked: the run is unknown or
+    /// finished, and the request is declined at once.
     pub(crate) fn open_permission_request(
         &self,
         run_id: &str,
@@ -1230,7 +1257,7 @@ impl RunRegistry {
     ) -> Option<oneshot::Receiver<crate::permissions::PermissionReply>> {
         let mut inner = self.inner.write().unwrap_or_else(PoisonError::into_inner);
         let entry = inner.runs.get_mut(run_id)?;
-        if entry.record.status.is_terminal() || entry.record.trigger == RunTrigger::Schedule {
+        if entry.record.status.is_terminal() {
             return None;
         }
         let (sender, receiver) = oneshot::channel();
@@ -1267,7 +1294,8 @@ impl RunRegistry {
 
     /// What `agent`'s next model call in `run_id` meets (ADR 0068): go ahead, stop, or wait at a
     /// spend stop for the operator. A run the registry doesn't know has no spool (the CLI's); one
-    /// that has finished spends nothing more. A scheduled run has nobody to ask, so it stops.
+    /// that has finished spends nothing more. A routine's run asks too, and its stop carries the
+    /// deadline after which the team finishes with what it has (ADR 0090).
     pub(crate) fn spend_gate(&self, run_id: &str, agent: &str, name: &str) -> crate::spend::Gate {
         use crate::spend::{Check, Gate};
         let mut inner = self.inner.write().unwrap_or_else(PoisonError::into_inner);
@@ -1278,17 +1306,26 @@ impl RunRegistry {
         if entry.record.status.is_terminal() {
             return Gate::Stop { first: None };
         }
-        let can_ask = entry.record.trigger != RunTrigger::Schedule;
         let RunRecord {
-            spend, spend_stops, ..
+            spend,
+            spend_stops,
+            wait_for_you,
+            ..
         } = &mut entry.record;
         let Some(spend) = spend.as_mut() else {
             return Gate::Ahead;
         };
-        match crate::spend::check(spend, spend_stops, agent, name, can_ask, &now()) {
+        match crate::spend::check(spend, spend_stops, agent, name, true, &now()) {
             Check::Ahead => Gate::Ahead,
             Check::Stop { first } => Gate::Stop { first },
-            Check::Wait { stop, opened } => {
+            Check::Wait { mut stop, opened } => {
+                if opened && let Some(wait) = *wait_for_you {
+                    let expires = crate::deadline::stamp(Utc::now() + wait);
+                    if let Some(open) = spend_stops.iter_mut().find(|open| open.id == stop.id) {
+                        open.expires_at = Some(expires.clone());
+                    }
+                    stop.expires_at = Some(expires);
+                }
                 let answer = spending
                     .entry(stop.id.clone())
                     .or_insert_with(|| tokio::sync::watch::channel(None).0)
@@ -1387,6 +1424,41 @@ impl RunRegistry {
             }
         }
         Ok(entry.record.clone())
+    }
+
+    /// Answer the spend stop `stop_id` "Finish" because nobody answered it by its deadline (ADR
+    /// 0090), and say so on the run's spend, so the receipt never claims the person finished it:
+    /// `no_answer` at the team's spool, `unanswered` on the agent stopped at its own guard. Whether
+    /// this answered it: `false` when someone else did first, or the run ended.
+    pub(crate) fn finish_unanswered_spend(&self, run_id: &str, stop_id: &str) -> bool {
+        let whose = self.get(run_id).and_then(|record| {
+            record
+                .spend_stops
+                .iter()
+                .find(|stop| stop.id == stop_id)
+                .map(|stop| stop.agent.clone())
+        });
+        let Some(whose) = whose else {
+            return false;
+        };
+        if self
+            .answer_spend(run_id, stop_id, crate::spend::SpendDecision::Finish, None)
+            .is_err()
+        {
+            return false;
+        }
+        let mut inner = self.inner.write().unwrap_or_else(PoisonError::into_inner);
+        if let Some(spend) = inner
+            .runs
+            .get_mut(run_id)
+            .and_then(|entry| entry.record.spend.as_mut())
+        {
+            match whose {
+                None => spend.stopped = Some(crate::spend::Stopped::NoAnswer),
+                Some(agent) => spend.agents.entry(agent).or_default().unanswered = true,
+            }
+        }
+        true
     }
 
     /// The operator's answer to one open permission request, handed to the agent waiting on it.
@@ -2850,6 +2922,12 @@ pub(crate) fn launch(
     .map_err(LaunchError::into_api_error)?;
     prepared.record.retry_of_run_id = tries.retry_of.map(str::to_owned);
     prepared.record.try_again_after = tries.again_after;
+    if trigger.is_unattended() {
+        prepared.record.wait_for_you = Some(prepared.team.schedule.as_ref().map_or_else(
+            || chrono::Duration::minutes(i64::from(crate::config::DEFAULT_WAIT_FOR_YOU_MINUTES)),
+            crate::config::ScheduleConfig::wait_for_you,
+        ));
+    }
     let record = prepared.record.clone();
     let run_id = record.run_id.clone();
     registry.insert(record);
@@ -3421,7 +3499,9 @@ async fn settle_at_spool(
     record_abandoned_checkpoints(archive, run_id, lineage).await;
     let stop_reason = Some(SPEND_LIMIT.to_owned());
     let words = match stopped.cause {
-        crate::spend::Stopped::Finished => last_words(archive, run_id, responder).await,
+        crate::spend::Stopped::Finished | crate::spend::Stopped::NoAnswer => {
+            last_words(archive, run_id, responder).await
+        }
         crate::spend::Stopped::NobodyToAsk => None,
     };
     if let Some(reply) = words {
@@ -3437,6 +3517,12 @@ async fn settle_at_spool(
         crate::spend::Stopped::Finished => format!(
             "The team used its {} before any agent wrote anything, so there was nothing to finish \
              with.",
+            crate::spend::usd(stopped.limit_usd)
+        ),
+        crate::spend::Stopped::NoAnswer => format!(
+            "The team used its {} before any agent wrote anything, and nobody answered in time, \
+             so it stopped there. Each agent's checkpoint is kept, so you can carry on from where \
+             it stopped.",
             crate::spend::usd(stopped.limit_usd)
         ),
         crate::spend::Stopped::NobodyToAsk => stopped.to_string(),
@@ -4000,6 +4086,7 @@ async fn answer_run(
             send_back: request.send_back,
             // The id of the `message` event the run is about to archive the answer as.
             answer_event_id: crate::engine::new_event_id(),
+            unanswered: false,
         },
     )
     .await
@@ -4501,9 +4588,9 @@ pub(crate) mod tests {
         assert!(!registry.allowed_for_run(&run_id, "a~1", "execute"));
     }
 
-    /// ADR 0040: a person-started run can be asked, a routine cannot; an answer reaches the waiting
-    /// agent once and only once; "allow for this run" is remembered per agent and kind until the
-    /// run ends; and ending a run lets go of everything it was waiting on.
+    /// ADR 0040: a live run can be asked, a routine's too since ADR 0090; an answer reaches the
+    /// waiting agent once and only once; "allow for this run" is remembered per agent and kind
+    /// until the run ends; and ending a run lets go of everything it was waiting on.
     #[tokio::test]
     async fn permission_requests_are_asked_answered_once_and_dropped_with_the_run() {
         use crate::permissions::PermissionDecision;
@@ -4523,8 +4610,8 @@ pub(crate) mod tests {
         assert!(
             registry
                 .open_permission_request(&routine_id, permission_request("r1", "fetch"))
-                .is_none(),
-            "nobody watches a routine"
+                .is_some(),
+            "a routine's run asks too, and waits for the person (ADR 0090)"
         );
         assert!(
             registry
@@ -6817,6 +6904,7 @@ pub(crate) mod tests {
             send_back_available: false,
             question_id: None,
             check: None,
+            expires_at: None,
         };
         let app = router(Some(archive.clone()), dir.0.clone(), registry.clone());
         let endpoint = format!("/api/runs/{run_id}/answers");
@@ -6903,6 +6991,7 @@ pub(crate) mod tests {
             send_back_available: false,
             question_id: None,
             check: None,
+            expires_at: None,
         };
         let first = desk.park(&run_id, waiting("solo")).await.unwrap();
         assert!(
@@ -6974,6 +7063,7 @@ pub(crate) mod tests {
                 text: "done".into(),
                 send_back: None,
                 answer_event_id: "answer-2".into(),
+                unanswered: false,
             },
         )
         .await
@@ -7615,10 +7705,11 @@ pub(crate) mod tests {
         assert_eq!(done.next_try_at, None, "it answered: nothing to try again");
     }
 
-    /// A scheduled run has nobody to ask: at its spool it stops, says so, and keeps its
-    /// checkpoint.
+    /// ADR 0090: a routine's run asks at its spool like any other, with the twelve hours its
+    /// schedule waits for the person by default, and money added there lets it carry on to its
+    /// answer. Before, it stopped at once with nobody to ask.
     #[tokio::test]
-    async fn a_scheduled_run_stops_at_its_spool_and_says_so() {
+    async fn a_routine_waits_at_its_spool_and_carries_on_once_you_add_money() {
         let pool = crate::db::Db::temp().await;
         let dir = TeamsDir::new();
         write_spool_team(&dir, "spool.yaml", &costly(0.04), 0.05);
@@ -7634,32 +7725,109 @@ pub(crate) mod tests {
             Tries::default(),
         )
         .expect("launched");
+        let waiting = wait_for(&registry, &run.run_id, |r| {
+            !r.spend_stops.is_empty() || r.status.is_terminal()
+        })
+        .await;
+        let stop = waiting
+            .spend_stops
+            .first()
+            .cloned()
+            .unwrap_or_else(|| panic!("a routine's run waits at its spool: {waiting:?}"));
+        let since = crate::deadline::parse(&stop.since).unwrap();
+        let expires = crate::deadline::parse(
+            stop.expires_at
+                .as_deref()
+                .expect("a routine's stop carries its deadline"),
+        )
+        .unwrap();
+        assert!(
+            (expires - since - chrono::Duration::hours(12))
+                .num_seconds()
+                .abs()
+                < 5,
+            "twelve hours by default: {stop:?}"
+        );
+        registry
+            .answer_spend(
+                &run.run_id,
+                &stop.id,
+                crate::spend::SpendDecision::Add,
+                None,
+            )
+            .expect("the stop takes the answer");
         let done = wait_for(&registry, &run.run_id, |r| r.status.is_terminal()).await;
-        assert_eq!(done.status, RunStatus::Failed, "{done:?}");
-        assert_eq!(done.error_code.as_deref(), Some(SPEND_LIMIT));
-        let error = done.error.clone().unwrap_or_default();
-        assert!(
-            error.contains("$0.05") && error.contains("Nobody was there"),
-            "{error}"
-        );
-        assert_eq!(
-            done.spend.as_ref().and_then(|spend| spend.stopped),
-            Some(crate::spend::Stopped::NobodyToAsk)
-        );
-        assert!(done.spend_stops.is_empty(), "nobody was asked");
-        let events = archive.load_session(&run.run_id).await.unwrap();
-        assert!(
-            events
-                .iter()
-                .any(|event| event.payload["phase"] == "spend_stopped"),
-            "the stop is in the record"
-        );
-        let checkpoints = archive
-            .notebook()
-            .checkpoints(&run.run_id, None)
+        assert_eq!(done.status, RunStatus::Succeeded, "{done:?}");
+        assert_eq!(done.spend.as_ref().and_then(|spend| spend.stopped), None);
+    }
+
+    /// ADR 0090: an agent's question in a routine's run waits for the person until the schedule's
+    /// deadline, then `LoomWatch` answers in their place: go on with your best assumption. A review
+    /// stop is one the person designed, and keeps waiting as long as it takes.
+    #[tokio::test]
+    async fn a_routines_question_is_answered_for_you_once_its_deadline_passes() {
+        use crate::operator::{ParkTier, StopKind, WaitingOn};
+        let team = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: x\n      cwd: .\n    model: m\n",
+        )
+        .unwrap();
+        let registry = RunRegistry::default();
+        let mut record =
+            RunRecord::queued("t.yaml".into(), "go".into(), &team, RunTrigger::Schedule).unwrap();
+        record.wait_for_you = Some(chrono::Duration::milliseconds(300));
+        let run_id = record.run_id.clone();
+        registry.insert(record);
+        assert!(registry.mark_starting(&run_id));
+        assert!(registry.mark_running(&run_id));
+        let desk = registry.operator_desk(None);
+        let stop = |kind: StopKind, node: &str| WaitingOn {
+            node: node.into(),
+            name: node.into(),
+            kind,
+            since: now(),
+            question: "Which budget?".into(),
+            context: None,
+            handover_from: None,
+            park: ParkTier::None,
+            park_note: String::new(),
+            send_back_available: false,
+            question_id: None,
+            check: None,
+            expires_at: None,
+        };
+
+        let review = desk
+            .park(&run_id, stop(StopKind::ReviewStop, "you"))
             .await
             .unwrap();
-        assert_eq!(checkpoints.len(), 1, "{checkpoints:?}");
+        assert_eq!(
+            desk.waiting_for(&run_id, "you").unwrap().expires_at,
+            None,
+            "a review stop waits as long as it takes"
+        );
+        drop(review);
+        registry.take_wait(&run_id, "you").unwrap();
+
+        let question = desk
+            .park(&run_id, stop(StopKind::Question, "a"))
+            .await
+            .unwrap();
+        assert!(desk.waiting_for(&run_id, "a").unwrap().expires_at.is_some());
+        let answer = tokio::time::timeout(std::time::Duration::from_secs(5), question.answer())
+            .await
+            .expect("answered by its deadline")
+            .expect("an answer, not an error");
+        assert!(answer.unanswered, "not the person's words: {answer:?}");
+        assert!(
+            answer.text.contains("most reasonable assumption"),
+            "{}",
+            answer.text
+        );
+        assert_eq!(
+            desk.waiting(&run_id),
+            None,
+            "the question is off the record"
+        );
     }
 
     /// An agent's own guard (ADR 0068) stops only that agent: "Stop A here" ends its turn with what

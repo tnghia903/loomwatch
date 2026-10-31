@@ -160,6 +160,10 @@ pub struct AgentSpend {
     /// The operator stopped this agent at its guard: it makes no more calls this run.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub stopped: bool,
+    /// It was stopped there because nobody answered by the stop's deadline, in a routine's run
+    /// (ADR 0090), not because the operator chose to.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub unanswered: bool,
 }
 
 /// Money the operator added at a stop.
@@ -180,7 +184,11 @@ pub struct TopUp {
 pub enum Stopped {
     /// The operator chose "Finish with what it has".
     Finished,
-    /// A scheduled run used its spool, with nobody there to add more.
+    /// A routine's run reached its stop's deadline with nobody answering, and finished with what
+    /// it had, as "Finish" would have (ADR 0090).
+    NoAnswer,
+    /// A scheduled run used its spool, with nobody there to add more. Only runs recorded before
+    /// ADR 0090 carry it: since then a routine's run asks, like any other.
     NobodyToAsk,
 }
 
@@ -200,6 +208,11 @@ pub struct SpendStop {
     /// What "Add and carry on" adds.
     pub add_usd: f64,
     pub since: String,
+    /// RFC 3339: when the team finishes with what it has if nobody answers, in a run nobody
+    /// started by hand (ADR 0090). Absent in a run someone started, which waits as long as it
+    /// takes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<String>,
 }
 
 // Finite amounts only, as for `RunSpend`.
@@ -297,7 +310,8 @@ pub enum Check {
 }
 
 /// Looks at the spool before `agent`'s next call, opening a stop on `stops` when one is reached
-/// and none is open for it yet. `can_ask` is false for a scheduled run: it stops instead.
+/// and none is open for it yet. With `can_ask` false it stops instead; every run the registry
+/// knows can ask since ADR 0090.
 pub fn check(
     spend: &mut RunSpend,
     stops: &mut Vec<SpendStop>,
@@ -333,6 +347,7 @@ pub fn check(
         spent_usd: used,
         add_usd: top_up_for(limit),
         since: now.to_owned(),
+        expires_at: None,
     };
     if !can_ask {
         spend.stopped = Some(Stopped::NobodyToAsk);
@@ -464,6 +479,11 @@ impl fmt::Display for SpendStopped {
             Stopped::Finished => write!(
                 formatter,
                 "The team used its {limit} for this run, and you finished it there."
+            ),
+            Stopped::NoAnswer => write!(
+                formatter,
+                "The team used its {limit} for this run. Nobody answered in time, so it finished \
+                 there."
             ),
             Stopped::NobodyToAsk => write!(
                 formatter,

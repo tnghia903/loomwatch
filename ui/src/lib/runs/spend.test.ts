@@ -74,6 +74,9 @@ describe('spend as the operator reads it (ADR 0068)', () => {
     expect(spendNote({ spend: { limitUsd: 1, spentUsd: 1.02, stopped: 'finished' } }, name)).toBe('Stopped at its $1.00: you finished with what it had')
     expect(spendNote({ spend: { limitUsd: 1, spentUsd: 1.02, stopped: 'nobody_to_ask' } }, name)).toBe('Stopped at its $1.00: nobody was there to add more')
     expect(spendNote({ spend: { limitUsd: 1, spentUsd: 0.4, agents: { r: { spentUsd: 0.31, limitUsd: 0.3, stopped: true } } } }, name)).toBe('You stopped Researcher at its $0.30')
+    // ADR 0090: a scheduled run nobody answered at its limit never reads as something you did.
+    expect(spendNote({ spend: { limitUsd: 1, spentUsd: 1.02, stopped: 'no_answer' } }, name)).toBe('Stopped at its $1.00: nobody answered, so it finished with what it had')
+    expect(spendNote({ spend: { limitUsd: 1, spentUsd: 0.4, agents: { r: { spentUsd: 0.31, limitUsd: 0.3, stopped: true, unanswered: true } } } }, name)).toBe('Researcher stopped at its $0.30: nobody answered in time')
     expect(spendNote({ spend: { limitUsd: 1, spentUsd: 0.4 } }, name)).toBeNull()
     expect(spendNote({}, name)).toBeNull()
   })

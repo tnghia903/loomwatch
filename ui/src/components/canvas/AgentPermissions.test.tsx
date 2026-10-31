@@ -21,9 +21,9 @@ describe('AgentPermissions', () => {
     // Only a switch that is on adds a line: off is what the tile already says.
     expect(screen.getByText('It can search and read web pages.')).toBeInTheDocument()
     expect(screen.queryByText('It can read, but not change, files.')).not.toBeInTheDocument()
-    expect(screen.queryByText(/waits for your answer during a run/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/waits for your answer\. If nobody answers, it is declined: after 10 minutes, or after 12 hours in a scheduled run\./)).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'About Allowed without asking' }))
-    expect(screen.getByText(/waits for your answer during a run/)).toBeInTheDocument()
+    expect(screen.getByText(/waits for your answer\. If nobody answers, it is declined: after 10 minutes, or after 12 hours in a scheduled run\./)).toBeInTheDocument()
   })
 
   it('says Auto on the commands switch when the team is in Auto mode, and only while that switch is off', () => {

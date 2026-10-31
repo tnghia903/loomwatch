@@ -9,7 +9,7 @@ import { questionBackOf, SAID } from '../../lib/chat/reply'
 import { autoNote, permissionAsks, permissionWhat } from '../../lib/runs/permissionRequests'
 import { clock, describeEvidence } from '../../lib/story/weft'
 import type { Evidence } from '../../lib/watch/events'
-import { REACHED_WORD, reachedLine, type AskRefusal, type PermissionOutcome, type TeamMessage } from '../../lib/watch/messages'
+import { LOOMWATCH_ID, REACHED_WORD, reachedLine, type AskRefusal, type PermissionOutcome, type TeamMessage } from '../../lib/watch/messages'
 import { useAgentFaces } from '../../lib/chat/faces'
 import { AgentFace } from '../chat/AgentFace'
 import { Quote } from '../chat/ReplyQuote'
@@ -17,6 +17,7 @@ import { AvatarFace } from '../agents/AvatarFace'
 import { TeamFiguresContext } from '../agents/figureContext'
 import { FIGURE_HUES, figureHue, type FigureChoice } from '../../lib/library/figures'
 import { Markdown } from '../ui/Markdown'
+import { LoomMark } from '../ui/glyphs'
 import { helperOf, wearerOf } from '../../lib/chat/helpers'
 
 interface AgentMessagesProps {
@@ -127,7 +128,7 @@ export function AgentMessages({ messages, order, predecessors, evidence, live, o
   // Inside the team's chat every message wears the time of day, as the chat's own do; the record
   // beside it keeps the time since the run started.
   const when = (bubble: Bubble) => (bare ? clockTime(bubble.ts) : clock(bubble.offsetMs))
-  const member = (id: string): Member => members.get(id) ?? { id, name: id, you: false, number: null, initials: initialsOf(id), hue: 1 }
+  const member = (id: string): Member => members.get(id) ?? { id, name: id === LOOMWATCH_ID ? 'LoomWatch' : id, you: false, number: null, initials: initialsOf(id), hue: 1 }
   const count = said.filter((bubble) => bubble.part !== 'waiting').length
   if (count === 0 && carried.length === 0) {
     return live && !bare ? <p className="chat-none">Nothing has passed between the agents yet. When they talk, it shows here as a chat.</p> : null
@@ -361,7 +362,8 @@ function ChatMessage({ bubble, member, continued, open, flash, live, calls, onTo
   const quoted = quote ? { what: quoteWhat(quote, member), text: quote.part === 'reply' && quote.item.line.message.reply?.asksBack ? questionBackOf(quote.text) : spoken(quote, member) } : null
   // What you can reply to: anything an agent said, other than a permission request (answered with
   // its own buttons) and a message that never arrived.
-  const toReply = onReply && speaker && !mine && part !== 'waiting' && !asking && !failed && text.trim() ? replyFor(bubble, speaker.id, mentions) : null
+  // Nor LoomWatch's own answer in your place (ADR 0090): there is nobody there to reach.
+  const toReply = onReply && speaker && !mine && speaker.id !== LOOMWATCH_ID && part !== 'waiting' && !asking && !failed && text.trim() ? replyFor(bubble, speaker.id, mentions) : null
   // A reply's quote already says whom it answers; it names someone only when it goes elsewhere, as
   // your approval does when it passes the work on.
   const addressed = quote ? mentions.filter((person) => !quote.from.includes(person.id)) : mentions
@@ -377,7 +379,7 @@ function ChatMessage({ bubble, member, continued, open, flash, live, calls, onTo
 
   return (
     <li
-      className={`chat-msg ${mine ? 'mine' : ''} ${continued ? 'continued' : ''} ${flash ? 'flash' : ''} ${failed ? 'failed' : ''} hue-${speaker?.hue ?? 0}`}
+      className={`chat-msg ${mine ? 'mine' : ''} ${continued ? 'continued' : ''} ${flash ? 'flash' : ''} ${failed ? 'failed' : ''} hue-${speaker?.id === LOOMWATCH_ID ? 'quiet' : speaker?.hue ?? 0}`}
       data-bubble={bubble.key}
       tabIndex={-1}
       aria-label={label}
@@ -556,6 +558,8 @@ function Body({ text, long, more }: { text: string; long: boolean; more: boolean
 function Avatar({ member, size, plain = false }: { member: Member; size: number; plain?: boolean }) {
   // In a team's chat an agent's face has its own card, and @mentions it when clicked.
   const faces = useAgentFaces()
+  // LoomWatch itself answered (ADR 0090): its own mark, never a teammate's face.
+  if (member.id === LOOMWATCH_ID) return <span className="chat-avatar-loomwatch" title="Nobody answered in time, so LoomWatch answered for you"><LoomMark size={size} /></span>
   const face = (
     <AvatarFace id={member.id} hue={member.hue} size={size} hidden={false} text={member.you ? 'You' : member.initials} title={faces && !member.you ? undefined : member.you ? 'You' : member.name}>
       {!plain && member.number !== null && !member.you && <span className="chat-avatar-number">{member.number}</span>}
@@ -577,7 +581,9 @@ function membersOf(lanes: readonly Party[], order: readonly Party[], figures: Re
     // A helper (ADR 0079) wears its agent's figure and colour, and its own number.
     const helper = helperOf(lane.id)
     const figure = figures.get(lane.id) ?? figures.get(wearerOf(lane.id))
-    members.set(lane.id, { id: lane.id, name: lane.operator ? 'You' : lane.name, you: lane.operator, number: helper ? helper.number : number.get(lane.id) ?? null, initials: initialsOf(lane.name), hue: lane.operator ? 0 : figure ? figureHue(figure) : (hue++ % FIGURE_HUES) + 1 })
+    // LoomWatch's own answer (ADR 0090) wears no teammate's colour, nor takes one from a helper.
+    const own = lane.operator || lane.id === LOOMWATCH_ID
+    members.set(lane.id, { id: lane.id, name: lane.operator ? 'You' : lane.name, you: lane.operator, number: helper ? helper.number : number.get(lane.id) ?? null, initials: initialsOf(lane.name), hue: own ? 0 : figure ? figureHue(figure) : (hue++ % FIGURE_HUES) + 1 })
   }
   return members
 }

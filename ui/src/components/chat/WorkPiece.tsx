@@ -565,7 +565,8 @@ function permitted(message: TeamMessage, agent: string): string {
  * you said it, so your own words do not vanish into the fold. Unfolded, the talk shows them.
  */
 function Decisions({ messages, autoRan = [], operators, name }: { messages: readonly TeamMessage[]; autoRan?: readonly AutoRan[]; operators: ReadonlySet<string>; name: (id: string) => string }) {
-  const yours = messages.filter((message) => message.reply && (operators.has(message.reply.from) || message.reply.from === 'operator') && (message.kind === 'handover' || message.kind === 'question' || message.kind === 'permission'))
+  // A question nobody answered in time is said here too, as LoomWatch's answer, not yours (ADR 0090).
+  const yours = messages.filter((message) => message.reply && (operators.has(message.reply.from) || message.reply.from === 'operator' || message.reply.noAnswer) && (message.kind === 'handover' || message.kind === 'question' || message.kind === 'permission'))
   if (yours.length === 0 && autoRan.length === 0) return null
   const lastAuto = autoRan.at(-1)
   return (
@@ -589,10 +590,12 @@ function Decisions({ messages, autoRan = [], operators, name }: { messages: read
         const whose = message.kind === 'question' ? message.from ?? '' : message.handedBy?.from[0] ?? message.from ?? ''
         const label = message.kind === 'permission'
           ? permitted(message, name(message.from ?? ''))
+          : reply.noAnswer
+          ? `Nobody answered “${message.text.trim().slice(0, 80)}” in time, so ${name(message.from ?? '')} went on with its best guess`
           : message.kind === 'question'
           ? `You → ${name(message.from ?? '')} · your answer to “${message.text.trim().slice(0, 80)}”`
           : reply.sentBackTo ? `You sent it back to ${name(reply.sentBackTo)}` : `You approved ${name(whose)}'s work`
-        const quiet = message.kind === 'permission' || (message.kind === 'handover' && !reply.sentBackTo && reply.text.trim() === APPROVAL_TEXT)
+        const quiet = message.kind === 'permission' || Boolean(reply.noAnswer) || (message.kind === 'handover' && !reply.sentBackTo && reply.text.trim() === APPROVAL_TEXT)
         return (
           <Appearing key={message.id} className="chat-msg mine tc-decided">
             <div className="chat-stack">

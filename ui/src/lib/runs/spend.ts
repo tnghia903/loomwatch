@@ -130,9 +130,13 @@ export function spendNote(run: Pick<RunRecord, 'spend'>, name: (id: string) => s
   }
   const limit = spend.limitUsd != null ? dollars(spend.limitUsd) : null
   if (spend.stopped === 'finished' && limit) parts.push(`Stopped at its ${limit}: you finished with what it had`)
+  if (spend.stopped === 'no_answer' && limit) parts.push(`Stopped at its ${limit}: nobody answered, so it finished with what it had`)
   if (spend.stopped === 'nobody_to_ask' && limit) parts.push(`Stopped at its ${limit}: nobody was there to add more`)
   for (const [agent, share] of Object.entries(spend.agents ?? {})) {
-    if (share.stopped && share.limitUsd != null) parts.push(`You stopped ${name(agent)} at its ${dollars(share.limitUsd)}`)
+    if (!share.stopped || share.limitUsd == null) continue
+    parts.push(share.unanswered
+      ? `${name(agent)} stopped at its ${dollars(share.limitUsd)}: nobody answered in time`
+      : `You stopped ${name(agent)} at its ${dollars(share.limitUsd)}`)
   }
   return parts.length > 0 ? parts.join(' · ') : null
 }

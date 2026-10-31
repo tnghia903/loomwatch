@@ -207,7 +207,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
       const waiting = run.waitingOn
       if (!waiting) continue
       const from = waiting.kind === 'review_stop' ? waiting.handoverFrom ?? waiting.node : waiting.node
-      return { runId: run.runId, node: waiting.node, kind: waiting.kind, from, fromName: team.names.get(from) ?? from }
+      return { runId: run.runId, node: waiting.node, kind: waiting.kind, from, fromName: team.names.get(from) ?? from, expiresAt: waiting.expiresAt ?? null }
     }
     return null
   }, [chat.live, team.names])

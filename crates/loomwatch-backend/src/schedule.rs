@@ -1033,6 +1033,7 @@ mod tests {
             enabled: true,
             deliver,
             retry_after_minutes: crate::config::DEFAULT_RETRY_AFTER_MINUTES.to_vec(),
+            wait_for_you_minutes: crate::config::DEFAULT_WAIT_FOR_YOU_MINUTES,
         }
     }
 

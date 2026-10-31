@@ -20,6 +20,9 @@ import type { Evidence, PromptSection, RunEvent } from './events'
 
 /** The id your answers are archived under when the team has no review step of its own (docs/TEAM_CONFIG.md). */
 export const OPERATOR_ID = 'operator'
+/** Who answered a question nobody answered in time: LoomWatch itself, in your place (ADR 0090). A
+ * colon is never in an agent's id, so no agent can be taken for it. Shown as "LoomWatch". */
+export const LOOMWATCH_ID = 'loomwatch:app'
 
 export type MessageKind =
   /** What a pipeline stage was handed by the stages before it (`stage_results`). */
@@ -86,6 +89,11 @@ export interface MessageReply {
   asksBack?: true
   /** For a `helper`: it couldn't finish, and `text` says why. */
   failed?: true
+  /**
+   * For a `question` in a scheduled run: nobody answered by its deadline, so LoomWatch answered in
+   * your place and the agent went on with its best guess (ADR 0090). Not your words.
+   */
+  noAnswer?: true
 }
 
 /**
@@ -496,7 +504,9 @@ export class Correspondence {
       return
     }
     answered.state = 'answered'
-    answered.reply = { from: event.agentId, text, ...this.at(event), source: null, sentBackTo: words(raw.sendBack) }
+    // Nobody answered by the deadline, so LoomWatch did (ADR 0090): said as LoomWatch's, not yours.
+    const noAnswer = raw.noAnswer === true
+    answered.reply = { from: noAnswer ? LOOMWATCH_ID : event.agentId, text, ...this.at(event), source: null, sentBackTo: words(raw.sendBack), ...(noAnswer ? { noAnswer: true as const } : {}) }
   }
 
   /**

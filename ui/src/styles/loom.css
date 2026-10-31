@@ -171,6 +171,8 @@ span.story-schedule { cursor: default; }
 .chat-head { display: flex; align-items: center; gap: 12px; padding: 11px 16px; border-bottom: 1px solid var(--color-hairline); }
 .chat-faces { display: inline-flex; flex: none; }
 .chat-faces .chat-avatar + .chat-avatar { margin-left: -5px; }
+/* LoomWatch's answer in your place (ADR 0090) wears the app's mark, drawn still like the chat around it. */
+.chat-avatar-loomwatch .fr-mark { animation: none; }
 .chat-title { display: grid; gap: 1px; min-width: 0; }
 .chat-title h3 { margin: 0; font: 600 14px/1.3 var(--font-sans); color: var(--color-ink); }
 .chat-title span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--color-ink-3); }

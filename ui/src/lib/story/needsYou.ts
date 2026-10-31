@@ -1,6 +1,7 @@
 import { baseName } from '../files/paths'
 import type { RunRecord } from '../runs/client'
 import { plainRunError } from '../runs/errors'
+import { dueAt } from '../chat/format'
 import { permissionSentence, permissionWhat } from '../runs/permissionRequests'
 import { dollars, openStops, stopActions, stopSentence } from '../runs/spend'
 import { checkStopLines } from './checkStop'
@@ -39,6 +40,19 @@ export interface Ticket {
   /** A spend ticket's stop, which its answer names, and the words of its two answers. */
   stopId?: string
   spendActions?: { add: string; finish: string }
+  /** What happens by itself if nobody answers, and when: a permission is declined; in a scheduled
+      run a spend stop finishes and a question goes on with the agent's best guess (ADR 0090).
+      Absent when it waits as long as it takes. */
+  until?: string
+}
+
+/**
+ * "If nobody answers by 21:40, the team finishes with what it has.": what happens by itself, and
+ * when. A time of day rather than "in 9 min", so a ticket the tray keeps as it was never goes stale.
+ */
+export function ifNobodyAnswers(expiresAt: string | null | undefined, then: string, now = Date.now()): string | undefined {
+  const at = expiresAt ? dueAt(expiresAt, now) : ''
+  return at ? `If nobody answers by ${at}, ${then}.` : undefined
 }
 
 /** Failures older than this are history, not something waiting on you. */
@@ -70,6 +84,7 @@ export function ticketsFrom(records: readonly RunRecord[], names: ReadonlyMap<st
         since: request.since,
         requestId: request.id,
         team: record.agentIds.length > 1,
+        until: ifNobodyAnswers(request.expiresAt, 'it is declined', now),
       })
     }
     for (const stop of openStops(record)) {
@@ -87,6 +102,7 @@ export function ticketsFrom(records: readonly RunRecord[], names: ReadonlyMap<st
         since: stop.since,
         stopId: stop.id,
         spendActions: stopActions(stop),
+        until: ifNobodyAnswers(stop.expiresAt, stop.agent ? `${stop.name || stop.agent} stops here` : 'the team finishes with what it has', now),
       })
     }
     const waiting = record.waitingOn
@@ -104,6 +120,7 @@ export function ticketsFrom(records: readonly RunRecord[], names: ReadonlyMap<st
         // A check step's stop leads with what is still not met: that is what is being decided.
         context: (waiting.check ? [...checkStopLines(waiting.check), waiting.context?.trim() ?? ''].filter(Boolean).join('\n') : waiting.context?.trim()) || null,
         since: waiting.since,
+        until: ifNobodyAnswers(waiting.expiresAt, `${waiting.name} goes on with its best guess`, now),
       })
     } else if (record.status === 'failed' && !record.nextTryAt && !tried.has(record.runId) && !dismissed.has(record.runId)) {
       const finished = Date.parse(record.finishedAt ?? record.createdAt)

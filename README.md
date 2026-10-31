@@ -971,8 +971,8 @@ run**, **Allow for the whole team** (every agent in this run may use that tool w
 allow** lets you change it before it runs, this once, and **Answer instead** sends the agent your
 reply in place of what it asked to do, so nothing runs. The chat keeps how it ended, such
 as "You allowed it, this once". The same question shows up in the Needs-you tray from
-any screen. If nobody answers within 10 minutes it is declined, and scheduled runs decline it
-straight away because nobody is watching.
+any screen. If nobody answers within 10 minutes it is declined. A scheduled run waits 12 hours instead,
+then declines it (`waitForYouMinutes` in its schedule changes that).
 
 To ask less often, set `permissions: {mode: auto}` in the team file. A command an agent isn't allowed
 to run on its own then runs without asking when every part of it only reads inside the agent's

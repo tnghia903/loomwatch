@@ -212,6 +212,7 @@ export function NeedsYouTray({ tickets, working, onAnswer, onPermission, onSpend
                   {ticket.kind === 'question' ? <><b>{ticket.asker}</b> asks: “{ticket.text}”</> : ticket.kind === 'permission' ? <>{ticket.text}. It is paused until you answer.</> : ticket.kind === 'spend' ? <>{ticket.text}</> : ticket.kind === 'review' ? <>{ticket.text || `${ticket.asker} is waiting for your approval.`}</> : <>{ticket.text}</>}
                 </p>
                 {ticket.context && <blockquote className="ticket-context" title={agentWrote(ticket) ? plainWords(ticket.context) : ticket.context}>{agentWrote(ticket) ? <InlineMarkdown clickable={false}>{ticket.context}</InlineMarkdown> : ticket.context}</blockquote>}
+                {ticket.until && <p className="ticket-until t-meta">{ticket.until}</p>}
                 {onScreen(ticket) ? (
                   <p className="ticket-here t-meta">On this screen: answer it below.</p>
                 ) : replying === ticket.id ? (

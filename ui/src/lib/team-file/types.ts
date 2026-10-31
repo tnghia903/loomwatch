@@ -31,6 +31,8 @@ export interface ScheduleConfig {
   deliver?: DeliverConfig
   /** Minutes to wait before each new try of a timed run that couldn't reach its AI source. */
   retryAfterMinutes?: number[]
+  /** How long a routine's run waits for you when it asks something (ADR 0090); 720 when absent. */
+  waitForYouMinutes?: number
 }
 
 export type AgentStatus =

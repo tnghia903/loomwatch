@@ -65,8 +65,8 @@ export function AgentBadge({ markId, figure, draft, modelName, effortName, usedI
           <span className="agent-badge-label">After hours</span>
           <span className={`agent-badge-after${scheduled ? ' live' : ''}`}>
             {scheduled
-              ? <>In {usedIn!.scheduled} scheduled team{usedIn!.scheduled === 1 ? '' : 's'}, nobody is there to answer: {asks.map((item) => item.short.toLowerCase()).join(', ')} {asks.length === 1 ? 'is' : 'are'} declined.</>
-              : <>On a schedule, anything it would ask you is declined: {asks.map((item) => item.short.toLowerCase()).join(', ')}.</>}
+              ? <>In {usedIn!.scheduled} scheduled team{usedIn!.scheduled === 1 ? '' : 's'}, {asks.map((item) => item.short.toLowerCase()).join(' and ')} ask{asks.length === 1 ? 's' : ''} you, and {asks.length === 1 ? 'is' : 'are'} declined if nobody answers in 12 hours.</>
+              : <>On a schedule it still asks you, and it is declined if nobody answers in 12 hours: {asks.map((item) => item.short.toLowerCase()).join(', ')}.</>}
           </span>
         </div>
       )}

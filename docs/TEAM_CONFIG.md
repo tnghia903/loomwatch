@@ -134,7 +134,10 @@ depend on the document as a whole:
   reject the document otherwise. `retryAfterMinutes` (default `[1, 2, 5, 10, 30]`) is the waits
   before each new try of a timed run that couldn't reach its AI source, as one that starts before
   the network is back after the computer wakes. It allows at most 20 waits of 1 to 1,440 minutes;
-  `[]` never tries again. The schedule editor keeps it as written. See `WATCH.md` → *Routines*.
+  `[]` never tries again. `waitForYouMinutes` (default 720, 12 hours; from 1 minute to a week, 10,080) is how long
+  a routine's run waits for you when it asks something: a permission, more money at its spending
+  limit, or an agent's question (ADR 0090). The schedule editor keeps both as written. See
+  `WATCH.md` → *Routines*.
 - An optional top-level `deliver` block (`$defs.Deliver`) sends every successful run's answer
   somewhere besides the Run view, whoever started the run. Today that is `notion: {title?}`, a new
   child page of the page chosen on the Notion tool's card in Connections. The default title is
@@ -276,8 +279,9 @@ depend on the document as a whole:
       - A `loomwatchd run` has nobody to ask, so its run fails, saying what was not met, rather
         than show the work.
     - **Spend limits** (ADR 0068) stop a loop as they stop any call: each call checks the spool
-      first, and the next call waits at the spend card when it is used. A scheduled run stops at
-      once and delivers nothing.
+      first, and the next call waits at the spend card when it is used. A scheduled run waits there
+      too, for its schedule's `waitForYouMinutes`, then finishes with what it has (at an
+      agent's own limit, that agent stops).
     - **`sendBackOnce: true`**, the older form, still reads as `sendBack: {rounds: 1,
       whenStillNotMet: answer}`. A file may not set both.
   - **What is recorded.** Every round is recorded as a `check_result` event. A send-back is
@@ -306,8 +310,10 @@ depend on the document as a whole:
   the ChatGPT plan costs no dollars and counts against the plan's limits instead. Before each call, an agent whose run has used its figure waits, and the run shows a
   stop: "Add $0.50 and carry on" grows this run's figure (the file is not changed), and "Finish
   with what it has" ends the run as done, with the last words an agent wrote as its answer, stop
-  reason `spend_limit`, and its checkpoints kept. A scheduled run has nobody to ask: it fails with
-  code `spend_limit`, says so, keeps its checkpoints and delivers nothing. A call's cost is known
+  reason `spend_limit`, and its checkpoints kept. A scheduled run waits at the stop too, for its
+  schedule's `waitForYouMinutes` (12 hours by default); if nobody answers by then it finishes with
+  what it has, or at an agent's own limit that agent stops, and the run's spend record says nobody
+  answered (ADR 0090). A call's cost is known
   only after it is made, so the calls under way when the figure is reached, one for each agent at
   work, can take a run a few cents past it.
 - `spend.perRun` on an agent is that agent's own guard, for an agent that runs away; there is
@@ -616,8 +622,9 @@ Anything else is put to the operator while the agent waits. The run shows, for e
 - **Answer instead** runs nothing and gives the agent your words as the tool's result.
 
 The Needs-you tray offers **Allow**, **Allow for this run** and **Deny**, plus **Allow for the
-whole team** when the run has more than one agent. A request is declined if nobody answers within 10 minutes, and at once in a scheduled run,
-which has nobody watching. The agent is told the call was declined and carries on without it.
+whole team** when the run has more than one agent. A request is declined if nobody answers within 10 minutes, or in a scheduled run within its
+schedule's `waitForYouMinutes` (12 hours by default). The wait is counted by the clock, so a
+computer that slept through it declines the request on waking (ADR 0090). The agent is told the call was declined and carries on without it.
 
 A team in Auto mode lets its agents run, without asking, the commands that only read or download.
 It is set in the team file:

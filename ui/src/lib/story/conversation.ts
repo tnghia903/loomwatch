@@ -1,5 +1,5 @@
 import type { Evidence } from '../watch/events'
-import { allMet, OPERATOR_ID, type MessageKind, type PermissionOutcome, type TeamMessage } from '../watch/messages'
+import { allMet, LOOMWATCH_ID, OPERATOR_ID, type MessageKind, type PermissionOutcome, type TeamMessage } from '../watch/messages'
 import { nameWithHelpers } from '../chat/helpers'
 
 /**
@@ -96,7 +96,7 @@ export function converse(messages: readonly TeamMessage[], order: readonly Party
   for (const id of involved) {
     if (known.has(id)) continue
     // A helper (ADR 0079) is named after the agent it helps.
-    lanes.push(id === OPERATOR_ID ? { id, name: 'You', operator: true } : { id, name: nameWithHelpers(names, id) ?? id, operator: false })
+    lanes.push(id === OPERATOR_ID ? { id, name: 'You', operator: true } : { id, name: id === LOOMWATCH_ID ? 'LoomWatch' : nameWithHelpers(names, id) ?? id, operator: false })
   }
   return { lanes, lines }
 }

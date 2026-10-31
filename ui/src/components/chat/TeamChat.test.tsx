@@ -1361,6 +1361,29 @@ describe('reactions', () => {
     expect(within(talk).getByRole('button', { name: 'Not sure: you. You’re having second thoughts. Take yours off' })).toHaveAttribute('aria-pressed', 'true')
   })
 
+  // ADR 0090: in a scheduled run, a question nobody answered in time was answered by LoomWatch.
+  // The chat says so, and never shows it as your answer.
+  it('says a question nobody answered in time went on with the agent’s best guess, not as your answer', async () => {
+    said.messages = [{
+      id: 'q-1', kind: 'question', from: 'writer', handedBy: null, to: 'operator', text: 'Which region?', context: null,
+      eventId: 'e1', evidenceId: null, seq: 1, ts: '2026-10-06T02:02:00.000Z', offsetMs: 120_000, state: 'answered', error: null, carried: false,
+      reply: { from: 'loomwatch:app', text: 'Nobody answered your question within 12 hours.', eventId: 'e2', seq: 2, ts: '2026-10-06T14:02:00.000Z', offsetMs: 43_320_000, source: null, sentBackTo: null, noAnswer: true },
+    }]
+    page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null, working: ['writer'] }), request: message({}), notes: [] }]
+    stores()
+    renderChat()
+    // The talk names LoomWatch as the one who answered, never you.
+    const talk = await screen.findByRole('region', { name: 'What the agents said' })
+    expect(within(talk).queryByRole('button', { name: 'React to your answer' })).toBeNull()
+    expect(within(talk).getAllByText(/LoomWatch/).length).toBeGreaterThan(0)
+    // Nobody is there to reach: no Reply under LoomWatch's own answer.
+    expect(within(talk).queryByRole('button', { name: /Reply to LoomWatch/ })).toBeNull()
+    // Folded while it works, the piece says what happened in one line, and not as your answer.
+    fireEvent.click(screen.getByRole('button', { name: 'Hide what they said' }))
+    expect(screen.getByText('Nobody answered “Which region?” in time, so Writer went on with its best guess')).toBeInTheDocument()
+    expect(screen.queryByText(/your answer to/)).toBeNull()
+  })
+
   it('reacts to a message the agents answered and to each answer, kept on the note across a reload', async () => {
     const hello = message({
       id: 'n-1', route: 'team_note', runId: null, text: '@team hi team, I am Colin', createdAt: '2026-10-06T01:00:00.000Z',

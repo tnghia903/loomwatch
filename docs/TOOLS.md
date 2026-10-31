@@ -65,8 +65,8 @@ You can answer in three ways:
 - **Always allow this** lets that one action through for that agent from now on. Its other actions
   still ask. The agent's Tools block lists what it always may do, with a × to take each back.
 
-On a schedule nobody is there to answer. So an action you haven't always allowed is declined, and
-the agent carries on without it.
+On a schedule the run still asks you, and waits 12 hours for your answer. If nobody answers by
+then, the action is declined and the agent carries on without it.
 
 ## When something goes wrong
 

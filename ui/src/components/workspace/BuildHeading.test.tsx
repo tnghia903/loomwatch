@@ -13,7 +13,7 @@ const improve: CheckupFinding = {
 }
 const undone: CheckupFinding = {
   id: 'needs-web:editor', rule: 'needs-web', severity: 'fix', agentId: 'editor', agentIds: ['editor'],
-  title: 'Editor can\'t search the web when the team runs on schedule', why: 'A scheduled run declines it.',
+  title: 'Editor must ask you each time it searches the web, even on a schedule', why: 'On a schedule the run waits up to 12 hours for your answer.',
   fix: { label: 'Allow web search', change: { kind: 'allow', agentId: 'editor', key: 'web' } },
 }
 
@@ -41,7 +41,7 @@ describe('BuildHeading checkup', () => {
   it('says "almost ready" when part of the work would go undone, and says why', () => {
     heading([undone, improve])
     expect(screen.getByRole('heading', { name: 'Almost ready' })).toBeInTheDocument()
-    expect(screen.getByText(/Editor can't search the web when the team runs on schedule\. A scheduled run declines it\./)).toBeInTheDocument()
+    expect(screen.getByText(/Editor must ask you each time it searches the web, even on a schedule\. On a schedule the run waits up to 12 hours for your answer\./)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'See all 2' }))
     fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' })
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
