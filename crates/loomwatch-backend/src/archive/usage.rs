@@ -4,6 +4,12 @@
 //! calls are counted as well as runs'. Nothing here asks a provider: a `ChatGPT` plan tells an app
 //! nothing of its limits, an Anthropic key nothing of its balance. The Usage page says what
 //! `LoomWatch` itself sent, and links to each provider for the rest.
+//!
+//! Every call is one of two kinds (ADR 0106): an agent's work, for a team or in its chat, or
+//! `LoomWatch`'s own help: Ask, reading a message, checking an answer against it, learning from
+//! feedback, the next steps under the notch's box, choosing an agent's model. Each source's total
+//! and each day say how much of it was `LoomWatch`'s own, and its own help is listed by what it
+//! did; the agents' list holds only their work.
 
 use anyhow::{Context, Result};
 use serde::Serialize;
@@ -20,8 +26,22 @@ pub struct UsageReport {
     pub sources: Vec<SourceUsage>,
     /// One entry per day and source that had calls, oldest first. Days are UTC dates.
     pub days: Vec<DayUsage>,
-    /// One entry per team (or Ask), agent and source, the costliest first.
+    /// One entry per team, agent and source, the costliest first: the agents' work only.
     pub agents: Vec<AgentUsage>,
+    /// `LoomWatch`'s own help, one entry per feature and source, the costliest first.
+    pub features: Vec<FeatureUsage>,
+}
+
+/// What `LoomWatch` did for the person with a model, besides the agents' work: what [`FEATURE`]
+/// names a call by.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FeatureUsage {
+    /// `ask`, `reading`, `checking`, `learning`, `next_steps` or `choosing_models`.
+    pub feature: String,
+    pub source: String,
+    #[serde(flatten)]
+    pub tally: Tally,
 }
 
 /// One source's calls in the window, with the recent ones that its limits count.
@@ -31,6 +51,8 @@ pub struct SourceUsage {
     /// `openrouter`, `chatgpt` or `anthropic`.
     pub source: String,
     pub total: Tally,
+    /// How much of `total` was `LoomWatch`'s own help; the rest was the agents' work.
+    pub loomwatch: Tally,
     /// The last five hours: a `ChatGPT` Plus plan's short limit counts these.
     pub last_five_hours: Tally,
     /// The last seven days: a `ChatGPT` plan's weekly share counts these.
@@ -85,18 +107,18 @@ pub struct DayUsage {
     pub source: String,
     #[serde(flatten)]
     pub tally: Tally,
+    /// How much of the day's was `LoomWatch`'s own help.
+    pub loomwatch: Tally,
 }
 
 /// One agent's calls through one source.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentUsage {
-    /// The team's name when the run recorded it; `None` for Ask and for runs from before names
-    /// were kept.
+    /// The team's name when the run recorded it; `None` for an agent's answer in its chat with no
+    /// run, and for runs from before names were kept.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub team: Option<String>,
-    /// Whether these were Ask's calls.
-    pub ask: bool,
     pub agent_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_name: Option<String>,
@@ -104,6 +126,44 @@ pub struct AgentUsage {
     pub runs: u64,
     #[serde(flatten)]
     pub tally: Tally,
+}
+
+/// Which of `LoomWatch`'s own features a call in `model_calls AS calls` was for, or NULL for an
+/// agent's work. `LoomWatch`'s check and the calls it records itself are told by who made them or
+/// what they were; Ask, its reader and its learner only when no run has their session, so an agent
+/// a team calls "ask" or "reader" is still the team's.
+pub(crate) static FEATURE: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    let alone = "NOT EXISTS (SELECT 1 FROM runs WHERE runs.session_id = calls.session_id)";
+    format!(
+        "CASE
+             WHEN calls.call_kind = '{NEXT_STEPS}' THEN 'next_steps'
+             WHEN calls.call_kind = '{CHOOSING_MODELS}' THEN 'choosing_models'
+             WHEN calls.agent_id = '{checker}' THEN 'checking'
+             WHEN calls.agent_id = '{ask}' AND {alone} THEN 'ask'
+             WHEN calls.agent_id = '{reader}' AND {alone} THEN 'reading'
+             WHEN calls.agent_id = '{learner}' AND {alone} THEN 'learning'
+         END",
+        checker = crate::message_done::CHECKER_ID,
+        ask = crate::control::AGENT_ID,
+        reader = crate::intent::READER_ID,
+        learner = crate::lessons::LEARNER_ID,
+    )
+});
+
+/// What `call_kind` a call `LoomWatch` records itself carries: the next steps under the notch's
+/// box, and reading an agent's setup to choose its model.
+pub(crate) const NEXT_STEPS: &str = "next_steps";
+pub(crate) const CHOOSING_MODELS: &str = "choosing_models";
+
+/// A call `LoomWatch` made for itself outside any session's events, to count with the rest.
+pub(crate) struct OwnCall<'a> {
+    /// The session the Usage page names it by: an agent's run's, or the feature's own.
+    pub(crate) session: &'a str,
+    pub(crate) agent: &'a str,
+    pub(crate) kind: &'a str,
+    pub(crate) source: &'a str,
+    pub(crate) model: &'a str,
+    pub(crate) usage: &'a crate::agent::Usage,
 }
 
 /// The sums every query below selects, in this order.
@@ -144,11 +204,18 @@ impl EventArchive {
             at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
         };
         let since = stamp(now - chrono::Duration::days(i64::from(days)));
+        let own = self.own_tallies_since(&since).await?;
         let mut sources: Vec<SourceUsage> = Vec::new();
         for (source, total) in self.tallies_since(&since).await? {
+            let loomwatch = own
+                .iter()
+                .find(|(own_source, _)| *own_source == source)
+                .map(|(_, tally)| *tally)
+                .unwrap_or_default();
             sources.push(SourceUsage {
                 source,
                 total,
+                loomwatch,
                 last_five_hours: Tally::default(),
                 last_seven_days: Tally::default(),
                 active_days: 0,
@@ -184,10 +251,85 @@ impl EventArchive {
         }
         Ok(UsageReport {
             agents: self.agents_since(&since).await?,
+            features: self.features_since(&since).await?,
             since,
             sources,
             days: days_used,
         })
+    }
+
+    /// Count a call `LoomWatch` made for itself, as the Usage page reads every call.
+    ///
+    /// # Errors
+    ///
+    /// When the archive can't be written.
+    pub(crate) async fn count_call(&self, call: &OwnCall<'_>) -> Result<()> {
+        let usage = call.usage;
+        let count = |tokens: u64| i64::try_from(tokens).unwrap_or(i64::MAX);
+        sqlx::query(
+            "INSERT OR IGNORE INTO model_calls (
+                 event_id, session_id, agent_id, ts, source, model, call_kind, input_tokens,
+                 cached_read_tokens, cached_write_tokens, output_tokens, reasoning_tokens, cost_usd,
+                 cost_estimated)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
+        )
+        .bind(format!("{}-{}", call.kind, uuid::Uuid::new_v4()))
+        .bind(call.session)
+        .bind(call.agent)
+        .bind(chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true))
+        .bind(call.source)
+        .bind(call.model)
+        .bind(call.kind)
+        .bind(count(usage.input_tokens))
+        .bind(count(usage.cached_read_tokens))
+        .bind(count(usage.cached_write_tokens))
+        .bind(count(usage.output_tokens))
+        .bind(count(usage.reasoning_tokens))
+        .bind(usage.cost_usd.max(0.0))
+        .bind(usage.cost_estimated)
+        .execute(self.db.writer())
+        .await
+        .context("couldn't count a call")?;
+        Ok(())
+    }
+
+    /// Each source's calls since `since` that were `LoomWatch`'s own help.
+    async fn own_tallies_since(&self, since: &str) -> Result<Vec<(String, Tally)>> {
+        let rows = sqlx::query(&format!(
+            "SELECT source, {TALLY} FROM model_calls AS calls
+             WHERE ts >= $1 AND ({feature}) IS NOT NULL GROUP BY source",
+            feature = *FEATURE
+        ))
+        .bind(since)
+        .fetch_all(self.db.reader())
+        .await
+        .context("couldn't read LoomWatch's own usage")?;
+        rows.iter()
+            .map(|row| Ok((row.try_get("source")?, tally(row)?)))
+            .collect()
+    }
+
+    /// `LoomWatch`'s own help since `since`, by feature and source, the costliest first.
+    async fn features_since(&self, since: &str) -> Result<Vec<FeatureUsage>> {
+        let rows = sqlx::query(&format!(
+            "SELECT ({feature}) AS feature, source, {TALLY} FROM model_calls AS calls
+             WHERE ts >= $1 AND ({feature}) IS NOT NULL
+             GROUP BY feature, source ORDER BY cost_usd DESC, output_tokens DESC",
+            feature = *FEATURE
+        ))
+        .bind(since)
+        .fetch_all(self.db.reader())
+        .await
+        .context("couldn't read LoomWatch's own usage")?;
+        rows.iter()
+            .map(|row| {
+                Ok(FeatureUsage {
+                    feature: row.try_get("feature")?,
+                    source: row.try_get("source")?,
+                    tally: tally(row)?,
+                })
+            })
+            .collect()
     }
 
     /// Each source's calls since `since`.
@@ -204,7 +346,8 @@ impl EventArchive {
             .collect()
     }
 
-    /// Each day's calls through each source since `since`, oldest first.
+    /// Each day's calls through each source since `since`, oldest first, with `LoomWatch`'s own
+    /// share of each.
     async fn days_since(&self, since: &str) -> Result<Vec<DayUsage>> {
         let rows = sqlx::query(&format!(
             "SELECT substr(ts, 1, 10) AS day, source, {TALLY} FROM model_calls WHERE ts >= $1
@@ -214,12 +357,37 @@ impl EventArchive {
         .fetch_all(self.db.reader())
         .await
         .context("couldn't read usage by day")?;
+        let own_rows = sqlx::query(&format!(
+            "SELECT substr(ts, 1, 10) AS day, source, {TALLY} FROM model_calls AS calls
+             WHERE ts >= $1 AND ({feature}) IS NOT NULL GROUP BY day, source",
+            feature = *FEATURE
+        ))
+        .bind(since)
+        .fetch_all(self.db.reader())
+        .await
+        .context("couldn't read LoomWatch's own usage by day")?;
+        let mut own = Vec::with_capacity(own_rows.len());
+        for row in &own_rows {
+            own.push((
+                row.try_get::<String, _>("day")?,
+                row.try_get::<String, _>("source")?,
+                tally(row)?,
+            ));
+        }
         rows.iter()
             .map(|row| {
+                let day: String = row.try_get("day")?;
+                let source: String = row.try_get("source")?;
+                let loomwatch = own
+                    .iter()
+                    .find(|(own_day, own_source, _)| *own_day == day && *own_source == source)
+                    .map(|(_, _, tally)| *tally)
+                    .unwrap_or_default();
                 Ok(DayUsage {
-                    day: row.try_get("day")?,
-                    source: row.try_get("source")?,
+                    day,
+                    source,
                     tally: tally(row)?,
+                    loomwatch,
                 })
             })
             .collect()
@@ -233,9 +401,10 @@ impl EventArchive {
                     json_extract(runs.agent_names, '$.\"' || calls.agent_id || '\"') AS agent_name,
                     calls.source AS source, COUNT(DISTINCT calls.session_id) AS runs, {TALLY}
              FROM model_calls AS calls LEFT JOIN runs ON runs.session_id = calls.session_id
-             WHERE calls.ts >= $1
+             WHERE calls.ts >= $1 AND ({feature}) IS NULL
              GROUP BY runs.team_name, calls.agent_id, calls.source
-             ORDER BY cost_usd DESC, output_tokens DESC"
+             ORDER BY cost_usd DESC, output_tokens DESC",
+            feature = *FEATURE
         ))
         .bind(since)
         .fetch_all(self.db.reader())
@@ -247,7 +416,6 @@ impl EventArchive {
                 let runs: i64 = row.try_get("runs")?;
                 Ok(AgentUsage {
                     team: row.try_get("team")?,
-                    ask: agent_id == crate::control::AGENT_ID,
                     agent_name: row.try_get("agent_name")?,
                     agent_id,
                     source: row.try_get("source")?,
@@ -452,11 +620,18 @@ mod tests {
             report.days.first().map(|day| day.day.as_str()),
             Some("2026-10-15")
         );
+        // Ask is LoomWatch's own help, not an agent's work.
+        assert!(
+            report
+                .features
+                .iter()
+                .any(|feature| feature.feature == "ask" && feature.source == "openrouter")
+        );
         assert!(
             report
                 .agents
                 .iter()
-                .any(|agent| agent.ask && agent.source == "openrouter")
+                .all(|agent| agent.agent_id != crate::control::AGENT_ID)
         );
         let checker = report
             .agents
@@ -466,6 +641,111 @@ mod tests {
         assert_eq!((checker.source.as_str(), checker.runs), ("anthropic", 1));
         // The costliest first.
         assert_eq!(report.agents[0].agent_id, "checker");
+        Ok(())
+    }
+
+    /// Each call is either an agent's work or `LoomWatch`'s own help, told apart by who made it,
+    /// what it was, and whether a run has its session: an agent a team calls "reader" or "ask" is
+    /// the team's.
+    #[tokio::test]
+    async fn loomwatchs_own_help_is_told_from_the_agents_work() -> Result<()> {
+        let archive = EventArchive::new(Db::temp().await);
+        let now: chrono::DateTime<chrono::Utc> = "2026-10-19T12:00:00Z".parse()?;
+        sqlx::query(
+            "INSERT INTO runs (run_id, session_id, team_path, team_key, prompt, status, mode,
+                               entrypoint, responder, created_at, trigger, team_name)
+             VALUES ('t', 't', 'news.yaml', 'news', 'Today''s news', 'succeeded', 'team', 'reader',
+                     'reader', '2026-10-19T09:00:00Z', 'manual', 'News brief')",
+        )
+        .execute(archive.db().writer())
+        .await?;
+        let at = "2026-10-19T10:00:00.000Z";
+        let openrouter = |cost| call("anthropic/claude-sonnet-5.5", 100, 10, cost, None);
+        for (id, session, agent, cost) in [
+            // Work: a team's writer, and the team's own agents called "reader" and "ask".
+            ("w:0", "t", "writer", 0.40),
+            ("w:1", "t", "reader", 0.20),
+            ("w:2", "t", "ask", 0.10),
+            // LoomWatch's own: Ask, reading a message, learning, and its check.
+            ("o:0", "ask-1", crate::control::AGENT_ID, 0.05),
+            ("o:1", "chat-reader-1", crate::intent::READER_ID, 0.01),
+            ("o:2", "learner-1", crate::lessons::LEARNER_ID, 0.02),
+            ("o:3", "t", crate::message_done::CHECKER_ID, 0.03),
+        ] {
+            archive
+                .append(&event(
+                    id,
+                    session,
+                    agent,
+                    at,
+                    EventKind::Usage,
+                    openrouter(cost),
+                ))
+                .await?;
+        }
+        // And the calls LoomWatch counts itself: next steps after the team's answer, on the
+        // team's own session, and choosing a model.
+        let usage = |cost| crate::agent::Usage {
+            input_tokens: 50,
+            output_tokens: 5,
+            cost_usd: cost,
+            ..crate::agent::Usage::default()
+        };
+        for (session, agent, kind, cost) in [
+            ("t", "writer", NEXT_STEPS, 0.004),
+            (CHOOSING_MODELS, CHOOSING_MODELS, CHOOSING_MODELS, 0.000_02),
+        ] {
+            archive
+                .count_call(&OwnCall {
+                    session,
+                    agent,
+                    kind,
+                    source: "openrouter",
+                    model: "anthropic/claude-haiku-5.5",
+                    usage: &usage(cost),
+                })
+                .await?;
+        }
+        let report = archive
+            .model_usage(now + chrono::Duration::days(1), 30)
+            .await?;
+
+        let work: Vec<(&str, Option<&str>)> = report
+            .agents
+            .iter()
+            .map(|agent| (agent.agent_id.as_str(), agent.team.as_deref()))
+            .collect();
+        assert_eq!(
+            work,
+            [
+                ("writer", Some("News brief")),
+                ("reader", Some("News brief")),
+                ("ask", Some("News brief"))
+            ]
+        );
+        let own: Vec<&str> = report
+            .features
+            .iter()
+            .map(|feature| feature.feature.as_str())
+            .collect();
+        assert_eq!(
+            own,
+            [
+                "ask",
+                "checking",
+                "learning",
+                "reading",
+                "next_steps",
+                "choosing_models"
+            ]
+        );
+        let source = &report.sources[0];
+        assert_eq!((source.total.calls, source.loomwatch.calls), (9, 6));
+        assert!((source.loomwatch.cost_usd - 0.114_02).abs() < 1e-9);
+        assert!((source.total.cost_usd - 0.814_02).abs() < 1e-9);
+        // Each day says its own share too: the counted calls fall on the day they were made.
+        let own_by_day: f64 = report.days.iter().map(|day| day.loomwatch.cost_usd).sum();
+        assert!((own_by_day - 0.114_02).abs() < 1e-9);
         Ok(())
     }
 }

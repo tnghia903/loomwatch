@@ -334,7 +334,7 @@
 .usage-bars-readout { color: var(--color-ink-2); text-align: right; }
 .usage-bars svg { width: 100%; height: 64px; display: block; overflow: visible; }
 .usage-bar { fill: var(--color-accent); opacity: .85; }
-.usage-bar.pointed { opacity: 1; }
+.usage-bars g.pointed .usage-bar { opacity: 1; }
 .usage-bar-hit { fill: transparent; outline: none; }
 .usage-bar-hit:focus-visible { stroke: var(--color-accent); stroke-width: 1; }
 .usage-bars-base { stroke: var(--color-hairline); stroke-width: 1; vector-effect: non-scaling-stroke; }
@@ -344,6 +344,44 @@
 .usage-table th { text-align: left; font-weight: 500; color: var(--color-ink-3); padding: var(--sp-1) var(--sp-2); }
 .usage-table td { padding: var(--sp-1) var(--sp-2); border-top: 1px solid var(--color-hairline); color: var(--color-ink-2); }
 @media (max-width: 720px) { .usage-figures { grid-template-columns: 1fr; } }
+/* Two kinds of use (ADR 0106): the agents' work solid in the accent, LoomWatch's own help striped
+   in the ink's quiet tone and set apart by a gap, each named in words beside its key, so tone is
+   never the only cue. LoomWatch's face names its help where it is a heading. */
+.usage-tracks { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: var(--sp-3); }
+.usage-track { gap: var(--sp-1); }
+.usage-track > * { margin: 0; }
+.usage-track-title { display: flex; align-items: center; gap: var(--sp-2); color: var(--color-ink-2); }
+.usage-track-figure { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2); }
+.usage-track-figure .t-meta, .usage-track-about { color: var(--color-ink-3); }
+.usage-split { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-4); margin: 0; color: var(--color-ink-2); }
+.usage-split span { display: inline-flex; align-items: center; gap: var(--sp-1); }
+.usage-key-whole, .usage-key-part { flex: none; width: 8px; height: 8px; border-radius: 2px; }
+.usage-key-whole { background: var(--color-accent); }
+.usage-key-part { background: repeating-linear-gradient(to bottom, var(--color-ink-3) 0 1.5px, transparent 1.5px 3px); box-shadow: inset 0 0 0 1px var(--color-ink-3); }
+.usage-bar-part { stroke: var(--color-ink-3); stroke-width: 1; vector-effect: non-scaling-stroke; pointer-events: none; }
+.usage-bar-stripe { fill: var(--color-ink-3); }
+.usage-tracks-when { grid-column: 1 / -1; margin: 0; color: var(--color-ink-3); }
+.usage-where-title { display: flex; align-items: center; gap: var(--sp-2); margin: var(--sp-2) 0 0; color: var(--color-ink); }
+/* Behind a "?", the heading's space sits on the row that holds it, so the "?" stays level with it. */
+.section-head:has(> .usage-where-title) { margin-top: var(--sp-2); }
+.section-head > .usage-where-title { margin: 0; }
+/* A feature's switch beside its name, so a narrow screen never scrolls the table to reach it. */
+.usage-feature { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-2) var(--sp-3); }
+.usage-feature-switch { display: flex; flex-direction: column; align-items: flex-end; text-align: right; }
+.usage-switch-hint { display: block; max-width: 30ch; margin-top: 2px; color: var(--color-ink-3); }
+.usage-switch-failed { display: block; margin-top: 2px; }
+/* An "on" here is a line, not a fill: the page's one gold fill stays its main action. */
+.usage-table .lw-settings-switch input:checked + .lw-settings-switch-track { background: var(--color-accent-tint); box-shadow: inset 0 0 0 1px var(--color-accent); }
+.usage-table .lw-settings-switch input:checked + .lw-settings-switch-track i { background: var(--color-accent); }
+@media (max-width: 767px) {
+  .usage-table .lw-settings-switch { min-width: 44px; min-height: 44px; justify-content: center; }
+}
+@media (max-width: 560px) {
+  .usage-col-tokens { display: none; }
+  .usage-feature { flex-direction: column; gap: 0; min-width: 14ch; }
+  .usage-feature-switch { align-items: flex-start; text-align: left; }
+  .usage-table .lw-settings-switch { justify-content: flex-start; }
+}
 .usage-notices { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); max-width: 720px; }
 .usage-notices li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); border-radius: var(--r-md); }
 

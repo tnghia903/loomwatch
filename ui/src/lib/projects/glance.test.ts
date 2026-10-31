@@ -105,9 +105,9 @@ describe('what a room shows at a glance', () => {
       days: [],
       sources: [{ source: 'openrouter', total: tally(0.4) }, { source: 'anthropic', total: tally(0.2, 1, true) }, { source: 'chatgpt', total: tally(0, 12) }],
       agents: [
-        { ...tally(0.4), team: 'Launch posts', ask: false, agentId: 'writer', source: 'openrouter', runs: 2 },
-        { ...tally(0, 12), team: 'Landing page', ask: false, agentId: 'illustrator', source: 'chatgpt', runs: 1 },
-        { ...tally(0.2, 1, true), team: 'Elsewhere', ask: false, agentId: 'x', source: 'anthropic', runs: 1 },
+        { ...tally(0.4), team: 'Launch posts', agentId: 'writer', source: 'openrouter', runs: 2 },
+        { ...tally(0, 12), team: 'Landing page', agentId: 'illustrator', source: 'chatgpt', runs: 1 },
+        { ...tally(0.2, 1, true), team: 'Elsewhere', agentId: 'x', source: 'anthropic', runs: 1 },
       ],
     } as unknown as UsageReport
     const home = monthCost(report, null)
@@ -183,15 +183,15 @@ describe('what a room shows at a glance', () => {
       since: '2026-10-01', days: [], sources: [],
       agents: [
         // An agent's own chat: the report names its team only by its name, so it is found by its own.
-        { ...tally(0.05), team: 'Cole · chat', ask: false, agentId: 'agent', agentName: 'Cole', source: 'openrouter', runs: 1 },
-        { ...tally(0.3, true), team: 'Launch posts', ask: false, agentId: 'writer', agentName: 'Writer', source: 'anthropic', runs: 1 },
-        { ...tally(0.1), team: 'Launch posts', ask: false, agentId: 'writer', agentName: 'Writer', source: 'openrouter', runs: 1 },
-        { ...tally(0.15), team: 'Competitor watch', ask: false, agentId: 'pen', agentName: 'Writer', source: 'openrouter', runs: 1 },
-        { ...tally(0.2), team: 'Competitor watch', ask: false, agentId: 'scout', agentName: 'Scout', source: 'openrouter', runs: 1 },
+        { ...tally(0.05), team: 'Cole · chat', agentId: 'agent', agentName: 'Cole', source: 'openrouter', runs: 1 },
+        { ...tally(0.3, true), team: 'Launch posts', agentId: 'writer', agentName: 'Writer', source: 'anthropic', runs: 1 },
+        { ...tally(0.1), team: 'Launch posts', agentId: 'writer', agentName: 'Writer', source: 'openrouter', runs: 1 },
+        { ...tally(0.15), team: 'Competitor watch', agentId: 'pen', agentName: 'Writer', source: 'openrouter', runs: 1 },
+        { ...tally(0.2), team: 'Competitor watch', agentId: 'scout', agentName: 'Scout', source: 'openrouter', runs: 1 },
         { ...tally(0.9), ask: true, agentId: 'ask', source: 'openrouter', runs: 1 },
         // LoomWatch reading a message for whether it is work: in no team, so no one's.
-        { ...tally(0.7), ask: false, agentId: 'reader', source: 'openrouter', runs: 3 },
-        { ...tally(0), team: 'Landing page', ask: false, agentId: 'illustrator', source: 'chatgpt', runs: 1 },
+        { ...tally(0.7), agentId: 'reader', source: 'openrouter', runs: 3 },
+        { ...tally(0), team: 'Landing page', agentId: 'illustrator', source: 'chatgpt', runs: 1 },
       ],
     } as unknown as UsageReport
     const spent = monthSpenders(report, null, [launch, watch], [{ id: 'cole', name: 'Cole' }])

@@ -350,6 +350,8 @@ async fn main() -> Result<()> {
             // can start a run. Nothing is read or fetched here: the key is read when the first
             // agent starts, and the model list when it is first asked for.
             let ai = loomwatch_backend::ai::Ai::new(&state_dir);
+            // ADR 0106: choosing models is counted with every other model call.
+            ai.count_calls_in(opened.clone());
             loomwatch_backend::ai::install(ai.clone());
             // What the person told their agents about themselves (ADR 0074), which every session
             // reads when it opens. Read once here; the About you page changes it in memory too.

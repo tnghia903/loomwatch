@@ -15,7 +15,8 @@ use crate::{EventKind, RunEvent};
 pub(crate) mod codec;
 mod usage;
 
-pub use usage::{AgentUsage, DayUsage, LastProblem, SourceUsage, Tally, UsageReport};
+pub use usage::{AgentUsage, DayUsage, FeatureUsage, LastProblem, SourceUsage, Tally, UsageReport};
+pub(crate) use usage::{CHOOSING_MODELS, NEXT_STEPS, OwnCall};
 
 /// The ordered event archive, in the SQLite database.
 #[derive(Clone, Debug)]
