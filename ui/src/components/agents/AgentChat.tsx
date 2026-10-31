@@ -157,6 +157,9 @@ export function AgentChat({ draft, model, chatId, figure, onAllow, onRecord, ans
 
   // The newer of what the file reader and Details ask the chat to show.
   const fromFile = file?.reveal ?? null
+  // The file over the bench leaves its changes with this chat's agent.
+  const tellTeam = file?.team
+  useEffect(() => { tellTeam?.(path) }, [tellTeam, path])
   const shownMessage = fromFile && (!reveal || fromFile.at > reveal.at) ? fromFile : reveal
 
   if (!shown) return <section className="agent-chat-wait" aria-busy="true"><p className="t-meta">Opening {name}’s chat…</p></section>
@@ -251,7 +254,7 @@ export function AgentFile({ bench, chatId, name, figure }: { bench: BenchFile; c
       <div className="agent-answer agent-file" onKeyDown={(event) => { if (event.key === 'Escape' && !event.defaultPrevented) { event.stopPropagation(); bench.close() } }}>
         <button type="button" className="link agent-answer-back" onClick={bench.close}><ArrowLeft size={14} aria-hidden="true" />Back to {name}</button>
         <FileReader key={reading.path} file={{ ...reading, from: reading.from ?? agentId }} name={(id) => (id === agentId ? name : id)} hue={() => figureHue(figure)}
-          onAsk={bench.askInChat} asked={bench.passages.asked} asking={bench.passages.asking} onShowAsked={bench.showAsked} />
+          onAsk={bench.askInChat} asked={bench.passages.asked} asking={bench.passages.asking} onShowAsked={bench.showAsked} teamPath={bench.teamPath} />
       </div>
     </TeamFiguresContext.Provider>
   )

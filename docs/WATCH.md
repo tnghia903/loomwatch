@@ -155,7 +155,39 @@ answer then opens at the newer words and says which words it is about. A bubble 
 answer, and the marked words open the one still waiting for you, or else the newest; Esc or ×
 closes it. A Markdown report shows the pictures it links to on this computer, such as a chart it
 links as `figures/chart.svg` beside it; a picture on the web shows as its words, so reading a report
-never tells a website you did. A web page the agent made is marked the same way. It runs in a sandbox of its own, and
+never tells a website you did. **Make changes** at the top of the reader (ADR 0107) turns a file
+you can change into a draft: a file an agent made in its own folder, or one in a folder you gave a
+team, that is a text, code or Markdown file, a table or workbook, a slide deck or a Word document.
+Ask and Explain wait while it is on, and one line at the foot of the file says where to type until a
+change is saved. A table's or workbook's cell is changed by a double-click (Enter saves, Esc puts
+it back, Tab goes on to the next); a cell whose formula other cells share can't be changed alone,
+and says so. A deck's slide words and speaker notes, and a Word document's paragraphs, are typed into
+where they are drawn, as a Markdown file's are; a part with a link, a field or a picture in it, a
+table on a slide and a chart are left as they are. A paragraph typed into takes the look of its
+first words. A Markdown file is typed into where it is drawn: click a paragraph, a heading
+or a list item and type. Leaving it, or Enter, saves that part in the file, and Esc puts it back as
+it was. Any other file is changed as its words in one box, saved when you leave it or
+stop typing for a moment; Esc there puts back what you typed. The header then says **Saved**, with
+**Undo**; after Undo it says **Undone**, with **Redo**. LoomWatch keeps a copy of the file as it was before each change, and Undo
+writes that copy back (keeping the one it replaces, which is what Redo writes). If the file changed since you opened it (an agent wrote it again), your
+change isn't saved, the header says "The file changed just now, so yours wasn't saved. Type it
+again.", and the file shows as it is now. When LoomWatch refuses a change for a reason of its own,
+the header says that reason. Beside a team's chat, Make changes is also how you leave changes for the agents, on
+any kind of file: mark a part as you would to ask about it (words, a box on a picture or page, cells,
+a moment, a part of a web page; over words you are typing into, **Change this…** comes first) and
+say what should change there (**Add**). It goes to the agent who made the file; a teammate's face
+gives it to them instead. Each change waits at its part as its agent's figure with a short gold line,
+dashed while it waits, and the header's **Send 2 changes** says how many wait. While you type into
+the words, a part's figures stand in the margin beside it, three at most with how many more. Send
+gives each agent one message holding all of its changes
+on the file, numbered, which it makes in one go and answers by number; the message shows in the
+chat with each change under it. Agents with changes on the same file take turns, the one who made
+it first, so one doesn't write over another; a change waiting its turn keeps its figure alone, one
+at work types, and one made shows a gold dot until you open it; the line goes solid once it is sent.
+Its card says **Your change**, with **Remove** while it waits, and **Put back** once it is made,
+which writes back the file as it was before that agent's turn: every change that turn made goes
+(**Put back all 3**), and anything changed in the file since. A change whose words the agent
+changed keeps its figure in the header, three at most. A web page the agent made is marked the same way. It runs in a sandbox of its own, and
 the data, clips, pictures and fonts beside it load as they would from the page's folder (a
 dashboard's `fetch('sales.csv')` works; LoomWatch reads them for it): its own folder and the folders
 in it only, never anything above it. To ask about any part of the page, not just its words, press

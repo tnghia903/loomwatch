@@ -1,8 +1,9 @@
-import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent } from 'react'
 import { createPortal } from 'react-dom'
 
-import { cellAt, cellsCopied, inRange, rangeBetween, sheetColumns, type CellRange, type Sheet } from '../../lib/files/cells'
+import { cellAt, cellsCopied, columnName, inRange, rangeBetween, sheetColumns, type CellRange, type Sheet } from '../../lib/files/cells'
 import { isNumberCell } from '../../lib/files/table'
+import '../../styles/sheet-edit.css'
 
 /** A range asked about on a sheet, by its part's id (`partId`), with how its asks look. */
 export interface SheetRange {
@@ -11,6 +12,17 @@ export interface SheetRange {
   sheet: string | null
   range: CellRange
   look: string
+}
+
+/** A cell changed in place (ADR 0107): by the sheet's own row and column numbers, from 1. */
+export interface CellEdit {
+  /** The sheet it is on, by name; `null` for a file of one sheet. */
+  sheet: string | null
+  row: number
+  col: number
+  /** What it says now, and what it said as shown before. */
+  value: string
+  was: string
 }
 
 /** A range marked now: where it is, and on which sheet. */
@@ -45,12 +57,34 @@ interface SheetViewProps {
    * another sheet's tab is chosen, or the sheet is laid out anew.
    */
   onDrawn?: () => void
+  /**
+   * Cells can be changed in place (ADR 0107): a double-click on one, or Enter or typing on one
+   * reached from the keyboard, opens it to type in; Enter or leaving it saves, Esc puts it back, Tab
+   * goes on to the next cell. A press still marks cells to ask about.
+   */
+  editable?: boolean
+  /**
+   * A cell was changed: called only when its words did. Until the sheet is read again it shows the
+   * new words; a promise that ends in `false`, or fails, shows the old ones again.
+   */
+  onCellEdit?: (edit: CellEdit) => void | Promise<unknown>
 }
 
 type Corner = { row: number; column: number }
 /** What a drag started on: a cell, a column's name (whole columns), or a row's number (whole rows). */
 type Start = 'cell' | 'column' | 'row'
 type Placed = { id: string; range: CellRange; className: string; away: boolean }
+/** Where a press or a click is: the event's place, and what it was on. */
+type Pointed = { clientX: number; clientY: number; target: EventTarget | null }
+/** The cell open to type in: where it is, what is typed (what it starts with, while it is drawn), and what it said. */
+type Editing = { sheet: string | null; row: number; column: number; value: string; was: string }
+/** How typing in a cell ends: saved and stays there, saved as focus goes elsewhere, put back, or saved and on to the next or the one before. */
+type Finish = 'save' | 'leave' | 'cancel' | 'next' | 'back'
+
+/** A cell's place, as the key of the words typed into it. */
+const typedKey = (sheet: string | null, row: number, column: number) => `${sheet ?? ''}\u0000${row}\u0000${column}`
+/** Arrow keys, by how far they move. */
+const MOVES: Record<string, [number, number]> = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] }
 
 /** Room beside the sheet for the bubbles of a range at its last column: two agents' worth. */
 const GUTTER_PX = 96
@@ -63,7 +97,7 @@ const GUTTER_PX = 96
  * (ADR 0077); ⌘C copies what is marked. Each range asked about stays drawn on the sheet, with the
  * bubble of each agent asked beside it, which opens the answer as a press on its cells does.
  */
-export function SheetView({ sheets, askable, ranges, marking, asking, open, dark, onMarked, onOpen, tabsInto, onDrawn }: SheetViewProps) {
+export function SheetView({ sheets, askable, ranges, marking, asking, open, dark, onMarked, onOpen, tabsInto, onDrawn, editable = false, onCellEdit }: SheetViewProps) {
   const [shownName, setShownName] = useState<string | null>(sheets[0]?.name ?? null)
   const sheet = sheets.find((each) => each.name === shownName) ?? sheets[0]
   // The answer opened for cells on another sheet shows that sheet, once, when it opens.
@@ -82,7 +116,7 @@ export function SheetView({ sheets, askable, ranges, marking, asking, open, dark
   const firstMarked = sheet && sheet.rows.length > 1 ? sheet.firstRow + 1 : sheet?.firstRow ?? 1
   const [drawing, setDrawing] = useState<{ from: Corner; to: Corner; pointer: number; start: Start } | null>(null)
   // The cell under the pointer: while the grid holds the pointer, the event's target is the grid.
-  const cellOf = (event: PointerEvent<HTMLDivElement>): Corner | null => {
+  const cellOf = (event: Pointed): Corner | null => {
     const under = (typeof document.elementFromPoint === 'function' ? document.elementFromPoint(event.clientX, event.clientY) : null) ?? (event.target as Element)
     // A row's number stands for its row, at the sheet's first column.
     const row = under.closest<HTMLElement>('[data-whole-row]')
@@ -107,6 +141,9 @@ export function SheetView({ sheets, askable, ranges, marking, asking, open, dark
   }
 
   const down = (event: PointerEvent<HTMLDivElement>) => {
+    if ((event.target as Element).closest('.rd-cell-input')) return
+    // A press anywhere else saves the cell being typed in first, however the browser moves focus.
+    finish('leave')
     if (!askable || !sheet || event.button !== 0 || (event.target as Element).closest('.rd-slot')) return
     const target = event.target as Element
     const row = target.closest<HTMLElement>('[data-whole-row]')
@@ -138,12 +175,150 @@ export function SheetView({ sheets, askable, ranges, marking, asking, open, dark
   const wholeColumn = (column: number) => mark({ top: firstMarked, bottom: lastRow, left: column, right: column })
   const wholeRow = (row: number) => mark({ top: row, bottom: row, left: sheet?.firstColumn ?? 1, right: lastColumn })
 
+  // Changing a cell in place (ADR 0107). The words typed are shown in their cell until the sheet is
+  // read again, as the file the change was saved in.
+  const [typed, setTyped] = useState<ReadonlyMap<string, string>>(new Map())
+  const [typedFor, setTypedFor] = useState(sheets)
+  if (typedFor !== sheets) {
+    setTypedFor(sheets)
+    setTyped(new Map())
+  }
+  const shownAt = (row: number, column: number) => (sheet ? typed.get(typedKey(sheet.name, row, column)) ?? cellAt(sheet, row, column) : '')
+  const [editing, setEditing] = useState<Editing | null>(null)
+  // Read as typing ends, whichever way it ends first: leaving the cell as well as pressing Enter.
+  const editingNow = useRef<Editing | null>(null)
+  // The cell reached from the keyboard or by a press: the one the sheet's tab stop is on. It moves
+  // on the cells themselves, so a large sheet isn't drawn again for each arrow pressed.
+  const active = useRef<{ sheet: string | null } & Corner | null>(null)
+  const sheetName = sheet?.name ?? null
+  const firstColumn = sheet?.firstColumn ?? 1
+  const firstRow = sheet?.firstRow ?? 1
+  const opened = editing && editing.sheet === sheetName ? editing : null
+
+  /** The one cell with the sheet's tab stop. */
+  const stopOn = (cell: HTMLElement) => {
+    for (const other of grid.current?.querySelectorAll<HTMLElement>('[data-row][data-column][tabindex="0"]') ?? []) if (other !== cell) other.tabIndex = -1
+    cell.tabIndex = 0
+  }
+  const reach = (row: number, column: number): HTMLElement | null => {
+    active.current = { sheet: sheetName, row, column }
+    const cell = cellBox(row, column)
+    if (cell) stopOn(cell)
+    return cell
+  }
+  // Each cell is drawn without the tab stop; it is put on the cell reached last, or else the first
+  // cell under the column names, once the sheet is drawn.
+  useLayoutEffect(() => {
+    if (!editable) return
+    const at = active.current
+    const fits = at && at.sheet === sheetName && at.row >= firstRow && at.row <= lastRow && at.column >= firstColumn && at.column <= lastColumn
+    const cell = fits ? cellBox(at.row, at.column) : cellBox(firstMarked, firstColumn)
+    if (cell && cell.tabIndex !== 0) stopOn(cell)
+  })
+  const focusCell = (row: number, column: number, scroll = true) => reach(row, column)?.focus({ preventScroll: !scroll })
+  /** The cell a click or a key is on: one of the sheet's cells, its column names' row too, never a row's number. */
+  const editableAt = (event: Pointed): Corner | null => {
+    const under = (typeof document.elementFromPoint === 'function' ? document.elementFromPoint(event.clientX, event.clientY) : null) ?? (event.target as Element)
+    const cell = under?.closest<HTMLElement>('td[data-row][data-column], thead th[data-row][data-column]')
+    return cell && grid.current?.contains(cell) ? { row: Number(cell.dataset.row), column: Number(cell.dataset.column) } : null
+  }
+  const startEditing = (at: Corner, value?: string) => {
+    if (!editable || !sheet) return
+    const was = shownAt(at.row, at.column)
+    const next = { sheet: sheet.name, row: at.row, column: at.column, value: value ?? was, was }
+    editingNow.current = next
+    setEditing(next)
+    reach(at.row, at.column)
+    // Typing in a cell is not asking about it.
+    if (marking) onMarked(null)
+    const selection = document.getSelection()
+    if (selection?.anchorNode && grid.current?.contains(selection.anchorNode)) selection.removeAllRanges()
+  }
+  /** The next cell along the rows, or the one before, as Tab and Shift-Tab go. */
+  const step = (at: Corner, back: boolean): Corner => {
+    let { row, column } = at
+    column += back ? -1 : 1
+    if (column > lastColumn) { column = firstColumn; row += 1 }
+    if (column < firstColumn) { column = lastColumn; row -= 1 }
+    return row < firstRow || row > lastRow ? at : { row, column }
+  }
+  const save = (edit: Editing) => {
+    // The box reads a line break as one character, however the file writes it.
+    if (edit.value.replace(/\r\n?/g, '\n') === edit.was.replace(/\r\n?/g, '\n')) return
+    const key = typedKey(edit.sheet, edit.row, edit.column)
+    setTyped((now) => new Map(now).set(key, edit.value))
+    const putBack = () => setTyped((now) => {
+      if (now.get(key) !== edit.value) return now
+      const next = new Map(now)
+      next.delete(key)
+      return next
+    })
+    const saving = onCellEdit?.({ sheet: edit.sheet, row: edit.row, col: edit.column, value: edit.value, was: edit.was })
+    if (saving && typeof saving.then === 'function') saving.then((done) => { if (done === false) putBack() }, putBack)
+  }
+  function finish(how: Finish) {
+    const edit = editingNow.current
+    if (!edit) return
+    editingNow.current = null
+    setEditing(null)
+    if (how !== 'cancel') save(edit)
+    // Focus stays with the sheet, unless it was going elsewhere.
+    if (how === 'leave') return
+    const to = how === 'next' || how === 'back' ? step(edit, how === 'back') : edit
+    focusCell(to.row, to.column)
+  }
+  const doubleClicked = (event: MouseEvent<HTMLDivElement>) => {
+    if (!editable || (event.target as Element).closest('.rd-cell-input, .rd-slot')) return
+    const at = editableAt(event)
+    if (at) startEditing(at)
+  }
+  const clicked = (event: MouseEvent<HTMLDivElement>) => {
+    if (!editable || (event.target as Element).closest('.rd-cell-input, .rd-slot')) return
+    const at = editableAt(event)
+    if (at && !(event.target as Element).closest('button')) focusCell(at.row, at.column, false)
+  }
+  const keyed = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (!editable || !sheet || editingNow.current) return
+    const target = event.target as HTMLElement
+    if (!target.matches('td[data-row][data-column], thead th[data-row][data-column]')) return
+    const at = { row: Number(target.dataset.row), column: Number(target.dataset.column) }
+    if (event.metaKey || event.ctrlKey || event.altKey) return
+    const move = MOVES[event.key]
+    if (move || event.key === 'Home' || event.key === 'End') {
+      event.preventDefault()
+      const row = move ? Math.min(lastRow, Math.max(firstRow, at.row + move[0])) : at.row
+      const column = move ? Math.min(lastColumn, Math.max(firstColumn, at.column + move[1])) : event.key === 'Home' ? firstColumn : lastColumn
+      focusCell(row, column)
+    } else if (event.key === 'Enter' || event.key === 'F2') {
+      event.preventDefault()
+      startEditing(at)
+    } else if (event.key === 'Backspace' || event.key === 'Delete') {
+      event.preventDefault()
+      startEditing(at, '')
+    } else if ([...event.key].length === 1) {
+      // Typing on a cell types over it, as in a spreadsheet; Esc puts it back.
+      event.preventDefault()
+      startEditing(at, event.key)
+    } else if (event.key === 'Process' || event.nativeEvent.isComposing) {
+      // Letters still being composed go on into the box as it opens.
+      startEditing(at, '')
+    }
+  }
+  /** A cell's own props for the keyboard: reached by arrows, the tab stop moved onto it (`stopOn`). */
+  const reachable = editable ? { tabIndex: -1 } : {}
+  // What is typed is the box's own: the sheet isn't drawn again for each letter.
+  const box = (row: number, column: number) => (opened && opened.row === row && opened.column === column ? (
+    <CellBox start={opened.value} label={`Change cell ${columnName(column)}${row}`}
+      onChange={(value) => { if (editingNow.current) editingNow.current = { ...editingNow.current, value } }} onFinish={finish} />
+  ) : null)
+
   // ⌘C copies the marked cells, by row and tab, as a spreadsheet does: nothing in a sheet is
   // selected as words while cells can be marked.
   useEffect(() => {
     if (!marking || !sheet || marking.sheet !== sheet.name) return
     const copy = (event: ClipboardEvent) => {
-      if (document.getSelection()?.isCollapsed === false || !event.clipboardData) return
+      // Words copied from a cell being typed in are its own.
+      if ((event.target instanceof Element && event.target.closest('textarea, input')) || document.getSelection()?.isCollapsed === false || !event.clipboardData) return
       event.clipboardData.setData('text/plain', cellsCopied(sheet, marking.range))
       event.preventDefault()
     }
@@ -157,7 +332,6 @@ export function SheetView({ sheets, askable, ranges, marking, asking, open, dark
   const live = drawing ? rangeOf(drawing.from, drawing.to, drawing.start) : null
   // A range at the sheet's last row and column takes the table's rounded corner.
   const corner = (range: CellRange) => (range.bottom === lastRow && range.right === lastColumn ? ' corner' : '')
-  const sheetName = sheet?.name ?? null
   const now = live ?? (marking && marking.sheet === sheetName ? marking.range : null)
   const placed: Placed[] = [
     // Cells on another sheet are not lost: their sheet's tab shows them.
@@ -215,16 +389,18 @@ export function SheetView({ sheets, askable, ranges, marking, asking, open, dark
       {tabs && (tabsInto ? createPortal(tabs, tabsInto) : tabs)}
       {sheet.noCells ? <p className="rd-empty">There are no cells on this sheet to show here. Open it in its own app to see it.</p>
         : !head ? <p className="rd-empty">This sheet is empty.</p> : (
-          <div ref={grid} className={`rd-table-wrap rd-grid${askable ? ' askable' : ''}`} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={() => setDrawing(null)}>
-            <table className="rd-table rd-cells" aria-label={sheet.name ?? undefined}>
+          <div ref={grid} className={`rd-table-wrap rd-grid${askable ? ' askable' : ''}${editable ? ' editable' : ''}`} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={() => setDrawing(null)}
+            onClick={editable ? clicked : undefined} onDoubleClick={editable ? doubleClicked : undefined} onKeyDown={editable ? keyed : undefined}>
+            <table className="rd-table rd-cells" aria-label={sheet.name ?? undefined} role={editable ? 'grid' : undefined}>
               <thead>
                 <tr>
                   <th className="rd-row-name" scope="col" aria-hidden="true" />
                   {columnNumbers.map((column) => (
-                    <th key={column} scope="col" data-row={sheet.firstRow} data-column={column}>
+                    <th key={column} scope="col" data-row={sheet.firstRow} data-column={column} className={box(sheet.firstRow, column) ? 'rd-cell-editing' : undefined} {...reachable}>
                       {askable
-                        ? <button type="button" className="rd-line-name" title="Mark the whole column" onClick={(event) => { if (event.detail === 0) wholeColumn(column) }}>{cellAt(sheet, sheet.firstRow, column)}</button>
-                        : cellAt(sheet, sheet.firstRow, column)}
+                        ? <button type="button" className="rd-line-name" title="Mark the whole column" onClick={(event) => { if (event.detail === 0) wholeColumn(column) }}>{shownAt(sheet.firstRow, column)}</button>
+                        : shownAt(sheet.firstRow, column)}
+                      {box(sheet.firstRow, column)}
                     </th>
                   ))}
                 </tr>
@@ -240,8 +416,10 @@ export function SheetView({ sheets, askable, ranges, marking, asking, open, dark
                           : row}
                       </th>
                       {columnNumbers.map((column) => {
-                        const cell = cellAt(sheet, row, column)
-                        return <td key={column} data-row={row} data-column={column} className={isNumberCell(cell) ? 'num' : undefined}>{cell}</td>
+                        const cell = shownAt(row, column)
+                        const typing = box(row, column)
+                        const className = [isNumberCell(cell) ? 'num' : '', typing ? 'rd-cell-editing' : ''].filter(Boolean).join(' ')
+                        return <td key={column} data-row={row} data-column={column} className={className || undefined} {...reachable}>{cell}{typing}</td>
                       })}
                     </tr>
                   )
@@ -258,5 +436,36 @@ export function SheetView({ sheets, askable, ranges, marking, asking, open, dark
         )}
       {sheet.more && <p className="rd-note">The first {sheet.rows.length.toLocaleString('en-US')} rows are shown. Open it in its own app for the rest.</p>}
     </div>
+  )
+}
+
+/**
+ * The box a cell is typed in, over the cell (ADR 0107): its words as shown, the caret at their end.
+ * Enter saves and stays; Shift-Enter starts a new line in the cell; Tab saves and goes on.
+ */
+function CellBox({ start, label, onChange, onFinish }: { start: string; label: string; onChange: (value: string) => void; onFinish: (how: Finish) => void }) {
+  const field = useRef<HTMLTextAreaElement>(null)
+  const [value, setValue] = useState(start)
+  useLayoutEffect(() => {
+    const element = field.current
+    if (!element) return
+    element.focus({ preventScroll: true })
+    element.setSelectionRange(element.value.length, element.value.length)
+  }, [])
+  return (
+    <textarea ref={field} className="rd-cell-input" rows={1} value={value} aria-label={label} spellCheck={false}
+      onChange={(event) => { setValue(event.target.value); onChange(event.target.value) }}
+      onBlur={() => onFinish('leave')}
+      onKeyDown={(event) => {
+        // Enter while letters are being composed ends the composing, not the typing.
+        if (event.nativeEvent.isComposing) return
+        const how: Finish | null = event.key === 'Escape' ? 'cancel'
+          : event.key === 'Enter' && !event.shiftKey && !event.altKey ? 'save'
+            : event.key === 'Tab' ? (event.shiftKey ? 'back' : 'next') : null
+        if (!how) return
+        event.preventDefault()
+        event.stopPropagation()
+        onFinish(how)
+      }} />
   )
 }

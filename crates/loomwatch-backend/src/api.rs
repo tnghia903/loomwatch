@@ -492,6 +492,12 @@ async fn file_answer(
     {
         response.headers_mut().insert(header::CONTENT_RANGE, value);
     }
+    // The version of a file the reader can change, which a change to its bytes names (ADR 0107).
+    if let Some(version) = &file.version
+        && let Ok(value) = format!("\"{version}\"").parse()
+    {
+        response.headers_mut().insert(header::ETAG, value);
+    }
     // The reader draws a PDF, a deck and a Word document itself; a browser sent to one saves it
     // rather than show it as a page of this daemon, where its own viewer would read whatever the
     // agent put in it.
@@ -3143,8 +3149,16 @@ mod tests {
         let deck = ask("deck.pptx").await.expect("response");
         assert_eq!(deck.status(), StatusCode::OK);
         assert_eq!(deck.headers()[header::CONTENT_DISPOSITION], "attachment");
+        // With the version a change to it names (ADR 0107): the SHA-256 of `PK`.
+        assert_eq!(
+            deck.headers()[header::ETAG],
+            format!("\"sha256:{:x}\"", Sha256::digest(b"PK")).as_str()
+        );
         let clip = ask("talk.mp4").await.expect("response");
         assert!(clip.headers().get(header::CONTENT_DISPOSITION).is_none());
+        // A recording or a PDF is never changed in the reader, so it has no version to name.
+        assert!(clip.headers().get(header::ETAG).is_none());
+        assert!(pdf.headers().get(header::ETAG).is_none());
     }
 
     /// **A recording is answered a part at a time (ADR 0091).** Safari plays only what it can ask
@@ -5730,8 +5744,8 @@ mod tests {
 
     /// The file takes the new name, and everything the team keeps beside it or files under its
     /// path goes with it: its Brief, layout and added files, their names inside the file, its run
-    /// history, chat, the chat's search and the files sent in it, and its approval. Other teams
-    /// stay as they are.
+    /// history, chat, the chat's search and the files sent in it, the changes left on its files,
+    /// and its approval. Other teams stay as they are.
     #[tokio::test]
     #[allow(clippy::too_many_lines)]
     async fn rename_moves_the_team_with_everything_kept_beside_it_and_filed_under_it() {
@@ -5776,6 +5790,16 @@ mod tests {
         .execute(db.writer())
         .await
         .expect("search row");
+        // A change left on a file for one of its agents, with a picture of its part (ADR 0107).
+        sqlx::query(
+            "INSERT INTO file_changes (id, team_key, team_path, file, agent_id, words, part, files, created_at)
+             VALUES ('c1', 'trip', 'trip.yaml', $1, 'planner', 'Shorter', '{}', $2, '2026-10-29T00:00:00Z')",
+        )
+        .bind(&elsewhere)
+        .bind(json!([{ "path": photo }]).to_string())
+        .execute(db.writer())
+        .await
+        .expect("change row");
 
         let renamed = TRIP_WITH_FOLDERS.replace("name: Trip planner", "name: Kyoto week");
         let response = rename_request(
@@ -5865,6 +5889,18 @@ mod tests {
         assert_eq!(
             rows(&db, "SELECT piece, team_path FROM work_passages").await,
             [("m1".to_owned(), "kyoto-week.yaml".to_owned())]
+        );
+        assert_eq!(
+            rows(&db, "SELECT id, team_path FROM file_changes").await,
+            [("c1".to_owned(), "kyoto-week.yaml".to_owned())]
+        );
+        let (files,): (String,) = sqlx::query_as("SELECT files FROM file_changes WHERE id = 'c1'")
+            .fetch_one(db.reader())
+            .await
+            .expect("files");
+        assert_eq!(
+            serde_json::from_str::<Value>(&files).expect("files JSON"),
+            json!([{ "path": moved_photo }])
         );
 
         assert!(approvals.is_approved("kyoto-week.yaml", &revision(written.as_bytes())));

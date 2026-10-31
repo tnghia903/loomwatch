@@ -16,6 +16,10 @@
 //! chat: [`read`] answers its text — the file itself, or the words of a PDF, Word, Excel or
 //! `PowerPoint` file — and [`raw`] answers a picture or a recording as it is. Nothing is run here:
 //! the page shows a web page in a sandbox of its own.
+//!
+//! Some of those files can be changed in the reader too (ADR 0107): [`writable`] says which, and
+//! both answers carry the file's [`version_of`], which a change names so a file that changed since
+//! it was read is not written over. The writing is `crate::kept`'s.
 
 use std::path::{Component, Path, PathBuf};
 use std::process::Stdio;
@@ -24,6 +28,7 @@ use std::time::SystemTime;
 use axum::http::StatusCode;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest as _, Sha256};
 
 use crate::api::{ApiError, resolve_existing_team_path};
 
@@ -409,6 +414,11 @@ pub(crate) struct FileText {
     pub(crate) truncated: bool,
     pub(crate) size_bytes: u64,
     pub(crate) modified_at: Option<String>,
+    /// The version of the file read ([`version_of`]), which a change to it names (ADR 0107).
+    pub(crate) version: Option<String>,
+    /// It can be changed in the reader ([`writable`]), and all of it was read: a text cut at
+    /// [`READ_MAX_BYTES`] is never written back.
+    pub(crate) editable: bool,
 }
 
 /// The most text the reader is sent. A report, a page or a table is far smaller; a log can be
@@ -535,6 +545,105 @@ pub(crate) fn read(teams_root: &Path, requested: &Path) -> Result<FileText, ApiE
         truncated,
         size_bytes: metadata.len(),
         modified_at: metadata.modified().ok().map(iso),
+        version: version_of(&resolved).ok(),
+        // A document's words are read out of it, cut or not; its bytes are what a change writes.
+        editable: (extracted || !truncated) && writable_file(teams_root, &resolved),
+    })
+}
+
+/// Which version of a file this is: the SHA-256 of its bytes, as a team file's revision is. A
+/// change made in the reader names the version it was made on, so a file that changed on disk
+/// since — an agent wrote it again — is not written over (ADR 0107). Blocking.
+pub(crate) fn version_of(path: &Path) -> std::io::Result<String> {
+    let mut file = std::fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    std::io::copy(&mut file, &mut hasher)?;
+    Ok(format!("sha256:{:x}", hasher.finalize()))
+}
+
+/// Files the reader changes besides those it is sent as text ([`is_text`]), from their bytes
+/// (ADR 0107): a deck's words and speaker notes, a Word document's paragraphs, a workbook's cells.
+const WRITABLE_EXTENSIONS: &[&str] = &["pptx", "pptm", "docx", "docm", "xlsx", "xlsm"];
+
+/// The file `requested` names, if the reader may change it (ADR 0107): an existing file of a kind
+/// it changes ([`is_text`], [`WRITABLE_EXTENSIONS`]) in a place it may write ([`writable_place`]).
+/// Anything else is refused, saying why. Blocking: a path outside the teams root is checked against
+/// the folders the teams were given.
+pub(crate) fn writable(teams_root: &Path, requested: &Path) -> Result<PathBuf, ApiError> {
+    let resolved = existing(teams_root, requested)?;
+    let name = resolved.file_name().map_or_else(
+        || requested.display().to_string(),
+        |name| name.to_string_lossy().into_owned(),
+    );
+    if !writable_kind(&resolved) {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("{name} can't be changed in LoomWatch. Open it in its own app instead."),
+        ));
+    }
+    if !writable_place(teams_root, &resolved) {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            format!(
+                "LoomWatch changes only files your agents made and files in folders you gave a team, so it won't change {name}."
+            ),
+        ));
+    }
+    Ok(resolved)
+}
+
+/// [`writable`] for a file already resolved.
+fn writable_file(teams_root: &Path, resolved: &Path) -> bool {
+    writable_kind(resolved) && writable_place(teams_root, resolved)
+}
+
+fn writable_kind(path: &Path) -> bool {
+    is_text(path)
+        || extension(path)
+            .is_some_and(|extension| WRITABLE_EXTENSIONS.contains(&extension.as_str()))
+}
+
+/// Whether the reader is sent the file as its text: [`TEXT_KINDS`], and a table of comma or tab
+/// separated values.
+pub(crate) fn is_text(path: &Path) -> bool {
+    TEXT_KINDS.contains(&kind_of(path, false))
+        || matches!(extension(path).as_deref(), Some("csv" | "tsv"))
+}
+
+/// Whether the reader may write `resolved`, a canonical path (ADR 0107). Inside the teams root:
+/// only a file an agent made, in its own folder under a `.loomwatch/` beside its team file, and not
+/// what `LoomWatch` keeps there for it — its hidden folders, the copies of the files it was given
+/// (`knowledge/`), its notes (`AGENTS.md`) — as the app tells a made file (`fileRefs.ts`). So never
+/// a team file, a job or anything else `LoomWatch` keeps. Outside it: a file in a folder the person
+/// gave a team ([`given_folders`]), or a file they gave, outside any hidden folder in it.
+fn writable_place(teams_root: &Path, resolved: &Path) -> bool {
+    let named = |path: &Path| -> Option<Vec<String>> {
+        path.components()
+            .map(|part| match part {
+                Component::Normal(name) => name.to_str().map(str::to_owned),
+                _ => None,
+            })
+            .collect()
+    };
+    if let Ok(inside_root) = resolved.strip_prefix(teams_root) {
+        let Some(parts) = named(inside_root) else {
+            return false;
+        };
+        let Some(at) = parts.iter().position(|part| part == ".loomwatch") else {
+            return false;
+        };
+        let (before, inside) = (&parts[..at], &parts[at + 1..]);
+        return before.iter().all(|part| !part.starts_with('.'))
+            && inside.len() >= 2
+            && inside
+                .iter()
+                .all(|part| !part.starts_with('.') && part != "knowledge")
+            && inside.last().is_some_and(|name| name != "AGENTS.md");
+    }
+    given_folders(teams_root).iter().any(|folder| {
+        resolved.strip_prefix(folder).is_ok_and(|inside| {
+            named(inside).is_some_and(|parts| parts.iter().all(|part| !part.starts_with('.')))
+        })
     })
 }
 
@@ -557,6 +666,9 @@ fn media_type(path: &Path) -> Option<&'static str> {
         "pptm" => "application/vnd.ms-powerpoint.presentation.macroEnabled.12",
         "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "docm" => "application/vnd.ms-word.document.macroEnabled.12",
+        // A workbook, for the reader to change a cell in (ADR 0107).
+        "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "xlsm" => "application/vnd.ms-excel.sheet.macroEnabled.12",
         "mp3" => "audio/mpeg",
         "wav" => "audio/wav",
         "m4a" => "audio/mp4",
@@ -583,6 +695,9 @@ pub(crate) struct RawFile {
     pub(crate) path: PathBuf,
     pub(crate) media_type: &'static str,
     pub(crate) size: u64,
+    /// Its [`version_of`], for a kind the reader changes: what a change to a deck's bytes names
+    /// (ADR 0107). Pictures, recordings and PDFs have none.
+    pub(crate) version: Option<String>,
 }
 
 /// A picture or a recording, to be answered as it is, for the reader and for a web page's own
@@ -616,10 +731,17 @@ pub(crate) fn raw(teams_root: &Path, requested: &Path) -> Result<RawFile, ApiErr
     if !in_parts && size > WHOLE_MAX_BYTES {
         return Err(unreadable(&name, "it is larger than 50 MB"));
     }
+    // Only a kind the reader changes: a page's pictures are not read twice for a version.
+    let version = if in_parts || !writable_kind(&resolved) {
+        None
+    } else {
+        version_of(&resolved).ok()
+    };
     Ok(RawFile {
         path: resolved,
         media_type,
         size,
+        version,
     })
 }
 
@@ -760,6 +882,18 @@ mod tests {
         assert_eq!(read.kind, "markdown");
         assert_eq!(read.text, "# Market\n\nSales grew.\n");
         assert!(!read.extracted && !read.truncated);
+        // The reader may change it (ADR 0107), naming this version.
+        assert!(read.editable);
+        assert_eq!(read.version, version_of(&report).ok());
+        assert!(
+            read.version
+                .as_deref()
+                .is_some_and(|version| version.starts_with("sha256:"))
+        );
+        // Not the notes LoomWatch writes for the agent.
+        let notes = workspace.join("AGENTS.md");
+        std::fs::write(&notes, "# Writer\n").expect("write notes");
+        assert!(!super::read(&root.0, &notes).expect("read notes").editable);
 
         let table = workspace.join("sales.csv");
         std::fs::write(&table, "month,sales\nMay,12\n").expect("write table");
@@ -777,6 +911,55 @@ mod tests {
         assert!(read.truncated);
         assert_eq!(read.text.len(), READ_MAX_BYTES - 1);
         assert!(!read.text.contains('\u{fffd}'));
+        // Only its start was sent, so it is never written back from the reader.
+        assert!(!read.editable);
+    }
+
+    /// **A deck an agent made is changed as its bytes (ADR 0107),** however many of its words the
+    /// reader is sent; a picture is never changed here, so it has no version to name.
+    #[test]
+    fn a_deck_is_changed_as_its_bytes_and_a_picture_not_at_all() {
+        let root = Root::new();
+        let workspace = root.0.join(".loomwatch/team/writer");
+        let ns = r#"xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships""#;
+        let rels = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+        let words = "word ".repeat(READ_MAX_BYTES / 5 + 1_000);
+        let deck = crate::test_support::zip_of(&[
+            (
+                "ppt/presentation.xml",
+                &format!(
+                    r#"<p:presentation {ns}><p:sldIdLst><p:sldId id="256" r:id="rId2"/></p:sldIdLst></p:presentation>"#
+                ),
+            ),
+            (
+                "ppt/_rels/presentation.xml.rels",
+                &format!(
+                    r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId2" Type="{rels}/slide" Target="slides/slide1.xml"/></Relationships>"#
+                ),
+            ),
+            (
+                "ppt/slides/slide1.xml",
+                &format!(
+                    "<p:sld {ns}><p:cSld><p:spTree><p:sp><p:txBody><a:p><a:r><a:t>{words}</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>"
+                ),
+            ),
+        ]);
+        let path = workspace.join("launch.pptx");
+        std::fs::write(&path, &deck).expect("write deck");
+        let read = super::read(&root.0, &path).expect("read deck");
+        assert!(
+            read.extracted && read.truncated,
+            "its words are cut for the reader"
+        );
+        assert!(read.editable);
+        assert_eq!(
+            raw(&root.0, &path).expect("raw deck").version,
+            version_of(&path).ok()
+        );
+
+        let chart = workspace.join("chart.png");
+        std::fs::write(&chart, b"png").expect("write picture");
+        assert_eq!(raw(&root.0, &chart).expect("raw picture").version, None);
     }
 
     #[test]

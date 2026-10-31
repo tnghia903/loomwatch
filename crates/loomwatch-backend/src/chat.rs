@@ -147,6 +147,23 @@ pub struct ChatMessage {
     /// A team's work handed back to the agent that asked for it: the chat shows it as that team's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub handed_back: Option<HandedBack>,
+    /// The changes it sends its agent, left on a file in the reader (`crate::changes`, ADR 0107).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub changes: Vec<MessageChange>,
+}
+
+/// One change a chat message sends its agent (ADR 0107), as the chat shows it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageChange {
+    /// The change's own id (`crate::changes::FileChange`).
+    pub id: String,
+    /// Its number in the message, from 1, which the agent's answer names it by.
+    pub number: u32,
+    /// What should change, as the person typed it.
+    pub words: String,
+    /// The part of the file it is about.
+    pub part: ReplyTo,
 }
 
 /// A team's work handed back to the agent that asked for it (ADR 0083, decision 10): written into
@@ -601,6 +618,16 @@ impl ReplyTo {
     /// What an agent is handed with the reply: the message named, with the work it was said in,
     /// and its words cut to what an agent is handed.
     pub(crate) fn for_agents(&self, team: &TeamConfig) -> crate::Replied {
+        self.handed(team, true)
+    }
+
+    /// [`Self::for_agents`] without the file's full path, for a message that names the file once
+    /// above all its parts: a message of changes (`crate::changes`, ADR 0107).
+    pub(crate) fn for_agents_in_named_file(&self, team: &TeamConfig) -> crate::Replied {
+        self.handed(team, false)
+    }
+
+    fn handed(&self, team: &TeamConfig, with_file: bool) -> crate::Replied {
         let work = self
             .run_id
             .as_deref()
@@ -609,7 +636,7 @@ impl ReplyTo {
         // The part alone is not enough to act on: the agent is told where the whole file is, so it
         // can read around the part or change it.
         let file = match (self.kind, self.file.as_deref()) {
-            (ReplyKind::Passage, Some(path)) => format!(", in the file {path}"),
+            (ReplyKind::Passage, Some(path)) if with_file => format!(", in the file {path}"),
             _ => String::new(),
         };
         // A part that isn't words is told by its place too: its words only name it ("The top right
@@ -633,7 +660,7 @@ impl ReplyTo {
     }
 
     /// The name of the file a passage is a part of: `report.md`.
-    fn file_name(&self) -> String {
+    pub(crate) fn file_name(&self) -> String {
         self.file
             .as_deref()
             .map(|path| {
@@ -690,8 +717,8 @@ impl ChatStore {
         sqlx::query(
             "INSERT INTO chat_messages
              (id, team_key, team_path, text, created_at, route, run_id, agent_id, delivered_at, now,
-              reply_to, answers, files, handed_back)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+              reply_to, answers, files, handed_back, changes)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
              ON CONFLICT (id) DO NOTHING",
         )
         .bind(&message.id)
@@ -726,6 +753,11 @@ impl ChatStore {
                 .handed_back
                 .as_ref()
                 .and_then(|handed| serde_json::to_value(handed).ok()),
+        )
+        .bind(
+            (!message.changes.is_empty())
+                .then(|| serde_json::to_value(&message.changes).ok())
+                .flatten(),
         )
         .execute(self.db.writer())
         .await?;
@@ -1228,6 +1260,10 @@ pub(crate) fn decode_message(row: &sqlx::sqlite::SqliteRow) -> Result<ChatMessag
         handed_back: row
             .try_get::<Option<Value>, _>("handed_back")?
             .and_then(|handed| serde_json::from_value(handed).ok()),
+        changes: row
+            .try_get::<Option<Value>, _>("changes")?
+            .and_then(|changes| serde_json::from_value(changes).ok())
+            .unwrap_or_default(),
     })
 }
 
@@ -2019,7 +2055,10 @@ async fn put_chat_file(
 }
 
 /// A team file the chat may act on: its normalised path and its parsed config.
-fn open_team(teams_root: &Path, team_path: &str) -> Result<(String, TeamConfig), ApiError> {
+pub(crate) fn open_team(
+    teams_root: &Path,
+    team_path: &str,
+) -> Result<(String, TeamConfig), ApiError> {
     let resolved = resolve_existing_team_path(teams_root, Path::new(team_path))?;
     let relative = normalized_relative_path(teams_root, &resolved).ok_or_else(|| {
         ApiError::new(
@@ -2351,7 +2390,7 @@ fn check_message(text: &str, to: Option<&Target>, team: &TeamConfig) -> Result<(
 
 /// Refuse a reply the chat cannot keep: nothing quoted, ids that are not the chat's, or a reply to
 /// the operator's own words. The quote is cut to what a reply keeps.
-fn check_reply(reply: &mut ReplyTo, team: &TeamConfig) -> Result<(), ApiError> {
+pub(crate) fn check_reply(reply: &mut ReplyTo, team: &TeamConfig) -> Result<(), ApiError> {
     let bad = |message: &str| Err(ApiError::new(StatusCode::BAD_REQUEST, message.to_owned()));
     let unusable = |id: &str| id.trim().is_empty() || id.chars().count() > MAX_REPLY_ID_CHARS;
     if unusable(&reply.message_id)
@@ -2457,6 +2496,117 @@ pub(crate) async fn tell_agent(
     }
 }
 
+/// One message of changes left on a file for one agent (ADR 0107), as `crate::changes` sends it
+/// when that agent's turn on the file comes.
+pub(crate) struct ChangesMessage {
+    /// Fixed when the person pressed Send, so the changes name it while they wait for the turn.
+    pub(crate) id: String,
+    /// The team file, relative to the teams root.
+    pub(crate) team_path: String,
+    pub(crate) agent: String,
+    /// What the chat shows as the person's message: "2 changes to market-report.md".
+    pub(crate) text: String,
+    /// What the agent is given: every change, numbered, with the part it is about.
+    pub(crate) task: String,
+    /// The person's own words in it, whose links the agent may read (ADR 0104); never the parts'.
+    pub(crate) said: String,
+    /// The parts' pictures, sent with it as a message's files are.
+    pub(crate) files: Vec<ChatFile>,
+    pub(crate) changes: Vec<MessageChange>,
+}
+
+/// Where a message of changes went.
+#[derive(Debug)]
+pub(crate) enum ChangesDelivered {
+    /// A turn of the agent alone started on it: this run.
+    Started(RunRecord),
+    /// The agent was at work in this run, so the message joins its next turn there, as a note to
+    /// an agent at work does.
+    Joined(RunRecord),
+}
+
+/// Send a message of changes from the person to its agent, as a message to that agent goes
+/// ([`send_message`]): it joins the agent's next turn as a note while the agent works, and
+/// otherwise starts a turn of that agent alone. It is always work, never answered in the chat.
+/// The chat keeps it with its changes, so it shows them. An answer that is not a start is what
+/// `POST /api/runs` would have answered, as for any message.
+pub(crate) async fn send_changes(
+    registry: &RunRegistry,
+    archive: Option<EventArchive>,
+    teams_root: &Path,
+    sent: ChangesMessage,
+) -> Result<(ChatMessage, ChangesDelivered), Box<Response>> {
+    let refused = |error: ApiError| Box::new(error.into_response());
+    let (relative, team) = open_team(teams_root, &sent.team_path).map_err(refused)?;
+    let store = registry.chat_store().ok_or_else(|| refused(no_store()))?;
+    let key = team.chat_key(&relative);
+    let to = Target::Agent {
+        agent: sent.agent.clone(),
+    };
+    let mut message = ChatMessage {
+        id: sent.id,
+        team_key: key.clone(),
+        team_path: relative.clone(),
+        text: sent.text,
+        created_at: now(),
+        route: Route::Agent,
+        run_id: None,
+        agent_id: Some(sent.agent.clone()),
+        delivered_at: None,
+        now: false,
+        reply_to: None,
+        answers: None,
+        files: sent.files,
+        handed_back: None,
+        changes: sent.changes,
+    };
+    let live = registry.live_runs_of(&key, &relative);
+    if let Decided::Note { run_id, agent } = decide(Some(&to), &live) {
+        let note = QueuedNote {
+            id: message.id.clone(),
+            agent,
+            text: sent.task.clone(),
+            sent_at: message.created_at.clone(),
+            now: false,
+            reply: None,
+            files: message.files.clone(),
+        };
+        // The agent finished between the look and the note: its turn starts instead, below.
+        if let Ok(record) = registry.queue_note(&run_id, note) {
+            message.route = Route::Note;
+            message.run_id = Some(run_id);
+            store
+                .insert(&message)
+                .await
+                .map_err(|error| refused(database(&error)))?;
+            return Ok((message, ChangesDelivered::Joined(record)));
+        }
+    }
+    let start = StartRunRequest::from_chat(&relative, &sent.task, None, None)
+        .only(&sent.agent)
+        .giving(message.files.clone())
+        .written_by_the_operator(&sent.said);
+    let outcome = runs::launch_manual(registry, archive, teams_root, &start).await;
+    let record = match outcome {
+        Ok(StartRunOutcome::Accepted(record) | StartRunOutcome::Duplicate(record)) => record,
+        outcome => {
+            return Err(Box::new(
+                match runs::start_response(registry, outcome).await {
+                    Ok(response) => response,
+                    Err(error) => error.into_response(),
+                },
+            ));
+        }
+    };
+    registry.persist_quietly(&record.run_id).await;
+    message.run_id = Some(record.run_id.clone());
+    store
+        .insert(&message)
+        .await
+        .map_err(|error| refused(database(&error)))?;
+    Ok((message, ChangesDelivered::Started(record)))
+}
+
 /// `POST /api/chat/messages`: route one message by the rule, and do what the route says.
 #[allow(clippy::too_many_lines)]
 async fn send_message(
@@ -2499,6 +2649,7 @@ async fn send_message(
         answers: None,
         files,
         handed_back: request.handed_back.clone(),
+        changes: Vec::new(),
     };
     let mut decided = decide(request.to.as_ref(), &live);
     learn_from_words(
@@ -3705,6 +3856,7 @@ mod tests {
             answers: None,
             files: Vec::new(),
             handed_back: None,
+            changes: Vec::new(),
         }
     }
 
@@ -6713,6 +6865,7 @@ mod tests {
             }),
             files: Vec::new(),
             handed_back: None,
+            changes: Vec::new(),
         };
         store.insert(&answered).await.unwrap();
         let (status, _) = send(

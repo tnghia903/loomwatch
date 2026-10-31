@@ -1317,3 +1317,11 @@ button.tc-reply-quote:hover, button.tc-reply-quote:focus-visible { border-left-c
 .tc-decided .chat-stack { grid-template-columns: minmax(0, 1fr); }
 .tc-decided .chat-meta { max-width: 100%; }
 .tc-decided .chat-meta time { flex: none; white-space: nowrap; }
+
+/* The changes a message sent an agent (ADR 0107): numbered as it was given them, each its part's
+   quote and what should change there. */
+.tc-changes { display: grid; gap: 8px; margin: 8px 0 2px; padding: 0; list-style: none; }
+.tc-change { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; align-items: start; }
+.tc-change-number { font: 600 11px/20px var(--font-mono); color: var(--color-ink-2); }
+.tc-change-body .chat-quote { margin: 0 0 3px; }
+.tc-change-words { margin: 0; font-size: 13.5px; line-height: 1.45; }

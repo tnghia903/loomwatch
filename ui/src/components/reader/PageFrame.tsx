@@ -39,6 +39,14 @@ interface PageFrameProps {
   cleared: number
   /** While picking, the arrow keys reached a part of the page: what it is called. */
   onPointing?: (text: string) => void
+  /**
+   * A part of a deck or a Word document drawn to be typed into (ADR 0107) was left with its words
+   * changed: which part (lib/files/officeEdits.ts `editPart`) and its words, a line break as a new
+   * line. Only a page LoomWatch drew to be typed into should be given it: any page can send one.
+   */
+  onEdit?: (part: string, words: string) => void
+  /** A part of the page is typed in now (`on`), or no longer is: left, or the page drawn again under it. */
+  onTyping?: (on: boolean) => void
 }
 
 /**
@@ -47,7 +55,7 @@ interface PageFrameProps {
  * coordinates; the parts asked about go back the same way, and so do the files beside it that the
  * page asks for as it runs, read inside its own folder.
  */
-export function PageFrame({ path, name, html, drawn = false, marks, picking, pickKeys, onMarked, onParts, onOpen, onEscape, onHover, cleared, onPointing }: PageFrameProps) {
+export function PageFrame({ path, name, html, drawn = false, marks, picking, pickKeys, onMarked, onParts, onOpen, onEscape, onHover, cleared, onPointing, onEdit, onTyping }: PageFrameProps) {
   const frame = useRef<HTMLIFrameElement>(null)
   const page = useRef(path)
   useEffect(() => { page.current = path }, [path])
@@ -67,6 +75,10 @@ export function PageFrame({ path, name, html, drawn = false, marks, picking, pic
   const escaped = useRef(onEscape)
   const hovered = useRef(onHover)
   const pointed = useRef(onPointing)
+  const edited = useRef(onEdit)
+  const typed = useRef(onTyping)
+  // Whether the page on screen says a part of it is typed in: a page drawn again ends it.
+  const typing = useRef(false)
   useEffect(() => {
     marked.current = onMarked
     placed.current = onParts
@@ -74,7 +86,9 @@ export function PageFrame({ path, name, html, drawn = false, marks, picking, pic
     escaped.current = onEscape
     hovered.current = onHover
     pointed.current = onPointing
-  }, [onMarked, onParts, onOpen, onEscape, onHover, onPointing])
+    edited.current = onEdit
+    typed.current = onTyping
+  }, [onMarked, onParts, onOpen, onEscape, onHover, onPointing, onEdit, onTyping])
   useEffect(() => {
     const listen = (event: MessageEvent) => {
       const element = frame.current
@@ -85,6 +99,11 @@ export function PageFrame({ path, name, html, drawn = false, marks, picking, pic
       if (message.type === 'open') { opened.current?.(message.key); return }
       if (message.type === 'escape') { escaped.current?.(); return }
       if (message.type === 'pointing') { pointed.current?.(message.text); return }
+      if (message.type === 'edit') { edited.current?.(message.part, message.words); return }
+      if (message.type === 'typing') {
+        if (typing.current !== message.on) { typing.current = message.on; typed.current?.(message.on) }
+        return
+      }
       if (message.type === 'load') {
         const asking = element.contentWindow
         void pageFile(page.current, message.url).then((file) => {
@@ -139,6 +158,10 @@ export function PageFrame({ path, name, html, drawn = false, marks, picking, pic
   }, [pickKeys])
 
   const shown = doc?.html === html ? doc.ready : null
+  // The page drawn again, or gone, while a part of it was typed in: nothing is typed in any more.
+  useEffect(() => () => {
+    if (typing.current) { typing.current = false; typed.current?.(false) }
+  }, [shown])
   return shown === null
     ? <p className="rd-loading" role="status">Setting up the page…</p>
     : <iframe ref={frame} className={`rd-frame${drawn ? ' drawn' : ''}`} title={`The page ${name}`} sandbox={PAGE_SANDBOX} srcDoc={shown} referrerPolicy="no-referrer" />

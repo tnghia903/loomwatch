@@ -28,7 +28,8 @@
 .rd-meta { display: flex; align-items: center; gap: 10px; min-width: 0; margin: 3px 0 0; font-size: 12px; line-height: 16px; color: var(--color-ink-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .rd-meta > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 /* The maker's name gives way when the bar is narrow, rather than running under what comes after it. */
-.rd-from { display: inline-flex; flex: 0 1 auto; align-items: center; gap: 5px; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--color-ink-2); }
+.rd-from { display: inline-flex; flex: 0 1 auto; align-items: center; gap: 5px; min-width: 0; overflow: hidden; color: var(--color-ink-2); }
+.rd-from-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rd-updated { font-weight: 600; color: var(--color-accent); }
 .rd-views { flex: none; }
 /* A web page's Pick switch (pageFrame.ts): a dashed chip with a page in it, one part of the page
@@ -45,6 +46,32 @@
 .rd-pick[aria-pressed='true'] .rd-pick-part { stroke-dasharray: none; fill: color-mix(in srgb, var(--color-accent) 30%, transparent); }
 /* As big as the bar's other buttons on a touch screen or a narrow window (app.css lifts them to 44 px). */
 @media (pointer: coarse), (max-width: 767px) { .rd-pick { width: 44px; height: 44px; } }
+/* Make changes (ADR 0107): a switch with its words, as it is the way in to changing the file. On, a
+   gold edge and tint, never a fill: the screen's one fill is for what waits on you. */
+.rd-change { display: inline-flex; flex: none; align-items: center; gap: 6px; box-sizing: border-box; height: 30px; padding: 0 10px; border: 1px solid var(--color-hairline); border-radius: 8px; background: transparent; color: var(--color-ink); font: inherit; font-size: 12.5px; font-weight: 500; white-space: nowrap; cursor: pointer; transition: background-color var(--t-instant) var(--ease-out), border-color var(--t-instant) var(--ease-out); }
+@media (hover: hover) { .rd-change:hover { background: var(--color-accent-tint); } }
+.rd-change[aria-pressed='true'] { border-color: var(--color-accent); background: var(--color-accent-tint); }
+.rd-change:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.rd-change-mark { flex: none; fill: none; stroke-width: 1.6; stroke-linecap: round; }
+.rd-change-mark .rd-change-words { stroke: var(--color-ink-3); }
+.rd-change-mark .rd-change-stitch { stroke: var(--color-accent); stroke-width: 2; stroke-dasharray: 3 2.5; stroke-linecap: butt; }
+.rd-change-mark.on .rd-change-stitch { stroke-dasharray: none; }
+@media (pointer: coarse), (max-width: 767px) { .rd-change { height: 44px; } .rd-saved-act { min-width: 44px; min-height: 44px; } }
+/* What came of the last change saved: a word, and the one thing to do about it. */
+.rd-saved { display: inline-flex; flex: none; align-items: center; gap: 6px; font-size: 12px; color: var(--color-ink-2); white-space: nowrap; }
+.rd-saved-act { padding: 2px 4px; border: 0; border-radius: 4px; background: transparent; color: var(--color-ink); font: inherit; font-weight: 600; text-decoration: underline; text-decoration-color: var(--color-accent); text-underline-offset: 3px; cursor: pointer; }
+.rd-saved-act:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+.rd-saved-problem { color: var(--color-alert); font-size: 13px; font-weight: 600; }
+/* The file typed into: a part being typed in has a gold edge, the parts you can type in a faint one
+   on hover (at rest on a touch screen), so what can be changed shows without words. The edge is
+   drawn outside the words, so nothing moves as typing starts. */
+.rd-drafting [contenteditable='true'] { border-radius: 3px; outline: 1px solid transparent; outline-offset: 4px; transition: outline-color var(--t-instant) var(--ease-out); }
+@media (hover: hover) { .rd-drafting [contenteditable='true']:hover { outline-color: var(--color-hairline); } }
+@media (hover: none) { .rd-drafting [contenteditable='true'] { outline-color: var(--color-hairline); } }
+.rd-drafting [contenteditable='true']:focus { outline-color: var(--color-accent); background: var(--color-accent-tint); }
+.rd-draft-text { display: block; box-sizing: border-box; width: 100%; min-height: 12em; margin: 0; padding: 12px 14px; border: 1px solid var(--color-hairline); border-radius: 8px; background: transparent; color: var(--color-ink); font-family: var(--font-mono); font-size: 13px; line-height: 1.55; resize: none; overflow: hidden; tab-size: 2; }
+.rd-draft-text:focus { border-color: var(--color-accent); }
+.rd-draft-text:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 .rd-acts { display: inline-flex; flex: none; gap: 2px; }
 .rd-note { flex: none; margin: 0; padding: 8px 18px; border-bottom: 1px solid var(--color-hairline); background: var(--color-accent-tint); font-size: 12.5px; line-height: 1.45; color: var(--color-ink-2); }
 
@@ -294,7 +321,7 @@
   background: var(--rd-b); color: var(--rd-b-ink); font: 600 11px/1 var(--font-sans); white-space: nowrap; cursor: pointer; vertical-align: middle;
   box-shadow: 0 0 0 1px var(--rd-b-edge), 0 3px 10px color-mix(in srgb, var(--color-black) 16%, transparent);
 }
-.rd-slot.on-dark .rd-bubble {
+:is(.rd-slot, .rd-draft-bubble, .rd-lost-changes).on-dark .rd-bubble {
   --rd-b: var(--color-bubble-dark); --rd-b-edge: var(--color-bubble-dark-edge); --rd-b-ink: var(--color-bubble-dark-ink); --rd-b-ink-2: var(--color-bubble-dark-ink-2);
   --rd-b-gold: var(--color-bubble-dark-gold); --rd-b-live: var(--color-bubble-dark-live); --rd-b-alert: var(--color-bubble-dark-alert);
 }
@@ -405,6 +432,8 @@
   display: -webkit-box; margin: 0 0 6px; padding-left: 8px; overflow: hidden; border-left: 2px solid var(--rd-edge);
   color: var(--color-ink-2); font: 400 12.5px/1.4 var(--font-sans); -webkit-line-clamp: 2; -webkit-box-orient: vertical;
 }
+.rd-answer-asked-what { font-weight: 600; color: var(--color-ink); }
+.rd-answer-reply:disabled { opacity: .55; cursor: default; }
 /* An earlier part shown with the newer one over it: which words the answer is about. */
 .rd-answer-about { margin: 0 14px 4px; color: var(--color-ink-2); font: 400 12px/1.4 var(--font-sans); overflow-wrap: anywhere; }
 /* The part is gone from the file: said on a line of its own, in the answer's own words' colour. */
@@ -491,9 +520,11 @@
   .rd-bar { padding-left: 14px; }
   /* A web page's bar holds the Pick switch as well: in a narrow pane its buttons go to a row of
      their own, at its right, rather than squeeze the title to a few letters. */
-  .rd-bar:has(.rd-pick) { flex-wrap: wrap; row-gap: 8px; }
-  .rd-bar:has(.rd-pick) .rd-bar-words { flex: 1 1 calc(100% - 44px); }
-  .rd-bar:has(.rd-pick) .rd-pick { margin-left: auto; }
+  .rd-bar:has(.rd-pick, .rd-change) { flex-wrap: wrap; row-gap: 8px; }
+  .rd-bar:has(.rd-pick, .rd-change) .rd-bar-words { flex: 1 1 calc(100% - 44px); }
+  .rd-bar:has(.rd-pick) .rd-pick, .rd-bar:not(:has(.rd-pick)) .rd-change { margin-left: auto; }
+  /* What came of a change says it on a row of its own, whole. */
+  .rd-saved { order: 1; flex-basis: 100%; white-space: normal; }
   /* The tip wraps rather than lose its end (where to click, and who is asked), over the pane's
      width: centred from its middle, it would otherwise wrap in half of it. */
   .rd-hint { width: max-content; white-space: normal; border-radius: 16px; }
@@ -529,6 +560,12 @@
   .rd-mark.busy, .rd-mark.on-dark.busy { background: var(--rd-stroke); }
   .rd-bubble .chat-dots i, .rd-answer-body .chat-dots i { opacity: 1; }
 }
+/* Changes waiting, or made, take room in the bar: its buttons go to a row of their own sooner. */
+@container details (max-width: 760px) {
+  .rd-bar:has(.rd-changes, .rd-lost-changes) { flex-wrap: wrap; row-gap: 8px; }
+  .rd-bar:has(.rd-changes, .rd-lost-changes) .rd-bar-words { flex: 1 1 calc(100% - 44px); }
+  .rd-bar:has(.rd-changes, .rd-lost-changes):not(:has(.rd-pick)) .rd-change { margin-left: auto; }
+}
 @keyframes rd-shine { from { background-position: 100% 62%, 0 62%; } to { background-position: -150% 62%, 0 62%; } }
 @keyframes rd-bubble-in { from { opacity: 0; scale: .3; } }
 @keyframes rd-new-in { from { scale: 0; } }
@@ -536,3 +573,52 @@
 @keyframes rd-answer-in-above { from { opacity: 0; translate: 0 6px; } }
 @keyframes rd-hint-in { from { opacity: 0; transform: translateX(-50%) translateY(10px); } }
 @keyframes rd-mark-sweep { 0% { background-size: 0% 100%; } 30%, 85% { background-size: 100% 100%; } 100% { background-size: 100% 100%; } }
+
+/* ---------- Changes left for agents (ADR 0107) ----------
+   With Make changes on, marking a part opens a card over it: what should change, and who makes
+   it. Over words being typed into it is one button first, so selecting words to type over them is
+   never in its way. A change waits at its part as its agent's figure with the gold stitch a changed
+   part is marked with; the header counts them and holds Send, the one gold fill while any wait. */
+.rd-change-field { position: absolute; z-index: 6; box-sizing: border-box; display: grid; gap: 8px; width: min(320px, calc(100% - 24px)); padding: 10px; border: 1px solid var(--color-accent); border-radius: var(--r-lg); background: var(--color-panel-solid); color: var(--color-ink); box-shadow: var(--e2-shadow); transform: translateX(-50%); }
+.rd-change-field.folded { width: auto; padding: 3px; border-radius: 999px; }
+.rd-change-open { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 13px 0 4px; border: 0; border-radius: 999px; background: transparent; color: var(--color-ink); font: 600 13px/1 var(--font-sans); white-space: nowrap; cursor: pointer; }
+@media (hover: hover) { .rd-change-open:hover { background: var(--color-accent-tint); } }
+.rd-change-ask { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 6px 8px; font-size: 12.5px; color: var(--color-ink-2); }
+.rd-change-ask b { font-weight: 600; color: var(--color-ink); }
+.rd-change-ask textarea { grid-column: 1 / -1; box-sizing: border-box; width: 100%; min-height: 52px; padding: 7px 9px; border: 1px solid var(--color-hairline); border-radius: var(--r-sm); background: var(--color-ground); color: var(--color-ink); font: 400 13px/1.45 var(--font-sans); resize: vertical; }
+.rd-change-row { display: flex; align-items: center; gap: 6px; }
+.rd-change-others { display: inline-flex; gap: 2px; }
+.rd-change-other { display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: var(--r-sm); background: transparent; cursor: pointer; }
+@media (hover: hover) { .rd-change-other:hover { background: var(--color-accent-tint); } }
+.rd-change-add { margin-left: auto; height: 30px; padding: 0 14px; border: 1px solid var(--color-accent); border-radius: var(--r-sm); background: transparent; color: var(--color-ink); font: 600 13px var(--font-sans); cursor: pointer; }
+.rd-change-add:disabled { opacity: .55; cursor: default; }
+.rd-change-open:focus-visible, .rd-change-other:focus-visible, .rd-change-add:focus-visible, .rd-change-ask textarea:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.rd-change-problem { margin: 0; font-size: 13px; font-weight: 600; color: var(--color-alert); }
+@media (pointer: coarse), (max-width: 767px) {
+  .rd-change-add, .rd-change-other, .rd-change-open { min-height: 44px; min-width: 44px; }
+  /* At 16px a phone doesn't zoom in on a field it focuses. */
+  .rd-change-ask textarea, .rd-draft-text { font-size: 16px; }
+}
+.rd-changes { display: inline-flex; flex: none; align-items: center; gap: 8px; font-size: 12.5px; color: var(--color-ink-2); white-space: nowrap; }
+.rd-send { height: 30px; padding: 0 14px; border-radius: var(--r-sm); }
+/* Send is the screen's one gold fill only while nothing else asks for one (an Allow or an Approve in
+   the chat): then it steps back to a ring, as the page's fills do for the open tray. */
+:root:has(.btn-primary:not(.rd-send):not(:disabled)) .rd-send.btn-primary:not(:disabled) { background: transparent; color: var(--color-ink); border-color: var(--color-accent); filter: none; }
+:root:has(.btn-primary:not(.rd-send):not(:disabled)) .rd-send.btn-primary:not(:disabled):hover { background: var(--color-accent-tint); }
+@media (pointer: coarse), (max-width: 767px) { .rd-send { height: 44px; } }
+/* A change's line in its bubble (PartBubble): dashed, with a dashed edge, while it waits for Send or
+   its turn, as the Make changes switch is dashed when off; solid once sent. */
+.rd-bubble-change { display: block; flex: none; width: 16px; height: 4px; overflow: visible; }
+.rd-bubble-change path { fill: none; stroke: var(--rd-b-gold); stroke-width: 2px; stroke-linecap: round; }
+.rd-bubble.held .rd-bubble-change path { stroke-dasharray: 3 2.5; stroke-linecap: butt; }
+.rd-bubble.held { box-shadow: 0 3px 10px color-mix(in srgb, var(--color-black) 16%, transparent); }
+.rd-bubble.held:not(:focus-visible) { outline: 1px dashed var(--rd-b-gold); outline-offset: -1px; }
+.rd-bubble.held .rd-bubble-point-edge { stroke-dasharray: 2 2; stroke: var(--rd-b-gold); }
+/* More bubbles on one part than are shown: how many more. */
+.rd-bubble-more { flex: none; margin-left: 5px; font: 600 11px/22px var(--font-sans); font-variant-numeric: tabular-nums; color: var(--color-ink-2); pointer-events: auto; }
+/* A part's bubble while its words are typed into: over the page at their end, never in them. */
+.rd-draft-bubble { position: absolute; z-index: 4; pointer-events: none; }
+.rd-draft-bubble .rd-bubble { pointer-events: auto; }
+.rd-draft-bubble { display: flex; align-items: center; }
+.rd-lost-changes { display: inline-flex; flex: none; align-items: center; gap: 0; }
+.rd-lost-changes .rd-bubble-point { display: none; }

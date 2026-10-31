@@ -1,5 +1,7 @@
 import { renderAsync } from 'docx-preview'
 
+import { editableDocument, editingStyle, EDITING_ATTRIBUTE } from './editableParts'
+import { withParagraphMarks } from './officeEdits'
 import { lookOf, PAPER_LOOK, type PageLook } from './pageLook'
 import { escapeHtml, fontStack } from './slidesPage'
 
@@ -12,11 +14,16 @@ import { escapeHtml, fontStack } from './slidesPage'
  *
  * A page keeps its width, and the whole document is scaled down to the reader's width by the page's
  * own script when the reader is narrower.
+ *
+ * Drawn to be typed into (`editing`, ADR 0107), each paragraph of its body that is words alone is
+ * typed into where it is (editableParts.ts `editableDocument`), found by a mark drawn into a copy of
+ * it (officeEdits.ts `withParagraphMarks`). Its headers, footers and footnotes are drawn as they are.
  */
-export async function documentPage(bytes: ArrayBuffer, name: string, look: PageLook = PAPER_LOOK): Promise<string> {
+export async function documentPage(bytes: ArrayBuffer | Uint8Array, name: string, look: PageLook = PAPER_LOOK, { editing = false }: { editing?: boolean } = {}): Promise<string> {
   const body = document.createElement('div')
   const styles = document.createElement('div')
-  await renderAsync(bytes, body, styles, {
+  const marked = editing ? await withParagraphMarks(bytes) : null
+  await renderAsync(marked?.bytes ?? bytes, body, styles, {
     className: 'docx',
     inWrapper: true,
     breakPages: true,
@@ -34,10 +41,11 @@ export async function documentPage(bytes: ArrayBuffer, name: string, look: PageL
   })
   // Nothing in the document runs: it is drawn, not opened.
   for (const script of Array.from(body.querySelectorAll('script'))) script.remove()
+  if (marked) editableDocument(body, marked.words)
   return [
     '<!doctype html>',
-    '<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">',
-    `<title>${escapeHtml(name)}</title>${readable(styles.innerHTML)}<style>${pageStyle(lookOf(look))}</style></head>`,
+    `<html lang="en"${marked ? ` ${EDITING_ATTRIBUTE}=""` : ''}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">`,
+    `<title>${escapeHtml(name)}</title>${readable(styles.innerHTML)}<style>${pageStyle(lookOf(look))}${marked ? editingStyle(look) : ''}</style></head>`,
     `<body>${readable(body.innerHTML)}<script>${FIT}</script></body></html>`,
   ].join('')
 }

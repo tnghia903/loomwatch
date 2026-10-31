@@ -15,9 +15,12 @@ export function useBenchFile() {
   const [passages, setPassages] = useState<{ asked: AskedPassage[]; asking: string | null }>({ asked: [], asking: null })
   const [reveal, setReveal] = useState<{ runId: string; id: string; at: number } | null>(null)
   const onPassages = useCallback((asked: AskedPassage[], asking: string | null) => setPassages({ asked, asking }), [])
-  const chat = useMemo(() => ({ open: setReading, ask, onPassages, reveal }), [ask, onPassages, reveal])
+  // The chat's team, by its path: changes left on a file read here go to its agent (ADR 0107).
+  const [teamPath, setTeamPath] = useState<string | null>(null)
+  const chat = useMemo(() => ({ open: setReading, ask, onPassages, reveal, team: setTeamPath }), [ask, onPassages, reveal])
   return {
     reading,
+    teamPath,
     close: useCallback(() => setReading(null), []),
     chat,
     passages,
