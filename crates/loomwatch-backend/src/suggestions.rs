@@ -240,10 +240,12 @@ impl Suggestions {
             self.keep(&answer.run_id, Vec::new());
             return false;
         };
+        let model = runs_on(&self.inner.teams_root, agent, &job);
         let suggestions = self.clone();
         let agent = agent.to_owned();
         tokio::spawn(async move {
-            let steps = match tokio::time::timeout(WRITE_TIMEOUT, next_steps(&job, &answer)).await {
+            let writing = next_steps(&job, &model, &answer);
+            let steps = match tokio::time::timeout(WRITE_TIMEOUT, writing).await {
                 Ok(Ok((steps, call))) => {
                     suggestions.count(call.usage.cost_usd);
                     suggestions.record(&agent, &answer, &call).await;
@@ -539,6 +541,27 @@ fn writer_for(model: &ModelRef, free: bool) -> ModelRef {
     }
 }
 
+/// The model the agent `agent` answers on: the one its chat runs on. The app writes that chat from
+/// My agents when it sends a message, and an agent saved with no model gets the model a new agent
+/// starts on, paid the way what is connected says, so with only a `ChatGPT` plan it is the plan's.
+/// Before its chat is written, the model it is saved with; with none, the default.
+fn runs_on(teams_root: &Path, agent: &str, job: &crate::jobs::JobSpec) -> ModelRef {
+    let chat = teams_root
+        .join(crate::jobs::JOBS_DIR)
+        .join(crate::jobs::BENCH_DIR)
+        .join(format!("{agent}.yaml"));
+    let chatted = crate::config::TeamConfig::load_in(&chat, teams_root)
+        .ok()
+        .and_then(|team| team.agents.into_iter().find(|each| each.id == agent))
+        .map(|each| each.model);
+    ModelRef::parse(
+        chatted
+            .as_deref()
+            .or(job.model.as_deref())
+            .unwrap_or(crate::ai::DEFAULT_MODEL),
+    )
+}
+
 /// Whether `model` costs nothing: an `OpenRouter` model the catalog lists as free, or named so.
 async fn costs_nothing(model: &ModelRef) -> bool {
     if model.source != Source::OpenRouter {
@@ -561,11 +584,11 @@ async fn costs_nothing(model: &ModelRef) -> bool {
 /// Write the next steps from `answer` for the agent `job`, and the call that wrote them.
 async fn next_steps(
     job: &crate::jobs::JobSpec,
+    model: &ModelRef,
     answer: &Answer,
 ) -> Result<(Vec<String>, Call), String> {
     let reply = answer.reply.as_deref().unwrap_or_default();
-    let model = ModelRef::parse(job.model.as_deref().unwrap_or(crate::ai::DEFAULT_MODEL));
-    let writer = writer_for(&model, costs_nothing(&model).await);
+    let writer = writer_for(model, costs_nothing(model).await);
     let provider = crate::engine::provider_for(&writer)
         .await
         .map_err(|error| error.to_string())?;
@@ -579,9 +602,7 @@ async fn next_steps(
         cut(&answer.prompt, REQUEST_CHARS),
         cut(reply, ANSWER_CHARS),
     );
-    let completion = provider
-        .once(&writer.id, WRITE, &about, WRITE_TOKENS)
-        .await?;
+    let completion = provider.once(&writer, WRITE, &about, WRITE_TOKENS).await?;
     Ok((
         read_steps(&completion.content),
         Call {
@@ -1071,6 +1092,76 @@ mod tests {
         };
         assert!(content.contains("The person asked: what is S-1?\n"));
         assert!(content.ends_with("before it sells shares."));
+    }
+
+    /// A `ChatGPT` plan and a Claude key read a model named without its source as an `OpenRouter`
+    /// one (`openai/gpt-5.6-terra`) and refuse it: the writer names it with its source.
+    #[tokio::test]
+    async fn the_writer_names_its_model_with_its_source_so_a_plan_or_a_claude_key_takes_it() {
+        let demo = Demo::scripted(vec![
+            Completion::text("{\"next\": []}"),
+            Completion::text("{\"next\": []}"),
+        ]);
+        let provider = crate::agent::Provider::Demo(demo.clone());
+        for (model, source) in [
+            ("chatgpt:gpt-5.6-terra", Source::ChatGpt),
+            ("anthropic:claude-haiku-5-5", Source::Anthropic),
+        ] {
+            let writer = ModelRef::parse(model);
+            provider
+                .once(&writer, WRITE, "Assistant: Cole", WRITE_TOKENS)
+                .await
+                .expect("written");
+            let sent = demo.requests().last().expect("asked").model.clone();
+            assert_eq!(sent, model);
+            assert_eq!(ModelRef::parse(&sent), writer);
+            assert_eq!(ModelRef::parse(&sent).source, source);
+        }
+    }
+
+    /// The writer uses the model the agent's chat runs on: an agent saved with no model runs on
+    /// the plan's when only a `ChatGPT` plan is connected, never `OpenRouter`'s default.
+    #[test]
+    fn writes_with_the_model_the_agents_chat_runs_on() {
+        let teams = folder();
+        let jobs = teams.0.join(".jobs");
+        std::fs::create_dir_all(jobs.join(".bench")).expect("jobs folder");
+        std::fs::write(
+            jobs.join("mia.yaml"),
+            "name: Mia\ninstructions: Help me write.\n",
+        )
+        .expect("job");
+        std::fs::write(
+            jobs.join("cole.yaml"),
+            "name: Cole\ninstructions: Help me.\nmodel: anthropic/claude-sonnet-5.5\n",
+        )
+        .expect("job");
+        let job = |id: &str| crate::jobs::read_job(&teams.0, id).expect("saved");
+        // Before its chat is written: the model it is saved with, else the default.
+        assert_eq!(
+            runs_on(&teams.0, "mia", &job("mia")),
+            ModelRef::parse(crate::ai::DEFAULT_MODEL)
+        );
+        assert_eq!(
+            runs_on(&teams.0, "cole", &job("cole")).id,
+            "anthropic/claude-sonnet-5.5"
+        );
+        // Once the app has written its chat, the model there: the one it really answers on.
+        for (id, name) in [("mia", "Mia"), ("cole", "Cole")] {
+            std::fs::write(
+                jobs.join(".bench").join(format!("{id}.yaml")),
+                format!(
+                    "schemaVersion: 1\nid: bench-{id}\nname: {name} · chat\nentrypoint: {id}\nagents:\n  - id: {id}\n    name: {name}\n    role: Help me.\n    model: chatgpt:gpt-6.1-sol\n"
+                ),
+            )
+            .expect("chat");
+            let model = runs_on(&teams.0, id, &job(id));
+            assert_eq!(
+                (model.source, model.id.as_str()),
+                (Source::ChatGpt, "gpt-6.1-sol")
+            );
+            assert_eq!(writer_for(&model, false), model);
+        }
     }
 
     #[tokio::test]

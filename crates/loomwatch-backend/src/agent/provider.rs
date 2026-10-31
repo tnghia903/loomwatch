@@ -13,7 +13,7 @@ use super::chatgpt::ChatGptPlan;
 use super::demo::Demo;
 use super::error::CallError;
 use super::openrouter::{OpenRouter, through_messages};
-use crate::ai::Source;
+use crate::ai::{ModelRef, Source};
 
 /// One message of the conversation, in the agent's own order. It is append-only: a model that
 /// signs its reasoning (Claude's "preserved thinking") refuses a history whose earlier turns were
@@ -449,14 +449,16 @@ impl Provider {
 
     /// One question, with no tools and no conversation before it: `system` says the job, `user`
     /// carries what it is about. The reply's words and what the call used, or why there were none,
-    /// in words.
+    /// in words. `model` goes as a team file names it, with its source (`chatgpt:gpt-6.1-sol`): a
+    /// plan or a Claude key reads a bare name as an `OpenRouter` one, and refuses it.
     pub(crate) async fn once(
         &self,
-        model: &str,
+        model: &ModelRef,
         system: &str,
         user: &str,
         max_tokens: u32,
     ) -> Result<Completion, String> {
+        let model = model.to_string();
         let messages = [
             Message::System {
                 content: system.to_owned(),
@@ -468,7 +470,7 @@ impl Provider {
         ];
         let key = format!("once-{}", uuid::Uuid::new_v4().simple());
         let request = ChatRequest {
-            model,
+            model: &model,
             effort: Some("low"),
             messages: &messages,
             tools: &[],

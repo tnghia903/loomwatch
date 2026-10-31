@@ -789,8 +789,11 @@ at a little desk, whose workbench opens while it is pointed at. For the agent in
   says so too. Words still to come after letting go are dropped once the box is sent or written in;
 - under the box, what the person may ask next (ADR 0105, `suggestions.rs`,
   `GET /api/pinned-agent/suggestions`): next steps from the agent's newest answer, written once for
-  that answer by a small model on the source the agent runs on (`Provider::once`, no tools; an
-  agent on a free model writes with it), while the answer is younger than `NEXT_STEPS_FOR` and the
+  that answer by a small model on the source the model of the agent's chat is paid from (its
+  `.jobs/.bench/<id>.yaml`, which for an agent saved with no model holds the one the app chose for
+  what is connected): on a `ChatGPT` plan, that same model; an agent on a free model writes with it
+  (`Provider::once`, no tools, the model named with its source, as a plan and a Claude key read
+  it), while the answer is younger than `NEXT_STEPS_FOR` and the
   person hasn't written since; then what the person asked it more than once, without files.
   Pressing one only puts it in the box. The page asks only while the box is open, so next steps are
   written only for answers someone reaches for the box after, and again while they are being
