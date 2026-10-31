@@ -186,9 +186,9 @@ ringed, then Enter (or tap it, on a touch screen). The agent is told the page an
 and sent a sharp picture of the box. A PDF that can't be shown as its pages shows only its words.
 A PowerPoint deck is shown as its slides, and a Word document as its pages, drawn by LoomWatch
 itself: nothing else needs to be on the computer, and they open at once. Mark their words, or press
-the Pick switch and click any part of a slide or a page (a box, a table, a chart) to ask about it;
-each slide sits under its number, so the agent is told which slide the part is on. A deck's speaker
-notes fold away under each slide. A deck or a document LoomWatch can't draw shows only its words,
+the Pick switch and click any part of a slide or a page (a box, a table, a chart) to ask about it.
+Each slide sits under its number, and a picked picture, shape or chart is named by its slide. A
+deck's speaker notes fold away under each slide. A deck or a document LoomWatch can't draw shows only its words,
 and an old `.ppt` or `.doc` opens in its own app. A CSV or TSV file and an Excel workbook are shown as a sheet: a workbook's
 sheets behind tabs, the first row as the column names, the rows numbered. Drag across any cells to ask about them,
 or press (or drag across) column names or row numbers for whole columns or rows; from the keyboard,

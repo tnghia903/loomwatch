@@ -1,5 +1,6 @@
 import { renderAsync } from 'docx-preview'
 
+import { lookOf, PAPER_LOOK, type PageLook } from './pageLook'
 import { escapeHtml, fontStack } from './slidesPage'
 
 /**
@@ -12,7 +13,7 @@ import { escapeHtml, fontStack } from './slidesPage'
  * A page keeps its width, and the whole document is scaled down to the reader's width by the page's
  * own script when the reader is narrower.
  */
-export async function documentPage(bytes: ArrayBuffer, name: string): Promise<string> {
+export async function documentPage(bytes: ArrayBuffer, name: string, look: PageLook = PAPER_LOOK): Promise<string> {
   const body = document.createElement('div')
   const styles = document.createElement('div')
   await renderAsync(bytes, body, styles, {
@@ -36,7 +37,7 @@ export async function documentPage(bytes: ArrayBuffer, name: string): Promise<st
   return [
     '<!doctype html>',
     '<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">',
-    `<title>${escapeHtml(name)}</title>${readable(styles.innerHTML)}<style>${PAGE_STYLE}</style></head>`,
+    `<title>${escapeHtml(name)}</title>${readable(styles.innerHTML)}<style>${pageStyle(lookOf(look))}</style></head>`,
     `<body>${readable(body.innerHTML)}<script>${FIT}</script></body></html>`,
   ].join('')
 }
@@ -66,11 +67,12 @@ const SYMBOL_MARKS: Record<string, string> = {
   '\uF0B7': '•', '\uF0A7': '▪', '\uF0A8': '◻', '\uF0D8': '➢', '\uF0FC': '✓', '\uF06E': '■', '\uF076': '❖', '\uF0E0': '➔',
 }
 
-const PAGE_STYLE = [
-  'html{background:#e9e9ec;color-scheme:light}',
+/** Each page paper on the reader's own ground, as a PDF's pages are. */
+const pageStyle = (look: PageLook) => [
+  `html{background:${look.ground}}`,
   'body{margin:0}',
-  '.docx-wrapper{background:transparent!important;padding:16px!important;align-items:center}',
-  '.docx-wrapper>section.docx{box-shadow:0 1px 3px rgba(0,0,0,.18)!important;margin-bottom:20px!important}',
+  '.docx-wrapper{background:transparent!important;padding:24px!important;align-items:center}',
+  '.docx-wrapper>section.docx{border-radius:4px;box-shadow:0 1px 3px rgba(0,0,0,.12),0 12px 32px rgba(0,0,0,.14)!important;margin-bottom:40px!important}',
 ].join('')
 
 /** The pages scaled down to fit the reader's width when it is narrower than they are; never up. */

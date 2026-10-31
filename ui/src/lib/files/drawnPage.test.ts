@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { deckFile, documentFile, paragraph, placeholder, table } from '../../test/officeFiles'
-import { drawnPage } from './drawnPage'
+import { drawnPage, readerLook } from './drawnPage'
+import { DARK_LOOK, PAPER_LOOK } from './pageLook'
 import { readable } from './documentPage'
 
 const answered = (bytes: ArrayBuffer) => vi.stubGlobal('fetch', vi.fn(async () => new Response(bytes, { status: 200 })))
@@ -38,6 +39,18 @@ describe('a deck or a Word document drawn from its bytes', () => {
     expect(doc.querySelector('section.docx')!.textContent).toBe('BriefWe sell tea.Mostly green.')
     expect(page).toContain("'Calibri', Calibri, Carlito")
     expect(page).not.toContain('<script src')
+  })
+
+  it('takes the reader’s ground and words from the app’s own styles, else its theme’s', () => {
+    // The app's styles aren't loaded here: each theme's own colours stand in.
+    expect(readerLook('dark')).toEqual(DARK_LOOK)
+    expect(readerLook('light')).toEqual(PAPER_LOOK)
+    document.documentElement.style.setProperty('--color-ground', '#101013')
+    try {
+      expect(readerLook('dark').ground).toBe('#101013')
+    } finally {
+      document.documentElement.style.removeProperty('--color-ground')
+    }
   })
 
   it('says why, in the daemon’s words, when the file can’t be had', async () => {

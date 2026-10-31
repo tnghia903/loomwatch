@@ -45,7 +45,7 @@ describe('a deck with what its slides take from their master written onto them',
     expect(rows).toEqual([['4F81BD', '4F81BD'], ['D0D8E8', 'D0D8E8'], ['E9EDF4', 'E9EDF4'], ['D0D8E8', 'D0D8E8']])
     const header = slide.getElementsByTagNameNS(A, 'tr')[0].getElementsByTagNameNS(A, 'rPr')[0]
     expect(header.getAttribute('b')).toBe('1')
-    expect(header.getElementsByTagNameNS(A, 'srgbClr')[0].getAttribute('val')).toBe('FFFFFF')
+    expect(header.getElementsByTagNameNS(A, 'srgbClr')[0]?.getAttribute('val')).toBe('FFFFFF')
     expect(slide.getElementsByTagNameNS(A, 'tr')[1].getElementsByTagNameNS(A, 'rPr')[0].hasAttribute('b')).toBe(false)
   })
 

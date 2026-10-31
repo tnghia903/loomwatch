@@ -20,7 +20,9 @@ import { wearerOf } from '../../lib/chat/helpers'
 import { TeamFiguresContext } from '../agents/figureContext'
 import { useFigurePictures } from './useFigurePictures'
 import { FileOriginContext, rawFileUrl, readerFormat, type FileToRead } from '../../lib/files/reader'
-import { useDrawnPage } from '../../lib/files/drawnPage'
+import { readerLook, useDrawnPage } from '../../lib/files/drawnPage'
+import { PAPER_LOOK } from '../../lib/files/pageLook'
+import { useTheme } from '../../lib/theme'
 import { useFileActions } from '../../lib/files/useFile'
 import { useFileText } from '../../lib/files/useFileText'
 import { relativeTime } from '../../lib/format'
@@ -131,7 +133,12 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
   // A slide deck or a Word document is drawn by LoomWatch itself as a page of its slides or pages,
   // shown as a web page an agent made is (ADR 0091); its words alone where it can't be drawn.
   const drawnKind = format === 'slides' || format === 'document' ? format : null
-  const drawn = useDrawnPage(drawnKind ? path : null, drawnKind, baseName(path), String(content.changes))
+  // Its paper lies on the reader's own ground, in the theme shown now.
+  const { resolved: theme } = useTheme()
+  const look = useMemo(() => (drawnKind ? readerLook(theme) : null), [drawnKind, theme])
+  const drawn = useDrawnPage(drawnKind ? path : null, drawnKind, baseName(path), String(content.changes), look ?? PAPER_LOOK)
+  // Until it is drawn, or can't be, it is neither its pages nor only its words.
+  const drawing = drawnKind !== null && !drawn
   const asPages = format === 'pdf'
   const pdfPages = asPages && pdfFailed !== path
   // Whether one of its pages shows a picture or a chart: only then does its tip speak of boxes.
@@ -622,7 +629,7 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
   const actions = useFileActions(path)
   const modifiedAt = content.file?.modifiedAt ?? content.modifiedAt
   const meta = [
-    content.file?.extracted && shown !== 'sheet' && shown !== 'page' && !pdfPages ? `Words from ${fileKindIn(path, 'a')}` : fileLabel(path),
+    content.file?.extracted && shown !== 'sheet' && shown !== 'page' && !pdfPages && !drawing ? `Words from ${fileKindIn(path, 'a')}` : fileLabel(path),
     content.file ? formatBytes(content.file.sizeBytes) : null,
     modifiedAt ? `changed ${relativeTime(new Date(modifiedAt))}` : null,
   ].filter(Boolean).join(' · ')
@@ -707,7 +714,7 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
         boxes={places.flatMap((id) => { const at = atOf(id); return at?.kind === 'box' && at.page ? [{ id, at, look: wordsLookOf([id]) }] : [] })} />
     </div>
   )
-  else if (shown === 'page' && pageHtml !== null) body = <PageFrame path={path} name={fileName} html={pageHtml} marks={pageMarks} picking={picking} pickKeys={pickKeys} onMarked={setMarked} onParts={takeParts} onOpen={setAnswerFor} onEscape={escapePage} cleared={cleared}
+  else if (shown === 'page' && pageHtml !== null) body = <PageFrame path={path} name={fileName} html={pageHtml} drawn={Boolean(drawn?.html)} marks={pageMarks} picking={picking} pickKeys={pickKeys} onMarked={setMarked} onParts={takeParts} onOpen={setAnswerFor} onEscape={escapePage} cleared={cleared}
     onPointing={setPointedAt}
     onHover={(key, at, now) => { const passage = key ? mine.find((item) => askKey(item) === key) : undefined; if (key && passage && hasCard(passage)) cardAt(key, at, now); else cardAt('', null, now) }} />
   else if (text === null || (drawnKind && !drawn)) body = <p className="rd-loading" role="status">Reading {fileName}…</p>
@@ -746,7 +753,7 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
         </div>
         {pickable && from && (
           <button type="button" className="rd-pick" aria-pressed={picking} onClick={togglePick}
-            aria-label="Pick a part of the page to ask about" title={picking ? 'Click any part of the page. Click here or press Esc to stop.' : 'Pick a part to ask about'}>
+            aria-label="Pick a part of the page to ask about" title={picking ? 'Click any part. Click here or press Esc to stop.' : 'Pick a part to ask about'}>
             <PickMark size={18} />
           </button>
         )}
@@ -763,7 +770,7 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
         <span className="visually-hidden" role="status">{actions.said}</span>
         {pickable && <span className="visually-hidden" role="status">{picking ? pointedAt : ''}</span>}
       </header>
-      {((content.file?.extracted && shown !== 'sheet' && shown !== 'page' && !pdfPages) || (content.file?.truncated && shown !== 'page' && !pdfPages)) && (
+      {!drawing && ((content.file?.extracted && shown !== 'sheet' && shown !== 'page' && !pdfPages) || (content.file?.truncated && shown !== 'page' && !pdfPages)) && (
         <p className="rd-note">
           {content.file.extracted && shown !== 'sheet'
             ? `These are the words of ${fileKindIn(path, 'the')}, as your agents read them, without the layout. Open the file in its own app to see how it looks.`
@@ -776,7 +783,7 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
       )}
       {cellsView && sheets && sheets.length > 1 && <div ref={setSheetBar} className="rd-sheet-bar" />}
       <div ref={stage} className="rd-stage">
-        <div ref={scroller} className={`rd-scroll${shown === 'page' ? ' rd-scroll-frame' : ' tc-document'}`} onScroll={onScroll}>
+        <div ref={scroller} className={`rd-scroll${shown === 'page' ? ' rd-scroll-frame' : ' tc-document'}${drawn?.html ? ' drawn' : ''}`} onScroll={onScroll}>
           {body}
         </div>
         {[...bubblesIn(onScreen?.slots ?? NO_SLOTS, mine)].map(([slot, asks]) => createPortal(
@@ -791,7 +798,7 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
           slot, slot.dataset.part,
         ))}
         {askable && marked && place && from && askee && (
-          <div ref={bubble} className={`rd-ask${place.below ? ' below' : ''}${listing ? ' listing' : ''}${pdfPages ? ' on-paper' : ''}`} style={{ top: place.top, left: place.left }} role="toolbar" aria-label={`Ask ${name(askee)} about the ${marked.at?.kind === 'cells' ? 'cells' : marked.at?.kind === 'time' ? 'moment' : marked.at?.kind === 'element' ? marked.at.what : marked.at?.kind === 'box' && marked.at.page && isWholeBox(marked.at) ? 'page' : marked.at ? 'part' : 'words'} you marked`} onMouseDown={(event) => event.preventDefault()}>
+          <div ref={bubble} className={`rd-ask${place.below ? ' below' : ''}${listing ? ' listing' : ''}${pdfPages || drawn?.html ? ' on-paper' : ''}`} style={{ top: place.top, left: place.left }} role="toolbar" aria-label={`Ask ${name(askee)} about the ${marked.at?.kind === 'cells' ? 'cells' : marked.at?.kind === 'time' ? 'moment' : marked.at?.kind === 'element' ? marked.at.what : marked.at?.kind === 'box' && marked.at.page && isWholeBox(marked.at) ? 'page' : marked.at ? 'part' : 'words'} you marked`} onMouseDown={(event) => event.preventDefault()}>
             <button type="button" className="rd-ask-main" onClick={() => ask()} title={`Ask ${name(askee)} about this`}>
               <AvatarFace key={askee} id={askee} hue={hue(askee)} size={24} fontSize={9} text={initials(name(askee))} className="rd-ask-face" />
               <span>Ask</span>

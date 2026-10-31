@@ -55,6 +55,31 @@ describe('a slide deck drawn as a page', () => {
     expect(svg.querySelector('marker#lw-end-8-end')!.getAttribute('fill')).toBe('#4B5563')
   })
 
+  it('gives a line straight down the same point of room, across', () => {
+    const line = { type: 'shape', id: '9', name: 'Connector 8', ...box, width: 0, borderColor: '#4B5563', borderWidth: 1.75, borderType: 'solid', borderStrokeDasharray: '0', fill: { type: 'color', value: '' }, content: '', vAlign: 'up', wrap: true, shapType: 'line', path: 'M 0 0 L 0 108', pathViewBox: { x: 0, y: 0, width: 0, height: 108 } } as unknown as Element
+    const part = drawn(deck([slide([line])])).querySelector<HTMLElement>('.lw-el')!
+    expect([part.style.left, part.style.width, part.style.height]).toEqual(['35.5pt', '1pt', '108pt'])
+    expect(part.querySelector('svg')!.getAttribute('viewBox')).toBe('-0.5 0 1 108')
+  })
+
+  it('names a clip by its slide, says how to play it, and draws its place where it can be seen', () => {
+    const clip = { type: 'video', id: 'v', ...box, ref: 'ppt/media/clip.mp4', blob: '' } as unknown as Element
+    const page = drawn(deck([slide([]), slide([clip])]))
+    const place = page.querySelector('.lw-media')!
+    expect([place.getAttribute('role'), place.getAttribute('aria-label'), place.getAttribute('title')]).toEqual(['img', 'Video on slide 2', 'Video. Open the file in its own app to play it.'])
+  })
+
+  it('lays the slides on the reader’s own ground, its words in the reader’s colours, and nothing there but colours', () => {
+    const page = slidesPage(deck([slide([], { note: '<p>Hi</p>' })]), 'deck.pptx', { ground: '#08080A', ink: '#F5F3EE', label: '#A9A59C' })
+    expect(page).toContain('html{background:#08080A}')
+    expect(page).toContain('color:#F5F3EE')
+    expect(page).toContain('.lw-slide-number{margin:0 0 8px;font-size:12px;font-weight:500;color:#A9A59C')
+    const odd = slidesPage(deck([slide([])]), 'deck.pptx', { ground: 'red;}</style><script>', ink: 'oklch(0.2 0.01 90)', label: '' })
+    expect(odd).toContain('html{background:#FAF8F3}')
+    expect(odd).toContain('color:oklch(0.2 0.01 90)')
+    expect(odd).not.toContain('</style><script>')
+  })
+
   it('draws a shape’s outline, filled with its gradient, its words over it', () => {
     const oval = { type: 'shape', id: '3', name: 'Oval 2', ...box, ...plain, borderColor: '#000000', borderWidth: 0.75, fill: { type: 'gradient', value: { rot: 45, path: 'line', colors: [{ pos: '0%', color: '#3e7fcd' }, { pos: '100%', color: '#86bdff' }] } }, content: '<p>Oval</p>', vAlign: 'mid', wrap: true, shapType: 'ellipse', path: 'M 0,54 A 144,54 0 1,0 288,54 A 144,54 0 1,0 0,54 Z', pathViewBox: { x: 0, y: 0, width: 288, height: 108 } } as unknown as Element
     const page = drawn(deck([slide([oval])]))
@@ -97,7 +122,7 @@ describe('a slide deck drawn as a page', () => {
     const chart = (chartType: string, data: unknown) => ({ type: 'chart', id: 'c', ...box, chartType, data, colors: [], barDir: 'col', grouping: 'clustered' }) as unknown as Element
     const bars = drawn(deck([slide([chart('barChart', [series('North', [4, 9]), series('South', [5, 6])])])]))
     const svg = bars.querySelector('svg.lw-chart')!
-    expect(svg.closest('[role="img"]')!.getAttribute('aria-label')).toBe('A chart')
+    expect(svg.closest('[role="img"]')!.getAttribute('aria-label')).toBe('Chart on slide 1')
     expect(svg.querySelectorAll('rect[height]:not([height="7"])')).toHaveLength(4)
     expect([...svg.querySelectorAll('text')].map((text) => text.textContent)).toEqual(expect.arrayContaining(['Q1', 'Q2', 'North', 'South', '9']))
     const pie = drawn(deck([slide([chart('pieChart', [{ ...series('Costs', [30, 70]), xlabels: { 0: 'Rent', 1: 'Staff' } }])])]))

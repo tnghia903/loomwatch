@@ -1,5 +1,7 @@
 import type { Chart, Element, Fill, Image, LineEnd, Shadow, Shape, Slide, Table, TableCell, Text } from 'pptxtojson'
 
+import { lookOf, PAPER_LOOK, type PageLook } from './pageLook'
+
 /** A slide deck as `pptxtojson` reads it out of a `.pptx`. */
 export interface ParsedDeck {
   slides: Slide[]
@@ -16,14 +18,14 @@ export interface ParsedDeck {
  * "Slide 3", so a part picked on it is named by the slide it is on; its speaker notes fold away
  * under it.
  */
-export function slidesPage(deck: ParsedDeck, name: string): string {
+export function slidesPage(deck: ParsedDeck, name: string, look: PageLook = PAPER_LOOK): string {
   const width = positive(deck.size.width, 960)
   const height = positive(deck.size.height, 540)
   const slides = deck.slides.map((slide, index) => slideHtml(slide, index + 1, width, height)).join('\n')
   return [
     '<!doctype html>',
     '<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">',
-    `<title>${escapeHtml(name)}</title><style>${DECK_STYLE}</style></head>`,
+    `<title>${escapeHtml(name)}</title><style>${deckStyle(lookOf(look))}</style></head>`,
     `<body><main class="lw-deck">${slides}</main>`,
     `<script>${fitScript(width)}</script></body></html>`,
   ].join('')
@@ -42,12 +44,13 @@ function fitScript(width: number): string {
     + `addEventListener('resize',fit);fit();shrink();})();`
 }
 
-const DECK_STYLE = [
-  'html{background:#e9e9ec;color-scheme:light}',
-  'body{margin:0;padding:16px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}',
-  '.lw-deck{max-width:1600px;margin:0 auto;display:flex;flex-direction:column;gap:20px}',
-  '.lw-slide-number{margin:0 0 6px;font-size:12px;font-weight:500;color:#5b5b66;letter-spacing:.02em}',
-  '.lw-frame{position:relative;overflow:hidden;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.18);border-radius:2px}',
+/** The page around the slides: the reader's ground, and each slide paper on it, as a PDF's pages are. */
+const deckStyle = (look: PageLook) => [
+  `html{background:${look.ground}}`,
+  `body{margin:0;padding:24px;color:${look.ink};font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}`,
+  '.lw-deck{max-width:1600px;margin:0 auto;display:flex;flex-direction:column;gap:40px}',
+  `.lw-slide-number{margin:0 0 8px;font-size:12px;font-weight:500;color:${look.label};letter-spacing:.02em}`,
+  '.lw-frame{position:relative;overflow:hidden;background:#fff;border-radius:4px;box-shadow:0 1px 3px rgba(0,0,0,.12),0 12px 32px rgba(0,0,0,.14)}',
   '.lw-canvas{position:relative;transform:scale(var(--lw-k,1));transform-origin:0 0;overflow:hidden;font-family:Calibri,Carlito,"Helvetica Neue",Arial,sans-serif;color:#000}',
   '.lw-canvas p{margin:0}',
   '.lw-canvas ul,.lw-canvas ol{margin:0;padding:0}',
@@ -65,14 +68,15 @@ const DECK_STYLE = [
   '.lw-table td.mid{vertical-align:middle}.lw-table td.down{vertical-align:bottom}',
   '.lw-chart{position:absolute;inset:0;width:100%;height:100%}',
   '.lw-chart text{font-family:Calibri,Carlito,"Helvetica Neue",Arial,sans-serif}',
-  '.lw-media{border:1pt dashed #9a9aa6;border-radius:4pt}',
-  '.lw-notes{margin-top:8px;font-size:13px;line-height:1.5;color:#2c2c34}',
-  '.lw-notes summary{cursor:pointer;color:#5b5b66;font-size:12px}',
+  '.lw-media{border:1pt dashed #6E6862;border-radius:4pt}',
+  '.lw-notes{margin-top:10px;font-size:13px;line-height:1.5}',
+  `.lw-notes summary{cursor:pointer;color:${look.label};font-size:12px}`,
+  '@media (pointer:coarse){.lw-notes summary{min-height:44px;display:flex;align-items:center}}',
   '.lw-notes p{margin:4px 0}',
 ].join('')
 
 function slideHtml(slide: Slide, number: number, width: number, height: number): string {
-  const parts = [...(slide.layoutElements ?? []), ...(slide.elements ?? [])].map(elementHtml).join('')
+  const parts = [...(slide.layoutElements ?? []), ...(slide.elements ?? [])].map((element) => elementHtml(element, number)).join('')
   const notes = slide.note?.trim() ? `<details class="lw-notes"><summary>Notes</summary>${textContent(slide.note)}</details>` : ''
   const id = `lw-slide-${number}`
   // The frame keeps the slide's shape at any scale; the canvas inside is the slide at its own size.
@@ -81,22 +85,27 @@ function slideHtml(slide: Slide, number: number, width: number, height: number):
     + `<div class="lw-canvas" style="width:${pt(width)};height:${pt(height)};${backgroundOf(slide.fill, '#ffffff')}">${parts}</div></div>${notes}</section>`
 }
 
-function elementHtml(element: Element): string {
+/** A part of slide `slide`, drawn where the deck puts it. */
+function elementHtml(element: Element, slide: number): string {
+  const inside = (parts: readonly Element[]) => parts.map((part) => elementHtml(part, slide)).join('')
   switch (element.type) {
     case 'text': return textHtml(element)
     case 'shape': return shapeHtml(element)
     case 'image': return pictureHtml(element)
     case 'table': return tableHtml(element)
-    case 'chart': return chartHtml(element)
+    case 'chart': return chartHtml(element, slide)
     // A group's parts and a diagram's are placed inside its own box.
-    case 'group': return `<div class="lw-el" style="${boxOf(element)}">${element.elements.map(elementHtml).join('')}</div>`
-    case 'diagram': return `<div class="lw-el" style="${boxOf(element)}">${element.elements.map(elementHtml).join('')}</div>`
+    case 'group': return `<div class="lw-el" style="${boxOf(element)}">${inside(element.elements)}</div>`
+    case 'diagram': return `<div class="lw-el" style="${boxOf(element)}">${inside(element.elements)}</div>`
     case 'math': return element.picBase64 && isPicture(element.picBase64)
       ? `<div class="lw-el" style="${boxOf(element)}"><div class="lw-picture"><img src="${escapeHtml(element.picBase64)}" alt="${escapeHtml(element.text ?? element.latex ?? '')}" style="inset:0;width:100%;height:100%"></div></div>`
       : `<div class="lw-el" style="${boxOf(element)}"><div class="lw-text mid">${escapeHtml(element.text ?? element.latex ?? '')}</div></div>`
-    // A clip in a deck is not drawn: where it goes is.
+    // A clip in a deck is not drawn: where it goes is, named by its slide, as a picked part is.
     case 'video':
-    case 'audio': return `<div class="lw-el lw-media" style="${boxOf(element)}" aria-label="${element.type === 'video' ? 'A video' : 'A recording'}"></div>`
+    case 'audio': {
+      const kind = element.type === 'video' ? 'Video' : 'Audio'
+      return `<div class="lw-el lw-media" style="${boxOf(element)}" role="img" aria-label="${kind} on slide ${slide}" title="${kind}. Open the file in its own app to play it."></div>`
+    }
     default: return ''
   }
 }
@@ -220,8 +229,8 @@ const SERIES_COLOURS = ['#4472C4', '#ED7D31', '#A5A5A5', '#FFC000', '#5B9BD5', '
  * doughnut, points; any other kind as the table of its numbers. The numbers are the deck's own, so
  * what is drawn says what the deck says, if not always in its exact style.
  */
-function chartHtml(element: Chart): string {
-  const box = `<div class="lw-el" style="${boxOf(element)}" role="img" aria-label="A chart">`
+function chartHtml(element: Chart, slide: number): string {
+  const box = `<div class="lw-el" style="${boxOf(element)}" role="img" aria-label="Chart on slide ${slide}">`
   const w = positive(element.width, 100)
   const h = positive(element.height, 100)
   if (element.chartType === 'scatterChart' || element.chartType === 'bubbleChart') {
@@ -481,6 +490,8 @@ function color(value: string | null | undefined): string {
   const text = String(value ?? '').trim()
   return /^#[0-9a-f]{3,8}$/i.test(text) || /^rgba?\([\d.,\s%]+\)$/i.test(text) || /^[a-z]{3,20}$/i.test(text) ? text : ''
 }
+
+
 
 function isPicture(source: string | undefined): source is string {
   return typeof source === 'string' && /^data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=\s]+$/i.test(source)

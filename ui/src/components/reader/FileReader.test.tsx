@@ -53,9 +53,10 @@ vi.mock('../../lib/files/pdf', async (real) => ({
 }))
 
 // The deck and Word parsers stand in, each drawing two parts; `drawState.fail` has them fail to read the file.
-const drawState = vi.hoisted(() => ({ fail: false }))
+const drawState = vi.hoisted(() => ({ fail: false, hang: false }))
 vi.mock('pptxtojson', () => ({
   parse: vi.fn(async () => {
+    if (drawState.hang) await new Promise(() => undefined)
     if (drawState.fail) throw new Error('not a deck')
     const words = (id: string, said: string) => ({
       type: 'text', id, name: 'Title', left: 40, top: 40, width: 800, height: 60, rotate: 0, isFlipH: false, isFlipV: false, isVertical: false,
@@ -1492,6 +1493,25 @@ describe('a PDF in the reader', () => {
       expect(screen.getByRole('button', { name: 'Pick a part of the page to ask about' })).toBeInTheDocument()
     })
 
+    it('says nothing of its words while it is being drawn, and lies on the reader’s ground once drawn', async () => {
+      drawState.hang = true
+      try {
+        renderReader({ file: { path: DECK, runId: 'run-1', from: 'writer' } })
+        await waitFor(() => expect(document.querySelector('.rd-loading')).toHaveTextContent('Reading deck.pptx…'))
+        // Its words are in, but it isn't only its words.
+        await act(() => new Promise((resolve) => setTimeout(resolve, 50)))
+        expect(screen.queryByText(/These are the words of the slides/)).toBeNull()
+        expect(screen.queryByText(/Words from/)).toBeNull()
+      } finally {
+        drawState.hang = false
+      }
+      cleanup()
+      renderReader({ file: { path: DECK, runId: 'run-1', from: 'writer' } })
+      const frame = await frameOf()
+      expect(frame).toHaveClass('drawn')
+      expect(frame.closest('.rd-scroll')).toHaveClass('drawn')
+    })
+
     it('shows a deck’s words when it can’t be drawn', async () => {
       drawState.fail = true
       try {
@@ -1590,7 +1610,7 @@ describe('a web page in the reader', () => {
     // On: the page is told, and keeps the keys where it had them for a mouse's click; the tip says what to do now.
     fireEvent.click(pick, { detail: 1 })
     expect(pick).toHaveAttribute('aria-pressed', 'true')
-    expect(pick).toHaveAttribute('title', 'Click any part of the page. Click here or press Esc to stop.')
+    expect(pick).toHaveAttribute('title', 'Click any part. Click here or press Esc to stop.')
     await waitFor(() => expect(told).toHaveBeenLastCalledWith({ lw: 'reader', type: 'pick', on: true }, '*'))
     expect(document.activeElement).not.toBe(frame)
     expect(tip()).toHaveTextContent(/^WRClick any part to ask Writer about it$/)
