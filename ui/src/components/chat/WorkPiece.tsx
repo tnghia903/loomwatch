@@ -23,7 +23,7 @@ import { checkAnswer, type AnswerCheck } from '../../lib/story/answerCheck'
 import { APPROVAL_TEXT } from '../../lib/story/needsYou'
 import { bubbles as layOut, converse, expectsAnswer, fold, type Bubble, type Party } from '../../lib/story/conversation'
 import type { ReceiptLine } from '../../lib/story/receipt'
-import { OPERATOR_ID, type TeamMessage } from '../../lib/watch/messages'
+import { LOOMWATCH_ID, OPERATOR_ID, type TeamMessage } from '../../lib/watch/messages'
 import type { AutoRan } from '../../lib/watch/events'
 import { workPhase } from '../../lib/watch/workPhase'
 import type { AgentConfig } from '../../lib/team-file/types'
@@ -316,8 +316,9 @@ export function WorkPiece({ item, newest = false, approveFilled = true, fixFille
   }, [session.projection.messages, team.parties, team.predecessors, guests])
   const speakers = useMemo(() => {
     const ids = [...said.flatMap((bubble) => bubble.from), ...(live ? working : []), ...(said.length > 0 && answer.trim() ? [run.responder] : [])]
-    // LoomWatch's own check (ADR 0098) is no agent of the team: its rows say so, its face isn't here.
-    const agents = [...new Set(ids)].filter((id) => !helperOf(id) && id !== OPERATOR_ID && id !== LOOMWATCH_CHECK_ID && !team.operators.has(id))
+    // LoomWatch is no agent of the team, whether it checked the work (ADR 0098) or answered for you
+    // (ADR 0090): its rows say so, its face isn't here.
+    const agents = [...new Set(ids)].filter((id) => !helperOf(id) && id !== OPERATOR_ID && id !== LOOMWATCH_CHECK_ID && id !== LOOMWATCH_ID && !team.operators.has(id))
     return (agents.length > 0 ? agents : workers).slice(0, FACES_SHOWN)
   }, [said, live, working, answer, run.responder, team.operators, workers])
   // An answer is drawn after what it answers, so the last drawn is not always the last said.

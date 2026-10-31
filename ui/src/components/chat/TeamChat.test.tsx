@@ -1882,6 +1882,8 @@ describe('reactions', () => {
     expect(within(talk).getAllByText(/LoomWatch/).length).toBeGreaterThan(0)
     // Nobody is there to reach: no Reply under LoomWatch's own answer.
     expect(within(talk).queryByRole('button', { name: /Reply to LoomWatch/ })).toBeNull()
+    // The piece's line shows the team's faces only: LoomWatch is no agent of the team.
+    expect([...document.querySelectorAll('.tc-replies-faces .chat-avatar')].map((face) => face.textContent)).toEqual(['WR'])
     // Folded while it works, the piece says what happened in one line, and not as your answer.
     fireEvent.click(await screen.findByRole('button', { expanded: true, name: /replies/ }))
     await waitFor(() => expect(document.querySelector('.tc-decided')).not.toBeNull())
