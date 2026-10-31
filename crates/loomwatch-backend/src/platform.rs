@@ -106,67 +106,6 @@ pub fn program_candidates(path: &Path) -> Vec<PathBuf> {
     }
 }
 
-/// Where `LibreOffice`'s program is on this computer, if it is (ADR 0091): on the search path as
-/// `soffice` or `libreoffice`, or where its installers put it.
-#[must_use]
-pub fn office_program() -> Option<PathBuf> {
-    office_program_in(
-        std::env::var_os("PATH").as_deref(),
-        &installed_office_programs(),
-    )
-}
-
-/// The first of `soffice` and `libreoffice` in the folders of `search` (a `PATH`), then the first
-/// of `installed` that is a file.
-fn office_program_in(search: Option<&std::ffi::OsStr>, installed: &[PathBuf]) -> Option<PathBuf> {
-    let on_path = search
-        .map(|search| std::env::split_paths(search).collect::<Vec<_>>())
-        .unwrap_or_default()
-        .into_iter()
-        .flat_map(|folder| ["soffice", "libreoffice"].map(|name| folder.join(name)));
-    on_path
-        .chain(installed.iter().cloned())
-        .flat_map(|path| program_candidates(&path))
-        .find(|path| path.is_file())
-}
-
-/// Where `LibreOffice`'s installers put its program on this system. A Mac app started from the
-/// Finder has a short search path, so Homebrew's folders are named too.
-fn installed_office_programs() -> Vec<PathBuf> {
-    #[cfg(target_os = "macos")]
-    {
-        let app = Path::new("Applications/LibreOffice.app/Contents/MacOS/soffice");
-        let mut places = vec![
-            Path::new("/").join(app),
-            PathBuf::from("/opt/homebrew/bin/soffice"),
-            PathBuf::from("/usr/local/bin/soffice"),
-        ];
-        places.extend(home_dir().map(|home| home.join(app)));
-        places
-    }
-    #[cfg(windows)]
-    {
-        ["ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"]
-            .into_iter()
-            .filter_map(std::env::var_os)
-            .map(|folder| PathBuf::from(folder).join(r"LibreOffice\program\soffice.exe"))
-            .collect()
-    }
-    #[cfg(not(any(target_os = "macos", windows)))]
-    {
-        [
-            "/usr/bin/soffice",
-            "/usr/local/bin/soffice",
-            "/usr/lib/libreoffice/program/soffice",
-            "/opt/libreoffice/program/soffice",
-            "/snap/bin/libreoffice",
-        ]
-        .into_iter()
-        .map(PathBuf::from)
-        .collect()
-    }
-}
-
 /// What this computer is called in its own settings, such as `Nghia's MacBook Pro`: how another
 /// computer lists it among its connected devices (ADR 0102).
 #[must_use]
@@ -360,36 +299,6 @@ mod tests {
         );
         assert_eq!(canonicalize(&resolved).expect("resolve again"), resolved);
         std::fs::remove_dir_all(&directory).ok();
-    }
-
-    #[test]
-    fn libreoffice_is_found_on_the_search_path_then_where_it_installs() {
-        let root = std::env::temp_dir().join(format!(
-            "lw-office-{}-{}",
-            std::process::id(),
-            uuid::Uuid::new_v4().simple()
-        ));
-        let bin = root.join("bin");
-        let installed = root.join("Applications").join("soffice");
-        std::fs::create_dir_all(&bin).expect("search folder");
-        std::fs::create_dir_all(installed.parent().expect("a folder")).expect("install folder");
-        let search = std::env::join_paths([&bin]).expect("a search path");
-        assert_eq!(
-            office_program_in(Some(&search), std::slice::from_ref(&installed)),
-            None
-        );
-        let made = crate::test_support::fake_program(&installed, "#!/bin/sh\n");
-        assert_eq!(
-            office_program_in(Some(&search), std::slice::from_ref(&installed)),
-            Some(made)
-        );
-        // On the search path first, by either of its names.
-        let on_path = crate::test_support::fake_program(&bin.join("libreoffice"), "#!/bin/sh\n");
-        assert_eq!(
-            office_program_in(Some(&search), &[installed]),
-            Some(on_path)
-        );
-        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[cfg(not(windows))]
