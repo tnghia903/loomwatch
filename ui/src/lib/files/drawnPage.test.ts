@@ -25,7 +25,7 @@ describe('a deck or a Word document drawn from its bytes', () => {
     }))
     const page = asPage((await drawnPage('/teams/.loomwatch/t/deck-maker/deck.pptx', 'slides', 'deck.pptx', '3')).html)
     expect(vi.mocked(fetch)).toHaveBeenCalledWith('/api/files/raw?path=%2Fteams%2F.loomwatch%2Ft%2Fdeck-maker%2Fdeck.pptx&v=3', expect.anything())
-    expect([...page.querySelectorAll('h2')].map((heading) => heading.textContent)).toEqual(['Slide 1', 'Slide 2'])
+    expect([...page.querySelectorAll('h2')].map((heading) => heading.textContent)).toEqual(['Slide 1 of 2', 'Slide 2 of 2'])
     const first = page.querySelectorAll('section')[0]
     expect(first.textContent).toContain('What we found')
     // Its body text keeps the master's bullets, as lists.

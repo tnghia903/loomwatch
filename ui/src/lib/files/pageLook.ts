@@ -9,19 +9,21 @@ export interface PageLook {
   label: string
   /** Gold as a line or a ring: the slide shown now, and what changed. */
   accent: string
+  /** Gold for what is behind, a step already said: quieter than `accent`, still a mark. */
+  accentDim: string
   /** Gold dark enough for white paper, whatever the theme: what changed on a slide. */
   paperAccent: string
 }
 
 /** The light theme's ground and words (tokens.css), where the reader's own can't be read. */
-export const PAPER_LOOK: PageLook = { ground: '#FAF8F3', ink: '#17150F', label: '#56524A', accent: '#8A6A16', paperAccent: '#8A6A16' }
+export const PAPER_LOOK: PageLook = { ground: '#FAF8F3', ink: '#17150F', label: '#56524A', accent: '#8A6A16', accentDim: '#9C8440', paperAccent: '#8A6A16' }
 /** The dark theme's, likewise. */
-export const DARK_LOOK: PageLook = { ground: '#08080A', ink: '#F5F3EE', label: '#A9A59C', accent: '#E9C46A', paperAccent: '#8A6A16' }
+export const DARK_LOOK: PageLook = { ground: '#08080A', ink: '#F5F3EE', label: '#A9A59C', accent: '#E9C46A', accentDim: '#8C7130', paperAccent: '#8A6A16' }
 
 /** The look given, each colour a colour or else `fallback`'s. */
 export function lookOf(look: Partial<PageLook> | null | undefined, fallback: PageLook = PAPER_LOOK): PageLook {
   const pick = (key: keyof PageLook) => cssColour(look?.[key]) || fallback[key]
-  return { ground: pick('ground'), ink: pick('ink'), label: pick('label'), accent: pick('accent'), paperAccent: pick('paperAccent') }
+  return { ground: pick('ground'), ink: pick('ink'), label: pick('label'), accent: pick('accent'), accentDim: pick('accentDim'), paperAccent: pick('paperAccent') }
 }
 
 /** A colour as the app's styles write one, if it is one: never anything else in a style. */

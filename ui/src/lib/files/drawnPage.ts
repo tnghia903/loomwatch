@@ -69,7 +69,7 @@ async function pictureData(url: string, signal?: AbortSignal): Promise<string | 
 export function readerLook(theme: 'dark' | 'light'): PageLook {
   const styles = getComputedStyle(document.documentElement)
   const token = (name: string) => styles.getPropertyValue(name).trim()
-  return lookOf({ ground: token('--color-ground'), ink: token('--color-ink'), label: token('--color-ink-2'), accent: token('--color-accent'), paperAccent: token('--color-paper-gold') }, theme === 'dark' ? DARK_LOOK : PAPER_LOOK)
+  return lookOf({ ground: token('--color-ground'), ink: token('--color-ink'), label: token('--color-ink-2'), accent: token('--color-accent'), accentDim: token('--color-accent-dim'), paperAccent: token('--color-paper-gold') }, theme === 'dark' ? DARK_LOOK : PAPER_LOOK)
 }
 
 export type DrawnState = { html: string; error: null } | { html: null; error: string } | null

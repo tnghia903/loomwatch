@@ -1,6 +1,7 @@
 import type { Chart, Element, Fill, Image, LineEnd, Shadow, Shape, Slide, Table, TableCell, Text } from 'pptxtojson'
 
 import type { DeckChanges } from './deckSeen'
+import { noteSteps, wordsOf, type SlidePart } from './noteSteps'
 import { DARK_LOOK, lookOf, PAPER_LOOK, type PageLook } from './pageLook'
 
 /** A slide deck as `pptxtojson` reads it out of a `.pptx`. */
@@ -19,35 +20,51 @@ export interface SlideMarks {
 const NO_MARKS: SlideMarks = { changes: null, face: null }
 
 /**
- * A slide deck drawn inside LoomWatch as a web page of its slides, one under another (ADR 0091), so
- * the reader shows it as it shows a page an agent made: its words marked and asked about, any part
- * picked with the Pick switch. Nothing is needed on the computer but LoomWatch.
+ * A slide deck drawn inside LoomWatch as a web page (ADR 0091), so the reader shows it as it shows a
+ * page an agent made: its words marked and asked about, any part picked with the Pick switch.
+ * Nothing is needed on the computer but LoomWatch.
  *
- * Each slide is drawn at its own size in points, every part where the deck puts it, and the whole
- * slide scaled to the reader's width by the page's own script. Each slide sits under a heading,
- * "Slide 3", so a part picked on it is named by the slide it is on, with its speaker notes open
- * under it, to read and to ask about as any words. Beside the slides, a strip of every slide
- * (`stripHtml`) goes to one and shows which is in view. A slide that changed since the deck was
- * last seen carries the gold stitch, a dashed line, under it there and beside its number, with the
- * face of the agent whose file it is; its changed parts carry the stitch along their bottom edge
- * and its changed notes beside their label. A dashed outline is left to the Pick switch's marks.
- * The page opens at the first slide that changed.
+ * One slide is shown at a time, at its own size in points, every part where the deck puts it, the
+ * whole slide scaled to the reader by the page's own script. It sits under its heading, "Slide 3 of
+ * 12", so a part picked on it is named by the slide it is on. Under it, its speaker notes are walked
+ * through a step at a time (`noteSteps`): the step being said in full, beside the face of the agent
+ * whose file it is, the others a line each, and the parts of the slide that step talks about ringed
+ * while the rest steps back. → goes to the next step, then the next slide. Beside the slide, a strip
+ * of every slide (`stripHtml`) goes to one. A slide that changed since the deck was last seen
+ * carries the gold stitch, a dashed line, in the strip and beside its number, with the agent's face;
+ * its changed parts carry the stitch along their bottom edge and its changed notes beside their
+ * label. A dashed outline is left to the Pick switch's marks. The page opens at the first slide
+ * that changed.
  */
 export function slidesPage(deck: ParsedDeck, name: string, look: PageLook = PAPER_LOOK, marks: SlideMarks = NO_MARKS): string {
   const width = positive(deck.size.width, 960)
   const height = positive(deck.size.height, 540)
   const shown = lookOf(look)
-  const slides = deck.slides.map((slide, index) => slideHtml(slide, index + 1, width, height, marks)).join('\n')
+  const count = deck.slides.length
+  const opening = Math.max(0, deck.slides.findIndex((_, index) => marks.changes?.slides.has(index)))
+  const slides = deck.slides.map((slide, index) => slideHtml(slide, index + 1, count, width, height, marks, index === opening)).join('\n')
   // A deck of one slide has nothing to go to.
-  const strip = deck.slides.length > 1 ? stripHtml(deck.slides.length, width, height, marks) : ''
+  const strip = count > 1 ? stripHtml(count, width, height, marks, opening) : ''
+  const turn = count > 1
+    ? `<div class="lw-turn"><button type="button" class="lw-slide-before" aria-label="Previous slide" title="Previous slide"${opening === 0 ? ' disabled' : ''}>${BEFORE}</button>`
+      + `<button type="button" class="lw-slide-after" aria-label="Next slide" title="Next slide"${opening === count - 1 ? ' disabled' : ''}>${AFTER}</button></div>`
+    : ''
   return [
     '<!doctype html>',
     '<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">',
-    `<title>${escapeHtml(name)}</title><style>${deckStyle(shown)}</style></head>`,
-    `<body><div class="lw-reader${strip ? '' : ' single'}">${strip}<main class="lw-deck">${slides}</main></div>`,
-    `<script>${fitScript(width)}${strip ? stripScript(width) : ''}${marks.changes?.slides.size ? toChangeScript() : ''}</script></body></html>`,
+    `<title>${escapeHtml(name)}</title><style>${deckStyle(shown, width, height, marks)}</style></head>`,
+    `<body><div class="lw-reader${strip ? '' : ' single'}">${strip}<main class="lw-deck"><div class="lw-stage">${turn}${slides}</div>`,
+    '<p class="lw-hidden" id="lw-told" aria-live="polite"></p></main></div>',
+    `<script>${deckScript(width)}</script></body></html>`,
   ].join('')
 }
+
+/** An arrow drawn as a line, the same on every computer, whatever its fonts. */
+const arrow = (path: string) => `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="${path}" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+const BEFORE = arrow('M10 3.5 5.5 8l4.5 4.5')
+const AFTER = arrow('M6 3.5 10.5 8 6 12.5')
+const BACK = arrow('M13 8H3.5M7.5 4 3.5 8l4 4')
+const ON = arrow('M3 8h9.5M8.5 4l4 4-4 4')
 
 /** What a changed slide, part or note is said to be, to a screen reader and on hover. */
 const CHANGED = 'Changed since you last looked'
@@ -65,16 +82,16 @@ const changedMark = (inside: string) => `<span class="lw-change-mark" role="img"
 const faceOf = (marks: SlideMarks, className: string) => (isPicture(marks.face ?? undefined) ? `<img class="${className}" src="${escapeHtml(marks.face!)}" alt="">` : '')
 
 /**
- * A strip of every slide, each a small copy of it (`stripScript` draws them in), its number beside
- * it. A press goes to the slide; the one in view is ringed. A changed slide has the stitch under it
+ * A strip of every slide, each a small copy of it (`deckScript` draws them in), its number beside
+ * it. A press goes to the slide; the one shown is ringed. A changed slide has the stitch under it
  * and the face of the agent whose file it is at its corner.
  */
-function stripHtml(count: number, width: number, height: number, marks: SlideMarks): string {
+function stripHtml(count: number, width: number, height: number, marks: SlideMarks, opening: number): string {
   const face = faceOf(marks, 'lw-thumb-face')
   const thumbs = Array.from({ length: count }, (_, index) => {
     const number = index + 1
     const changed = marks.changes?.slides.has(index) ?? false
-    return `<button type="button" class="lw-thumb${changed ? ' changed' : ''}" data-slide="${number}" aria-label="Slide ${number}${changed ? `, ${CHANGED.toLowerCase()}` : ''}"${changed ? ` title="${CHANGED}"` : ''}>`
+    return `<button type="button" class="lw-thumb${changed ? ' changed' : ''}" data-slide="${number}" aria-label="Slide ${number}${changed ? `, ${CHANGED.toLowerCase()}` : ''}"${changed ? ` title="${CHANGED}"` : ''}${index === opening ? ' aria-current="true"' : ''}>`
       + `<span class="lw-thumb-number" aria-hidden="true">${number}</span>`
       + `<span class="lw-thumb-sheet"><span class="lw-thumb-paper" style="aspect-ratio:${num(width)}/${num(height)}"></span>`
       // Under the copy, clear of its corner and of the ring round the slide in view.
@@ -84,45 +101,215 @@ function stripHtml(count: number, width: number, height: number, marks: SlideMar
 }
 
 /**
- * The strip at work: each slide copied in small (inert: a copy is never marked, picked or found),
- * a press scrolling to its slide, and the slide nearest the top of the view ringed, the strip kept
- * scrolled to it.
+ * The deck at work, a slide at a time.
+ *
+ * The slide shown is scaled to the page's width, by the one scale every slide shares (a deck's
+ * slides are all one size), and words the deck says to shrink to their box are made smaller, a step
+ * at a time, until they fit, as PowerPoint does, once a slide is first shown. The strip's copies of
+ * the slides are drawn in, inert (a copy is never marked, picked or found), a press on one showing
+ * its slide.
+ *
+ * A slide's notes are walked a step at a time: → and the Next step button go to the next step, then
+ * the next slide's first; ← back, to the last step of the slide before; Page Up and Page Down, Home
+ * and End go by slides. A step is pressed to go to it; pointing at a step lights its parts until the
+ * pointer leaves; and a part pressed on the slide goes to the next step about it. A dot for each
+ * step shows how far the walk has come. The parts the step being said is about are lit: ringed, and
+ * the slide's other words faded back. While the Pick switch is on, a press and the arrow keys are
+ * the Pick switch's.
  */
-function stripScript(width: number): string {
-  const pixels = (width * (4 / 3)).toFixed(3)
-  return `(function(){var strip=document.querySelector('.lw-strip');if(!strip)return;var thumbs=[].slice.call(strip.querySelectorAll('.lw-thumb')),slides=[].slice.call(document.querySelectorAll('.lw-slide')),current=-1;`
-    + `function draw(){thumbs.forEach(function(thumb,i){var paper=thumb.querySelector('.lw-thumb-paper'),canvas=slides[i]&&slides[i].querySelector('.lw-canvas');if(!paper||!canvas)return;var copy=paper.querySelector('.lw-canvas');if(!copy){copy=canvas.cloneNode(true);[].forEach.call(copy.querySelectorAll('[id]'),function(e){e.removeAttribute('id');});copy.setAttribute('aria-hidden','true');copy.setAttribute('inert','');paper.appendChild(copy);}copy.style.transform='scale('+(paper.clientWidth/${pixels})+')';});}`
-    + `function mark(i){if(i===current)return;current=i;thumbs.forEach(function(t,j){if(j===i)t.setAttribute('aria-current','true');else t.removeAttribute('aria-current');});var t=thumbs[i];if(t&&(t.offsetTop<strip.scrollTop||t.offsetTop+t.offsetHeight>strip.scrollTop+strip.clientHeight))strip.scrollTop=t.offsetTop-16;}`
-    + `function follow(){var best=0;for(var i=0;i<slides.length;i++){if(slides[i].getBoundingClientRect().top<=innerHeight*0.4)best=i;}mark(best);}`
-    + `thumbs.forEach(function(thumb,i){thumb.addEventListener('click',function(){if(slides[i])slides[i].scrollIntoView({block:'start'});});});`
-    // The frame takes its size after the page loads: the slide in view is found again then.
-    + `addEventListener('scroll',follow,{passive:true});addEventListener('resize',function(){draw();follow();});draw();follow();})();`
-}
-
-/**
- * The page opened at the first slide that changed, so what an agent changed is what is seen, and
- * kept there as the frame takes its size and the slides scale with it, until the person moves.
- */
-function toChangeScript(): string {
-  return `(function(){var first=document.querySelector('.lw-slide.changed');if(!first)return;var held=true;function go(){if(held)first.scrollIntoView({block:'start'});}function release(){held=false;}`
-    + `['wheel','touchstart','keydown','mousedown'].forEach(function(name){addEventListener(name,release,{passive:true,once:true});});addEventListener('resize',go);go();})();`
-}
-
-/**
- * Each slide's width set to the page's, by the one scale every slide shares: a deck's slides are all
- * one size. And words the deck says to shrink to their box made smaller, a step at a time, until
- * they fit, as PowerPoint does, once: the scale doesn't change what fits.
- */
-function fitScript(width: number): string {
+function deckScript(width: number): string {
   // Points to CSS pixels: 96 to 72.
-  const pixels = width * (4 / 3)
-  return `(function(){var root=document.documentElement;function fit(){var frame=document.querySelector('.lw-frame');if(!frame)return;root.style.setProperty('--lw-k',String(Math.max(0.1,frame.clientWidth/${pixels.toFixed(3)})));}`
-    + `function shrink(){Array.prototype.forEach.call(document.querySelectorAll('.lw-shrink'),function(words){var box=words.parentElement,zoom=1;while(box.scrollHeight>box.clientHeight+1&&zoom>0.3){zoom-=0.05;words.style.zoom=String(zoom);}});}`
-    + `addEventListener('resize',fit);fit();shrink();})();`
+  const pixels = (width * (4 / 3)).toFixed(3)
+  return `(function () {
+  var root = document.documentElement, slides = [].slice.call(document.querySelectorAll('.lw-slide')), told = document.getElementById('lw-told');
+  var strip = document.querySelector('.lw-strip'), thumbs = strip ? [].slice.call(strip.querySelectorAll('.lw-thumb')) : [];
+  var before = document.querySelector('.lw-slide-before'), after = document.querySelector('.lw-slide-after');
+  var at = -1, step = 0, lit = [], PIXELS = ${pixels};
+  if (!slides.length) return;
+  function each(list, run) { Array.prototype.forEach.call(list, run); }
+  function stepsOf(i) { return [].slice.call(slides[i].querySelectorAll('.lw-step')); }
+  function picking() { return root.classList.contains('lw-picking'); }
+  function selected() { var selection = getSelection(); return Boolean(selection && !selection.isCollapsed); }
+  function copy(i) {
+    var paper = thumbs[i] && thumbs[i].querySelector('.lw-thumb-paper'), canvas = slides[i].querySelector('.lw-canvas');
+    if (!paper || !canvas) return;
+    var old = paper.querySelector('.lw-canvas'), made = canvas.cloneNode(true);
+    each(made.querySelectorAll('[id]'), function (part) { part.removeAttribute('id'); });
+    made.classList.remove('lw-saying');
+    each(made.querySelectorAll('.lw-said'), function (part) { part.classList.remove('lw-said'); });
+    made.setAttribute('aria-hidden', 'true');
+    made.setAttribute('inert', '');
+    if (old) paper.replaceChild(made, old); else paper.appendChild(made);
+    made.style.transform = 'scale(' + (paper.clientWidth / PIXELS) + ')';
+  }
+  function fit() {
+    var frame = slides[at] && slides[at].querySelector('.lw-frame');
+    if (frame && frame.clientWidth) root.style.setProperty('--lw-k', String(Math.max(0.1, frame.clientWidth / PIXELS)));
+    each(thumbs, function (thumb) {
+      var paper = thumb.querySelector('.lw-thumb-paper'), made = paper && paper.querySelector('.lw-canvas');
+      if (made) made.style.transform = 'scale(' + (paper.clientWidth / PIXELS) + ')';
+    });
+    ring();
+  }
+  function shrink(i) {
+    var slide = slides[i], changed = false;
+    if (slide.hasAttribute('data-lw-fitted')) return;
+    slide.setAttribute('data-lw-fitted', '');
+    each(slide.querySelectorAll('.lw-shrink'), function (words) {
+      var box = words.parentElement, zoom = 1;
+      while (box.scrollHeight > box.clientHeight + 1 && zoom > 0.3) { zoom -= 0.05; words.style.zoom = String(zoom); changed = true; }
+    });
+    if (changed) copy(i);
+  }
+  // The parts said, by their keys: lit, and ringed where the slide is.
+  function light(keys) {
+    var canvas = slides[at].querySelector('.lw-canvas');
+    each(canvas.querySelectorAll('.lw-said'), function (part) { part.classList.remove('lw-said'); });
+    lit = String(keys || '').split(' ').filter(function (key) {
+      if (!key) return false;
+      var found = canvas.querySelectorAll('[data-lw-part~="' + key + '"]');
+      each(found, function (part) { part.classList.add('lw-said'); });
+      return found.length > 0;
+    });
+    canvas.classList.toggle('lw-saying', lit.length > 0);
+    // A lit row is read under its table's column names, a lit column beside its row names.
+    each(canvas.querySelectorAll('.lw-keep'), function (cell) { cell.classList.remove('lw-keep'); });
+    each(canvas.querySelectorAll('td.lw-said'), function (cell) {
+      var table = cell.closest('table'), keys = String(cell.getAttribute('data-lw-part') || '').split(' ');
+      lit.forEach(function (key) {
+        if (keys.indexOf(key) < 0) return;
+        each(table.querySelectorAll(/r\\d+$/.test(key) ? '.lw-col-name' : '.lw-row-name'), function (name) { name.classList.add('lw-keep'); });
+      });
+    });
+    ring();
+  }
+  function ring() {
+    var slide = slides[at], rings = slide && slide.querySelector('.lw-rings');
+    if (!rings) return;
+    rings.textContent = '';
+    var frame = slide.querySelector('.lw-frame').getBoundingClientRect(), canvas = slide.querySelector('.lw-canvas'), boxes = [];
+    // Round each part, a little out from it.
+    lit.forEach(function (key) {
+      var box = { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity };
+      each(canvas.querySelectorAll('[data-lw-part~="' + key + '"]'), function (part) {
+        var at = part.getBoundingClientRect();
+        if (!at.width && !at.height) return;
+        box = { left: Math.min(box.left, at.left - 4), top: Math.min(box.top, at.top - 4), right: Math.max(box.right, at.right + 4), bottom: Math.max(box.bottom, at.bottom + 4) };
+      });
+      if (box.right > box.left) boxes.push(box);
+    });
+    // Parts that touch share a ring, rather than two rings crossing.
+    for (var joined = true; joined;) {
+      joined = false;
+      for (var i = 0; i < boxes.length && !joined; i++) for (var j = i + 1; j < boxes.length && !joined; j++) {
+        var a = boxes[i], b = boxes[j];
+        if (a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom) {
+          boxes[i] = { left: Math.min(a.left, b.left), top: Math.min(a.top, b.top), right: Math.max(a.right, b.right), bottom: Math.max(a.bottom, b.bottom) };
+          boxes.splice(j, 1);
+          joined = true;
+        }
+      }
+    }
+    // Each inside the slide's edge.
+    boxes.forEach(function (box) {
+      var mark = document.createElement('span'), x = Math.max(1, box.left - frame.left), y = Math.max(1, box.top - frame.top);
+      mark.className = 'lw-ring';
+      mark.style.left = x + 'px';
+      mark.style.top = y + 'px';
+      mark.style.width = Math.max(4, Math.min(frame.width - 1, box.right - frame.left) - x) + 'px';
+      mark.style.height = Math.max(4, Math.min(frame.height - 1, box.bottom - frame.top) - y) + 'px';
+      rings.appendChild(mark);
+    });
+  }
+  function current() { var steps = stepsOf(at); return steps[step] ? steps[step].getAttribute('data-lw-parts') : ''; }
+  function show(i, s, quiet) {
+    if (i < 0 || i >= slides.length) return;
+    var moved = i !== at, was = step;
+    if (moved) {
+      if (selected()) getSelection().removeAllRanges();
+      each(document.querySelectorAll('.lw-ring'), function (mark) { mark.remove(); });
+      slides.forEach(function (slide, j) { slide.hidden = j !== i; });
+      thumbs.forEach(function (thumb, j) { if (j === i) thumb.setAttribute('aria-current', 'true'); else thumb.removeAttribute('aria-current'); });
+      at = i;
+      if (before) before.disabled = i === 0;
+      if (after) after.disabled = i === slides.length - 1;
+      fit();
+      shrink(i);
+      scrollTo(0, 0);
+      var thumb = thumbs[i];
+      if (strip && thumb && (thumb.offsetTop < strip.scrollTop || thumb.offsetTop + thumb.offsetHeight > strip.scrollTop + strip.clientHeight)) strip.scrollTop = thumb.offsetTop - 16;
+    }
+    var steps = stepsOf(i);
+    step = Math.max(0, Math.min(s, steps.length - 1));
+    steps.forEach(function (item, j) { if (j === step) item.setAttribute('aria-current', 'step'); else item.removeAttribute('aria-current'); });
+    var dots = slides[i].querySelector('.lw-step-dots');
+    if (dots) {
+      dots.setAttribute('aria-label', 'Step ' + (step + 1) + ' of ' + steps.length);
+      dots.style.setProperty('--lw-walked', String(step / Math.max(1, steps.length - 1)));
+      each(dots.querySelectorAll('.lw-step-dot'), function (dot, j) { dot.classList.toggle('lw-past', j < step); dot.classList.toggle('lw-now', j === step); });
+    }
+    // The walk's buttons say where they go: to a step, or at either end of the slide's, to a slide.
+    var back = slides[i].querySelector('.lw-step-back'), next = slides[i].querySelector('.lw-step-next');
+    if (back) name(back, i === 0 && step === 0, step > 0 ? 'Previous step' : 'Previous slide', '←');
+    if (next) name(next, i === slides.length - 1 && step >= steps.length - 1, step < steps.length - 1 ? 'Next step' : 'Next slide', '→');
+    light(current());
+    if (!moved && was !== step) {
+      // Words marked in the notes move as the steps open and close: they are let go.
+      var selection = getSelection(), list = slides[i].querySelector('.lw-steps');
+      if (selected() && list && list.contains(selection.anchorNode)) selection.removeAllRanges();
+      if (steps[step] && steps[step].scrollIntoView) steps[step].scrollIntoView({ block: 'nearest' });
+    }
+    if (told && !quiet) told.textContent = moved ? 'Slide ' + (i + 1) + ' of ' + slides.length : 'Step ' + (step + 1) + ' of ' + steps.length;
+  }
+  function name(button, last, said, key) {
+    button.disabled = last;
+    button.setAttribute('aria-label', said);
+    button.title = said + ' (' + key + ')';
+  }
+  function forward() { if (step < stepsOf(at).length - 1) show(at, step + 1); else show(at + 1, 0); }
+  function backward() { if (step > 0) show(at, step - 1); else if (at > 0) show(at - 1, stepsOf(at - 1).length - 1); }
+  thumbs.forEach(function (thumb, i) { copy(i); thumb.addEventListener('click', function () { show(i, 0); }); });
+  if (before) before.addEventListener('click', function () { show(at - 1, 0); });
+  if (after) after.addEventListener('click', function () { show(at + 1, 0); });
+  slides.forEach(function (slide, i) {
+    each(slide.querySelectorAll('.lw-step-back'), function (button) { button.addEventListener('click', backward); });
+    each(slide.querySelectorAll('.lw-step-next'), function (button) { button.addEventListener('click', forward); });
+    stepsOf(i).forEach(function (item, j) {
+      item.addEventListener('click', function () { if (j !== step && !selected() && !picking()) show(i, j); });
+      item.addEventListener('mouseenter', function () { if (j !== step) light(item.getAttribute('data-lw-parts')); });
+      item.addEventListener('mouseleave', function () { light(current()); });
+    });
+    slide.querySelector('.lw-canvas').addEventListener('click', function (event) {
+      if (picking() || selected()) return;
+      var part = event.target && event.target.closest ? event.target.closest('[data-lw-part]') : null, steps = stepsOf(i);
+      if (!part) return;
+      var keys = part.getAttribute('data-lw-part').split(' ');
+      for (var n = 1; n <= steps.length; n++) {
+        var j = (step + n) % steps.length, says = String(steps[j].getAttribute('data-lw-parts') || '').split(' ');
+        if (keys.some(function (key) { return says.indexOf(key) >= 0; })) { show(i, j); return; }
+      }
+    });
+  });
+  var KEYS = { ArrowRight: forward, ArrowLeft: backward, PageDown: function () { show(at + 1, 0); }, PageUp: function () { show(at - 1, 0); }, Home: function () { show(0, 0); }, End: function () { show(slides.length - 1, 0); } };
+  addEventListener('keydown', function (event) {
+    var go = KEYS[event.key], target = event.target;
+    if (!go || event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || picking()) return;
+    if (target && (target.isContentEditable || /^(input|textarea|select)$/i.test(target.tagName || ''))) return;
+    event.preventDefault();
+    go();
+  });
+  // The frame takes its size after the page loads, and the slide's fonts after that.
+  addEventListener('resize', fit);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(ring);
+  show(Math.max(0, slides.findIndex(function (slide) { return !slide.hidden; })), 0, true);
+})();`
 }
 
-/** The page around the slides: the reader's ground, and each slide paper on it, as a PDF's pages are. */
-const deckStyle = (look: PageLook) => [
+/**
+ * The page around the slide: the reader's ground, the slide paper on it as a PDF's pages are, sized
+ * to leave room under it for its notes, and the notes as steps.
+ */
+const deckStyle = (look: PageLook, width: number, height: number, marks: SlideMarks) => [
   `html{background:${look.ground}}`,
   `body{margin:0;color:${look.ink};font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}`,
   '.lw-reader{display:grid;grid-template-columns:124px minmax(0,1fr);align-items:start}',
@@ -130,7 +317,8 @@ const deckStyle = (look: PageLook) => [
   `.lw-strip{position:sticky;top:0;height:100vh;box-sizing:border-box;overflow-y:auto;padding:20px 12px 20px 8px;display:flex;flex-direction:column;gap:14px;border-right:1px solid color-mix(in srgb,${look.ink} 12%,transparent);-webkit-user-select:none;user-select:none}`,
   `.lw-thumb{display:grid;grid-template-columns:16px minmax(0,1fr);gap:6px;align-items:start;margin:0;padding:0;border:0;background:none;color:${look.label};font-family:inherit;font-size:11px;font-weight:500;line-height:1.3;text-align:right;cursor:pointer}`,
   `.lw-thumb[aria-current="true"]{color:${look.ink}}`,
-  `.lw-thumb:focus-visible{outline:2px solid ${look.accent};outline-offset:3px;border-radius:2px}`,
+  `.lw-reader button:focus-visible{outline:2px solid ${look.accent};outline-offset:3px}`,
+  '.lw-thumb:focus-visible{border-radius:2px}',
   '.lw-thumb-sheet{position:relative;display:flex;flex-direction:column;gap:5px}',
   '@media (pointer:coarse){.lw-thumb-sheet{min-height:44px}}',
   '.lw-thumb-paper{position:relative;display:block;overflow:hidden;background:#fff;border-radius:2px;box-shadow:0 1px 2px rgba(0,0,0,.24)}',
@@ -139,9 +327,21 @@ const deckStyle = (look: PageLook) => [
   '.lw-thumb-mark{display:flex;align-items:center;gap:4px}',
   `.lw-thumb-stitch{display:block;flex:1;min-width:0;height:4px;color:${look.accent}}`,
   '.lw-thumb-face{flex-shrink:0;width:16px;height:16px;object-fit:contain}',
-  '@media (max-width:560px){.lw-reader{grid-template-columns:minmax(0,1fr)}.lw-strip{display:none}}',
-  '.lw-deck{box-sizing:border-box;width:100%;max-width:1600px;margin:0 auto;padding:24px;display:flex;flex-direction:column;gap:40px}',
-  `.lw-slide-number{display:flex;align-items:center;gap:8px;margin:0 0 8px;font-size:12px;font-weight:500;color:${look.label};letter-spacing:.02em}`,
+  // Room under the notes for the reader's tip about asking, which floats there.
+  '.lw-deck{box-sizing:border-box;min-width:0;padding:16px 24px 96px}',
+  // The slide as wide as the page lets it be, and no taller than leaves its notes' first lines in view.
+  `.lw-stage{position:relative;width:min(100%,max(320px,calc((100vh - 280px) * ${num(width)} / ${num(height)})));margin:0 auto}`,
+  // Where the strip is shown it goes to any slide; where it is folded away, ‹ › at the top do.
+  '.lw-turn{position:absolute;top:0;right:0;display:none;gap:6px}',
+  '@media (max-width:560px){.lw-reader{grid-template-columns:minmax(0,1fr)}.lw-strip{display:none}.lw-deck{padding:12px 12px 104px}.lw-turn{display:flex}.lw-reader .lw-slide-number{padding-right:84px}}',
+  '@media (max-width:560px) and (pointer:coarse){.lw-reader .lw-slide-number{min-height:44px;padding-right:100px}}',
+  `.lw-turn button,.lw-walk-turn button{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;margin:0;padding:0;border:1px solid color-mix(in srgb,${look.ink} 18%,transparent);border-radius:999px;background:none;color:${look.ink};cursor:pointer}`,
+  `.lw-turn button:not(:disabled):hover,.lw-walk-turn button:not(:disabled):hover{border-color:color-mix(in srgb,${look.ink} 40%,transparent)}`,
+  // Next is the walk: its ring and arrow are gold.
+  `.lw-walk-turn .lw-step-next{border-color:${look.accent};color:${look.accent}}`,
+  '.lw-turn button:disabled,.lw-walk-turn button:disabled{opacity:.35;cursor:default}',
+  '@media (pointer:coarse){.lw-turn button,.lw-walk-turn button{width:44px;height:44px}}',
+  `.lw-slide-number{display:flex;align-items:center;gap:8px;min-height:32px;margin:0 0 8px;font-size:13px;font-weight:500;font-variant-numeric:tabular-nums;color:${look.label};letter-spacing:.02em}`,
   '.lw-change-mark{display:inline-flex;align-items:center;gap:6px}',
   `.lw-stitch{width:40px;height:6px;color:${look.accent}}`,
   '.lw-slide-face{width:18px;height:18px;object-fit:contain}',
@@ -150,7 +350,19 @@ const deckStyle = (look: PageLook) => [
   // bright gold with a dark one.
   `.lw-canvas .lw-changed::after{content:"";position:absolute;left:6%;right:6%;bottom:3pt;height:3pt;background:repeating-linear-gradient(90deg,${look.paperAccent} 0 8pt,transparent 8pt 13pt);filter:drop-shadow(0 0 1.5px rgba(255,255,255,.95));pointer-events:none}`,
   `.lw-canvas.lw-dark-slide .lw-changed::after{background:repeating-linear-gradient(90deg,${DARK_LOOK.accent} 0 8pt,transparent 8pt 13pt);filter:drop-shadow(0 0 1.5px rgba(0,0,0,.85))}`,
-  '.lw-notes-label{display:flex;align-items:center;gap:8px}',
+  // The parts the step being said is about, ringed in the gold that shows on the slide's own
+  // ground, with a dark hairline outside and a light one inside for a ground of any lightness.
+  '.lw-rings{position:absolute;inset:0;overflow:hidden;pointer-events:none}',
+  `.lw-ring{position:absolute;box-sizing:border-box;border:2px solid ${look.paperAccent};border-radius:6px;box-shadow:0 0 0 1px rgba(0,0,0,.5),inset 0 0 0 1px rgba(255,255,255,.85)}`,
+  `.lw-dark-slide+.lw-rings .lw-ring{border-color:${DARK_LOOK.accent}}`,
+  // The slide's other words fade back, still read and marked: a part pointed at, or one with words
+  // asked about, comes back whole. Pictures, wordless shapes and the master's parts stay as they are.
+  '.lw-canvas [data-lw-part]{transition:opacity .24s cubic-bezier(.2,0,0,1)}',
+  '.lw-canvas.lw-saying [data-lw-part]:not(.lw-said,.lw-keep,:hover,:has(.lw-mark)){opacity:.55}',
+  '@media (prefers-reduced-motion:reduce){.lw-canvas [data-lw-part]{transition:none}}',
+  // While the Pick switch is on, every part is there to pick: nothing faded, no rings.
+  'html.lw-picking .lw-canvas [data-lw-part]{opacity:1!important}',
+  'html.lw-picking .lw-rings{display:none}',
   '.lw-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}',
   '.lw-frame{position:relative;overflow:hidden;background:#fff;border-radius:4px;box-shadow:0 1px 3px rgba(0,0,0,.12),0 12px 32px rgba(0,0,0,.14)}',
   '.lw-canvas{position:relative;transform:scale(var(--lw-k,1));transform-origin:0 0;overflow:hidden;font-family:Calibri,Carlito,"Helvetica Neue",Arial,sans-serif;color:#000}',
@@ -171,46 +383,132 @@ const deckStyle = (look: PageLook) => [
   '.lw-chart{position:absolute;inset:0;width:100%;height:100%}',
   '.lw-chart text{font-family:Calibri,Carlito,"Helvetica Neue",Arial,sans-serif}',
   '.lw-media{border:1pt dashed #6E6862;border-radius:4pt}',
-  '.lw-notes{margin-top:14px;max-width:72ch;font-size:14px;line-height:1.55;overflow-wrap:anywhere}',
-  `.lw-notes-label{margin:0 0 4px;font-size:12px;font-weight:500;color:${look.label}}`,
+  '.lw-notes{margin-top:14px;font-size:14px;line-height:1.55;overflow-wrap:anywhere}',
+  '.lw-notes-head{display:flex;align-items:center;gap:12px;min-height:32px;margin:0 0 6px}',
+  `.lw-notes-label{display:flex;align-items:center;gap:8px;margin:0;font-size:12px;font-weight:500;color:${look.label}}`,
+  // A dot for each step on a line, the stretch walked gold: behind filled, the one being said
+  // bright, the rest still to come open.
+  '.lw-step-dots{position:relative;display:flex;align-items:center;gap:8px;padding:0 2px}',
+  `.lw-step-dots::before,.lw-step-dots::after{content:"";position:absolute;left:6px;top:50%;height:1px;background:${look.label}}`,
+  '.lw-step-dots::before{right:6px}',
+  `.lw-step-dots::after{width:calc((100% - 12px) * var(--lw-walked,0));background:${look.accent}}`,
+  `.lw-step-dot{position:relative;z-index:1;box-sizing:border-box;width:8px;height:8px;border:1.5px solid ${look.label};border-radius:999px;background:${look.ground}}`,
+  `.lw-step-dot.lw-past{border-color:${look.accentDim};background:${look.accentDim}}`,
+  `.lw-step-dot.lw-now{width:11px;height:11px;border-color:${look.accent};background:${look.accent};box-shadow:0 0 0 3px color-mix(in srgb,${look.accent} 25%,transparent)}`,
+  '.lw-walk-turn{display:flex;gap:6px;margin-left:auto}',
+  '.lw-steps{display:flex;flex-direction:column;gap:2px;margin:0;padding:0;list-style:none}',
+  `.lw-step{display:flex;gap:8px;align-items:flex-start;padding:3px 12px 3px 34px;border-radius:10px;color:${look.label};font-size:13px;cursor:pointer}`,
+  `.lw-step:hover{color:${look.ink}}`,
+  // The step being said: a gold edge, as the ring round what it is about is gold.
+  `.lw-step[aria-current="step"]{padding:10px 14px 12px 6px;background:color-mix(in srgb,${look.accent} 8%,transparent);box-shadow:inset 2px 0 0 ${look.accent};color:${look.ink};font-size:14px;cursor:auto}`,
+  '@media (pointer:coarse){.lw-step{min-height:44px;box-sizing:border-box;align-items:center}}',
+  // A step not being said is a line, its words run on and cut where the line ends.
+  '.lw-step-words{flex:1;min-width:0}',
+  '.lw-step:not([aria-current="step"]) .lw-step-words{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}',
+  // The reader's own marks and answer bubbles in the words are left as the reader draws them.
+  '.lw-step:not([aria-current="step"]) .lw-step-words :not(.lw-slot,.lw-slot *){display:inline;margin:0}',
+  '.lw-step:not([aria-current="step"]) .lw-step-words br{display:none}',
+  '.lw-step:not([aria-current="step"]) .lw-step-words p+p::before,.lw-step:not([aria-current="step"]) .lw-step-words li+li::before{content:" "}',
+  // The step being said opens with the face of the agent whose file it is, else room the same width.
+  `.lw-step-face{flex-shrink:0;width:20px;height:22px;${isPicture(marks.face ?? undefined) ? `background:url("${marks.face!.replace(/\s+/g, '')}") center/contain no-repeat` : ''}}`,
+  '.lw-step:not([aria-current="step"]) .lw-step-face{display:none}',
   // The notes read in the reader's own words, whatever colour the deck gave them on its white page.
-  '.lw-notes-words *{color:inherit!important;background:transparent!important}',
-  '.lw-notes-words p{margin:4px 0}',
+  '.lw-step-words :not(.lw-mark,.lw-slot,.lw-slot *){color:inherit!important;background:transparent!important}',
+  '.lw-step-words p{margin:2px 0}',
 ].join('')
 
-function slideHtml(slide: Slide, number: number, width: number, height: number, marks: SlideMarks): string {
+function slideHtml(slide: Slide, number: number, count: number, width: number, height: number, marks: SlideMarks, opening: boolean): string {
   const index = number - 1
   const changes = marks.changes
   const changedParts = changes?.parts.get(index)
   const layout = (slide.layoutElements ?? []).map((element) => elementHtml(element, number)).join('')
-  // The slide's own parts that changed are marked; its master's are never what an agent changed.
+  // The slide's own parts can be what a step is about, each by its key; those that changed are
+  // marked. Its master's are never what an agent changed.
   const own = (slide.elements ?? []).map((element, at) => {
-    const drawn = elementHtml(element, number)
+    const drawn = elementHtml(element, number, String(at))
     return changedParts?.has(at) ? drawn.replace('class="lw-el', 'class="lw-el lw-changed') : drawn
   }).join('')
   const parts = layout + own
-  // Its notes, open, under their own heading, which names the slide for a part picked in them.
-  const notes = slide.note?.trim()
-    ? `<div class="lw-notes${changes?.notes.has(index) ? ' lw-changed' : ''}"><h3 class="lw-notes-label">Notes<span class="lw-hidden">, slide ${number}</span>${changes?.notes.has(index) ? changedMark(stitch('lw-stitch')) : ''}</h3><div class="lw-notes-words">${textContent(slide.note)}</div></div>`
-    : ''
   // A changed slide's number has the stitch and the face beside it, where the strip isn't shown too.
   const changed = changes?.slides.has(index) ?? false
   const mark = changed ? changedMark(`${stitch('lw-stitch')}${faceOf(marks, 'lw-slide-face')}`) : ''
   const id = `lw-slide-${number}`
-  // The frame keeps the slide's shape at any scale; the canvas inside is the slide at its own size.
-  return `<section class="lw-slide${changed ? ' changed' : ''}" aria-labelledby="${id}"><h2 class="lw-slide-number" id="${id}">Slide ${number}${mark}</h2>`
+  // The frame keeps the slide's shape at any scale; the canvas inside is the slide at its own size,
+  // and the rings round what is said are drawn over it.
+  return `<section class="lw-slide${changed ? ' changed' : ''}" aria-labelledby="${id}"${opening ? '' : ' hidden'}>`
+    + `<h2 class="lw-slide-number" id="${id}">Slide ${number}${count > 1 ? ` of ${count}` : ''}${mark}</h2>`
     + `<div class="lw-frame" style="aspect-ratio:${num(width)}/${num(height)}">`
-    + `<div class="lw-canvas${isDarkFill(slide.fill) ? ' lw-dark-slide' : ''}" style="width:${pt(width)};height:${pt(height)};${backgroundOf(slide.fill, '#ffffff')}">${parts}</div></div>${notes}</section>`
+    + `<div class="lw-canvas${isDarkFill(slide.fill) ? ' lw-dark-slide' : ''}" style="width:${pt(width)};height:${pt(height)};${backgroundOf(slide.fill, '#ffffff')}">${parts}</div>`
+    + `<div class="lw-rings" aria-hidden="true"></div></div>${notesHtml(slide, number, count, marks)}</section>`
 }
 
-/** A part of slide `slide`, drawn where the deck puts it. */
-function elementHtml(element: Element, slide: number): string {
-  const inside = (parts: readonly Element[]) => parts.map((part) => elementHtml(part, slide)).join('')
+/**
+ * A slide's notes as steps, under their own heading, which names the slide for a part picked in
+ * them: a dot for each step and the buttons to walk them, and each step tied to the parts it is
+ * about by their keys. The first is the one being said until the page's script moves on.
+ */
+function notesHtml(slide: Slide, number: number, count: number, marks: SlideMarks): string {
+  const steps = noteSteps(slide.note, partsOf(slide.elements ?? []))
+  // The walk goes on to the next slide, so its buttons are under every slide of a deck of more than one.
+  const turn = count > 1 || steps.length > 1
+    ? `<span class="lw-walk-turn"><button type="button" class="lw-step-back" aria-label="Previous step" title="Previous step (←)">${BACK}</button>`
+      + `<button type="button" class="lw-step-next" aria-label="Next step" title="Next step (→)">${ON}</button></span>`
+    : ''
+  if (!steps.length) return turn ? `<div class="lw-notes"><div class="lw-notes-head">${turn}</div></div>` : ''
+  const changed = marks.changes?.notes.has(number - 1) ?? false
+  const label = `<h3 class="lw-notes-label">Notes<span class="lw-hidden">, slide ${number}</span>${changed ? changedMark(stitch('lw-stitch')) : ''}</h3>`
+  const dots = steps.length > 1
+    ? `<span class="lw-step-dots" role="img" aria-label="Step 1 of ${steps.length}">${steps.map((_, at) => `<span class="lw-step-dot${at === 0 ? ' lw-now' : ''}"></span>`).join('')}</span>`
+    : ''
+  const walk = dots + turn
+  const items = steps.map((step, at) => `<li class="lw-step"${step.parts.length ? ` data-lw-parts="${escapeHtml(step.parts.join(' '))}"` : ''}${at === 0 ? ' aria-current="step"' : ''}>`
+    + `<span class="lw-step-face" aria-hidden="true"></span><div class="lw-step-words">${textContent(step.html)}</div></li>`).join('')
+  return `<div class="lw-notes${changed ? ' lw-changed' : ''}"><div class="lw-notes-head">${label}${walk}</div><ol class="lw-steps">${items}</ol></div>`
+}
+
+/**
+ * The parts of a slide a step can be about, each by the key it is drawn with: a box of words or a
+ * shape with words, by its place among the slide's parts (a group's by its place in the group, after
+ * the group's); a table by its rows and columns, the first of each, which names the others, left
+ * out; a table of one row or one column whole.
+ */
+function partsOf(elements: readonly Element[], prefix = ''): SlidePart[] {
+  return elements.flatMap((element, at): SlidePart[] => {
+    const key = `${prefix}${at}`
+    switch (element.type) {
+      case 'text':
+      case 'shape': return [{ key, text: wordsOf(element.content ?? '') }]
+      case 'group':
+      case 'diagram': return partsOf(element.elements, `${key}.`)
+      case 'table': {
+        const cells = element.data.map((row) => row.map((cell) => wordsOf(cell.text ?? '')))
+        if (!isGrid(element)) return [{ key, text: cells.flat().join(' ') }]
+        const across = Math.max(...cells.map((row) => row.length))
+        return [
+          ...cells.slice(1).map((row, r): SlidePart => ({ key: `${key}r${r + 1}`, text: row.join(' '), table: { key, along: 'row' } })),
+          ...Array.from({ length: across - 1 }, (_, c): SlidePart => ({ key: `${key}c${c + 1}`, text: cells.map((row) => row[c + 1] ?? '').join(' '), table: { key, along: 'column' } })),
+        ]
+      }
+      default: return []
+    }
+  })
+}
+
+/** A table of more than one row and more than one column, which a step can be about by rows or columns. */
+const isGrid = (table: Table) => table.data.length > 1 && table.data.some((row) => row.length > 1)
+
+/**
+ * A part of slide `slide`, drawn where the deck puts it; given its `key` (`partsOf`), it is drawn
+ * with it, for the steps of the notes that talk about it.
+ */
+function elementHtml(element: Element, slide: number, key?: string): string {
+  const inside = (parts: readonly Element[]) => parts.map((part, at) => elementHtml(part, slide, key === undefined ? undefined : `${key}.${at}`)).join('')
+  const keyed = (drawn: string) => (key === undefined || !drawn ? drawn : drawn.replace(/^<div /, `<div data-lw-part="${escapeHtml(key)}" `))
   switch (element.type) {
-    case 'text': return textHtml(element)
-    case 'shape': return shapeHtml(element)
+    case 'text': return keyed(textHtml(element))
+    case 'shape': return keyed(shapeHtml(element))
     case 'image': return pictureHtml(element)
-    case 'table': return tableHtml(element)
+    case 'table': return key !== undefined && !isGrid(element) ? keyed(tableHtml(element)) : tableHtml(element, key)
     case 'chart': return chartHtml(element, slide)
     // A group's parts and a diagram's are placed inside its own box.
     case 'group': return `<div class="lw-el" style="${boxOf(element)}">${inside(element.elements)}</div>`
@@ -311,18 +609,29 @@ function pictureHtml(element: Image): string {
     + `<img src="${escapeHtml(element.base64)}" alt="" style="${place}${filter ? `;filter:${filter}` : ''}"></div></div>`
 }
 
-function tableHtml(element: Table): string {
+/**
+ * A table, and given its `key`, each cell drawn with the keys of the row and the column it is in,
+ * but the first of each (`partsOf`).
+ */
+function tableHtml(element: Table, key?: string): string {
   const columns = element.colWidths?.length ? `<colgroup>${element.colWidths.map((width) => `<col style="width:${pt(width)}">`).join('')}</colgroup>` : ''
+  const keysOf = (cell: TableCell, r: number, c: number) => key === undefined
+    ? ''
+    : [
+        ...Array.from({ length: Math.max(1, Math.floor(cell.rowSpan ?? 1)) }, (_, n) => r + n).filter((row) => row > 0).map((row) => `${key}r${row}`),
+        ...Array.from({ length: Math.max(1, Math.floor(cell.colSpan ?? 1)) }, (_, n) => c + n).filter((column) => column > 0).map((column) => `${key}c${column}`),
+      ].join(' ')
+  const names = (r: number, c: number) => (key === undefined ? '' : [r === 0 ? 'lw-col-name' : '', c === 0 ? 'lw-row-name' : ''].filter(Boolean).join(' '))
   const rows = element.data.map((row, index) => {
     const height = element.rowHeights?.[index]
-    const cells = row.filter((cell) => !cell.hMerge && !cell.vMerge).map(cellHtml).join('')
+    const cells = row.map((cell, c) => ({ cell, c })).filter(({ cell }) => !cell.hMerge && !cell.vMerge).map(({ cell, c }) => cellHtml(cell, keysOf(cell, index, c), names(index, c))).join('')
     return `<tr${height ? ` style="height:${pt(height)}"` : ''}>${cells}</tr>`
   }).join('')
   const edges = (['top', 'bottom', 'left', 'right'] as const).map((side) => borderSide(side, element.borders?.[side])).join('')
   return `<div class="lw-el" style="${boxOf(element)}"><table class="lw-table" style="${edges}">${columns}<tbody>${rows}</tbody></table></div>`
 }
 
-function cellHtml(cell: TableCell): string {
+function cellHtml(cell: TableCell, keys = '', names = ''): string {
   const spans = `${cell.rowSpan && cell.rowSpan > 1 ? ` rowspan="${Math.floor(cell.rowSpan)}"` : ''}${cell.colSpan && cell.colSpan > 1 ? ` colspan="${Math.floor(cell.colSpan)}"` : ''}`
   const style = [
     cell.fillColor ? `background:${color(cell.fillColor)}` : '',
@@ -330,8 +639,9 @@ function cellHtml(cell: TableCell): string {
     cell.fontBold ? 'font-weight:bold' : '',
     ...(['top', 'bottom', 'left', 'right'] as const).map((side) => borderSide(side, cell.borders?.[side]).replace(/;$/, '')),
   ].filter(Boolean).join(';')
-  const align = cell.vAlign === 'mid' ? ' class="mid"' : cell.vAlign === 'down' ? ' class="down"' : ''
-  return `<td${spans}${align}${style ? ` style="${style}"` : ''}>${textContent(cell.text ?? '')}</td>`
+  const classes = [cell.vAlign === 'mid' ? 'mid' : cell.vAlign === 'down' ? 'down' : '', names].filter(Boolean).join(' ')
+  const align = classes ? ` class="${classes}"` : ''
+  return `<td${keys ? ` data-lw-part="${escapeHtml(keys)}"` : ''}${spans}${align}${style ? ` style="${style}"` : ''}>${textContent(cell.text ?? '')}</td>`
 }
 
 function borderSide(side: 'top' | 'bottom' | 'left' | 'right', border: { borderColor: string; borderWidth: number; borderType: string } | undefined): string {
@@ -599,12 +909,19 @@ export function fontStack(family: string): string {
   return `'${name}', ${fallback}`
 }
 
-/** Whether a slide's fill is a dark colour, for a mark on it to be bright. */
+/**
+ * Whether a slide's fill is dark enough for a mark on it to be the bright gold: whichever of the two
+ * golds stands out more against it (below a lightness of 0.31 the bright gold's contrast passes the
+ * paper gold's), so a mid blue or grey slide gets the bright one too.
+ */
 function isDarkFill(fill: Fill | null | undefined): boolean {
   const hex = fill?.type === 'color' ? /^#([0-9a-f]{6})$/i.exec(color(fill.value))?.[1] : undefined
   if (!hex) return false
-  const [r, g, b] = [0, 2, 4].map((at) => parseInt(hex.slice(at, at + 2), 16) / 255)
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.4
+  const [r, g, b] = [0, 2, 4].map((at) => {
+    const channel = parseInt(hex.slice(at, at + 2), 16) / 255
+    return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4
+  })
+  return 0.2126 * r! + 0.7152 * g! + 0.0722 * b! < 0.31
 }
 
 function borderStyle(type: string | undefined): string {
