@@ -2199,6 +2199,11 @@ pub(crate) struct StartRunRequest {
     /// they are, and the agent the run reaches first is shown the pictures. Only the chat sets it.
     #[serde(skip)]
     files: Vec<crate::chat_files::ChatFile>,
+    /// The links the operator wrote in the message (ADR 0104), which the run's agents may read.
+    /// Set from the prompt where the prompt is the operator's own words, and never for a request
+    /// another team's agent made.
+    #[serde(skip)]
+    links: Vec<String>,
 }
 
 impl StartRunRequest {
@@ -2235,6 +2240,13 @@ impl StartRunRequest {
     #[must_use]
     pub(crate) fn giving(mut self, files: Vec<crate::chat_files::ChatFile>) -> Self {
         self.files = files;
+        self
+    }
+
+    /// The operator wrote `words` (ADR 0104): the run's agents may read the links in them.
+    #[must_use]
+    pub(crate) fn written_by_the_operator(mut self, words: &str) -> Self {
+        self.links = crate::agent::tools::links_written_in(words);
         self
     }
 
@@ -2307,6 +2319,9 @@ async fn start_run(
             format!("invalid run request: {}", rejection.body_text()),
         )
     })?;
+    // Typed in the app's Run box, so the operator's own words.
+    let prompt = request.prompt.clone();
+    let request = request.written_by_the_operator(&prompt);
     let outcome = launch_manual(
         &state.registry,
         state.archive.clone(),
@@ -2509,6 +2524,7 @@ pub(crate) async fn launch_manual(
     }
     prepared.lineage.reply.clone_from(&request.reply);
     prepared.lineage.files.clone_from(&request.files);
+    prepared.lineage.links.clone_from(&request.links);
     // Retry lineage is a column, not a `Map` in the browser: a reloaded page still says
     // "Retry of Run 07". Written after `resolve_continuation` so an explicit `retryOfRunId` wins
     // over the one a checkpoint continuation derives, which is the more specific claim.
@@ -7099,6 +7115,7 @@ pub(crate) mod tests {
                     outputs: BTreeMap::new(),
                     usage: crate::agent::Usage::default(),
                     messages_written: 0,
+                    links: Vec::new(),
                 },
             )
             .await

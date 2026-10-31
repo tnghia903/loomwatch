@@ -1,5 +1,5 @@
-//! The tools a built-in agent can call itself: files in its folder, commands, its plan, and the
-//! long tool outputs it set aside.
+//! The tools a built-in agent can call itself: files in its folder, commands, its plan, the long
+//! tool outputs it set aside, and the pages at links the person wrote.
 //!
 //! Each tool says up front what it will touch ([`Prepared`]), so the session can ask
 //! [`Permissions`](super::Permissions) with the exact paths or command before anything happens.
@@ -8,6 +8,7 @@
 
 mod command;
 mod files;
+mod link;
 
 use std::path::{Component, Path, PathBuf};
 
@@ -18,6 +19,7 @@ use super::provider::{Cancel, Picture, ToolSpec};
 use crate::prompt_blocks::Block;
 
 pub(crate) use command::CommandSettings;
+pub(crate) use link::written_in as links_written_in;
 
 // What each tool says it does, read each time the agent picks a tool.
 pub(crate) const LIST_FILES: Block = Block::new(
@@ -70,6 +72,12 @@ pub(crate) const READ_TOOL_OUTPUT: Block = Block::new(
     "tool.read_tool_output",
     "Read more of a long tool output that was set aside, by the id the shortened output named.",
 );
+/// For an agent not allowed the web (ADR 0104).
+pub(crate) const READ_LINK: Block = Block::new(
+    "tool.read_link",
+    "Read the web page, PDF or text at a link the person wrote to you. Only the links in their \
+     messages can be read: you aren't allowed the web otherwise.",
+);
 
 /// A built-in tool.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,6 +90,7 @@ pub(crate) enum Builtin {
     RunCommand,
     UpdatePlan,
     ReadToolOutput,
+    ReadLink,
 }
 
 /// What a tool call will do, worked out before it is allowed.
@@ -141,10 +150,12 @@ pub(crate) struct Context<'a> {
     pub cancel: &'a Cancel,
     pub command: &'a CommandSettings,
     pub pictures: Pictures,
+    /// The links the person wrote, which `read_link` may read (ADR 0104).
+    pub links: &'a [String],
 }
 
 impl Builtin {
-    pub(crate) const ALL: [Self; 8] = [
+    pub(crate) const ALL: [Self; 9] = [
         Self::ListFiles,
         Self::ReadFile,
         Self::SearchFiles,
@@ -153,6 +164,7 @@ impl Builtin {
         Self::RunCommand,
         Self::UpdatePlan,
         Self::ReadToolOutput,
+        Self::ReadLink,
     ];
 
     pub(crate) fn name(self) -> &'static str {
@@ -165,6 +177,7 @@ impl Builtin {
             Self::RunCommand => "run_command",
             Self::UpdatePlan => "update_plan",
             Self::ReadToolOutput => "read_tool_output",
+            Self::ReadLink => "read_link",
         }
     }
 
@@ -176,7 +189,11 @@ impl Builtin {
     pub(crate) fn only_reads(self) -> bool {
         matches!(
             self,
-            Self::ListFiles | Self::ReadFile | Self::SearchFiles | Self::ReadToolOutput
+            Self::ListFiles
+                | Self::ReadFile
+                | Self::SearchFiles
+                | Self::ReadToolOutput
+                | Self::ReadLink
         )
     }
 
@@ -294,6 +311,17 @@ impl Builtin {
                     "additionalProperties": false,
                 }),
             ),
+            Self::ReadLink => (
+                READ_LINK,
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "url": {"type": "string", "description": "The link, as the person wrote it."},
+                    },
+                    "required": ["url"],
+                    "additionalProperties": false,
+                }),
+            ),
         };
         ToolSpec {
             name: self.name().to_owned(),
@@ -386,6 +414,13 @@ impl Builtin {
                 locations: Vec::new(),
                 needs_permission: false,
             },
+            // Not asked about: the person wrote the link, and only their links are read.
+            Self::ReadLink => Prepared {
+                title: format!("Read {}", one_line(required_str(input, "url")?, 200)),
+                kind: ToolKind::Fetch,
+                locations: Vec::new(),
+                needs_permission: false,
+            },
         })
     }
 
@@ -409,6 +444,7 @@ impl Builtin {
                 .unwrap_or_else(|error| Output::failed(format!("The tool stopped: {error}")))
             }
             Self::RunCommand => Box::pin(command::run(input, context)).await,
+            Self::ReadLink => Box::pin(link::run(input, context)).await,
             Self::UpdatePlan | Self::ReadToolOutput => {
                 Output::failed("This tool is answered by the session.")
             }

@@ -374,6 +374,7 @@ mod tests {
             cancel: &cancel,
             command: &settings,
             pictures: super::super::Pictures::default(),
+            links: &[],
         };
         let done = run(
             &script(
@@ -432,6 +433,7 @@ mod tests {
             cancel: &cancel,
             command: &settings,
             pictures: super::super::Pictures::default(),
+            links: &[],
         };
         let note = "(The sandbox blocked this";
         let home = std::env::var("HOME").unwrap();
@@ -501,6 +503,7 @@ mod tests {
             cancel: &cancel,
             command: &settings,
             pictures: super::super::Pictures::default(),
+            links: &[],
         };
         run(input, &context).await
     }
@@ -607,6 +610,7 @@ mod tests {
             cancel: &cancel,
             command: &settings,
             pictures: super::super::Pictures::default(),
+            links: &[],
         };
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(500)).await;

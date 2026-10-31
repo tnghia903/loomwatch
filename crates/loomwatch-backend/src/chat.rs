@@ -2563,7 +2563,8 @@ async fn send_message(
                 request.start_key.clone(),
             )
             .replying(replied)
-            .giving(message.files.clone());
+            .giving(message.files.clone())
+            .written_by_the_operator(text);
             if let Decided::Agent(agent) = &decided {
                 start = start.only(agent);
                 message.route = Route::Agent;
@@ -3268,7 +3269,8 @@ async fn start_from_note(
         .map_or(message.text.as_str(), |team| task_text(&message.text, team));
     let mut start = StartRunRequest::from_chat(&message.team_path, task, expected, None)
         .replying(replied)
-        .giving(message.files.clone());
+        .giving(message.files.clone())
+        .written_by_the_operator(&message.text);
     let route = if let Some(agent) = &only {
         start = start.only(agent);
         Route::Agent
@@ -5088,6 +5090,99 @@ mod tests {
             }
         }
         turns
+    }
+
+    /// ADR 0104: an agent not allowed the web reads the page at a link the operator pasted into
+    /// the chat, as the owner's Research lead could not (2026-10-31), and only that page.
+    #[tokio::test]
+    async fn an_agent_without_the_web_reads_the_page_at_a_link_in_the_message() {
+        let page = "<html><head><title>STAIR</title></head><body><h1>STAIR</h1>\
+                    <p>Leaf sections are picked from a table of contents.</p></body></html>";
+        let site = axum::Router::new().route(
+            "/html/2609.03874v1",
+            axum::routing::get(move || async move { axum::response::Html(page) }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let paper = format!(
+            "http://{}/html/2609.03874v1",
+            listener.local_addr().unwrap()
+        );
+        tokio::spawn(async move { axum::serve(listener, site).await });
+        let other = paper.replace("2609.03874v1", "elsewhere?notes=private");
+        let asks = [paper.clone(), other.clone()];
+        let lead = crate::engine::demo_model(crate::agent::Demo::responder(move |request| {
+            let read = request
+                .messages
+                .iter()
+                .filter(|message| matches!(message, crate::agent::Message::Tool { .. }))
+                .count();
+            Some(match asks.get(read) {
+                Some(url) if request.tools.iter().any(|tool| tool == "read_link") => {
+                    crate::agent::Completion::calls(
+                        "",
+                        vec![crate::agent::ToolCall {
+                            id: format!("read-{read}"),
+                            name: "read_link".to_owned(),
+                            arguments: json!({"url": url}).to_string(),
+                        }],
+                    )
+                }
+                _ => crate::agent::Completion::text("done"),
+            })
+        }));
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        let yaml = format!(
+            "schemaVersion: 1\nid: lab\nname: Lab\nentrypoint: lead\nagents:\n  - id: lead\n    name: Research lead\n    role: plan the research\n    model: {lead}\n    allow:\n      commands: true\nedges: []\n"
+        );
+        std::fs::write(dir.0.join("lab.yaml"), yaml).unwrap();
+        let rig = rig(pool, &dir);
+        let (status, started) = send(
+            &rig.app,
+            json!({
+                "teamPath": "lab.yaml",
+                "text": format!("@Research lead let's see how fit this paper with our project: {paper}"),
+                "to": {"kind": "agent", "agent": "lead"},
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED, "{started}");
+        let run_id = started["run"]["runId"].as_str().unwrap().to_owned();
+        let run = wait_for(&rig.registry, &run_id, |run| run.status.is_terminal()).await;
+        assert_eq!(run.status, RunStatus::Succeeded, "{run:?}");
+
+        let requests = crate::engine::demo_for(&lead).unwrap().requests();
+        assert!(
+            requests
+                .iter()
+                .all(|request| !request.server_tools.web_fetch),
+            "it isn't given the web"
+        );
+        let answers: Vec<String> = requests
+            .last()
+            .unwrap()
+            .messages
+            .iter()
+            .filter_map(|message| match message {
+                crate::agent::Message::Tool { content, .. } => Some(content.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(answers.len(), 2, "it called read_link twice: {answers:?}");
+        assert_eq!(
+            answers[0],
+            format!(
+                "Read from {paper}\nTitle: STAIR\n\n# STAIR\n\nLeaf sections are picked from a \
+                 table of contents."
+            )
+        );
+        assert!(
+            answers[1].starts_with(&format!(
+                "{other} isn't a link the person wrote to you, so it can't be read."
+            )),
+            "{}",
+            answers[1]
+        );
     }
 
     /// ADR 0082, a team with no fixed order: its lead is handed the files and shown the pictures;

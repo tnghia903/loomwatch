@@ -167,6 +167,7 @@ const ALL: &[Block] = {
         tools::RUN_COMMAND,
         tools::UPDATE_PLAN,
         tools::READ_TOOL_OUTPUT,
+        tools::READ_LINK,
         helpers::START_HELPER,
         helpers::START_HELPER_TITLE,
         helpers::START_HELPER_TASK,

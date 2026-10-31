@@ -123,6 +123,9 @@ pub struct ToolSet {
     pub commands: bool,
     /// The provider's web search and fetch. Offered only to an agent allowed the web.
     pub web: bool,
+    /// `read_link`: the pages at the links the person wrote (ADR 0104), for an agent without the
+    /// web, which has no other way to read them.
+    pub links: bool,
     /// `update_plan`.
     pub plan: bool,
 }
@@ -134,16 +137,19 @@ impl ToolSet {
         files: false,
         commands: false,
         web: false,
+        links: false,
         plan: false,
     };
 
-    /// Everything, with the web as the agent's `allow.web` says.
+    /// Everything, with the web as the agent's `allow.web` says, and the person's links when it
+    /// isn't allowed the web.
     #[must_use]
     pub fn all(web: bool) -> Self {
         Self {
             files: true,
             commands: true,
             web,
+            links: !web,
             plan: true,
         }
     }
@@ -395,6 +401,9 @@ pub struct Snapshot {
     pub usage: Usage,
     #[serde(default)]
     pub messages_written: u64,
+    /// The links the person wrote, which `read_link` may read (ADR 0104).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub links: Vec<String>,
 }
 
 /// Cancels the turn a session is running, from anywhere.
@@ -432,6 +441,9 @@ pub struct Session {
     /// The pictures opened by the message whose calls are running, and their base64 bytes: they
     /// join the conversation only once all its calls are done, and count against its room before.
     unsent_pictures: (usize, usize),
+    /// The links the person wrote, which `read_link` may read (ADR 0104): only the engine adds to
+    /// them, from the person's own messages, never from what the agent reads or is handed.
+    links: Vec<String>,
 }
 
 impl Session {
@@ -473,6 +485,7 @@ impl Session {
             host,
             spend: Arc::new(Unmetered),
             unsent_pictures: (0, 0),
+            links: Vec::new(),
         }
     }
 
@@ -507,6 +520,7 @@ impl Session {
             host,
             spend: Arc::new(Unmetered),
             unsent_pictures: (0, 0),
+            links: snapshot.links,
         }
     }
 
@@ -521,6 +535,17 @@ impl Session {
             outputs: self.outputs.clone(),
             usage: self.usage,
             messages_written: self.messages_written,
+            links: self.links.clone(),
+        }
+    }
+
+    /// Let `read_link` read `links` too (ADR 0104). Only for links the person wrote: a link the
+    /// agent could have made up would let it send what it read to any address.
+    pub fn allow_links<'a>(&mut self, links: impl IntoIterator<Item = &'a String>) {
+        for link in links {
+            if !self.links.contains(link) {
+                self.links.push(link.clone());
+            }
         }
     }
 
@@ -969,6 +994,8 @@ impl Session {
                 | Builtin::EditFile => set.files,
                 Builtin::RunCommand => set.commands,
                 Builtin::UpdatePlan => set.plan,
+                // Offered whether or not a link has been written yet, so the list never changes.
+                Builtin::ReadLink => set.links,
                 // Added last, with the daemon's tools.
                 Builtin::ReadToolOutput => false,
             })
@@ -1487,6 +1514,7 @@ impl Session {
                             bytes: self.config.max_picture_bytes.saturating_sub(bytes),
                         }
                     },
+                    links: &self.links,
                 };
                 tool.run(input, &context).await
             }

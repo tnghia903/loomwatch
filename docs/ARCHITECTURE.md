@@ -59,7 +59,10 @@ instructions and tools.
   document readers, and a CSV or JSON file parsed; the tool's answer says whether it opens and
   what it holds (pages, sheets, slides, rows), or why not. Plain text and files over 10 MB aren't
   checked, and the check never fails the write. An agent allowed the web also gets OpenRouter's
-  web search and fetch. Tools the daemon serves itself,
+  web search and fetch. One that isn't gets `read_link` (`agent/tools/link.rs`, ADR 0104), which
+  the daemon runs: it reads only the links the operator wrote, which the engine hands each
+  session from the run's message and the operator's notes (`ProcessSpec::links`, the Team Bus for
+  teammates), never from anything an agent read or wrote. Tools the daemon serves itself,
   such as the Team Bus and Ask's tools, come in through the `HostTools` trait. Calls a provider
   runs on its own side are recorded as finished tool calls named by what they were
   (`session.rs` `server_tool_title`): code Claude's web tools run is "Run code: <first line>"

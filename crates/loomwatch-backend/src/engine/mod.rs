@@ -58,6 +58,9 @@ pub struct ProcessSpec {
     /// Pictures the operator sent (ADR 0082), shown to the agent with the next prompt it is given
     /// and then not again: the conversation keeps them.
     pub pictures: Vec<PathBuf>,
+    /// The links the person wrote in the run's message and their notes (ADR 0104), which the agent
+    /// may read with `read_link` when it isn't allowed the web.
+    pub links: Vec<String>,
 }
 
 /// What a session needs from the run that opens it.
@@ -404,6 +407,15 @@ impl AgentRun {
     /// is about to read was sent with.
     pub(crate) fn show_pictures(&mut self, pictures: impl IntoIterator<Item = PathBuf>) {
         self.spec.pictures.extend(pictures);
+    }
+
+    /// Let the agent read `links`, which the person wrote (ADR 0104), from its next prompt on.
+    pub(crate) fn allow_links(&mut self, links: impl IntoIterator<Item = String>) {
+        for link in links {
+            if !self.spec.links.contains(&link) {
+                self.spec.links.push(link);
+            }
+        }
     }
 
     /// Instructions after the built-in ones, such as Ask's or a helper's.
@@ -794,6 +806,9 @@ impl AgentRun {
         let session_id = recorder.session_id.clone();
         // Shown once, with this prompt: the conversation keeps them from here on.
         let pictures = std::mem::take(&mut self.spec.pictures);
+        if let Some(session) = self.session.as_mut() {
+            session.allow_links(&self.spec.links);
+        }
         let mut said =
             json!({"role": "user", "messageId": null, "content": {"type": "text", "text": prompt}});
         if !pictures.is_empty() {
@@ -1289,6 +1304,7 @@ mod tests {
 
     fn spec(cwd: &Path) -> ProcessSpec {
         ProcessSpec {
+            links: Vec::new(),
             cmd: String::new(),
             args: Vec::new(),
             env: BTreeMap::new(),

@@ -695,6 +695,13 @@ Every agent in a run works with LoomWatch's own tools:
 - **The web**, only for an agent with `allow.web: true`: OpenRouter's web search and page fetch.
   OpenRouter runs them, and the run shows each search and each page read. An agent without the
   switch has no web tools.
+- **The links you wrote**, for an agent without `allow.web`: `read_link` reads the web page, PDF
+  or text at a link in your message or a note you sent while the run worked, and only those
+  (ADR 0104). LoomWatch fetches it, not a command, so the sandbox's network rule doesn't stop it,
+  and it asks nothing first: you wrote the link. A link in a file, a page, a teammate's brief or
+  another team's request can't be read with it, so an agent can't send what it read anywhere by
+  writing an address. A redirect from a site on the internet to one on your computer or network
+  isn't followed. A page that builds its words with script reads as empty.
 - **Its plan**: `update_plan`, plus `read_tool_output` for reading the rest of a long output that
   was set aside.
 - **Tools you connected and gave it** (`kind: tool`): each action named `<tool>__<action>`, such as
@@ -726,7 +733,7 @@ allow:
 ```
 
 Every switch defaults to `false`, and an absent block means all off. `web` decides whether the
-agent has web tools at all. `edits` and `commands` decide whether a file change or a command runs
+agent has web tools at all; without it, an agent can still read the links you write to it. `edits` and `commands` decide whether a file change or a command runs
 without asking. An agent whose `spawn.cwd` holds its own team file (`cwd: .`) works in its
 prepared folder, so neither an edit nor a command reaches the team files. An operator node takes no
 `allow:`.

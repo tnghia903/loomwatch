@@ -276,6 +276,21 @@ Read more of a long tool output that was set aside, by the id the shortened outp
   ],
   "type": "object"
 }
+===== tool: read_link
+Read the web page, PDF or text at a link the person wrote to you. Only the links in their messages can be read: you aren't allowed the web otherwise.
+{
+  "additionalProperties": false,
+  "properties": {
+    "url": {
+      "description": "The link, as the person wrote it.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "url"
+  ],
+  "type": "object"
+}
 ===== bus: a team's lead
 [
   {
