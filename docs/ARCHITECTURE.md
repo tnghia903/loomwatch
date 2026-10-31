@@ -244,7 +244,10 @@ as a `Problem` (`not_connected`, `key_refused`, `out_of_credits`, `plan_limit`,
 `plan_not_eligible`, `plan_use_off`, `sign_in_again`) that the app turns into a button, such as
 Manage usage. Every call is a row in `model_calls`, filled from the run events, and
 `GET /api/usage` sums it by source, day and agent for the Usage page: neither OpenAI nor Anthropic
-tells an app how much of a plan or credit is left. `scripts/mock-vendors.py` stands in for both
+tells an app how much of a plan or credit is left. Each call is either the agents' work or
+`LoomWatch`'s own help (ADR 0106: Ask, reading a message, checking an answer, learning, the next
+steps at the notch, choosing a model), told apart by `FEATURE` in `archive/usage.rs`; calls made
+outside any session's events (next steps, choosing models) are counted with `count_call`. `scripts/mock-vendors.py` stands in for both
 companies in end-to-end checks.
 
 Each model tier (`schemas/model-tiers.json`, ADR 0057) names its model first; then a connected plan

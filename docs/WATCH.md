@@ -319,6 +319,7 @@ always has its archive; a router built without one (tests) answers 503.
 | `POST /api/runs/{id}/done-when` | `{"item": 0, "checked": false}` takes item 0 of what the run's message said done looks like off the check, `true` puts it back (ADR 0098): 200 with the `done_when` record as it now stands; 409 when the run isn't checking its message, has no such item, or its check has ended |
 | `POST /api/runs/{id}/cancel` | Abort a live run: 200 with the record; 409 with the record when it already finished; 404 when unknown |
 | `GET /api/pinned-agent` | `{"agent": "<id>", "notchShown": true}`, the one of My agents pinned to the notch, which the Mac app's box (⌃⌥Space) opens with, or `{"agent": null, …}`; an agent taken out of My agents is no longer pinned. The box pins the first of My agents it sends to while none is pinned (`PUT /api/pinned-agent`); another is pinned in My agents. `notchShown` is `false` while Show at the notch is unticked in the Mac app's menu (it keeps `app-notch-off` in the state folder): the pin stays, but there is no island or ⌃⌥Space to reach the agent, so My agents says to turn it on. The island reads it beside `GET /api/runs`, and a message from its box goes into that agent's own chat through `POST /api/chat/messages` |
+| `GET /api/next-steps`, `PUT /api/next-steps` | `{"on": true, "written": 12, "spent": 0.0021}`: whether next steps are written after the pinned agent's answers (ADR 0105), how many answers they were written for and what they cost, as the providers reported. `PUT {"on": false}` turns writing off, kept in `next-steps.json` in the state folder; what was asked more than once still shows. A change needs the `X-LoomWatch-Request: 1` header the app sends |
 | `GET /api/pinned-agent/suggestions` | `{"suggestions": [{"text": "Make it shorter", "kind": "next"}, …], "writing": false}`: up to three things the person may ask the pinned agent next, for the buttons under the island's box (ADR 0105). `next` are next steps from its newest answer, written once for that answer by a small model on the source the agent runs on, while the answer is younger than 12 hours and nothing has been sent since; `again` are requests sent to it more than once without files. `writing` is `true` while that answer's next steps are being written: ask again in a moment. The island asks only while its box is open. An agent on a free model writes them with that model. Each call is counted in `model_calls` (`call_kind` `next_steps`, under the agent's chat), so `GET /api/usage` shows it, and the answers written and what they cost (as the provider reported) are added to `next-steps.json` in the state folder |
 | `PUT /api/pinned-agent` | Pin `{"agent": "<id>"}` in place of any other, or unpin with `{"agent": null}`; only from `LoomWatch`'s own page (`X-LoomWatch-Request: 1`, else 403), and 404 for an id that is not one of My agents. Answers as `GET` does. Only the agent is kept, in `pinned.json` in the state folder |
 | `GET /api/team-requests` | The pinned agent's requests for one of your teams (`ask_team`), oldest first: `{id, askedBy: {runId, agent, chatPath}, team: {path, name}, request, status, runId, problem, createdAt, finishedAt}`, `status` one of `waiting`, `started`, `declined`, `done`, `failed`. Waiting and started ones always; the others within `?finishedWithin=<seconds>`, and for an hour at most. Kept in memory; a restart clears them. The island reads it beside `GET /api/runs` |
@@ -614,11 +615,17 @@ another site cannot set one.
 the last days: by source (with the last five hours and seven days), by day and by agent, from the
 `model_calls` table every recorded call fills. Neither OpenAI nor Anthropic tells an app what is
 left of a plan or credit, so the Usage page shows LoomWatch's own count and links to each company
-for the rest. Its table names a helper after its agent ("Writer's helper 2"). Calls LoomWatch makes
-outside a team's run show as LoomWatch: "Working out what your messages need" (`reader`, which
-reads each chat message before the team starts on it, and each message for what it says done looks
-like) and "Learning from your feedback" (`learner`). LoomWatch's own check of an answer runs inside
-the team's run, under the team's name, as LoomWatch (`loomwatch:check`).
+for the rest. Every call is one of two kinds (ADR 0106): an agent's work (`agents`, by team and
+agent; a helper named after its agent, "Writer's helper 2") or LoomWatch's own help (`features`, by
+what it did: `ask`; `reading`, the `reader` that reads each chat message before the team starts on
+it and each message for what it says done looks like, outside any run; `checking`, LoomWatch's own
+check of an answer, `loomwatch:check`; `learning`, the `learner`, outside any run; `next_steps`; and
+`choosing_models`, Let AI choose's readings). Each source's `loomwatch` and each day's `loomwatch` say
+how much of its total was LoomWatch's own help. The page opens with the two side by side, splits each
+way of paying and its daily bars the same way (dollars, or a ChatGPT plan's tokens, as its chart
+counts them; the help striped at each bar's foot), and lists the help with a switch for the two a
+person can do without: next steps (`/api/next-steps`, listed on a Mac) and Let AI choose
+(`/api/models/reading`, listed with OpenRouter connected).
 
 `model` is `chatgpt:<slug>` on the ChatGPT plan, `anthropic:<id>` on the Claude credit, or an
 OpenRouter id such as `anthropic/claude-opus-5.5`, and `thinkingEffort` its reasoning effort (an

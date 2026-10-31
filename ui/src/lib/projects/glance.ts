@@ -249,16 +249,16 @@ export interface Spender {
 
 /**
  * Who this month's dollars went to, the costliest first, from the usage report: each agent of the
- * teams named (`null`: every team) once, whatever it ran through and in however many teams. Ask,
- * LoomWatch's own reading of messages (in no team), and work a plan paid for are nobody's part here.
- * An agent's own chat is found by its name among My agents, since the report names a team only by
- * its name.
+ * teams named (`null`: every team) once, whatever it ran through and in however many teams.
+ * LoomWatch's own help, which the report lists apart (ADR 0106), and work a plan paid for are
+ * nobody's part here. An agent's own chat is found by its name among My agents, since the report
+ * names a team only by its name.
  */
 export function monthSpenders(report: UsageReport | null, teams: readonly string[] | null, shapes: readonly TeamShape[], jobs: readonly { id: string; name: string }[]): Spender[] {
   if (!report) return []
   const parts = new Map<string, Spender>()
   for (const tally of report.agents) {
-    if (tally.ask || !tally.team || tally.costUsd <= 0 || (teams && !teams.includes(tally.team))) continue
+    if (!tally.team || tally.costUsd <= 0 || (teams && !teams.includes(tally.team))) continue
     const name = tally.agentName ?? tally.agentId
     const shape = shapes.find((candidate) => candidate.name === tally.team)
     const job = shape ? undefined : jobs.find((candidate) => candidate.name === name)

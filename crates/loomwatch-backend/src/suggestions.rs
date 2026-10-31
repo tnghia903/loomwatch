@@ -104,6 +104,19 @@ struct Tally {
     written: u64,
     /// Dollars those calls cost, as their providers reported; a plan's calls cost none.
     spent: f64,
+    /// The person turned writing them off on the Usage page: what was asked before still shows.
+    off: bool,
+}
+
+/// `GET` and `PUT /api/next-steps`: whether next steps are written, and what they have cost.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NextSteps {
+    pub on: bool,
+    #[serde(default)]
+    pub written: u64,
+    #[serde(default)]
+    pub spent: f64,
 }
 
 /// Suggestions for the pinned agent. Cheap to clone.
@@ -117,6 +130,8 @@ struct Inner {
     teams_root: PathBuf,
     archive: Option<EventArchive>,
     tally_file: Option<PathBuf>,
+    /// One change to the tally file at a time, so a count and a switch never undo each other.
+    settings: Mutex<()>,
     written: Mutex<Written>,
 }
 
@@ -172,6 +187,7 @@ impl Suggestions {
                 teams_root: teams_root.to_owned(),
                 archive,
                 tally_file: state_dir.map(|state| state.join(TALLY_FILE)),
+                settings: Mutex::default(),
                 written: Mutex::default(),
             }),
         }
@@ -202,7 +218,8 @@ impl Suggestions {
         });
         let mut next = Vec::new();
         let mut writing = false;
-        if WRITE_NEXT_STEPS && let Some(answer) = answer.filter(|answer| fresh(answer, &asked, now))
+        if self.writes()
+            && let Some(answer) = answer.filter(|answer| fresh(answer, &asked, now))
         {
             match self.written(&answer.run_id) {
                 Some(steps) => next = steps,
@@ -271,32 +288,71 @@ impl Suggestions {
         let Some(archive) = &self.inner.archive else {
             return;
         };
-        let usage = &call.usage;
-        let recorded = sqlx::query(
-            "INSERT OR IGNORE INTO model_calls (
-                 event_id, session_id, agent_id, ts, source, model, call_kind, input_tokens,
-                 cached_read_tokens, cached_write_tokens, output_tokens, reasoning_tokens, cost_usd,
-                 cost_estimated)
-             VALUES ($1, $2, $3, $4, $5, $6, 'next_steps', $7, $8, $9, $10, $11, $12, $13)",
-        )
-        .bind(format!("next-steps-{}", uuid::Uuid::new_v4()))
-        .bind(answer.session.as_deref().unwrap_or("next-steps"))
-        .bind(agent)
-        .bind(Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true))
-        .bind(call.source.as_str())
-        .bind(&call.model)
-        .bind(i64::try_from(usage.input_tokens).unwrap_or(i64::MAX))
-        .bind(i64::try_from(usage.cached_read_tokens).unwrap_or(i64::MAX))
-        .bind(i64::try_from(usage.cached_write_tokens).unwrap_or(i64::MAX))
-        .bind(i64::try_from(usage.output_tokens).unwrap_or(i64::MAX))
-        .bind(i64::try_from(usage.reasoning_tokens).unwrap_or(i64::MAX))
-        .bind(usage.cost_usd.max(0.0))
-        .bind(usage.cost_estimated)
-        .execute(archive.db().writer())
-        .await;
-        if let Err(error) = recorded {
-            eprintln!("warning: the call that wrote next steps was not counted: {error}");
+        let counted = archive
+            .count_call(&crate::archive::OwnCall {
+                session: answer.session.as_deref().unwrap_or("next-steps"),
+                agent,
+                kind: crate::archive::NEXT_STEPS,
+                source: call.source.as_str(),
+                model: &call.model,
+                usage: &call.usage,
+            })
+            .await;
+        if let Err(error) = counted {
+            eprintln!("warning: the call that wrote next steps was not counted: {error:#}");
         }
+    }
+
+    /// What was written and spent, and whether the person turned writing off.
+    fn tally(&self) -> Tally {
+        self.inner
+            .tally_file
+            .as_ref()
+            .and_then(|file| std::fs::read(file).ok())
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default()
+    }
+
+    /// Whether next steps are written: on unless the person turned them off.
+    fn writes(&self) -> bool {
+        WRITE_NEXT_STEPS && !self.tally().off
+    }
+
+    fn save(&self, tally: &Tally) {
+        let Some(file) = &self.inner.tally_file else {
+            return;
+        };
+        let saved = serde_json::to_vec_pretty(tally)
+            .map_err(std::io::Error::other)
+            .and_then(|text| crate::approvals::write_private(file, &text));
+        if let Err(error) = saved {
+            eprintln!("warning: could not keep next steps' setting and cost: {error}");
+        }
+    }
+
+    /// Whether next steps are written, and what they have cost.
+    #[must_use]
+    pub fn next_steps(&self) -> NextSteps {
+        let tally = self.tally();
+        NextSteps {
+            on: WRITE_NEXT_STEPS && !tally.off,
+            written: tally.written,
+            spent: tally.spent,
+        }
+    }
+
+    /// Turn writing next steps on or off, and keep it so.
+    pub fn set_next_steps(&self, on: bool) -> NextSteps {
+        let turn = self
+            .inner
+            .settings
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let mut tally = self.tally();
+        tally.off = !on;
+        self.save(&tally);
+        drop(turn);
+        self.next_steps()
     }
 
     /// Keep what was written for `run_id`, even nothing, so it is written once.
@@ -319,30 +375,44 @@ impl Suggestions {
 
     /// Add one written answer, and what its call cost, to the tally.
     fn count(&self, spent: f64) {
-        let Some(file) = &self.inner.tally_file else {
-            return;
-        };
-        let mut tally: Tally = std::fs::read(file)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-            .unwrap_or_default();
+        let _turn = self
+            .inner
+            .settings
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let mut tally = self.tally();
         tally.written += 1;
         tally.spent += spent.max(0.0);
-        let saved = serde_json::to_vec_pretty(&tally)
-            .map_err(std::io::Error::other)
-            .and_then(|text| crate::approvals::write_private(file, &text));
-        if let Err(error) = saved {
-            eprintln!("warning: could not keep what next steps have cost: {error}");
-        }
+        self.save(&tally);
     }
 }
 
-/// `GET /api/pinned-agent/suggestions`, on this computer's own address.
+/// `GET /api/pinned-agent/suggestions`, and `GET` and `PUT /api/next-steps`, on this computer's
+/// own address; a change only from `LoomWatch`'s own page, which sends `X-LoomWatch-Request`.
 pub fn router(suggestions: Suggestions) -> Router {
     Router::new()
         .route("/api/pinned-agent/suggestions", get(suggested))
+        .route("/api/next-steps", get(next_steps_now).put(set_next_steps))
+        .route_layer(middleware::from_fn(crate::you::from_loomwatch))
         .route_layer(middleware::from_fn(local_evidence))
         .with_state(suggestions)
+}
+
+async fn next_steps_now(State(suggestions): State<Suggestions>) -> Json<NextSteps> {
+    Json(suggestions.next_steps())
+}
+
+/// The body of `PUT /api/next-steps`.
+#[derive(Debug, Deserialize)]
+struct TurnNextSteps {
+    on: bool,
+}
+
+async fn set_next_steps(
+    State(suggestions): State<Suggestions>,
+    Json(turn): Json<TurnNextSteps>,
+) -> Json<NextSteps> {
+    Json(suggestions.set_next_steps(turn.on))
 }
 
 async fn suggested(State(suggestions): State<Suggestions>) -> Json<Suggested> {
@@ -1203,6 +1273,89 @@ mod tests {
             );
             assert_eq!(writer_for(&model, false, &|_| false), model);
         }
+    }
+
+    /// Next steps can be turned off on the Usage page: nothing more is written, what was asked
+    /// before still shows, and it stays off. Only `LoomWatch`'s own page may change it.
+    #[tokio::test]
+    async fn next_steps_turned_off_write_nothing_and_stay_off() {
+        let teams = folder();
+        let state = folder();
+        let model = crate::engine::demo_model(Demo::scripted(vec![Completion::text(
+            "{\"next\": [\"Make it shorter\"]}",
+        )]));
+        let jobs = teams.0.join(".jobs");
+        std::fs::create_dir_all(&jobs).expect("jobs folder");
+        std::fs::write(
+            jobs.join("cole.yaml"),
+            format!("name: Cole\ninstructions: Help me.\nmodel: {model}\n"),
+        )
+        .expect("job");
+        let pinned = Pinned::open(state.0.as_path(), teams.0.as_path());
+        pinned
+            .set(crate::pinned::PinnedAgent {
+                agent: Some("cole".to_owned()),
+            })
+            .expect("pin");
+        let db = Db::temp().await;
+        let now = Utc::now();
+        for days in [2, 1] {
+            insert_message(
+                &db,
+                "check my availability",
+                now - chrono::Duration::days(days),
+                None,
+            )
+            .await;
+        }
+        insert_run(&db, "ipo", "The brief.", now - chrono::Duration::minutes(5)).await;
+        let app = router(Suggestions::new(
+            pinned,
+            teams.0.as_path(),
+            Some(EventArchive::new(db)),
+            Some(state.0.as_path()),
+        ));
+        let turn = |on: bool, from_page: bool| {
+            let mut request = Request::builder()
+                .method("PUT")
+                .uri("/api/next-steps")
+                .header(header::HOST, "localhost")
+                .header(header::CONTENT_TYPE, "application/json");
+            if from_page {
+                request = request.header("x-loomwatch-request", "1");
+            }
+            request
+                .body(Body::from(format!("{{\"on\": {on}}}")))
+                .expect("request")
+        };
+        // Another page can't turn it off.
+        let refused = app.clone().oneshot(turn(false, false)).await.expect("put");
+        assert!(!refused.status().is_success());
+        let response = app.clone().oneshot(turn(false, true)).await.expect("put");
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        let said: Value = serde_json::from_slice(&bytes).expect("json");
+        assert_eq!(said["on"], false);
+
+        assert_eq!(
+            ask(&app).await,
+            serde_json::json!({
+                "suggestions": [{"text": "check my availability", "kind": "again"}],
+                "writing": false,
+            })
+        );
+        let demo = crate::engine::demo_for(&model).expect("demo");
+        assert!(demo.requests().is_empty());
+        // Kept so: read again from the state folder.
+        let kept: Tally =
+            serde_json::from_slice(&std::fs::read(state.0.join(TALLY_FILE)).expect("tally"))
+                .expect("tally json");
+        assert!(kept.off);
+        // And on again, it writes.
+        app.clone().oneshot(turn(true, true)).await.expect("put");
+        assert_eq!(written(&app).await["suggestions"][0]["kind"], "next");
+        assert_eq!(demo.requests().len(), 1);
     }
 
     #[tokio::test]
