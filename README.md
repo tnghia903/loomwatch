@@ -314,7 +314,7 @@ what only that team needs.
 Write **@team** to start everyone, **@Writer** to ask one agent, or a note the team reads next time.
 A note to an agent at work goes into its next turn, so it revises with everything it already has.
 **Reply** under anything an agent said tells it exactly what you mean, and a face you put on its
-work is read by the team's next run.
+work is read by the team's next run. Click the team's name at the top to go to another team's chat.
 
 </td>
 <td valign="top">

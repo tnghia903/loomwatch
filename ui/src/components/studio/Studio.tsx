@@ -7,7 +7,7 @@ import type { SavedJob } from '../../lib/library/jobs'
 import { projectFile, projectsChanged, saveProject, useProjects, type Project, type ProjectEntry } from '../../lib/projects/client'
 import { costWords, doneByOf, crewOf, finishedToday, lastFinished, madeHere, monthCost, monthSpend, monthSpenders, needsYou, workingNow } from '../../lib/projects/glance'
 import { moveTeam } from '../../lib/projects/move'
-import { roomsOf, studioLayout, type Room } from '../../lib/projects/studio'
+import { looseProjects, roomsOf, studioLayout, type Room } from '../../lib/projects/studio'
 import { useMonthUsage } from '../../lib/projects/useMonthUsage'
 import { approveRun, loadDismissed } from '../../lib/story/useNeedsYou'
 import { useTeamShapes } from '../../lib/projects/useTeamShapes'
@@ -37,18 +37,6 @@ const VIEW_KEY = 'loomwatch:studio-view'
 
 function readView(): 'rooms' | 'list' {
   try { return window.localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'rooms' } catch { return 'rooms' }
-}
-
-/**
- * A team with no project is kept as a room of its own, under the team's name, so the desk counts it
- * with the rest; Home lists it under "Not in a project", not among the projects (ADR 0100). One new
- * to the app stays there until it is moved into a project; one whose project was deleted, for good.
- */
-function looseProjects(loose: readonly string[], teams: readonly TeamSummary[]): ProjectEntry[] {
-  return loose.map((path) => {
-    const team = teams.find((summary) => summary.path === path)
-    return { id: `team:${path}`, name: team ? teamDisplayName(team) : path.split(/[\\/]/).pop()?.replace(/\.ya?ml$/i, '') ?? path, teams: [path] }
-  })
 }
 
 const PROBLEM_LABEL: Record<NonNullable<TeamSummary['problem']>, string> = {

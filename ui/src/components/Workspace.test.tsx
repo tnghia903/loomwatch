@@ -1100,6 +1100,30 @@ describe('Workspace', () => {
     Object.assign(documentState, { isValid: true, documentChipState: 'clean', documentProblems: [], yamlPreview: 'a: 1' })
   })
 
+  // From a team's chat, the only way to another team's chat was Projects and back in.
+  it('lists the other teams in the team menu, each opening on the tab on screen', async () => {
+    const fallback = globalThis.fetch
+    const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200 })
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith('/api/projects')) return json({ projects: [{ id: 'school', name: 'School', teams: ['demo.yaml', 'notes.yaml'] }], loose: [], missing: [], removed: [] })
+      if (url.endsWith('/api/teams')) return json({ root: '/teams', files: ['demo.yaml', 'notes.yaml'] })
+      if (url.startsWith('/api/team?') && url.includes('notes.yaml')) return json({ path: 'notes.yaml', yaml: 'schemaVersion: 1\nname: Lecture notes\nagents:\n  - id: taker\n    name: Note taker\n', revision: 'r2' })
+      if (url.startsWith('/api/team?')) return json({ path: 'demo.yaml', yaml: 'schemaVersion: 1\nname: Demo\nagents:\n  - id: researcher\n', revision: 'r1' })
+      return fallback(input, init)
+    }))
+    renderWorkspace()
+    fireEvent.click(screen.getByRole('button', { name: /open team menu/ }))
+    const notes = await screen.findByRole('link', { name: /Lecture notes/ })
+    expect(notes).toHaveAttribute('href', `/?path=${encodeURIComponent('notes.yaml')}`)
+    fireEvent.click(screen.getByRole('button', { name: /open team menu/ }))
+
+    fireEvent.click(screen.getByRole('button', { name: /Chat/ }))
+    fireEvent.click(screen.getByRole('button', { name: /open team menu/ }))
+    expect(await screen.findByRole('link', { name: /Lecture notes/ })).toHaveAttribute('href', `/?path=${encodeURIComponent('notes.yaml')}&view=chat`)
+    expect(screen.getByRole('link', { name: /Demo/ })).toHaveAttribute('aria-current', 'page')
+  })
+
   it('opens schedule problems in a friendly canvas editor instead of raw YAML', async () => {
     Object.assign(documentState, {
       isValid: false,
@@ -1529,6 +1553,49 @@ describe('Workspace', () => {
         expect(screen.queryByRole('alertdialog')).toBeNull()
         expect(vi.mocked(fetch).mock.calls.some(([url, init]) => String(url) === '/api/jobs/researcher' && init?.method === 'PUT')).toBe(false)
       } finally {
+        view.unmount()
+        researcher.selected = false
+        Reflect.deleteProperty(researcher.data.agent, 'from')
+      }
+    })
+
+    // The newcomer review: another team picked from the name's menu skipped the workbench's own
+    // question, and the browser's "Leave site?" asked instead.
+    it('asks about an agent’s workbench before another team opens, then opens it in place', async () => {
+      const researcher = documentState.nodes[0]
+      researcher.selected = true
+      Object.assign(researcher.data.agent, { from: { agent: 'researcher' } })
+      const stubbed = vi.mocked(fetch)
+      const answer = stubbed.getMockImplementation()!
+      const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200 })
+      stubbed.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        if (url === '/api/jobs') return json({ folder: '.jobs', jobs: [{ id: 'researcher', file: '.jobs/researcher.yaml', name: 'Researcher', instructions: 'Find it.', version: 1 }], problems: [] })
+        if (url.endsWith('/api/projects')) return json({ projects: [{ id: 'school', name: 'School', teams: ['demo.yaml', 'notes.yaml'] }], loose: [], missing: [], removed: [] })
+        if (url.endsWith('/api/teams')) return json({ root: '/teams', files: ['demo.yaml', 'notes.yaml'] })
+        if (url.startsWith('/api/team?') && url.includes('notes.yaml')) return json({ path: 'notes.yaml', yaml: 'schemaVersion: 1\nname: Lecture notes\nagents:\n  - id: taker\n    name: Note taker\n', revision: 'r2' })
+        if (url.startsWith('/api/team?')) return json({ path: 'demo.yaml', yaml: 'schemaVersion: 1\nname: Demo\nagents:\n  - id: researcher\n', revision: 'r1' })
+        return answer(input, init)
+      })
+      // The team page's own mover (useTeamPage) takes an in-place move; a held page goes as a load.
+      const movedTo: string[] = []
+      const inPlace = (event: Event) => { event.preventDefault(); movedTo.push((event as CustomEvent<string>).detail) }
+      window.addEventListener('loomwatch:open-team', inPlace)
+      const view = renderWorkspace()
+      try {
+        fireEvent.click(screen.getByRole('button', { name: 'Edit Researcher' }))
+        const bench = screen.getByRole('region', { name: /’s agents$/ })
+        fireEvent.click(await within(bench).findByRole('button', { name: /^Name\b/ }))
+        fireEvent.change(within(bench).getByRole('textbox', { name: 'Name' }), { target: { value: 'Scout' } })
+
+        fireEvent.click(screen.getByRole('button', { name: /open team menu/ }))
+        fireEvent.click(await screen.findByRole('link', { name: /Lecture notes/ }))
+        expect(movedTo).toEqual([])
+        fireEvent.click(within(screen.getByRole('alertdialog', { name: 'Save changes to Scout?' })).getByRole('button', { name: 'Don’t save' }))
+        await waitFor(() => expect(movedTo).toEqual([`/?path=${encodeURIComponent('notes.yaml')}`]))
+        expect(screen.queryByRole('region', { name: /’s agents$/ })).toBeNull()
+      } finally {
+        window.removeEventListener('loomwatch:open-team', inPlace)
         view.unmount()
         researcher.selected = false
         Reflect.deleteProperty(researcher.data.agent, 'from')

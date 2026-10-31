@@ -3,11 +3,15 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react'
 
 import { baseName } from '../../lib/files/paths'
 import { listNames } from '../../lib/format'
+import type { RunRecord } from '../../lib/runs/client'
+import type { LeaveTeam } from '../../lib/team-file/leaveTeam'
 import { reviewProblems, type ReviewProblem } from '../../lib/team-file/problems'
 import type { EntrypointProblem, SaveState } from '../../lib/team-file/useTeamDocument'
+import type { TeamView } from '../../lib/team-file/useTeamList'
 import type { AgentFieldProblems, DocumentProblem } from '../../lib/team-file/validation'
 import { ChipDot, type ChipState } from '../ui/glyphs'
 import { keys } from '../../lib/platform'
+import { TeamSwitch } from './TeamSwitch'
 
 export interface DocumentSwitcherProps {
   path: string | null
@@ -42,14 +46,21 @@ export interface DocumentSwitcherProps {
   onSelectProblem: (problem: ReviewProblem) => void
   problemsOpen: boolean
   onProblemsOpenChange: (open: boolean) => void
+  /**
+   * The other teams, listed in the menu and opened on the tab on screen; absent, none are listed.
+   * `before` lets the page ask first about anything else a move would lose (an agent's workbench),
+   * then carry on.
+   */
+  teams?: { view: TeamView; runs: readonly RunRecord[]; leave: LeaveTeam; before?: (then: () => void) => void }
 }
 
 
 // UX_REDESIGN §9.1: the canvas is a view over a file and the file is the truth. This chip is
-// the only place file state is expressed; its menu is what is done to the file. Other teams, and a
-// new one, are reached from the team rail beside the page (ADR 0043: one control per action).
+// the only place file state is expressed; its menu is what is done to the file, and the other teams
+// to go to, on the same tab (ADR 0043: one control per action; the dock's Projects lists them too,
+// a place away). A new team is made in Projects.
 export function DocumentSwitcher(props: DocumentSwitcherProps) {
-  const { path, teamName = null, here = null, alsoIn = [], saveState, saveError, entrypointProblem, documentProblems, fieldProblemsByAgent, agentNames, isValid, readOnlyReason, fileGone = false, editingDisabled = false, onSave, onSaveCopy, onReload, onDiscard, onRename, onDelete, onSelectProblem, problemsOpen, onProblemsOpenChange } = props
+  const { path, teamName = null, here = null, alsoIn = [], saveState, saveError, entrypointProblem, documentProblems, fieldProblemsByAgent, agentNames, isValid, readOnlyReason, fileGone = false, editingDisabled = false, onSave, onSaveCopy, onReload, onDiscard, onRename, onDelete, onSelectProblem, problemsOpen, onProblemsOpenChange, teams } = props
   const [switcherOpen, setSwitcherOpen] = useState(false)
   const [discardConfirm, setDiscardConfirm] = useState(false)
   const [renaming, setRenaming] = useState<string | null>(null)
@@ -58,6 +69,9 @@ export function DocumentSwitcher(props: DocumentSwitcherProps) {
   const [renameRefused, setRenameRefused] = useState<string | null>(null)
   const refusedId = useId()
   const chipRef = useRef<HTMLDivElement>(null)
+  // Another team picked while this one has changes not saved: where to, and how keeping them went.
+  const [leavingTo, setLeavingTo] = useState<string | null>(null)
+  const [keeping, setKeeping] = useState<'saving' | 'failed' | null>(null)
 
   const problems = useMemo(() => reviewProblems(entrypointProblem, fieldProblemsByAgent, documentProblems, agentNames), [entrypointProblem, fieldProblemsByAgent, documentProblems, agentNames])
   const errors = problems.filter((problem) => problem.weight === 'error')
@@ -66,11 +80,12 @@ export function DocumentSwitcher(props: DocumentSwitcherProps) {
 
   useEffect(() => {
     if (!switcherOpen && !problemsOpen) return
-    function onPointerDown(event: MouseEvent) {
-      if (chipRef.current && !chipRef.current.contains(event.target as Node)) { setSwitcherOpen(false); onProblemsOpenChange(false); setDiscardConfirm(false); setRenaming(null); setRenameRefused(null) }
+    function onPointerDown(event: PointerEvent) {
+      if (chipRef.current && !chipRef.current.contains(event.target as Node)) { setSwitcherOpen(false); onProblemsOpenChange(false); setDiscardConfirm(false); setRenaming(null); setRenameRefused(null); setLeavingTo(null); setKeeping(null) }
     }
-    window.addEventListener('mousedown', onPointerDown)
-    return () => window.removeEventListener('mousedown', onPointerDown)
+    // Caught on the way down: the Team tab's canvas stops a press on itself before it bubbles up.
+    window.addEventListener('pointerdown', onPointerDown, true)
+    return () => window.removeEventListener('pointerdown', onPointerDown, true)
   }, [switcherOpen, problemsOpen, onProblemsOpenChange])
 
   if (!path) return null
@@ -88,6 +103,34 @@ export function DocumentSwitcher(props: DocumentSwitcherProps) {
     setRenameBusy(false)
     setRenameRefused(refused)
     if (!refused) setRenaming(null)
+  }
+
+  const closeMenu = () => { setSwitcherOpen(false); setLeavingTo(null); setKeeping(null) }
+  // Another team: at once, or once this one's changes are saved or dropped.
+  const pickTeam = (href: string | null) => {
+    if (!teams || href === null) { closeMenu(); return }
+    const go = () => {
+      if (teams.leave.asks()) { setSwitcherOpen(true); setLeavingTo(href); setKeeping(null); return }
+      closeMenu()
+      teams.leave.go(href)
+    }
+    if (!teams.before) { go(); return }
+    // The page's own question comes first, with the menu out of its way; this team's, after it.
+    closeMenu()
+    teams.before(go)
+  }
+  const keepThenGo = async () => {
+    if (!teams || !leavingTo) return
+    setKeeping('saving')
+    const saved = await teams.leave.saveThenGo(leavingTo)
+    if (saved) closeMenu()
+    else setKeeping('failed')
+  }
+  const dropThenGo = () => {
+    if (!teams || !leavingTo) return
+    const href = leavingTo
+    closeMenu()
+    void teams.leave.dropThenGo(href)
   }
 
   let state: ChipState = 'clean'
@@ -118,10 +161,17 @@ export function DocumentSwitcher(props: DocumentSwitcherProps) {
 
   const ledger = saveState === 'saving' ? 'saving' : saveState === 'saved' ? 'saved' : saveState === 'error' ? 'failed' : ''
 
+  // Leaving with changes not saved: the question an agent's workbench asks (LeaveConfirm), in this
+  // team's words. Where saving can't work, it says why and offers what can.
+  const cantSave = saveState === 'conflict' ? `${l1} was changed outside LoomWatch.` : !isValid ? `${l1} can’t be saved yet.${problems.length > 0 ? ` ${l2}.` : ''}` : null
+  const leaveQuestion = keeping === 'failed' ? (saveError ? `Couldn’t save: ${saveError}` : 'Couldn’t save.') : cantSave ?? `Save changes to ${l1}?`
+
+  // Its menus hang from the chip's left edge: the chip starts the header, beside the dock, and a menu
+  // centred on it slid under the dock.
   return (
     <div ref={chipRef} style={{ position: 'relative', pointerEvents: 'auto' }}>
       <div className={`e1 lw-chip ${ledger}`} style={{ position: 'relative' }} title={readOnlyReason ?? saveError ?? undefined}>
-        <button type="button" className="chip-open" onClick={() => { setSwitcherOpen((open) => !open); onProblemsOpenChange(false) }} aria-controls="switcher-pop" aria-expanded={switcherOpen} aria-label={`${l1}, ${l2}, open team menu`} title={`${l1} · ${l2}`}>
+        <button type="button" className="chip-open" onClick={() => { if (switcherOpen) closeMenu(); else setSwitcherOpen(true); onProblemsOpenChange(false) }} aria-controls="switcher-pop" aria-expanded={switcherOpen} aria-label={`${l1}, ${l2}, open team menu`} title={`${l1} · ${l2}`}>
           <ChipDot state={state} />
           <span className="chip-text">
             <span className="chip-l1 t-body-m">{l1}</span>
@@ -134,7 +184,20 @@ export function DocumentSwitcher(props: DocumentSwitcherProps) {
       </div>
 
       {switcherOpen && (
-        <div id="switcher-pop" className="pop e2" role="dialog" aria-label="Team menu" style={{ top: 'calc(var(--lw-chip-h) + 8px)', left: '50%', transform: 'translateX(-50%)', width: 'min(392px, calc(100vw - 32px))' }} onKeyDown={(event) => { if (event.key === 'Escape') setSwitcherOpen(false) }}>
+        <div id="switcher-pop" className="pop e2" role="dialog" aria-label="Team menu" style={{ top: 'calc(var(--lw-chip-h) + 8px)', left: 0, width: 'min(392px, calc(100vw - 32px))' }} onKeyDown={(event) => { if (event.key === 'Escape') closeMenu() }}>
+          {teams && path && <TeamSwitch open={path} view={teams.view} runs={teams.runs} onPick={pickTeam} />}
+          {leavingTo && (
+            <div className="pop-inline team-switch-leave t-meta" role="alertdialog" aria-label={leaveQuestion} onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); setLeavingTo(null); setKeeping(null) } }}>
+              <span>{leaveQuestion}</span>
+              {/* A gold line: the screen's one gold fill stays its own action's (Run team, Send). The
+                  keyboard waits on Save, or on Cancel where there is no Save, never on Don't save. */}
+              {!cantSave && <button type="button" className="btn btn-ring" autoFocus onClick={() => void keepThenGo()} disabled={keeping === 'saving'}>{keeping === 'saving' ? 'Saving…' : 'Save'}</button>}
+              <button type="button" className="btn" onClick={dropThenGo} disabled={keeping === 'saving'}>Don’t save</button>
+              <button type="button" className="btn" autoFocus={Boolean(cantSave)} onClick={() => { setLeavingTo(null); setKeeping(null) }} disabled={keeping === 'saving'}>Cancel</button>
+            </div>
+          )}
+          {/* While it asks about leaving, the question is the menu's: the file's own Discard steps aside. */}
+          {!leavingTo && (<>
           {renaming !== null && onRename && (
             <form className="pop-inline t-meta" aria-label="Rename team" aria-busy={renameBusy} onSubmit={(event) => { event.preventDefault(); void rename(renaming) }}>
               <input className="input" autoFocus aria-label="Team name" aria-invalid={renameRefused ? true : undefined} aria-describedby={renameRefused ? refusedId : undefined} value={renaming} onChange={(event) => { setRenaming(event.target.value); setRenameRefused(null) }} onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); setRenaming(null); setRenameRefused(null) } }} style={{ flex: 1, minWidth: 0 }} />
@@ -157,11 +220,12 @@ export function DocumentSwitcher(props: DocumentSwitcherProps) {
             </span>
             <span className="pop-note t-meta">Saves keep your comments and key order.</span>
           </div>
+          </>)}
         </div>
       )}
 
       {problemsOpen && (
-        <div id="problems-pop" className="pop e2" role="dialog" aria-label="Document problems" style={{ top: 'calc(var(--lw-chip-h) + 8px)', left: '50%', transform: 'translateX(-50%)', width: 'min(392px, calc(100vw - 32px))' }} onKeyDown={(event) => { if (event.key === 'Escape') onProblemsOpenChange(false) }}>
+        <div id="problems-pop" className="pop e2" role="dialog" aria-label="Document problems" style={{ top: 'calc(var(--lw-chip-h) + 8px)', left: 0, width: 'min(392px, calc(100vw - 32px))' }} onKeyDown={(event) => { if (event.key === 'Escape') onProblemsOpenChange(false) }}>
           {incomplete.length > 0 && (
             <div className="prob-group">
               <div className="prob-head needs t-micro"><ChipDot state="incomplete" /> {incomplete.length} thing{incomplete.length === 1 ? '' : 's'} to finish</div>

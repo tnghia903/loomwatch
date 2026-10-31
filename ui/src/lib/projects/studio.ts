@@ -3,6 +3,7 @@ import { parse } from 'yaml'
 import { isOpenTeam } from '../library/uses'
 import { isTerminalRun, type RunRecord } from '../runs/client'
 import { scheduleWords } from '../story/teamSentence'
+import { teamDisplayName, type TeamSummary } from '../team-file/client'
 import { pipelineOrder } from '../team-file/pipelineOrder'
 import type { AgentConfig, TeamDocument } from '../team-file/types'
 import { PRESENCE_WORDS, type Presence } from '../rail/presence'
@@ -181,6 +182,54 @@ export function roomsOf(
       line: roomLine(teams, state),
       lastWorked: lastOf(project.teams.flatMap(runsOf)),
     }
+  })
+}
+
+/**
+ * A team with no project is kept as a room of its own, under the team's name, so the desk counts it
+ * with the rest; Home lists it under "Not in a project", not among the projects (ADR 0100). One new
+ * to the app stays there until it is moved into a project; one whose project was deleted, for good.
+ */
+export function looseProjects(loose: readonly string[], teams: readonly TeamSummary[]): ProjectEntry[] {
+  return loose.map((path) => {
+    const team = teams.find((summary) => summary.path === path)
+    return { id: `team:${path}`, name: team ? teamDisplayName(team) : path.split(/[\\/]/).pop()?.replace(/\.ya?ml$/i, '') ?? path, teams: [path] }
+  })
+}
+
+/** A group of teams in a team's name menu: a project's, or (`id` null) those in no project. */
+export interface TeamGroup {
+  id: string | null
+  name: string
+  mark?: string
+  teams: RoomTeam[]
+}
+
+/**
+ * The teams a team's page can move to, by project: the open team's own project first, as the
+ * nearest, then the others in the order Projects lists them, then the teams in no project. A project
+ * put away stays out, unless the open team is in it. `open` is the open team's path as the page has
+ * it (the full path in the running app); a room lists its teams under the teams folder `root`.
+ */
+export function teamGroups(rooms: readonly Room[], open: string, root: string | null): TeamGroup[] {
+  const holds = (room: Room) => room.teams.some((team) => isOpenTeam(team.path, open, root))
+  const loose = rooms.filter((room) => room.id.startsWith('team:'))
+  const projects = rooms.filter((room) => !room.id.startsWith('team:') && room.teams.length > 0 && (!room.putAway || holds(room)))
+  const inNone = loose.flatMap((room) => room.teams)
+  return [
+    ...[...projects.filter(holds), ...projects.filter((room) => !holds(room))].map((room) => ({ id: room.id, name: room.name, ...(room.mark ? { mark: room.mark } : {}), teams: room.teams })),
+    ...(inNone.length > 0 ? [{ id: null, name: 'Not in a project', teams: inNone }] : []),
+  ]
+}
+
+/** The groups' teams whose name, or one of whose agents' names, has `query` in it. */
+export function findTeams(groups: readonly TeamGroup[], query: string): TeamGroup[] {
+  const needle = query.trim().toLowerCase()
+  if (!needle) return [...groups]
+  const found = (team: RoomTeam) => team.name.toLowerCase().includes(needle) || team.seats.some((seat) => seat.kind === 'agent' && seat.name.toLowerCase().includes(needle))
+  return groups.flatMap((group) => {
+    const teams = group.teams.filter(found)
+    return teams.length > 0 ? [{ ...group, teams }] : []
   })
 }
 
