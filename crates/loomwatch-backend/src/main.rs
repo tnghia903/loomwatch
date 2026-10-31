@@ -425,6 +425,16 @@ async fn main() -> Result<()> {
             let address = listener.local_addr()?;
             println!("loomwatchd listening on http://{address}");
             let registry = recovered_registry(&opened).await;
+            // Changes left on a file that were waiting for their agent's turn when LoomWatch
+            // stopped wait on the file again, to be sent again (ADR 0107).
+            match loomwatch_backend::changes::ChangeStore::new(opened.db().clone())
+                .settle_after_restart()
+                .await
+            {
+                Ok(0) => {}
+                Ok(waiting) => println!("{waiting} changes left on files wait to be sent again"),
+                Err(error) => eprintln!("warning: could not settle changes left on files: {error}"),
+            }
             // Ctrl-C (and the launcher's stop) ends the daemon. The archive's writer may still
             // hold the last fraction of a second of events; they are written before it exits.
             tokio::spawn(flush_then_exit_on_signal(opened.clone()));
@@ -503,6 +513,7 @@ async fn main() -> Result<()> {
             let pinned = loomwatch_backend::pinned::Pinned::open(&state_dir, &teams_root);
             loomwatch_backend::pinned::install(pinned.clone());
             let team_requests_archive = archive.clone();
+            let changes_archive = archive.clone();
             // ADR 0105: what to ask the pinned agent next, under the island's box.
             let suggestions = loomwatch_backend::suggestions::Suggestions::new(
                 pinned.clone(),
@@ -550,6 +561,16 @@ async fn main() -> Result<()> {
                 app = app.merge(loomwatch_backend::skills_api::router(
                     state_dir.clone(),
                     loomwatch_backend::platform::home_dir().unwrap_or_default(),
+                ));
+                // Changing a file in the reader, with a copy kept first to put it back (ADR 0107).
+                // Changes left on a file for its agents keep their copies in the same place.
+                let kept = loomwatch_backend::kept::Kept::open(&state_dir);
+                app = app.merge(loomwatch_backend::kept::router(kept.clone(), &teams_root));
+                app = app.merge(loomwatch_backend::changes::router(
+                    changes_archive,
+                    teams_root.clone(),
+                    registry.clone(),
+                    kept,
                 ));
                 // Other devices connected to this computer (ADR 0102): their door, on this
                 // computer's own address, which the person's own Tailscale brings them to; and

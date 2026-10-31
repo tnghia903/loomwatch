@@ -49,7 +49,7 @@ import { Learned } from './Learned'
 import { Reactions } from './Reactions'
 import { Spool } from './Spool'
 import { StatusGlyph } from '../ui/glyphs'
-import { ReplyQuote } from './ReplyQuote'
+import { ChangesQuote, ReplyQuote } from './ReplyQuote'
 import { SaidText } from './SaidText'
 
 
@@ -714,6 +714,7 @@ function Request({ run, request, flash = false, continuedFrom, name, solo, onSho
           {request?.replyTo && <ReplyQuote reply={request.replyTo} name={name} onShow={onShowReplied?.(request.replyTo)} />}
           {request?.files && <ChatFiles files={request.files} />}
           <div className="chat-text"><SaidText text={text} /></div>
+          {request?.changes?.length ? <ChangesQuote changes={request.changes} onShow={onShowReplied} /> : null}
         </div>)}
       </div>
     </div>
@@ -769,6 +770,7 @@ function Note({ note, flash = false, live, name, onShowReplied, reactions }: { n
           {note.replyTo && <ReplyQuote reply={note.replyTo} name={name} onShow={onShowReplied?.(note.replyTo)} />}
           {note.files && <ChatFiles files={note.files} />}
           <div className="chat-text"><SaidText text={note.text} /></div>
+          {note.changes?.length ? <ChangesQuote changes={note.changes} onShow={onShowReplied} /> : null}
         </div>)}
         <div className="chat-under"><Swap key={state}>{state}</Swap></div>
       </div>

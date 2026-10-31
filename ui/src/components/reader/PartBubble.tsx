@@ -52,6 +52,8 @@ export function PartBubble({ passage, look, name, hue, open, fresh, lit, onOpen,
       onFocus={() => { onFocus(true); if (!pressing.current) card(true); pressing.current = false }} onBlur={() => { onFocus(false); onCard?.(null, false) }}>
       <BubblePoint />
       <AvatarFace id={by} hue={hue(by)} size={18} fontSize={9} text={initials(name(by))} className="rd-bubble-face" />
+      {/* A change left for the agent (ADR 0107): a line, dashed while it waits for Send or its turn (reader.css). */}
+      {passage.change && <svg className="rd-bubble-change" viewBox="0 0 16 4" aria-hidden="true" focusable="false"><path d="M1.5 2h13" /></svg>}
       {look === 'busy' && <span className="chat-dots" aria-hidden="true"><i /><i /><i /></span>}
       {look === 'waiting' && <i className="rd-bubble-new" aria-hidden="true" />}
       {look === 'failed' && <X size={10} strokeWidth={3} className="rd-bubble-stop" aria-hidden="true" />}

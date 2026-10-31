@@ -251,6 +251,11 @@ describe('a web page in the reader', () => {
       // one; the one whose answer is open is lit.
       expect(bubbles[0].className).toBe('lw-bubble lw-read lw-lit')
       expect(bubbles[1].className).toBe('lw-bubble lw-busy lw-dark')
+      // A change left for the agent wears its line (ADR 0107): dashed while it waits, solid once sent.
+      tell({ type: 'marks', asking: null, parts: [mark('beat Markov-chain', 'read', { change: 'waits' }), mark('Costs fell.', 'busy', { change: 'sent' }), mark('Sales fell.', 'read')] })
+      expect(bubbles[0].className).toBe('lw-bubble lw-read lw-change-waits')
+      expect(bubbles[1].className).toBe('lw-bubble lw-busy lw-change-sent lw-dark')
+      expect(bubbles[0].querySelector('svg.lw-change path')).not.toBeNull()
       tell({ type: 'marks', asking: null, parts: [] })
       expect(document.body.innerHTML).toBe(page)
     } finally {
@@ -759,6 +764,162 @@ describe('a web page in the reader', () => {
     }
   })
 
+  it('lets a part drawn to be typed into be typed in: says so, and says its words when it is left changed (ADR 0107)', () => {
+    const holder = document.createElement('iframe')
+    document.body.append(holder)
+    const inner = holder.contentWindow! as Window & typeof globalThis
+    const doc = holder.contentDocument!
+    const sent: Record<string, unknown>[] = []
+    vi.spyOn(inner.parent, 'postMessage').mockImplementation((message: unknown) => { sent.push(message as Record<string, unknown>) })
+    const told = () => sent.splice(0).filter((message) => message.type !== 'ready').map(({ lw, ...rest }) => { expect(lw).toBe('reader'); return rest })
+    const key = (part: Element, key: string, extra: KeyboardEventInit = {}) => {
+      const event = new inner.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...extra })
+      part.dispatchEvent(event)
+      return event
+    }
+    /** The caret at the end of a part's words. */
+    const atEnd = (part: Element) => {
+      const range = doc.createRange()
+      range.selectNodeContents(part)
+      range.collapse(false)
+      doc.getSelection()!.removeAllRanges()
+      doc.getSelection()!.addRange(range)
+    }
+    try {
+      doc.documentElement.setAttribute('data-lw-editing', '')
+      doc.body.innerHTML = '<div class="lw-canvas"><p data-lw-edit="shape:0:3:0" contenteditable="true"><span>Sales grew</span></p></div>'
+        + '<p data-lw-edit="note:0:1" contenteditable="true" data-lw-lines="">It rose<br>since spring.</p>'
+      const [box, note] = [...doc.querySelectorAll<HTMLElement>('[data-lw-edit]')]
+      new inner.Function(PAGE_BRIDGE)()
+      told()
+
+      // Typed in and left: what it says now, a line break as a new line.
+      box.focus()
+      expect(doc.activeElement).toBe(box)
+      expect(told()).toEqual([{ type: 'typing', on: true }])
+      box.querySelector('span')!.textContent = 'Sales grew 14%'
+      box.blur()
+      expect(told()).toEqual([{ type: 'edit', part: 'shape:0:3:0', words: 'Sales grew 14%' }, { type: 'typing', on: false }])
+      // Left as it was: nothing to write.
+      box.focus()
+      box.blur()
+      expect(told()).toEqual([{ type: 'typing', on: true }, { type: 'typing', on: false }])
+
+      // Escape puts it back and leaves it, and is not the reader's.
+      box.focus()
+      box.querySelector('span')!.textContent = 'Sales fell'
+      expect(key(box, 'Escape').defaultPrevented).toBe(true)
+      expect(box.textContent).toBe('Sales grew 14%')
+      expect(doc.activeElement).not.toBe(box)
+      expect(told()).toEqual([{ type: 'typing', on: true }, { type: 'typing', on: false }])
+
+      // Enter leaves it, Shift+Enter too: a box on a slide takes no line breaks.
+      box.focus()
+      box.querySelector('span')!.textContent = 'Sales grew 15%'
+      expect(key(box, 'Enter').defaultPrevented).toBe(true)
+      expect(told()).toEqual([{ type: 'typing', on: true }, { type: 'edit', part: 'shape:0:3:0', words: 'Sales grew 15%' }, { type: 'typing', on: false }])
+      box.focus()
+      key(box, 'Enter', { shiftKey: true })
+      expect(told()).toEqual([{ type: 'typing', on: true }, { type: 'typing', on: false }])
+      // A key finishing a word being composed stays the word's.
+      box.focus()
+      expect(key(box, 'Enter', { isComposing: true }).defaultPrevented).toBe(false)
+      expect(doc.activeElement).toBe(box)
+      expect(told()).toEqual([{ type: 'typing', on: true }])
+
+      // Pasted words arrive as plain words, on one line in a box.
+      atEnd(box)
+      const paste = new inner.Event('paste', { bubbles: true, cancelable: true })
+      Object.defineProperty(paste, 'clipboardData', { value: { getData: (type: string) => (type === 'text/plain' ? ' in Q3\r\nand Q4' : '<b>bold</b>') } })
+      box.dispatchEvent(paste)
+      expect(paste.defaultPrevented).toBe(true)
+      expect(box.innerHTML).not.toContain('<b>')
+      box.blur()
+      expect(told()).toEqual([{ type: 'edit', part: 'shape:0:3:0', words: 'Sales grew 15% in Q3 and Q4' }, { type: 'typing', on: false }])
+      // Nothing is made bold, nor dropped in.
+      for (const inputType of ['formatBold', 'formatItalic', 'insertFromDrop']) {
+        const input = new inner.InputEvent('beforeinput', { inputType, bubbles: true, cancelable: true })
+        box.dispatchEvent(input)
+        expect(input.defaultPrevented).toBe(true)
+      }
+      const typed = new inner.InputEvent('beforeinput', { inputType: 'insertText', data: 'x', bubbles: true, cancelable: true })
+      box.dispatchEvent(typed)
+      expect(typed.defaultPrevented).toBe(false)
+
+      // The notes take line breaks: Shift+Enter makes one, and the part stays typed in.
+      note.focus()
+      atEnd(note)
+      key(note, 'Enter', { shiftKey: true })
+      expect(doc.activeElement).toBe(note)
+      const lines = new inner.Event('paste', { bubbles: true, cancelable: true })
+      Object.defineProperty(lines, 'clipboardData', { value: { getData: () => 'And it\nkept rising.' } })
+      note.dispatchEvent(lines)
+      note.blur()
+      expect(told()).toEqual([{ type: 'typing', on: true }, { type: 'edit', part: 'note:0:1', words: 'It rose\nsince spring.\nAnd it\nkept rising.' }, { type: 'typing', on: false }])
+
+      // The Pick switch stays off on a page drawn to be typed into.
+      inner.dispatchEvent(new inner.MessageEvent('message', { data: { lw: 'reader', type: 'pick', on: true }, source: inner.parent }))
+      expect(doc.documentElement.classList.contains('lw-picking')).toBe(false)
+    } finally {
+      vi.restoreAllMocks()
+      holder.remove()
+    }
+  })
+
+  it('tells words marked in a part being typed into, so a change can be left on them (ADR 0107)', async () => {
+    const holder = document.createElement('iframe')
+    document.body.append(holder)
+    const inner = holder.contentWindow! as Window & typeof globalThis
+    const doc = holder.contentDocument!
+    const sent: Record<string, unknown>[] = []
+    vi.spyOn(inner.parent, 'postMessage').mockImplementation((message: unknown) => { sent.push(message as Record<string, unknown>) })
+    // jsdom lays nothing out: the marked words are somewhere.
+    Object.defineProperty(inner.Range.prototype, 'getBoundingClientRect', { configurable: true, value: () => ({ top: 10, bottom: 30, left: 5, right: 80 }) })
+    try {
+      doc.documentElement.setAttribute('data-lw-editing', '')
+      doc.body.innerHTML = '<p data-lw-edit="note:0:0" contenteditable="true">Open with why: one email a week.</p>'
+      new inner.Function(PAGE_BRIDGE)()
+      const note = doc.querySelector<HTMLElement>('p')!
+      note.focus()
+      doc.dispatchEvent(new inner.Event('pointerdown'))
+      const range = doc.createRange()
+      range.setStart(note.firstChild!, 15)
+      range.setEnd(note.firstChild!, 32)
+      doc.getSelection()!.removeAllRanges()
+      doc.getSelection()!.addRange(range)
+      doc.dispatchEvent(new inner.Event('pointerup'))
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(sent.filter((message) => message.type === 'typing')).toEqual([{ lw: 'reader', type: 'typing', on: true }])
+      expect(sent.at(-1)).toMatchObject({ lw: 'reader', type: 'selection', text: 'one email a week.' })
+    } finally {
+      vi.restoreAllMocks()
+      holder.remove()
+    }
+  })
+
+  it('types into nothing on a page not drawn to be typed into, whatever its parts say', () => {
+    const holder = document.createElement('iframe')
+    document.body.append(holder)
+    const inner = holder.contentWindow! as Window & typeof globalThis
+    const doc = holder.contentDocument!
+    const sent: Record<string, unknown>[] = []
+    vi.spyOn(inner.parent, 'postMessage').mockImplementation((message: unknown) => { sent.push(message as Record<string, unknown>) })
+    try {
+      doc.body.innerHTML = '<p data-lw-edit="para:0" contenteditable="true">Words</p>'
+      new inner.Function(PAGE_BRIDGE)()
+      const part = doc.querySelector<HTMLElement>('p')!
+      part.focus()
+      part.textContent = 'Other words'
+      part.blur()
+      expect(sent.filter((message) => message.type === 'edit' || message.type === 'typing')).toEqual([])
+      inner.dispatchEvent(new inner.MessageEvent('message', { data: { lw: 'reader', type: 'pick', on: true }, source: inner.parent }))
+      expect(doc.documentElement.classList.contains('lw-picking')).toBe(true)
+    } finally {
+      vi.restoreAllMocks()
+      holder.remove()
+    }
+  })
+
   it('takes only well-formed messages from the page’s script', () => {
     expect(pageMessage({ lw: 'reader', type: 'ready' })).toEqual({ type: 'ready' })
     expect(pageMessage({ lw: 'reader', type: 'open', key: 'writer:Sales' })).toEqual({ type: 'open', key: 'writer:Sales' })
@@ -791,6 +952,15 @@ describe('a web page in the reader', () => {
     for (const bad of [{ what: 'table' }, { path: '' }, { path: 'a\nb' }, { path: 'a`b' }, { text: '' }, { rect: { top: 'x' } }]) {
       expect(pageMessage({ lw: 'reader', type: 'thing', what: 'chart', path: 'canvas', text: 'The chart', rect, ...bad })).toBeNull()
     }
+    // A part typed into, by its name in the file, and its words; a name of anything else, or words too many to be a paragraph's, are refused.
+    expect(pageMessage({ lw: 'reader', type: 'edit', part: 'shape:0:12:3', words: 'Sales grew\n14%' })).toEqual({ type: 'edit', part: 'shape:0:12:3', words: 'Sales grew\n14%' })
+    expect(pageMessage({ lw: 'reader', type: 'edit', part: 'note:2:0', words: '' })).toEqual({ type: 'edit', part: 'note:2:0', words: '' })
+    expect(pageMessage({ lw: 'reader', type: 'edit', part: 'para:7', words: 'x'.repeat(100_000) })).toEqual({ type: 'edit', part: 'para:7', words: 'x'.repeat(100_000) })
+    for (const bad of [{ part: 'para:7', words: 'x'.repeat(100_001) }, { part: 'para:7' }, { part: 'para:7', words: 3 }, { part: 'para:x', words: 'a' }, { part: 'body:1', words: 'a' }, { part: '../para:1', words: 'a' }, { part: `para:${'1'.repeat(70)}`, words: 'a' }, { words: 'a' }]) {
+      expect(pageMessage({ lw: 'reader', type: 'edit', ...bad })).toBeNull()
+    }
+    expect(pageMessage({ lw: 'reader', type: 'typing', on: true })).toEqual({ type: 'typing', on: true })
+    expect(pageMessage({ lw: 'reader', type: 'typing', on: 'yes' })).toEqual({ type: 'typing', on: false })
     expect(pageMessage('hello')).toBeNull()
   })
 })

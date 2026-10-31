@@ -1,6 +1,7 @@
 import { quoteLine, replyWords } from '../chat/reply'
 import { stillAnswering, type ChatItem, type ChatMessage, type ChatTarget, type PartAt, type ReplyTo } from '../chat/client'
 import type { RunRecord } from '../runs/client'
+import type { ChangeState } from './changes'
 import { plainRunError } from '../runs/errors'
 import { stateLabel } from '../state/words'
 
@@ -87,6 +88,11 @@ export interface AskedPassage {
   onItsOwn: boolean
   /** What came of asking, for the reader to show beside the part. */
   answer: PassageAnswer
+  /**
+   * A change left on the part for the agent (ADR 0107), rather than a question: `asked` is what
+   * should change. Its number in its message, and the copy of the file kept before its work.
+   */
+  change?: { id: string; state: ChangeState; number: number | null; kept: string | null }
 }
 
 /** What came of asking about a part, as the reader shows it beside the part. */
@@ -97,12 +103,16 @@ export type PassageAnswer =
   | { state: 'writing'; by: string }
   /** Your message started work, or went into work under way, and it is not done. */
   | { state: 'working'; by: string }
+  /** That work waits for you: its agent asks before it goes on (an Allow in the chat). */
+  | { state: 'asking'; by: string }
   /** What came back: the agent's answer in the chat, or the answer of the work. */
   | { state: 'said'; by: string; text: string; at: string | null }
   /** The work stopped before it answered: what went wrong. */
   | { state: 'failed'; by: string; text: string }
   /** Your message did not reach the daemon: the chat has it, with Try again. */
   | { state: 'unsent' }
+  /** A change left on the part, not sent yet, or sent and waiting for an earlier agent's turn on the file (ADR 0107). */
+  | { state: 'held'; why: 'send' | 'turn' }
   /**
    * Nothing came back, and why: you stopped the work, the message was a note for the team's next
    * work, the agent asked had nothing to add, or its answer never came.
@@ -125,12 +135,29 @@ export function askedPassages(items: readonly ChatItem[], pending: readonly { te
     const from = message.agentId ?? reply.from
     found.push({ at: message.createdAt ?? '', passage: { file: reply.file, text: reply.text, ...(reply.at ? { at: reply.at } : {}), from, asked: message.text, runId: runId ?? reply.runId, messageId: message.id ?? null, onItsOwn, answer: answer(from) } })
   }
+  // Changes sent together in one message (ADR 0107): each its own part, each going as the message's work goes.
+  const addChanges = (message: Pick<ChatMessage, 'changes'> & { id?: string; agentId?: string | null; createdAt?: string }, runId: string | null, answer: (by: string) => PassageAnswer) => {
+    for (const change of message.changes ?? []) {
+      const part = change.part
+      if (part.kind !== 'passage' || !part.file) continue
+      const from = message.agentId ?? part.from
+      found.push({ at: message.createdAt ?? '', passage: { file: part.file, text: part.text, ...(part.at ? { at: part.at } : {}), from, asked: change.words, runId, messageId: message.id ?? null, onItsOwn: false, answer: answer(from), change: { id: change.id, state: 'sent', number: change.number, kept: null } } })
+    }
+  }
   for (const item of items) {
-    if (item.kind === 'note') add(item.message, item.message.runId ?? null, (from) => noteAnswer(item.message, from, now), true)
-    else {
+    if (item.kind === 'note') {
+      add(item.message, item.message.runId ?? null, (from) => noteAnswer(item.message, from, now), true)
+      addChanges(item.message, item.message.runId ?? null, (from) => noteAnswer(item.message, from, now))
+    } else {
       const answer = (from: string) => workAnswer(item.run, from)
-      if (item.request) add(item.request, item.run.runId, answer)
-      for (const note of item.notes) add(note, item.run.runId, answer)
+      if (item.request) {
+        add(item.request, item.run.runId, answer)
+        addChanges(item.request, item.run.runId, answer)
+      }
+      for (const note of item.notes) {
+        add(note, item.run.runId, answer)
+        addChanges(note, item.run.runId, answer)
+      }
     }
   }
   // By when each was asked, not where the chat keeps it: a note sent into earlier work is kept
@@ -141,8 +168,9 @@ export function askedPassages(items: readonly ChatItem[], pending: readonly { te
 }
 
 /** What tells one ask about a part of a file from another: the part (`partId`) and the agent asked. The same agent asked again about the same part is the same ask, newer. */
-export function askKey(passage: Pick<AskedPassage, 'text' | 'from' | 'at'>): string {
-  return `${passage.from}\u0000${partId(passage)}`
+export function askKey(passage: Pick<AskedPassage, 'text' | 'from' | 'at' | 'change'>): string {
+  // A change is its own, never the same as a question about the same words, nor another change.
+  return passage.change ? `change\u0000${passage.change.id}` : `${passage.from}\u0000${partId(passage)}`
 }
 
 /**
@@ -195,7 +223,8 @@ function noteAnswer(message: ChatMessage, from: string, now: number): PassageAns
 /** A message that started work or went into it: that work's answer, once it is done. */
 function workAnswer(run: RunRecord, from: string): PassageAnswer {
   const by = run.responder || run.onlyAgent || from
-  if (LIVE_RUN.has(run.status)) return { state: 'working', by: run.working?.[0] ?? by }
+  const asks = run.permissionRequests?.[0]
+  if (LIVE_RUN.has(run.status)) return asks ? { state: 'asking', by: asks.agent } : { state: 'working', by: run.working?.[0] ?? by }
   if (run.status === 'failed') return { state: 'failed', by, text: (run.error ? plainRunError(run.error).split('\n')[0] : '') || 'It stopped before it answered.' }
   if (run.status === 'succeeded' && run.reply?.trim()) return { state: 'said', by, text: run.reply, at: run.finishedAt }
   return { state: 'none', why: run.status === 'cancelled' ? 'stopped' : 'lost' }
@@ -340,16 +369,21 @@ export function partBox(lines: readonly Box[]): Box | null {
   }
 }
 
-/** How a part asked about looks, from what came of asking and whether you have read its answer. */
-export type PartLook = 'busy' | 'waiting' | 'read' | 'failed'
+/**
+ * How a part asked about looks, from what came of asking and whether you have read its answer; a
+ * change not sent yet, or waiting its turn, is `held`: its agent's figure and nothing more.
+ */
+export type PartLook = 'busy' | 'waiting' | 'read' | 'failed' | 'held'
 
 export function partLook(answer: PassageAnswer, read: boolean): PartLook {
+  if (answer.state === 'held') return 'held'
   if (answer.state === 'sending' || answer.state === 'writing' || answer.state === 'working') return 'busy'
   if (answer.state === 'failed' || answer.state === 'unsent') return 'failed'
+  if (answer.state === 'asking') return 'waiting'
   return answer.state === 'said' && !read ? 'waiting' : 'read'
 }
 
-const WORDS_LOOKS: readonly PartLook[] = ['busy', 'waiting', 'failed', 'read']
+const WORDS_LOOKS: readonly PartLook[] = ['busy', 'waiting', 'failed', 'held', 'read']
 
 /** How marked words look with several asks on them: at work while any is, else waiting while any answer waits, else stopped, else read. The page's script does the same. */
 export function wordsLook(looks: readonly PartLook[]): PartLook {
@@ -381,6 +415,15 @@ export function bubbleLabel(passage: AskedPassage, look: PartLook, name: (id: st
   const who = name(bubbleAgent(passage))
   // A thing in a page is named in words already ("The chart under “Sales”"): read on, not quoted.
   const about = passage.at?.kind === 'element' ? passage.text.charAt(0).toLowerCase() + passage.text.slice(1) : quoted(passage)
+  if (passage.change) {
+    if (passage.answer.state === 'held') return `Your change for ${who} to ${about}, ${passage.answer.why === 'send' ? 'waiting for Send' : 'waiting its turn'}`
+    if (passage.answer.state === 'asking') return `${who} asks you something before making your change to ${about}`
+    if (look === 'busy') return `${who} is making your change to ${about}`
+    if (look === 'failed') return `${who} didn’t finish your change to ${about}`
+    if (passage.answer.state === 'none') return `${who} didn’t make your change to ${about}`
+    return `${who} made your change to ${about}`
+  }
+  if (passage.answer.state === 'asking') return `${who} asks you something before answering about ${about}`
   if (passage.answer.state === 'unsent') return `Your question about ${about} wasn't sent`
   if (look === 'busy') return `${who} is answering your question about ${about}`
   if (look === 'waiting') return `New answer from ${who} about ${about}`
@@ -392,6 +435,8 @@ export function bubbleLabel(passage: AskedPassage, look: PartLook, name: (id: st
 /** What a part's bubble says on hover: your words, after what the bubble's look means. */
 export function bubbleTitle(passage: AskedPassage, look: PartLook, name: (id: string) => string): string {
   const words = yourWords(passage.asked, name(passage.from))
+  if (passage.answer.state === 'held') return [passage.answer.why === 'send' ? 'Waits for Send' : 'Waits its turn on this file', words].filter(Boolean).join(' · ')
+  if (passage.answer.state === 'asking') return ['Asks you first, in the chat', words].filter(Boolean).join(' · ')
   const state = passage.answer.state
   const said = state === 'unsent' ? 'Not sent'
     : state === 'sending' ? 'Sending your question'
@@ -404,19 +449,24 @@ export function bubbleTitle(passage: AskedPassage, look: PartLook, name: (id: st
 /** What a bubble's agent card says under who the agent is: what came of asking, and what you asked. */
 export function bubbleCardLine(passage: AskedPassage, look: PartLook, name: (id: string) => string): string {
   const { said, words } = bubbleCardParts(passage, look, name)
-  return [said, words && `You asked: ${words}`].filter(Boolean).join(' · ')
+  return [said, words && `${passage.change ? 'Your change' : 'You asked'}: ${words}`].filter(Boolean).join(' · ')
 }
 
 /** [`bubbleCardLine`] in its parts: the app's words, and yours, shown with their Markdown. */
 export function bubbleCardParts(passage: AskedPassage, look: PartLook, name: (id: string) => string): { said: string; words: string } {
   const words = yourWords(passage.asked, name(passage.from))
   const state = passage.answer.state
-  const said = state === 'unsent' ? 'Not sent'
-    : state === 'sending' ? 'Sending your question'
-      : state === 'writing' ? 'Writing its answer'
-        : state === 'working' ? 'Working on it'
-          : look === 'waiting' ? 'New answer'
-            : look === 'failed' ? stateLabel('failed') : ''
+  const answer = passage.answer
+  // A change says where it is: waiting, being made, made.
+  const said = answer.state === 'held' ? (answer.why === 'send' ? 'Waits for Send' : 'Waits its turn on this file')
+    : answer.state === 'asking' ? 'Asks you first, in the chat'
+      : state === 'unsent' ? 'Not sent'
+        : state === 'sending' ? 'Sending your question'
+          : state === 'writing' ? 'Writing its answer'
+            : state === 'working' ? (passage.change ? 'Making it' : 'Working on it')
+              : look === 'failed' ? (passage.change ? 'Didn’t finish' : stateLabel('failed'))
+                : passage.change && state === 'said' ? 'Made'
+                  : look === 'waiting' ? 'New answer' : ''
   return { said, words }
 }
 

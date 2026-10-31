@@ -37,7 +37,7 @@ import { Appearing, Swap } from './Appearing'
 import { ChatComposer, type OpenDecision } from './ChatComposer'
 import { Reactions } from './Reactions'
 import { Learned } from './Learned'
-import { ReplyQuote } from './ReplyQuote'
+import { ChangesQuote, ReplyQuote } from './ReplyQuote'
 import { ChatFiles } from './ChatFiles'
 import { FixIt, WorkPiece, type TeamView } from './WorkPiece'
 import { InlineMarkdown } from '../ui/Markdown'
@@ -1125,6 +1125,7 @@ function TeamNote({ message, reactions, lessons, fixFill = null, name, hue, flas
               {message.replyTo && <ReplyQuote reply={message.replyTo} name={name} onShow={onShowReplied(message.replyTo)} />}
               {message.files && <ChatFiles files={message.files} />}
               <div className="chat-text"><SaidText text={message.text} /></div>
+              {message.changes?.length ? <ChangesQuote changes={message.changes} onShow={onShowReplied} /> : null}
             </div>)}
           </div>
         </li>
@@ -1180,6 +1181,7 @@ function TeamNote({ message, reactions, lessons, fixFill = null, name, hue, flas
           {message.replyTo && <ReplyQuote reply={message.replyTo} name={name} onShow={onShowReplied(message.replyTo)} />}
           {message.files && <ChatFiles files={message.files} />}
           <div className="chat-text"><SaidText text={message.text} /></div>
+          {message.changes?.length ? <ChangesQuote changes={message.changes} onShow={onShowReplied} /> : null}
         </div>)}
         <div className="chat-under">
           <span>Starts nothing · the team reads it next time</span>

@@ -1,7 +1,8 @@
 import ReactMarkdown, { defaultUrlTransform, type Components, type ExtraProps, type UrlTransform } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
-import { useContext, useMemo, useState, type ReactNode } from 'react'
+import { useContext, useMemo, useState, type ComponentProps, type ReactNode } from 'react'
+import { sourceSpans } from '../../lib/files/markdownEdits'
 import { BACKED, CLAIM_MARK } from '../../lib/chat/claims'
 import { withoutCitationMarks } from '../../lib/chat/citationMarks'
 import { segments, useFoundWords, type FindTerm } from '../../lib/chat/findWords'
@@ -255,3 +256,38 @@ const COMPONENTS: Components = {
 }
 // Nothing to click: inline code stays code, a path in it too.
 const WORDS_ONLY: Components = { ...COMPONENTS, code: ({ children: text, className }) => <code className={className}>{text}</code> }
+
+/**
+ * A Markdown file drawn from its own words to be typed into in place (ADR 0107;
+ * components/reader/Draft.tsx). Each paragraph, heading and list item whose words are placed in the
+ * file can be typed into, its runs of words saying where they are in it (lib/files/markdownEdits.ts).
+ * A link is its words here, and a path is code: nothing opens while you write. Pictures show as
+ * when reading.
+ */
+export function EditableMarkdown({ source }: { source: string }) {
+  const rehype = useMemo(() => [sourceSpans(source)], [source])
+  return (
+    <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={rehype} skipHtml urlTransform={urlTransform} components={TYPED_INTO}>
+      {source}
+    </ReactMarkdown>
+  )
+}
+
+/** A block that can be typed into when its words are placed in the file (`data-lw-block`). */
+function typedInto(tag: 'p' | 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6' | 'li') {
+  return function TypedInto(props: ExtraProps) {
+    const { node, ...rest } = props
+    void node
+    const placed = 'data-lw-block' in rest
+    // Drawn as `tag`, with the props the Markdown gives it.
+    const Tag = tag as 'p'
+    return <Tag {...(rest as ComponentProps<'p'>)} {...(placed ? { contentEditable: true, suppressContentEditableWarning: true } : {})} />
+  }
+}
+
+// Module-level, as COMPONENTS is.
+const TYPED_INTO: Components = {
+  p: typedInto('p'), h1: typedInto('h1'), h2: typedInto('h2'), h3: typedInto('h3'), h4: typedInto('h4'), h5: typedInto('h5'), h6: typedInto('h6'), li: typedInto('li'),
+  a: ({ children: label, href }) => <a href={href} onClick={(event) => event.preventDefault()}>{label}</a>,
+  img: Picture,
+}

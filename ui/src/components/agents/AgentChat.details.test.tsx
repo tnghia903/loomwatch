@@ -177,7 +177,7 @@ describe('a piece’s record, in an agent’s own chat', () => {
 // reader's "show where it was asked" does: the newer of the two is shown.
 describe('a message Details asks the chat to show', () => {
   it('reaches the chat, and gives way to a newer one from the file reader', async () => {
-    const file = (at: number) => ({ open: vi.fn(), ask: null, onPassages: vi.fn(), reveal: { runId: 'run-1', id: 'from-file', at } })
+    const file = (at: number) => ({ open: vi.fn(), ask: null, onPassages: vi.fn(), team: vi.fn(), reveal: { runId: 'run-1', id: 'from-file', at } })
     const chatOf = (reading: ReturnType<typeof file>) => <AgentChat draft={draftFromJob(maya)} model="fake/offline" chatId="maya" figure={maya.figure!} onAllow={vi.fn()} onRecord={vi.fn()} answerRunId={null} onOpenAnswer={vi.fn()} detailsRunId={null} onDetails={vi.fn()} reveal={{ runId: 'run-1', id: 'from-details', at: 2 }} file={reading} />
     const view = render(chatOf(file(1)))
     await screen.findByRole('region', { name: 'Chat' }, { timeout: 5000 })

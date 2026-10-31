@@ -20,6 +20,15 @@ export interface SlideMarks {
 const NO_MARKS: SlideMarks = { changes: null, face: null }
 
 /**
+ * A deck drawn to be typed into (ADR 0107): each slide's notes drawn as their paragraphs in the
+ * file (deckNotes.ts `deckNotes`), each typed into where it is, rather than walked as steps; `null`
+ * for a slide with none. Its boxes of words are made so after it is drawn (editableParts.ts).
+ */
+export interface SlideEditing {
+  notes: ReadonlyArray<readonly string[] | null>
+}
+
+/**
  * A slide deck drawn inside LoomWatch as a web page (ADR 0091), so the reader shows it as it shows a
  * page an agent made: its words marked and asked about, any part picked with the Pick switch.
  * Nothing is needed on the computer but LoomWatch.
@@ -36,13 +45,13 @@ const NO_MARKS: SlideMarks = { changes: null, face: null }
  * label. A dashed outline is left to the Pick switch's marks. The page opens at the first slide
  * that changed.
  */
-export function slidesPage(deck: ParsedDeck, name: string, look: PageLook = PAPER_LOOK, marks: SlideMarks = NO_MARKS): string {
+export function slidesPage(deck: ParsedDeck, name: string, look: PageLook = PAPER_LOOK, marks: SlideMarks = NO_MARKS, editing: SlideEditing | null = null): string {
   const width = positive(deck.size.width, 960)
   const height = positive(deck.size.height, 540)
   const shown = lookOf(look)
   const count = deck.slides.length
   const opening = Math.max(0, deck.slides.findIndex((_, index) => marks.changes?.slides.has(index)))
-  const slides = deck.slides.map((slide, index) => slideHtml(slide, index + 1, count, width, height, marks, index === opening)).join('\n')
+  const slides = deck.slides.map((slide, index) => slideHtml(slide, index + 1, count, width, height, marks, index === opening, editing)).join('\n')
   // A deck of one slide has nothing to go to.
   const strip = count > 1 ? stripHtml(count, width, height, marks, opening) : ''
   const turn = count > 1
@@ -139,6 +148,7 @@ function deckScript(width: number): string {
     each(made.querySelectorAll('.lw-said'), function (part) { part.classList.remove('lw-said'); });
     made.setAttribute('aria-hidden', 'true');
     made.setAttribute('inert', '');
+    each(made.querySelectorAll('[data-lw-edit]'), function (part) { part.removeAttribute('data-lw-edit'); part.removeAttribute('contenteditable'); });
     if (old) paper.replaceChild(made, old); else paper.appendChild(made);
     made.style.transform = 'scale(' + (paper.clientWidth / PIXELS) + ')';
   }
@@ -279,6 +289,8 @@ function deckScript(width: number): string {
       item.addEventListener('mouseenter', function () { if (j !== step) light(item.getAttribute('data-lw-parts')); });
       item.addEventListener('mouseleave', function () { light(current()); });
     });
+    // A part typed into is copied into the strip as it now is, once it is left.
+    slide.querySelector('.lw-canvas').addEventListener('focusout', function (event) { if (event.target && event.target.closest && event.target.closest('[data-lw-edit]')) copy(i); });
     slide.querySelector('.lw-canvas').addEventListener('click', function (event) {
       if (picking() || selected()) return;
       var part = event.target && event.target.closest ? event.target.closest('[data-lw-part]') : null, steps = stepsOf(i);
@@ -417,7 +429,7 @@ const deckStyle = (look: PageLook, width: number, height: number, marks: SlideMa
   '.lw-step-words p{margin:2px 0}',
 ].join('')
 
-function slideHtml(slide: Slide, number: number, count: number, width: number, height: number, marks: SlideMarks, opening: boolean): string {
+function slideHtml(slide: Slide, number: number, count: number, width: number, height: number, marks: SlideMarks, opening: boolean, editing: SlideEditing | null): string {
   const index = number - 1
   const changes = marks.changes
   const changedParts = changes?.parts.get(index)
@@ -439,7 +451,7 @@ function slideHtml(slide: Slide, number: number, count: number, width: number, h
     + `<h2 class="lw-slide-number" id="${id}">Slide ${number}${count > 1 ? ` of ${count}` : ''}${mark}</h2>`
     + `<div class="lw-frame" style="aspect-ratio:${num(width)}/${num(height)}">`
     + `<div class="lw-canvas${isDarkFill(slide.fill) ? ' lw-dark-slide' : ''}" style="width:${pt(width)};height:${pt(height)};${backgroundOf(slide.fill, '#ffffff')}">${parts}</div>`
-    + `<div class="lw-rings" aria-hidden="true"></div></div>${notesHtml(slide, number, count, marks)}</section>`
+    + `<div class="lw-rings" aria-hidden="true"></div></div>${notesHtml(slide, number, count, marks, editing)}</section>`
 }
 
 /**
@@ -447,13 +459,14 @@ function slideHtml(slide: Slide, number: number, count: number, width: number, h
  * them: a dot for each step and the buttons to walk them, and each step tied to the parts it is
  * about by their keys. The first is the one being said until the page's script moves on.
  */
-function notesHtml(slide: Slide, number: number, count: number, marks: SlideMarks): string {
-  const steps = noteSteps(slide.note, partsOf(slide.elements ?? []))
+function notesHtml(slide: Slide, number: number, count: number, marks: SlideMarks, editing: SlideEditing | null): string {
+  const steps = editing ? [] : noteSteps(slide.note, partsOf(slide.elements ?? []))
   // The walk goes on to the next slide, so its buttons are under every slide of a deck of more than one.
   const turn = count > 1 || steps.length > 1
     ? `<span class="lw-walk-turn"><button type="button" class="lw-step-back" aria-label="Previous step" title="Previous step (←)">${BACK}</button>`
       + `<button type="button" class="lw-step-next" aria-label="Next step" title="Next step (→)">${ON}</button></span>`
     : ''
+  if (editing) return editableNotesHtml(editing.notes[number - 1] ?? null, number, turn, marks)
   if (!steps.length) return turn ? `<div class="lw-notes"><div class="lw-notes-head">${turn}</div></div>` : ''
   const changed = marks.changes?.notes.has(number - 1) ?? false
   const label = `<h3 class="lw-notes-label">Notes<span class="lw-hidden">, slide ${number}</span>${changed ? changedMark(stitch('lw-stitch')) : ''}</h3>`
@@ -465,6 +478,21 @@ function notesHtml(slide: Slide, number: number, count: number, marks: SlideMark
     + `<span class="lw-step-face" aria-hidden="true"></span><div class="lw-step-words">${textContent(step.html)}</div></li>`).join('')
   return `<div class="lw-notes${changed ? ' lw-changed' : ''}"><div class="lw-notes-head">${label}${walk}</div><ol class="lw-steps">${items}</ol></div>`
 }
+
+/**
+ * A slide's notes to type into: each paragraph of them in the file, typed into where it is, a new
+ * line in it a line break (Shift+Enter makes one), under the same heading and buttons as the steps.
+ */
+function editableNotesHtml(paragraphs: readonly string[] | null, number: number, turn: string, marks: SlideMarks): string {
+  if (!paragraphs) return turn ? `<div class="lw-notes"><div class="lw-notes-head">${turn}</div></div>` : ''
+  const changed = marks.changes?.notes.has(number - 1) ?? false
+  const label = `<h3 class="lw-notes-label">Notes<span class="lw-hidden">, slide ${number}</span>${changed ? changedMark(stitch('lw-stitch')) : ''}</h3>`
+  const lines = paragraphs.map((words, at) => `<p class="lw-note" contenteditable="true" data-lw-edit="note:${number - 1}:${at}" data-lw-lines="">${linesOf(words)}</p>`).join('')
+  return `<div class="lw-notes${changed ? ' lw-changed' : ''}"><div class="lw-notes-head">${label}${turn}</div><div class="lw-note-lines">${lines}</div></div>`
+}
+
+/** Words as lines of HTML, a new line a line break, and one more after a last one, so its empty line shows. */
+const linesOf = (words: string) => words.split('\n').map(escapeHtml).join('<br>') + (words.endsWith('\n') ? '<br>' : '')
 
 /**
  * The parts of a slide a step can be about, each by the key it is drawn with: a box of words or a

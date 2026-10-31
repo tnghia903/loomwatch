@@ -2,9 +2,11 @@ import { renderHook, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { deckFile, documentFile, paragraph, placeholder, table } from '../../test/officeFiles'
-import { drawnPage, readerLook, useDrawnPage } from './drawnPage'
+import { deckChanges, deckSeen } from './deckSeen'
+import { drawnPage, ownBase, readerLook, rememberOwnChange, useDrawnPage } from './drawnPage'
 import { DARK_LOOK, PAPER_LOOK } from './pageLook'
 import { readable } from './documentPage'
+import type { ParsedDeck } from './slidesPage'
 
 const answered = (bytes: ArrayBuffer) => vi.stubGlobal('fetch', vi.fn(async () => new Response(bytes, { status: 200 })))
 const asPage = (html: string) => new DOMParser().parseFromString(html, 'text/html')
@@ -58,6 +60,18 @@ describe('a deck or a Word document drawn from its bytes', () => {
     }
   })
 
+  it('hands back the bytes it drew and their version, which a change typed into it is made on (ADR 0107)', async () => {
+    const file = await documentFile('Brief', ['We sell tea.'])
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(file.slice(0), { status: 200, headers: { ETag: '"sha256:0b1d"' } })))
+    const drawn = await drawnPage('/w/brief.docx', 'document', 'brief.docx', '0')
+    expect(drawn.version).toBe('sha256:0b1d')
+    expect(drawn.bytes).toEqual(new Uint8Array(file))
+    expect(drawn.own).toBeNull()
+    // An older daemon names no version: nothing can be written then.
+    answered(file)
+    expect((await drawnPage('/w/brief.docx', 'document', 'brief.docx', '0')).version).toBeNull()
+  })
+
   it('says why, in the daemon’s words, when the file can’t be had', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: 'deck.pptx is gone' }), { status: 404 })))
     await expect(drawnPage('/w/deck.pptx', 'slides', 'deck.pptx', '0')).rejects.toThrow('deck.pptx is gone')
@@ -96,6 +110,66 @@ describe('a deck drawn with what changed since it was last seen', () => {
     const later = renderHook(() => useDrawnPage(DECK, 'slides', 'deck.pptx', '0', PAPER_LOOK))
     await waitFor(() => expect(later.result.current?.html).toContain('Ship on Friday'))
     expect(marked(later.result.current?.html)).toBe(true)
+  })
+})
+
+describe('a deck you changed yourself (ADR 0107)', () => {
+  const DECK = '/teams/.loomwatch/t/maker/own.pptx'
+  const version = (first: string, second: string) => deckFile({ slides: [placeholder(3, 'title', null, paragraph(first)), placeholder(3, 'title', null, paragraph(second))] })
+  /** Which slides the page marks as changed since last seen. */
+  const changedSlides = (html: string | null | undefined) => [...asPage(html ?? '').querySelectorAll('section.lw-slide')].map((slide) => slide.classList.contains('changed'))
+
+  it('marks what the agent changed and never what you changed; a change the page shows already leaves the page as it is', async () => {
+    const files = { now: await version('Ship on Monday', 'Budget'), tag: 'sha256:a' }
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(files.now.slice(0), { status: 200, headers: { ETag: `"${files.tag}"` } })))
+    const view = renderHook(({ v }) => useDrawnPage(DECK, 'slides', 'own.pptx', v, PAPER_LOOK, null, true), { initialProps: { v: '0' } })
+    await waitFor(() => expect(view.result.current?.html).toContain('Ship on Monday'))
+    expect(changedSlides(view.result.current?.html)).toEqual([false, false])
+    // The agent changes the first slide while it is open: marked.
+    files.now = await version('Ship on Tuesday', 'Budget')
+    files.tag = 'sha256:b'
+    view.rerender({ v: '1' })
+    await waitFor(() => expect(view.result.current?.html).toContain('Ship on Tuesday'))
+    expect(changedSlides(view.result.current?.html)).toEqual([true, false])
+    // You change the second, and put it back (an Undo the page doesn't show yet): drawn again, the agent's change still marked, yours not.
+    files.now = await version('Ship on Tuesday', 'Budget for Q3')
+    files.tag = 'sha256:c'
+    rememberOwnChange(DECK, 'sha256:c', false)
+    view.rerender({ v: '2' })
+    await waitFor(() => expect(view.result.current?.html).toContain('Budget for Q3'))
+    expect(changedSlides(view.result.current?.html)).toEqual([true, false])
+    expect(view.result.current).toMatchObject({ version: 'sha256:c' })
+    // You type into it again: the page on screen shows it already, so it stays, with the new bytes under it.
+    const shown = view.result.current?.html
+    files.now = await version('Ship on Tuesday', 'Budget for Q4')
+    files.tag = 'sha256:d'
+    rememberOwnChange(DECK, 'sha256:d')
+    view.rerender({ v: '3' })
+    await waitFor(() => expect(view.result.current).toMatchObject({ version: 'sha256:d' }))
+    expect(view.result.current?.html).toBe(shown)
+    expect(view.result.current && 'bytes' in view.result.current ? view.result.current.bytes : null).toEqual(new Uint8Array(files.now))
+    // Opened again, as you last had it: nothing is new.
+    view.unmount()
+    const again = renderHook(() => useDrawnPage(DECK, 'slides', 'own.pptx', '0', DARK_LOOK, null, true))
+    await waitFor(() => expect(again.result.current?.html).toContain('Budget for Q4'))
+    expect(changedSlides(again.result.current?.html)).toEqual([false, false])
+  })
+
+  it('takes a part you changed on a slide the agent changed as seen, leaving the agent’s parts marked', () => {
+    const slide = (first: string, second: string, note = ''): ParsedDeck['slides'][number] => ({
+      fill: { type: 'color', value: '#FFFFFF' }, layoutElements: [], note,
+      elements: [first, second].map((content, at) => ({ type: 'text', id: String(at + 2), content, left: 0, top: 0, width: 1, height: 1 })) as ParsedDeck['slides'][number]['elements'],
+    })
+    const seen = (...slides: ParsedDeck['slides']) => deckSeen({ size: { width: 960, height: 540 }, slides })
+    const looked = seen(slide('Plan', 'Budget'), slide('Team', 'Dates'))
+    const agent = seen(slide('New plan', 'Budget'), slide('Team', 'Dates'))
+    const yours = seen(slide('New plan', 'Budget for Q3', 'Say it slowly'), slide('Team', 'Dates for Q3'))
+    const changes = deckChanges(ownBase(looked, agent, yours), yours)!
+    expect([...changes.slides]).toEqual([0])
+    expect([...changes.parts.get(0)!]).toEqual([0])
+    expect([...changes.notes]).toEqual([])
+    // With nothing to tell from, nothing is marked still.
+    expect(ownBase(null, agent, yours)).toBeNull()
   })
 })
 

@@ -100,10 +100,42 @@ instructions and tools.
   version is compared with it, or, while the deck is open, with the version on screen before, and
   what changed is marked: a slide found anywhere before counts as moved, not changed. A Word document is laid
   out by `docx-preview` (`documentPage.ts`), its fonts given fallbacks and Word's Symbol bullets
-  drawn as the marks they are. Pictures are kept in the page as data. The drawing code is loaded
+  drawn as the marks they are. Pictures are kept in the page as data. With Make changes on (ADR
+  0107) the draw marks the parts that can be typed into (a slide's text boxes and its notes, read
+  from its notes slide by `deckNotes.ts`; a Word document's body paragraphs, found by bookmarks
+  `editableParts.ts` writes into a copy it draws), and a part left posts its words to the reader,
+  which writes them into the file's own XML (`officeEdits.ts`) and the file through
+  `/api/files/write`; a table's or a workbook's cell is written by `cellEdits.ts`. The drawing code is loaded
   only when such a file is first opened; a file it can't draw shows its words. (The daemon used
   to have `LibreOffice` make a PDF of them; the PDFs it kept in `<state>/pages/` are removed at
   start.)
+- **Files changed in the reader** (`kept.rs`, ADR 0107): `PUT /api/files/write` writes the bytes
+  the reader sends into a file it may change (`files::writable`): a text, code, data or table
+  file, or a deck, that an agent made in its own folder under `.loomwatch/` (not its hidden
+  folders, its `knowledge/` copies or its `AGENTS.md`), or that is in a folder given to a team,
+  outside any hidden folder there. The request names the version it was made on in `If-Match`:
+  the file's SHA-256 (`files::version_of`), which `/api/files/read` answers as `version` and
+  `/api/files/raw` as its `ETag`. A file that changed on disk since is refused with 409. Before a
+  file is written, the file as it was is kept in `<state>/kept/<id>/` with a note of its path,
+  time and why, and `POST /api/files/put-back` writes a kept copy back, keeping what it replaces
+  the same way. The newest 30 copies of each file are kept, and 2 GB at most in all, the oldest
+  going first. Only LoomWatch's own page sends these, with `X-LoomWatch-Request`. A text that
+  started with a byte order mark keeps it.
+- **Changes left for agents** (`changes.rs`, ADR 0107): with Make changes on, a part of a file
+  marked in the reader can be left a change for one of the team's agents (`POST /api/changes`),
+  kept in `file_changes` until Send (`POST /api/changes/send`). A refusal answers a sentence for
+  the person (too many waiting, a change already sent), which the reader shows as it is. The
+  waiting changes on the file are numbered in the order they were left (by `rowid` when two share
+  a millisecond) and grouped by agent, the file's maker first (the agent whose `.loomwatch/<team>/<agent>/`
+  folder holds it), then the team file's order. Each agent gets one chat message from the person,
+  its text "2 changes to report.md" and its changes on it (`changes`, a nullable column of
+  `chat_messages`). Its task names the file once and quotes every part as
+  `ReplyTo::for_agents_in_named_file` does, as source material, with what should change in the
+  person's own words and up to ten of the parts' pictures. Agents take turns on a file (`Lanes`, one
+  lock per file, held for all of a Send's turns): before each turn the file is kept
+  (`kept::Why::Changes`) and the copy's id put on its changes, and the next turn starts when the run
+  before it has ended. An agent already at work takes its changes as a note. At start, a change whose
+  turn never came goes back to waiting. A team renamed takes its changes with it.
 - **Files sent in the chat** (`chat_files.rs`, ADR 0082) are kept in `<team>.files/chat/`, a
   folder `PermissionPolicy::for_run_agent` lets every agent of the team read. The run carries them
   on `RunLineage::files` (a note on `QueuedNote::files`), and they are listed by path under the

@@ -7,6 +7,8 @@ import { openPdf } from '../../lib/files/pdf'
 import { askKey, partId, passageId, type AskedPassage, type PassageAnswer } from '../../lib/files/passage'
 import { isGoldFill } from '../../test/cascade'
 import { EXPLAIN_WORDS, FileReader } from './FileReader'
+import JSZip from 'jszip'
+import { wordFile } from '../../lib/files/officeEditFixtures'
 
 // PDF.js stands in as a PDF of a few pages, each 600 by 800 at scale 1, saying which page it is.
 // A drawing waits for `hold`, and laying words out for `wordsHold`, when there is one; each is
@@ -1460,6 +1462,38 @@ describe('a PDF in the reader', () => {
       return element
     })
 
+    it('types into a Word document where it is drawn, and saves the paragraph into its own part of the file (ADR 0107)', async () => {
+      const bytes = await wordFile()
+      const calls: Array<{ url: string; init?: RequestInit }> = []
+      vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        calls.push({ url, init })
+        if (url.startsWith('/api/files/read')) return respond(200, read({ path: LETTER, name: 'letter.docx', kind: 'document', text: 'Our plan\n\nWe sell tea and cake.', extracted: true, editable: true, version: 'sha256:word' }))
+        if (url.startsWith('/api/files/raw')) return Promise.resolve(new Response(new Uint8Array(bytes), { status: 200, headers: { ETag: '"sha256:word"' } }))
+        if (url.startsWith('/api/files/write')) return respond(200, { version: 'sha256:word-2', kept: 'kept-1' })
+        return answer(url)
+      }))
+      renderReader({ file: { path: LETTER, runId: 'run-1', from: 'writer' } })
+      const reading = await frameOf()
+      const post = (frame: HTMLIFrameElement, data: Record<string, unknown>) => act(() => { window.dispatchEvent(new MessageEvent('message', { data: { lw: 'reader', ...data }, source: frame.contentWindow })) })
+      // While reading, a page that says a part was typed into changes nothing.
+      post(reading, { type: 'ready' })
+      post(reading, { type: 'edit', part: 'para:1', words: 'We sell tea, cake and scones.' })
+      fireEvent.click(await screen.findByRole('button', { name: 'Make changes' }))
+      await waitFor(() => expect((document.querySelector('iframe')?.getAttribute('srcdoc') ?? '')).toContain('data-lw-edit'))
+      expect(calls.some((call) => call.url.startsWith('/api/files/write'))).toBe(false)
+      const editing = await frameOf()
+      post(editing, { type: 'ready' })
+      post(editing, { type: 'edit', part: 'para:1', words: 'We sell tea, cake and scones.' })
+      await waitFor(() => expect(calls.filter((call) => call.url.startsWith('/api/files/write'))).toHaveLength(1))
+      const write = calls.find((call) => call.url.startsWith('/api/files/write'))!
+      expect(new Headers(write.init?.headers).get('If-Match')).toBe('"sha256:word"')
+      const document_ = await (await JSZip.loadAsync(write.init?.body as Uint8Array)).file('word/document.xml')!.async('string')
+      expect(document_).toContain('We sell tea, cake and scones.')
+      expect(document_).not.toContain('We sell tea and cake.')
+      expect(await screen.findByRole('button', { name: 'Undo' })).toBeInTheDocument()
+    })
+
     it('draws a deck as a page of its slides, from its own bytes, each slide under its number, and a part picked on it asked about', async () => {
       const { onAsk } = renderReader({ file: { path: DECK, runId: 'run-1', from: 'writer' } })
       const frame = await frameOf()
@@ -1760,5 +1794,458 @@ describe('a web page in the reader', () => {
     expect(card.style.top).toBe('70px')
     fromPage({ type: 'hover', key: null, now: true })
     expect(screen.queryByRole('tooltip')).toBeNull()
+  })
+})
+
+describe('making changes to a file in the reader (ADR 0107)', () => {
+  const VERSION = 'sha256:first'
+  /** The file can be changed here; writes and puts back are answered, and kept to look at. */
+  const changeable = (overrides: Record<string, unknown> = {}) => {
+    const calls: Array<{ url: string; init?: RequestInit }> = []
+    const stat = answer
+    answer = (url) => (url.startsWith('/api/files/read') ? respond(200, read({ editable: true, version: VERSION, ...overrides })) : stat(url))
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      calls.push({ url, init })
+      if (url.startsWith('/api/files/write')) return respond(200, { version: 'sha256:second', kept: 'kept-1' })
+      if (url.startsWith('/api/files/put-back')) return respond(200, { version: VERSION, kept: 'kept-2' })
+      return answer(url)
+    }))
+    return calls
+  }
+  const writes = (calls: Array<{ url: string; init?: RequestInit }>) => calls.filter((call) => call.url.startsWith('/api/files/write'))
+  const written = (call: { init?: RequestInit }) => new TextDecoder().decode(call.init?.body as Uint8Array)
+  const named = (call: { init?: RequestInit }) => new Headers(call.init?.headers).get('If-Match')
+
+  it('offers Make changes only for a file the daemon says can be changed', async () => {
+    renderReader()
+    await screen.findByRole('heading', { name: 'Market report', level: 1 })
+    expect(screen.queryByRole('button', { name: 'Make changes' })).toBeNull()
+    cleanup()
+    changeable()
+    renderReader()
+    const change = await screen.findByRole('button', { name: 'Make changes' })
+    expect(change).toHaveAttribute('aria-pressed', 'false')
+    // Its gold is a line and a tint: the screen's one gold fill is for what waits on you.
+    expect(isGoldFill(change)).toBe(false)
+  })
+
+  it('types into a Markdown file where it is drawn, and saves the change into its own words', async () => {
+    const calls = changeable()
+    const { onAsk } = renderReader()
+    fireEvent.click(await screen.findByRole('button', { name: 'Make changes' }))
+    expect(screen.getByRole('button', { name: 'Make changes' })).toHaveAttribute('aria-pressed', 'true')
+    const words = await screen.findByText('Sales grew 12% in Q3.')
+    const block = words.closest('[contenteditable="true"]')!
+    expect(block).not.toBeNull()
+    fireEvent.focusIn(block)
+    words.textContent = 'Sales grew 14% in Q3.'
+    fireEvent.focusOut(block)
+    await waitFor(() => expect(writes(calls)).toHaveLength(1))
+    const [save] = writes(calls)
+    expect(save.url).toBe(`/api/files/write?path=${encodeURIComponent(REPORT)}`)
+    expect(named(save)).toBe(`"${VERSION}"`)
+    expect(written(save)).toBe('# Market report\n\nSales grew 14% in Q3.\n\nCosts fell.\n')
+    // Nothing is asked about while you change the file.
+    expect(onAsk).not.toHaveBeenCalled()
+    expect(screen.queryByRole('toolbar')).toBeNull()
+
+    // Saved, with the one thing to do about it.
+    fireEvent.click(await screen.findByRole('button', { name: 'Undo' }))
+    await waitFor(() => expect(calls.some((call) => call.url === '/api/files/put-back')).toBe(true))
+    expect(JSON.parse(String(calls.find((call) => call.url === '/api/files/put-back')?.init?.body))).toEqual({ id: 'kept-1' })
+    expect(await screen.findByRole('button', { name: 'Redo' })).toBeInTheDocument()
+    expect(document.querySelector('.rd-saved')).toHaveTextContent('Undone')
+  })
+
+  it('says on its switch, by its shape, that it is on, and where to type until a change is saved', async () => {
+    const calls = changeable()
+    renderReader()
+    const change = await screen.findByRole('button', { name: 'Make changes' })
+    expect(change.querySelector('.rd-change-mark')).not.toHaveClass('on')
+    fireEvent.click(change)
+    expect(change.querySelector('.rd-change-mark')).toHaveClass('on')
+    // The tip for asking gives way to the one for changing.
+    expect(screen.queryByText('Mark any words')).toBeNull()
+    expect(screen.getByText('Click any words')).toBeInTheDocument()
+    const words = await screen.findByText('Sales grew 12% in Q3.')
+    const block = words.closest('[contenteditable="true"]')!
+    fireEvent.focusIn(block)
+    words.textContent = 'Sales grew 14% in Q3.'
+    fireEvent.focusOut(block)
+    await waitFor(() => expect(writes(calls)).toHaveLength(1))
+    // Learnt: gone, and gone next time.
+    await waitFor(() => expect(screen.queryByText('Click any words')).toBeNull())
+    expect(window.localStorage.getItem('loomwatch.readerHint.change.markdown')).toBe('seen')
+    // Each way of changing a file keeps its own tip: the cells' and the agents' are still to come.
+    expect(window.localStorage.getItem('loomwatch.readerHint.change.cells')).toBeNull()
+    expect(window.localStorage.getItem('loomwatch.readerHint.change.agents')).toBeNull()
+  })
+
+  it('asks nothing while you change the file: marking words brings no pill', async () => {
+    changeable()
+    const { onAsk } = renderReader()
+    fireEvent.click(await screen.findByRole('button', { name: 'Make changes' }))
+    const paragraph = await screen.findByText('Sales grew 12% in Q3.')
+    fireEvent.pointerDown(paragraph)
+    const range = document.createRange()
+    range.selectNodeContents(paragraph)
+    document.getSelection()!.removeAllRanges()
+    document.getSelection()!.addRange(range)
+    fireEvent.pointerUp(paragraph)
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    expect(screen.queryByRole('toolbar')).toBeNull()
+    expect(onAsk).not.toHaveBeenCalled()
+  })
+
+  it('offers no switch on a web page: its code is not what you read', async () => {
+    changeable({ path: '/teams/.loomwatch/market/writer/dashboard.html', name: 'dashboard.html', kind: 'web', text: '<!doctype html><h1>Sales</h1>' })
+    render(<FileReader file={{ path: '/teams/.loomwatch/market/writer/dashboard.html', runId: 'run-1', from: 'writer' }} name={(id) => names.get(id) ?? id} hue={() => 2} onAsk={vi.fn()} />)
+    await screen.findByRole('heading', { name: 'Dashboard', level: 3 })
+    expect(screen.queryByRole('button', { name: 'Make changes' })).toBeNull()
+  })
+
+  it('a second change to a paragraph replaces the first, and a change in another is saved on the last one saved', async () => {
+    const calls = changeable()
+    renderReader()
+    fireEvent.click(await screen.findByRole('button', { name: 'Make changes' }))
+    const sales = await screen.findByText('Sales grew 12% in Q3.')
+    const block = sales.closest('[contenteditable="true"]')!
+    fireEvent.focusIn(block)
+    sales.textContent = 'Sales grew 14% in Q3.'
+    fireEvent.focusOut(block)
+    await waitFor(() => expect(writes(calls)).toHaveLength(1))
+    fireEvent.focusIn(block)
+    sales.textContent = 'Sales grew 15% in Q3.'
+    fireEvent.focusOut(block)
+    const costs = screen.getByText('Costs fell.')
+    fireEvent.focusIn(costs.closest('[contenteditable="true"]')!)
+    costs.textContent = 'Costs fell by half.'
+    fireEvent.focusOut(costs.closest('[contenteditable="true"]')!)
+    await waitFor(() => expect(writes(calls)).toHaveLength(3))
+    expect(written(writes(calls)[1])).toBe('# Market report\n\nSales grew 15% in Q3.\n\nCosts fell.\n')
+    expect(written(writes(calls)[2])).toBe('# Market report\n\nSales grew 15% in Q3.\n\nCosts fell by half.\n')
+    // Each names the version the one before it left.
+    expect(named(writes(calls)[2])).toBe('"sha256:second"')
+  })
+
+  it('marks no part asked about inside words being typed into, and marks it again after', async () => {
+    const calls = changeable()
+    renderReader({ asked: [part({ state: 'said', by: 'writer', text: 'It grew.', at: null })] })
+    await waitFor(() => expect(document.querySelector('.rd-mark')).not.toBeNull())
+    fireEvent.click(screen.getByRole('button', { name: 'Make changes' }))
+    const words = await screen.findByText('Sales grew 12% in Q3.')
+    expect(document.querySelector('.rd-mark')).toBeNull()
+    const block = words.closest('[contenteditable="true"]')!
+    fireEvent.focusIn(block)
+    words.textContent = 'Sales grew 14% in Q3.'
+    fireEvent.focusOut(block)
+    await waitFor(() => expect(writes(calls)).toHaveLength(1))
+    expect(written(writes(calls)[0])).toBe('# Market report\n\nSales grew 14% in Q3.\n\nCosts fell.\n')
+    fireEvent.click(screen.getByRole('button', { name: 'Make changes' }))
+    await waitFor(() => expect(document.querySelector('.rd-mark')).not.toBeNull())
+  })
+
+  it('changes a cell of a table where it is drawn, only that cell, on the version just read', async () => {
+    const TABLE = '/teams/.loomwatch/market/writer/sales.csv'
+    const text = 'month,"sales, total"\nMay,12\nJune,15\n'
+    const calls = changeable({ path: TABLE, name: 'sales.csv', kind: 'spreadsheet', text, version: 'sha256:table' })
+    render(<FileReader file={{ path: TABLE, runId: 'run-1', from: 'writer' }} name={(id) => names.get(id) ?? id} hue={() => 2} onAsk={vi.fn()} teamPath="t.yaml" />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Make changes' }))
+    expect(screen.getByText('Double-click a cell')).toBeInTheDocument()
+    const cell = await waitFor(() => {
+      const found = document.querySelector<HTMLElement>('[data-row="3"][data-column="2"]')
+      if (!found) throw new Error('no cell')
+      return found
+    })
+    // A click marks the cell, as for leaving a change on it: with a team, that waits as one button,
+    // so the double-click's typing goes into the cell, never into a change.
+    const grid = document.querySelector<HTMLElement>('.rd-grid')!
+    const was = document.elementFromPoint
+    document.elementFromPoint = () => cell
+    fireEvent.pointerDown(cell, { button: 0, pointerId: 1 })
+    fireEvent.pointerUp(grid, { pointerId: 1 })
+    document.elementFromPoint = was
+    expect(await screen.findByRole('button', { name: 'Change this…' })).toBeInTheDocument()
+    expect(screen.queryByRole('textbox')).toBeNull()
+    fireEvent.doubleClick(cell)
+    const box = await screen.findByRole('textbox')
+    fireEvent.change(box, { target: { value: '18' } })
+    fireEvent.keyDown(box, { key: 'Enter' })
+    await waitFor(() => expect(writes(calls)).toHaveLength(1))
+    expect(writes(calls)[0].url).toBe(`/api/files/write?path=${encodeURIComponent(TABLE)}`)
+    expect(written(writes(calls)[0])).toBe('month,"sales, total"\nMay,12\nJune,18\n')
+    expect(named(writes(calls)[0])).toBe('"sha256:table"')
+    expect(await screen.findByRole('button', { name: 'Undo' })).toBeInTheDocument()
+  })
+
+  it('says when the file changed meanwhile, and keeps what is on disk', async () => {
+    const calls = changeable()
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      calls.push({ url, init })
+      return url.startsWith('/api/files/write') ? respond(409, { error: 'market-report.md changed since you opened it' }) : answer(url)
+    }))
+    renderReader()
+    fireEvent.click(await screen.findByRole('button', { name: 'Make changes' }))
+    const words = await screen.findByText('Sales grew 12% in Q3.')
+    const block = words.closest('[contenteditable="true"]')!
+    fireEvent.focusIn(block)
+    words.textContent = 'Sales grew 14% in Q3.'
+    fireEvent.focusOut(block)
+    expect(await screen.findByRole('alert')).toHaveTextContent('The file changed just now, so yours wasn’t saved. Type it again.')
+    expect(await screen.findByText('Sales grew 12% in Q3.')).toBeInTheDocument()
+  })
+
+  it('changes a text file as its words, saved when you leave the box', async () => {
+    const calls = changeable({ path: '/teams/.loomwatch/market/writer/notes.txt', name: 'notes.txt', kind: 'text', text: 'Call the printer.\n' })
+    render(<FileReader file={{ path: '/teams/.loomwatch/market/writer/notes.txt', runId: 'run-1', from: 'writer' }} name={(id) => names.get(id) ?? id} hue={() => 2} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Make changes' }))
+    const box = await screen.findByRole('textbox', { name: 'The words of notes.txt' })
+    expect(box).toHaveValue('Call the printer.\n')
+    fireEvent.change(box, { target: { value: 'Call the printer on Monday.\n' } })
+    fireEvent.blur(box)
+    await waitFor(() => expect(writes(calls)).toHaveLength(1))
+    expect(written(writes(calls)[0])).toBe('Call the printer on Monday.\n')
+    expect(await screen.findByRole('button', { name: 'Undo' })).toBeInTheDocument()
+
+    // Esc puts back what was typed since the box was entered, saves nothing, and leaves the reader open.
+    act(() => box.focus())
+    fireEvent.change(box, { target: { value: 'Call the printer on Monday. Or Tuesday.\n' } })
+    fireEvent.keyDown(box, { key: 'Escape' })
+    expect(box).toHaveValue('Call the printer on Monday.\n')
+    await new Promise((resolve) => setTimeout(resolve, 1_400))
+    expect(writes(calls)).toHaveLength(1)
+    expect(screen.getByRole('textbox', { name: 'The words of notes.txt' })).toBeInTheDocument()
+  })
+})
+
+describe('leaving changes on a file for its agents (ADR 0107)', () => {
+  type Left = { id: string; state: 'waiting' | 'queued' | 'sent'; text: string; words: string; kept?: string | null }
+  const change = ({ id, state, text, words, kept = null }: Left) => ({
+    id, teamPath: 't.yaml', file: REPORT, agent: 'writer', words, part: { runId: 'run-1', messageId: passageId(REPORT, text), from: 'writer', to: null, kind: 'passage', text, file: REPORT },
+    files: [], createdAt: '2026-10-31T01:00:00.000Z', state, messageId: state === 'waiting' ? null : 'm-1', runId: state === 'sent' ? 'run-2' : null, kept, number: state === 'waiting' ? null : 1,
+  })
+  /** The daemon: the file can be changed, and `changes` are left on it. */
+  const daemon = (changes: Left[] = []) => {
+    const calls: Array<{ url: string; init?: RequestInit }> = []
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      calls.push({ url, init })
+      if (url.startsWith('/api/files/read')) return respond(200, read({ editable: true, version: 'sha256:first' }))
+      if (url.startsWith('/api/changes?')) return respond(200, { changes: changes.map(change) })
+      if (url === '/api/changes' && init?.method === 'POST') return respond(201, change({ id: 'c-new', state: 'waiting', text: SALES, words: 'Make it a question' }))
+      if (url === '/api/changes/send') return respond(200, { messages: [] })
+      if (url.startsWith('/api/changes/') && init?.method === 'DELETE') return Promise.resolve(new Response(null, { status: 204 }))
+      if (url === '/api/files/put-back') return respond(200, { version: 'sha256:first', kept: 'kept-again' })
+      return answer(url)
+    }))
+    return calls
+  }
+  const posted = (calls: Array<{ url: string; init?: RequestInit }>, url: string) => calls.filter((call) => call.url === url && call.init?.method !== 'GET' && call.init?.method !== undefined)
+
+  it('offers Make changes on any file read beside a team’s chat, even one you can’t type into', async () => {
+    daemon()
+    const picture = '/teams/.loomwatch/market/writer/chart.png'
+    render(<FileReader file={{ path: picture, runId: 'run-1', from: 'writer' }} name={(id) => names.get(id) ?? id} hue={() => 2} onAsk={vi.fn()} teamPath="t.yaml" />)
+    // It can't be typed into: the switch says what it does here.
+    expect(await screen.findByRole('button', { name: 'Make changes' })).toHaveAttribute('title', 'Mark a part for Writer to change')
+    cleanup()
+    render(<FileReader file={{ path: picture, runId: 'run-1', from: 'writer' }} name={(id) => names.get(id) ?? id} hue={() => 2} onAsk={vi.fn()} />)
+    await screen.findByRole('heading', { name: 'Chart', level: 3 })
+    expect(screen.queryByRole('button', { name: 'Make changes' })).toBeNull()
+  })
+
+  it('leaves a change on words selected while typing into the file: one button, then what should change', async () => {
+    const calls = daemon()
+    const { onAsk } = renderReader({ teamPath: 't.yaml' })
+    fireEvent.click(await screen.findByRole('button', { name: 'Make changes' }))
+    const words = await screen.findByText(SALES)
+    fireEvent.pointerDown(words)
+    const range = document.createRange()
+    range.selectNodeContents(words)
+    document.getSelection()!.removeAllRanges()
+    document.getSelection()!.addRange(range)
+    fireEvent.pointerUp(words)
+    // Not the pill: one button, so selecting words to type over them is never in the way.
+    fireEvent.click(await screen.findByRole('button', { name: 'Change this…' }))
+    expect(screen.queryByRole('toolbar')).toBeNull()
+    const field = screen.getByRole('group', { name: 'What should Writer change?' })
+    fireEvent.change(within(field).getByRole('textbox'), { target: { value: 'Make it a question' } })
+    fireEvent.click(within(field).getByRole('button', { name: 'Add' }))
+    await waitFor(() => expect(posted(calls, '/api/changes')).toHaveLength(1))
+    expect(JSON.parse(String(posted(calls, '/api/changes')[0].init?.body))).toMatchObject({
+      teamPath: 't.yaml', file: REPORT, agent: 'writer', words: 'Make it a question', files: [],
+      part: { kind: 'passage', text: SALES, file: REPORT, from: 'writer' },
+    })
+    expect(onAsk).not.toHaveBeenCalled()
+    await waitFor(() => expect(screen.queryByRole('group', { name: 'What should Writer change?' })).toBeNull())
+  })
+
+  it('shows changes waiting at their parts as their agent’s figure with the stitch, counts them, and Send sends them', async () => {
+    const calls = daemon([
+      { id: 'c-1', state: 'waiting', text: SALES, words: 'Make it a question' },
+      { id: 'c-2', state: 'waiting', text: 'Costs fell.', words: 'Say by how much' },
+    ])
+    renderReader({ teamPath: 't.yaml' })
+    await waitFor(() => expect(document.querySelectorAll('.rd-bubble.held .rd-bubble-change')).toHaveLength(2))
+    expect(screen.getByRole('button', { name: `Your change for Writer to “${SALES}”, waiting for Send` })).toBeInTheDocument()
+    // Send says how many wait.
+    const send = screen.getByRole('button', { name: 'Send 2 changes' })
+    // While changes wait, Send is the screen's one gold fill.
+    expect(isGoldFill(send)).toBe(true)
+    fireEvent.click(send)
+    await waitFor(() => expect(posted(calls, '/api/changes/send')).toHaveLength(1))
+    expect(JSON.parse(String(posted(calls, '/api/changes/send')[0].init?.body))).toEqual({ teamPath: 't.yaml', file: REPORT })
+  })
+
+  it('shows a change at the end of its words while the file is typed into, over the page, never in its words', async () => {
+    daemon([{ id: 'c-1', state: 'waiting', text: SALES, words: 'Make it a question' }])
+    renderReader({ teamPath: 't.yaml' })
+    fireEvent.click(await screen.findByRole('button', { name: 'Make changes' }))
+    await waitFor(() => expect(document.querySelectorAll('.rd-draft-bubble .rd-bubble.held .rd-bubble-change')).toHaveLength(1))
+    // The words typed into are as the file has them: no mark, no slot.
+    expect(document.querySelector('.rd-drafting .rd-mark, .rd-drafting .rd-slot')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: `Your change for Writer to “${SALES}”, waiting for Send` }))
+    expect(await screen.findByRole('region', { name: 'Your change for Writer' })).toHaveTextContent('Your change: Make it a question')
+  })
+
+  it('stands bubbles in the margin under each other where their lines are close, so none covers another', async () => {
+    daemon([
+      { id: 'c-1', state: 'waiting', text: SALES, words: 'Make it a question' },
+      { id: 'c-2', state: 'waiting', text: 'Costs fell.', words: 'Say by how much' },
+    ])
+    // The two parts end on lines 10 px apart.
+    vi.spyOn(Range.prototype, 'getClientRects').mockImplementation(function (this: Range) {
+      return [new DOMRect(120, this.toString().includes('Costs') ? 310 : 300, 160, 18)] as unknown as DOMRectList
+    })
+    renderReader({ teamPath: 't.yaml' })
+    fireEvent.click(await screen.findByRole('button', { name: 'Make changes' }))
+    await waitFor(() => expect(document.querySelectorAll('.rd-draft-bubble')).toHaveLength(2))
+    const tops = [...document.querySelectorAll<HTMLElement>('.rd-draft-bubble')].map((bubble) => parseFloat(bubble.style.top)).sort((one, other) => one - other)
+    expect(tops[1] - tops[0]).toBeGreaterThanOrEqual(28)
+  })
+
+  it('keeps a change whose words the agent changed in the header, its card and Put back a press away', async () => {
+    const calls = daemon([{ id: 'c-5', state: 'sent', text: 'Why customers stay', words: 'Make it a question', kept: 'kept-c-5' }])
+    const made = { file: REPORT, text: 'Why customers stay', from: 'writer', asked: 'Make it a question', runId: 'run-2', messageId: 'm-1', onItsOwn: false,
+      answer: { state: 'said' as const, by: 'writer', text: '1. Done: it asks now.', at: new Date(Date.now() + 60_000).toISOString() }, change: { id: 'c-5', state: 'sent' as const, number: 1, kept: null } }
+    renderReader({ teamPath: 't.yaml', asked: [made] })
+    const lost = await waitFor(() => {
+      const bubble = document.querySelector<HTMLElement>('.rd-lost-changes .rd-bubble')
+      if (!bubble) throw new Error('no bubble in the header')
+      return bubble
+    })
+    fireEvent.click(lost)
+    const card = await screen.findByRole('region', { name: 'Your change for Writer' })
+    expect(card).toHaveTextContent('Writer changed these words.')
+    fireEvent.click(within(card).getByRole('button', { name: 'Put back' }))
+    await waitFor(() => expect(posted(calls, '/api/files/put-back')).toHaveLength(1))
+    expect(JSON.parse(String(posted(calls, '/api/files/put-back')[0].init?.body))).toEqual({ id: 'kept-c-5' })
+  })
+
+  /** As `daemon`, with some answers changed: `refuse` maps a request to the daemon's answer to it. */
+  const refusing = (changes: Left[], refuse: (url: string, init?: RequestInit) => Promise<Response> | null) => {
+    const calls = daemon(changes)
+    const inner = globalThis.fetch
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => refuse(String(input), init) ?? inner(input, init)))
+    return calls
+  }
+
+  it('says the daemon’s own reason when a change can’t be added, sent or taken back, and asks to try again only when there is none', async () => {
+    const FULL = 'That’s as many changes as can wait on market.md. Send them first, then add more.'
+    let reachable = true
+    refusing([], (url, init) => (url === '/api/changes' && init?.method === 'POST' ? (reachable ? respond(422, { error: FULL }) : Promise.reject(new TypeError('Failed to fetch'))) : null))
+    renderReader({ teamPath: 't.yaml' })
+    fireEvent.click(await screen.findByRole('button', { name: 'Make changes' }))
+    const words = await screen.findByText(SALES)
+    const mark = () => {
+      fireEvent.pointerDown(words)
+      const range = document.createRange()
+      range.selectNodeContents(words)
+      document.getSelection()!.removeAllRanges()
+      document.getSelection()!.addRange(range)
+      fireEvent.pointerUp(words)
+    }
+    mark()
+    fireEvent.click(await screen.findByRole('button', { name: 'Change this…' }))
+    const field = screen.getByRole('group', { name: 'What should Writer change?' })
+    fireEvent.change(within(field).getByRole('textbox'), { target: { value: 'Make it a question' } })
+    fireEvent.click(within(field).getByRole('button', { name: 'Add' }))
+    expect(await within(field).findByRole('alert')).toHaveTextContent(FULL)
+    // No answer came back at all: trying again is all there is to do.
+    reachable = false
+    fireEvent.click(within(field).getByRole('button', { name: 'Add' }))
+    await waitFor(() => expect(within(field).getByRole('alert')).toHaveTextContent('Couldn’t add it. Try again.'))
+  })
+
+  it('says why Send or Remove didn’t work, in the daemon’s words', async () => {
+    const GONE = 'designer isn’t on this team any more, so their change can’t be sent. Remove it, then leave it for someone else.'
+    const SENT = 'That change was sent, so it can’t be changed or taken back now.'
+    refusing([{ id: 'c-1', state: 'waiting', text: SALES, words: 'Make it a question' }], (url, init) => (
+      url === '/api/changes/send' ? respond(422, { error: GONE }) : url === '/api/changes/c-1' && init?.method === 'DELETE' ? respond(409, { error: SENT }) : null))
+    renderReader({ teamPath: 't.yaml' })
+    fireEvent.click(await screen.findByRole('button', { name: 'Send 1 change' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(GONE)
+    fireEvent.click(screen.getByRole('button', { name: `Your change for Writer to “${SALES}”, waiting for Send` }))
+    const card = await screen.findByRole('region', { name: 'Your change for Writer' })
+    fireEvent.click(within(card).getByRole('button', { name: 'Remove' }))
+    expect(await within(card).findByRole('alert')).toHaveTextContent(SENT)
+  })
+
+  it('says on Put back that it takes back every change its agent’s turn made', async () => {
+    daemon([
+      { id: 'c-3', state: 'sent', text: 'Costs fell.', words: 'Say by how much', kept: 'kept-9' },
+      { id: 'c-4', state: 'sent', text: SALES, words: 'Make it a question', kept: 'kept-9' },
+    ])
+    const made = { file: REPORT, text: 'Costs fell.', from: 'writer', asked: 'Say by how much', runId: 'run-2', messageId: 'm-1', onItsOwn: false,
+      answer: { state: 'said' as const, by: 'writer', text: '1. Done. 2. Done.', at: new Date(Date.now() + 60_000).toISOString() }, change: { id: 'c-3', state: 'sent' as const, number: 1, kept: null } }
+    renderReader({ teamPath: 't.yaml', asked: [made] })
+    fireEvent.click(await screen.findByRole('button', { name: 'Writer made your change to “Costs fell.”' }))
+    const done = await screen.findByRole('region', { name: 'Your change for Writer' })
+    expect(within(done).getByRole('button', { name: 'Put back all 2' })).toHaveAttribute('title', 'Put the file back as it was before Writer’s turn. Anything changed in it since goes too.')
+    // The card says the words are the person's change, on the screen.
+    expect(done.querySelector('.rd-answer-asked-what')).toHaveTextContent('Your change:')
+  })
+
+  it('shows a few of a part’s changes in the margin while it is typed into, and how many more', async () => {
+    daemon(['a', 'b', 'c', 'd'].map((id) => ({ id: `c-${id}`, state: 'waiting' as const, text: SALES, words: `Change ${id}` })))
+    renderReader({ teamPath: 't.yaml' })
+    fireEvent.click(await screen.findByRole('button', { name: 'Make changes' }))
+    await waitFor(() => expect(document.querySelectorAll('.rd-draft-bubble')).toHaveLength(1))
+    const row = document.querySelector<HTMLElement>('.rd-draft-bubble')!
+    expect(row.querySelectorAll('.rd-bubble.held')).toHaveLength(3)
+    expect(row.querySelector('.rd-bubble-more')).toHaveTextContent('+1')
+  })
+
+  it('keeps a few changes made in the header, and how many more, so the file’s name keeps its room', async () => {
+    daemon(['one', 'two', 'three', 'four', 'five'].map((id, at) => ({ id: `c-${id}`, state: 'sent' as const, text: `Words now gone ${id}`, words: 'Change them', kept: `kept-${at}` })))
+    renderReader({ teamPath: 't.yaml' })
+    await waitFor(() => expect(document.querySelectorAll('.rd-lost-changes .rd-bubble')).toHaveLength(3))
+    expect(document.querySelector('.rd-lost-changes .rd-bubble-more')).toHaveTextContent('+2')
+    // Sent: not drawn as waiting.
+    expect(document.querySelectorAll('.rd-lost-changes .rd-bubble.held')).toHaveLength(0)
+  })
+
+  it('a change’s card takes it back while it waits, and puts the file back once it is made', async () => {
+    const calls = daemon([
+      { id: 'c-1', state: 'waiting', text: SALES, words: 'Make it a question' },
+      { id: 'c-3', state: 'sent', text: 'Costs fell.', words: 'Say by how much', kept: 'kept-c-3' },
+    ])
+    const made = { file: REPORT, text: 'Costs fell.', from: 'writer', asked: 'Say by how much', runId: 'run-2', messageId: 'm-1', onItsOwn: false,
+      answer: { state: 'said' as const, by: 'writer', text: '1. Done: costs fell by a tenth.', at: new Date(Date.now() + 60_000).toISOString() }, change: { id: 'c-3', state: 'sent' as const, number: 1, kept: null } }
+    renderReader({ teamPath: 't.yaml', asked: [made] })
+    fireEvent.click(await screen.findByRole('button', { name: `Your change for Writer to “${SALES}”, waiting for Send` }))
+    const waiting = await screen.findByRole('region', { name: 'Your change for Writer' })
+    expect(waiting).toHaveTextContent('Waits for Send')
+    fireEvent.click(within(waiting).getByRole('button', { name: 'Remove' }))
+    await waitFor(() => expect(calls.some((call) => call.url === '/api/changes/c-1' && call.init?.method === 'DELETE')).toBe(true))
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Writer made your change to “Costs fell.”' }))
+    const done = await screen.findByRole('region', { name: 'Your change for Writer' })
+    expect(done).toHaveTextContent('Done: costs fell by a tenth.')
+    fireEvent.click(within(done).getByRole('button', { name: 'Put back' }))
+    await waitFor(() => expect(posted(calls, '/api/files/put-back')).toHaveLength(1))
+    expect(JSON.parse(String(posted(calls, '/api/files/put-back')[0].init?.body))).toEqual({ id: 'kept-c-3' })
   })
 })

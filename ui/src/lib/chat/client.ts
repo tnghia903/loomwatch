@@ -3,6 +3,7 @@ import type { FindTerm } from './findWords'
 import { readRun, type RunRecord } from '../runs/client'
 import type { Lesson } from '../lessons/client'
 import type { Face, Reaction, ReactionAbout } from './reactions'
+import type { SentChange } from '../files/changes'
 
 /**
  * A team's chat (ADR 0051): its runs and what you wrote to it, read as one conversation.
@@ -37,6 +38,8 @@ export interface ChatMessage {
   now: boolean
   /** The message it replies to, when it was written as one. Absent from chats before replies. */
   replyTo?: ReplyTo | null
+  /** Changes left on a file for this agent, sent together in this message (ADR 0107). */
+  changes?: SentChange[] | null
   /**
    * The agents' own answers to an @ message that needed no workflow ("hi @team"): the message
    * stayed a note, nothing ran, and the agents it was for answered it themselves, at the same time.

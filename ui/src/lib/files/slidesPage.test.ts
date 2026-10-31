@@ -2,7 +2,9 @@ import type { Element, Slide } from 'pptxtojson'
 import { describe, expect, it } from 'vitest'
 
 import { deckChanges, deckSeen } from './deckSeen'
+import { editableDeck } from './editableParts'
 import { PAGE_BRIDGE } from './pageFrame'
+import { PAPER_LOOK } from './pageLook'
 import { slidesPage, textContent, type ParsedDeck } from './slidesPage'
 
 const box = { left: 36, top: 72, width: 288, height: 108, rotate: 0, isFlipH: false, isFlipV: false, order: 1 }
@@ -403,5 +405,53 @@ describe('a slide deck drawn as a page', () => {
     // A kind it doesn't draw is the table of its numbers.
     const radar = drawn(deck([slide([chart('radarChart', [series('North', [4, 9])])])]))
     expect([...radar.querySelectorAll('td')].map((td) => td.textContent)).toEqual(['', 'North', 'Q1', '4', 'Q2', '9'])
+  })
+
+  it('draws the notes as their paragraphs in the file to type into, under the same heading and buttons, when the deck is typed into (ADR 0107)', () => {
+    const parsed = deck([slide([words('<p>One</p>', { id: '4' })], { note: '<p>Walked as a step</p>' }), slide([], { note: '' })])
+    const page = new DOMParser().parseFromString(slidesPage(parsed, 'deck.pptx', undefined, undefined, { notes: [['Say <it> slowly', 'Then\nthe numbers', ''], null] }), 'text/html')
+    const [first, second] = page.querySelectorAll('section.lw-slide')
+    expect([...first.querySelectorAll('.lw-note')].map((note) => [note.getAttribute('data-lw-edit'), note.getAttribute('contenteditable'), note.hasAttribute('data-lw-lines'), note.innerHTML])).toEqual([
+      ['note:0:0', 'true', true, 'Say &lt;it&gt; slowly'],
+      ['note:0:1', 'true', true, 'Then<br>the numbers'],
+      ['note:0:2', 'true', true, ''],
+    ])
+    expect(first.querySelectorAll('.lw-step, .lw-step-dots')).toHaveLength(0)
+    expect(first.querySelector('.lw-notes-label')!.textContent).toBe('Notes, slide 1')
+    expect(first.querySelectorAll('.lw-walk-turn button')).toHaveLength(2)
+    // A slide with no notes to change has none, and still the buttons to walk the deck.
+    expect(second.querySelector('.lw-note, .lw-notes-label')).toBeNull()
+    expect(second.querySelectorAll('.lw-walk-turn button')).toHaveLength(2)
+    // Not typed into, the same deck walks its notes as steps, and nothing is typed into.
+    const walked = drawn(parsed)
+    expect(walked.querySelectorAll('.lw-step')).toHaveLength(1)
+    expect(walked.querySelectorAll('[contenteditable], [data-lw-edit], .lw-note')).toHaveLength(0)
+  })
+
+  it('copies a slide into the strip without the parts to type into, and again once one is left', () => {
+    const parsed = deck([slide([words('<p><span style="font-size:18pt">One</span></p>', { id: '4' })]), slide([])])
+    const html = editableDeck(slidesPage(parsed, 'deck.pptx', undefined, undefined, { notes: [null, null] }), parsed, [new Map([['4', ['One']]]), new Map()], PAPER_LOOK)
+    const holder = document.createElement('iframe')
+    document.body.appendChild(holder)
+    const inner = holder.contentWindow! as Window & typeof globalThis
+    const doc = holder.contentDocument!
+    try {
+      const page = new DOMParser().parseFromString(html, 'text/html')
+      doc.head.innerHTML = page.head.innerHTML
+      doc.body.innerHTML = page.body.innerHTML
+      inner.scrollTo = () => {}
+      new inner.Function(page.querySelector('script')!.textContent!)()
+      const part = doc.querySelector<HTMLElement>('.lw-slide [data-lw-edit]')!
+      expect(part.getAttribute('data-lw-edit')).toBe('shape:0:4:0')
+      const copy = () => doc.querySelector('.lw-thumb .lw-canvas')!
+      expect(copy().querySelectorAll('[data-lw-edit], [contenteditable]')).toHaveLength(0)
+      part.focus()
+      part.querySelector('span')!.textContent = 'One, changed'
+      part.blur()
+      expect(copy().textContent).toBe('One, changed')
+      expect(copy().querySelectorAll('[data-lw-edit], [contenteditable]')).toHaveLength(0)
+    } finally {
+      holder.remove()
+    }
   })
 })

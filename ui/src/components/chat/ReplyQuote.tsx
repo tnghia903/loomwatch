@@ -1,6 +1,7 @@
 import { CornerUpLeft } from '../ui/icon'
 
 import type { ReplyTo } from '../../lib/chat/client'
+import type { SentChange } from '../../lib/files/changes'
 import { replyWhat, replyWords } from '../../lib/chat/reply'
 import { InlineMarkdown } from '../ui/Markdown'
 
@@ -10,6 +11,40 @@ import { InlineMarkdown } from '../ui/Markdown'
  */
 export function ReplyQuote({ reply, name, onShow }: { reply: ReplyTo; name: (id: string) => string; onShow?: () => void }) {
   return <Quote what={replyWhat(reply, name)} text={replyWords(reply)} onShow={onShow} />
+}
+
+/**
+ * The changes one of your messages sent an agent (ADR 0107), each its part's quote and what
+ * should change there, numbered as the agent was given them. A click on a quote shows the part in
+ * its file, as a question's quote does.
+ */
+export function ChangesQuote({ changes, onShow }: { changes: readonly SentChange[]; onShow?: (part: ReplyTo) => (() => void) | undefined }) {
+  return (
+    <ol className="tc-changes" aria-label="Your changes">
+      {changes.map((change) => {
+        // The part's words alone: the message's first line names the file.
+        const what = `The part of ${partFile(change.part)}`
+        const words = <span><InlineMarkdown clickable={false}>{replyWords(change.part)}</InlineMarkdown></span>
+        const show = onShow?.(change.part)
+        return (
+          <li key={change.id} className="tc-change">
+            <span className="tc-change-number" aria-hidden="true">{change.number}</span>
+            <div className="tc-change-body">
+              {show
+                ? <button type="button" className="chat-quote tc-reply-quote" onClick={show} aria-label={`${what}. Show it`}>{words}</button>
+                : <blockquote className="chat-quote tc-reply-quote" aria-label={what}>{words}</blockquote>}
+              <p className="tc-change-words">{change.words}</p>
+            </div>
+          </li>
+        )
+      })}
+    </ol>
+  )
+}
+
+function partFile(part: ReplyTo): string {
+  const name = part.file?.split(/[\\/]/).pop()
+  return name || 'the file'
 }
 
 /**

@@ -41,10 +41,10 @@ impl Refile {
 }
 
 /// File the team's history under its new path, in one transaction: its runs, the messages in its
-/// chat, the chat's search and its reactions. Rows filed by the path alone, from before the team
-/// had an `id` or before the key was kept, take the key too, so the chat finds them by it. Files
-/// sent in the chat and files its runs made inside the team's own folder are named in full, and
-/// are named where they are now.
+/// chat, the chat's search and its reactions, and the changes left on its files. Rows filed by the
+/// path alone, from before the team had an `id` or before the key was kept, take the key too, so
+/// the chat finds them by it. Files sent in the chat and files its runs made inside the team's own
+/// folder are named in full, and are named where they are now.
 ///
 /// # Errors
 ///
@@ -64,7 +64,7 @@ pub(crate) async fn refile_history(db: &crate::db::Db, refile: &Refile) -> Resul
     .bind(&refile.key)
     .execute(&mut *transaction)
     .await?;
-    for table in ["chat_messages", "work_passages"] {
+    for table in ["chat_messages", "work_passages", "file_changes"] {
         sqlx::query(&format!(
             "UPDATE {table} SET team_path = $2,
                  team_key = CASE WHEN team_key = $3 THEN $4 ELSE team_key END
@@ -83,20 +83,23 @@ pub(crate) async fn refile_history(db: &crate::db::Db, refile: &Refile) -> Resul
         .execute(&mut *transaction)
         .await?;
 
-    let sent = sqlx::query(
-        "SELECT id, files FROM chat_messages WHERE team_path = $1 AND files IS NOT NULL",
-    )
-    .bind(&refile.to)
-    .fetch_all(&mut *transaction)
-    .await?;
-    for row in sent {
-        let files: String = row.try_get("files")?;
-        if let Some(moved) = moved_json(&files, refile) {
-            sqlx::query("UPDATE chat_messages SET files = $2 WHERE id = $1")
-                .bind(row.try_get::<String, _>("id")?)
-                .bind(moved)
-                .execute(&mut *transaction)
-                .await?;
+    // The files sent in the chat, and the pictures of the parts changes are left on (ADR 0107).
+    for table in ["chat_messages", "file_changes"] {
+        let sent = sqlx::query(&format!(
+            "SELECT id, files FROM {table} WHERE team_path = $1 AND files IS NOT NULL"
+        ))
+        .bind(&refile.to)
+        .fetch_all(&mut *transaction)
+        .await?;
+        for row in sent {
+            let files: String = row.try_get("files")?;
+            if let Some(moved) = moved_json(&files, refile) {
+                sqlx::query(&format!("UPDATE {table} SET files = $2 WHERE id = $1"))
+                    .bind(row.try_get::<String, _>("id")?)
+                    .bind(moved)
+                    .execute(&mut *transaction)
+                    .await?;
+            }
         }
     }
     let made =

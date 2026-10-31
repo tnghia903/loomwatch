@@ -483,6 +483,8 @@ export const PAGE_BRIDGE = `(function () {
   }
   var down = false, shown = false, timer = 0, queued = false;
   function report() {
+    // Words marked in a part being typed into are told too: over them the reader offers to leave a
+    // change for an agent, folded so as not to be in the way of typing over them (ADR 0107).
     var selection = document.getSelection();
     var text = selection && selection.rangeCount && !selection.isCollapsed ? String(selection) : '';
     if (!text.trim()) { if (shown) { shown = false; send({ type: 'selection', text: '' }); } return; }
@@ -502,6 +504,103 @@ export const PAGE_BRIDGE = `(function () {
   }, true);
   addEventListener('pointerup', function () { down = false; setTimeout(report, 0); }, true);
   document.addEventListener('selectionchange', function () { if (down) return; clearTimeout(timer); timer = setTimeout(report, 120); });
+  // Making changes (ADR 0107). A page LoomWatch drew to be typed into (html[data-lw-editing]) has
+  // parts that are (data-lw-edit, lib/files/editableParts.ts). Typing in one says so (typing, on and
+  // then off); leaving one whose words changed says which it is and its words (edit), a line break
+  // as a new line. Enter leaves it; Shift+Enter makes a line break where the part takes them
+  // (data-lw-lines); Escape puts it back as it was and leaves it. Pasted words arrive as plain
+  // words, and nothing is dropped in or made bold: only words go back into the file. The Pick
+  // switch stays off on such a page.
+  var typing = null;
+  function editingPage() { return document.documentElement.hasAttribute('data-lw-editing'); }
+  function editPart(node) {
+    var element = node && node.nodeType === 1 ? node : node && node.parentElement;
+    var part = element && element.closest ? element.closest('[data-lw-edit]') : null;
+    return part && editingPage() ? part : null;
+  }
+  // A part's words (lib/files/editableParts.ts wordsIn: keep the two alike): its text, a line break
+  // as a new line, a tab drawn as one as a tab, the reader's bubbles left out; a line break it ends
+  // on is the browser's own, so its empty last line shows.
+  function wordsOf(part) {
+    var words = '', last = null;
+    (function walk(node) {
+      Array.prototype.forEach.call(node.childNodes, function (child) {
+        if (child.nodeType === 3) { words += child.data; if (child.data) last = child; return; }
+        if (child.nodeType !== 1 || child.classList.contains('lw-slot')) return;
+        if (child.localName === 'br') { words += '\\n'; last = child; return; }
+        if (child.hasAttribute('data-lw-tab')) { words += '\\t'; last = child; return; }
+        walk(child);
+      });
+    })(part);
+    return last && last.localName === 'br' ? words.slice(0, -1) : words;
+  }
+  function command(name, value) { try { return document.execCommand(name, false, value); } catch (error) { return false; } }
+  // What is put in where the caret is goes in as typing would (so Undo takes it back), else by hand.
+  function put(node) {
+    var selection = getSelection();
+    if (!selection || !selection.rangeCount) return;
+    var range = selection.getRangeAt(0);
+    range.deleteContents();
+    range.insertNode(node);
+    range.setStartAfter(node);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+  function putWords(text) { if (text && !command('insertText', text)) put(document.createTextNode(text)); }
+  function putBreak() { if (!command('insertLineBreak')) put(document.createElement('br')); }
+  function leave(part) {
+    if (!typing || typing.part !== part) return;
+    var was = typing, words = wordsOf(part);
+    typing = null;
+    if (words !== was.words) send({ type: 'edit', part: part.getAttribute('data-lw-edit'), words: words });
+    send({ type: 'typing', on: false });
+  }
+  // Enter and Escape: left, as it is or as it was. Where the browser keeps the focus (the page's
+  // frame never had it), it is left all the same.
+  function done(part, back) {
+    if (back) part.innerHTML = typing.html;
+    var selection = getSelection();
+    if (selection) selection.removeAllRanges();
+    if (part.blur) part.blur();
+    leave(part);
+  }
+  document.addEventListener('focusin', function (event) {
+    var part = editPart(event.target);
+    if (!part || (typing && typing.part === part)) return;
+    if (typing) leave(typing.part);
+    typing = { part: part, html: part.innerHTML, words: wordsOf(part) };
+    send({ type: 'typing', on: true });
+  }, true);
+  document.addEventListener('focusout', function (event) {
+    var part = editPart(event.target);
+    if (part && !(event.relatedTarget && part.contains(event.relatedTarget))) leave(part);
+  }, true);
+  addEventListener('keydown', function (event) {
+    var part = typing && editPart(event.target) === typing.part ? typing.part : null;
+    // A key that finishes a word being composed (an accent, a character of Japanese) is the word's.
+    if (!part || event.isComposing || event.keyCode === 229) return;
+    if (event.key !== 'Escape' && event.key !== 'Enter') return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (event.key === 'Enter' && event.shiftKey && part.hasAttribute('data-lw-lines')) putBreak();
+    else done(part, event.key === 'Escape');
+  }, true);
+  document.addEventListener('beforeinput', function (event) {
+    var part = editPart(event.target), type = String(event.inputType || '');
+    if (!part) return;
+    if (type === 'insertParagraph') { event.preventDefault(); if (typing && typing.part === part) done(part, false); return; }
+    if (/^format/.test(type) || type === 'insertFromDrop' || type === 'deleteByDrag' || (type === 'insertLineBreak' && !part.hasAttribute('data-lw-lines'))) event.preventDefault();
+  }, true);
+  document.addEventListener('paste', function (event) {
+    var part = editPart(event.target);
+    if (!part) return;
+    event.preventDefault();
+    var text = String((event.clipboardData && event.clipboardData.getData('text/plain')) || '').replace(/\\r\\n?/g, '\\n');
+    if (!part.hasAttribute('data-lw-lines')) { putWords(text.replace(/[ \\t]*\\n\\s*/g, ' ')); return; }
+    text.split('\\n').forEach(function (line, at) { if (at) putBreak(); putWords(line); });
+  }, true);
+  document.addEventListener('drop', function (event) { if (editPart(event.target)) event.preventDefault(); }, true);
   var WALK = { ArrowUp: 1, ArrowDown: 1, ArrowLeft: 1, ArrowRight: 1 };
   addEventListener('keydown', function (event) {
     if (picking && !ours(event.target) && !event.metaKey && !event.ctrlKey && !event.altKey) {
@@ -589,7 +688,7 @@ export const PAGE_BRIDGE = `(function () {
   function bubbleFor(at, key) {
     var bubble = document.createElement('button');
     bubble.type = 'button';
-    bubble.innerHTML = '<svg class="lw-point" viewBox="0 0 10 7" aria-hidden="true" focusable="false"><path class="lw-point-fill" d="${BUBBLE_POINT_FILL}"/><path class="lw-point-edge" d="${BUBBLE_POINT_EDGE}"/></svg><span class="lw-face"></span><span class="lw-dots"><i></i><i></i><i></i></span><i class="lw-new"></i><span class="lw-stop">\u00d7</span>';
+    bubble.innerHTML = '<svg class="lw-point" viewBox="0 0 10 7" aria-hidden="true" focusable="false"><path class="lw-point-fill" d="${BUBBLE_POINT_FILL}"/><path class="lw-point-edge" d="${BUBBLE_POINT_EDGE}"/></svg><span class="lw-face"></span><svg class="lw-change" viewBox="0 0 16 4" aria-hidden="true" focusable="false"><path d="M1.5 2h13"/></svg><span class="lw-dots"><i></i><i></i><i></i></span><i class="lw-new"></i><span class="lw-stop">\u00d7</span>';
     bubble.addEventListener('click', function (event) { event.preventDefault(); event.stopPropagation(); unhover(true); send({ type: 'open', key: key }); });
     // Pointed at with the mouse, or reached with the keyboard, the reader shows the agent's card.
     bubble.addEventListener('mouseenter', function () { lit(at, bubble, true); hover(bubble, key, false); });
@@ -665,7 +764,7 @@ export const PAGE_BRIDGE = `(function () {
   }
   function dress(bubble, ask, dark) {
     bubble.lwLit = Boolean(ask.lit);
-    bubble.className = 'lw-bubble lw-' + ask.look + (dark ? ' lw-dark' : '') + (ask.fresh ? ' lw-fresh' : '') + (ask.lit ? ' lw-lit' : '');
+    bubble.className = 'lw-bubble lw-' + ask.look + (ask.change ? ' lw-change-' + ask.change : '') + (dark ? ' lw-dark' : '') + (ask.fresh ? ' lw-fresh' : '') + (ask.lit ? ' lw-lit' : '');
     bubble.setAttribute('aria-label', String(ask.label || ''));
     bubble.setAttribute('aria-expanded', ask.open ? 'true' : 'false');
     bubble.title = String(ask.title || '');
@@ -756,6 +855,8 @@ export const PAGE_BRIDGE = `(function () {
   addEventListener('scroll', function () { moved(); unhover(false); }, true);
   addEventListener('resize', moved);
   addEventListener('click', function (event) {
+    // A press in a part typed into puts the caret there: a link in it is not followed.
+    if (editPart(event.target)) return;
     if (picking && !ours(event.target)) { pickAt(event); return; }
     var link = event.target && event.target.closest ? event.target.closest('a[href]') : null;
     if (!link) {
@@ -822,7 +923,8 @@ export const PAGE_BRIDGE = `(function () {
       applyMarks();
     }
     if (data.type === 'pick') {
-      picking = data.on === true;
+      // Picking and typing never run at once: a page drawn to be typed into is never picked in.
+      picking = data.on === true && !editingPage();
       document.documentElement.classList.toggle('lw-picking', picking);
       if (!picking) { pointer = null; point(null); }
       // Turned on from the keyboard: the first part in view is outlined at once, so the keys have
@@ -939,6 +1041,11 @@ export const PAGE_BRIDGE = `(function () {
     + '.lw-bubble.lw-dark{--lw-ink-2:#A9A59C;--lw-fill:#D8A93C;--lw-live:#6AB8FF;--lw-alert:#F2635C}'
     + '.lw-dots i{width:4px;height:4px;border-radius:50%;background:var(--lw-ink-2)}'
     + '.lw-new{display:none;width:7px;height:7px;border-radius:50%;background:var(--lw-fill)}.lw-waiting .lw-new{display:inline-block}'
+    // A change's line (reader.css .rd-bubble-change): dashed, with a dashed edge, while it waits; solid once sent.
+    + '.lw-change{display:none;flex:none;width:16px;height:4px;overflow:visible}.lw-change path{fill:none;stroke:var(--lw-fill);stroke-width:2px;stroke-linecap:round}'
+    + '.lw-change-waits .lw-change,.lw-change-sent .lw-change{display:inline-block}.lw-change-waits .lw-change path{stroke-dasharray:3 2.5;stroke-linecap:butt}'
+    + '.lw-bubble.lw-change-waits{box-shadow:0 3px 10px rgba(0,0,0,.16)!important}.lw-bubble.lw-dark.lw-change-waits{box-shadow:0 3px 10px rgba(0,0,0,.4)!important}'
+    + '.lw-bubble.lw-change-waits:not(:focus-visible){outline:1px dashed var(--lw-fill)!important;outline-offset:-1px}.lw-change-waits .lw-point-edge{stroke-dasharray:2 2}'
     + '.lw-stop{display:none;margin-right:4px;color:var(--lw-alert);font:700 12px/1 sans-serif}.lw-failed .lw-stop{display:inline}'
     + '.lw-bubble.lw-busy img{filter:drop-shadow(0 0 1px var(--lw-live)) drop-shadow(0 0 2px var(--lw-live))}'
     + '.lw-bubble.lw-waiting img{filter:drop-shadow(0 0 1px var(--lw-fill)) drop-shadow(0 0 2px var(--lw-fill))}'
@@ -998,6 +1105,8 @@ export interface PageMark {
   /** A thing in the page (ADR 0091): found by its path, outlined, with the bubble at its corner. */
   at?: ElementAt
   look: 'busy' | 'waiting' | 'read' | 'failed'
+  /** A change left for the agent (ADR 0107): waiting for Send or its turn (a dashed line), or sent (a solid one). */
+  change?: 'waits' | 'sent'
   /** Asked just now: its stroke sweeps on. */
   fresh: boolean
   /** Its answer is open, or it is pointed at. */
@@ -1035,6 +1144,20 @@ export type PageMessage =
   | { type: 'thing'; what: ElementAt['what']; path: string; text: string; rect: PageRect; picture?: ArrayBuffer }
   /** While picking, the arrow keys reached a part: what it is called, for a screen reader to say. */
   | { type: 'pointing'; text: string }
+  /**
+   * A part of a deck or a Word document drawn to be typed into was left with its words changed
+   * (ADR 0107): which part, as the page names it (`data-lw-edit`, officeEdits.ts `editPart`), and its
+   * words now, a line break as a new line.
+   */
+  | { type: 'edit'; part: string; words: string }
+  /** A part drawn to be typed into is typed in now (`on`), or was left. */
+  | { type: 'typing'; on: boolean }
+
+/** What a part typed into may be named, as the page names it: `note:`, `shape:` or `para:` and its numbers. */
+export const EDIT_PART = /^(note|shape|para):[0-9:]+$/
+/** The longest name of a part typed into, and the most words taken from it: more is never a paragraph's. */
+const EDIT_PART_MAX = 64
+const EDIT_WORDS_MAX = 100_000
 
 /** The largest picture of a thing in the page taken from it. */
 const PICTURE_MAX_BYTES = 20 * 1024 * 1024
@@ -1053,6 +1176,14 @@ export function pageMessage(data: unknown): PageMessage | null {
     const { id, url } = data as { id?: unknown; url?: unknown }
     return Number.isSafeInteger(id) && typeof url === 'string' && url.length <= 4096 ? { type: 'load', id: id as number, url } : null
   }
+  if (message.type === 'edit') {
+    const { part, words } = data as { part?: unknown; words?: unknown }
+    // Words too many to be a paragraph's are refused whole, never cut short into the file.
+    return typeof part === 'string' && part.length <= EDIT_PART_MAX && EDIT_PART.test(part) && typeof words === 'string' && words.length <= EDIT_WORDS_MAX
+      ? { type: 'edit', part, words }
+      : null
+  }
+  if (message.type === 'typing') return { type: 'typing', on: (data as { on?: unknown }).on === true }
   if (message.type === 'pointing') {
     const text = (data as { text?: unknown }).text
     return typeof text === 'string' && text.trim() && text.length <= 200 ? { type: 'pointing', text } : null
