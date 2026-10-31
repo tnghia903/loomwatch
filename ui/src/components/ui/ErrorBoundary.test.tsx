@@ -15,7 +15,7 @@ it('replaces a crashed screen with a way back instead of a blank page', () => {
   const quiet = vi.spyOn(console, 'error').mockImplementation(() => {})
   render(<ErrorBoundary><Broken /></ErrorBoundary>)
   expect(screen.getByRole('alertdialog', { name: 'Something went wrong' })).toBeInTheDocument()
-  expect(screen.getByRole('button', { name: 'Back to your teams' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Back to Home' })).toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'Reload' })).toBeInTheDocument()
   quiet.mockRestore()
 })

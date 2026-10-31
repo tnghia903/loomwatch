@@ -27,26 +27,23 @@
   .build-workspace.lib-collapsed.inspecting .team-story { max-width: min(680px, calc(100% - 126px - var(--lw-inspector-w) - var(--lw-panel-inset) - 12px)); }
 }
 .team-story-eyebrow { font: 600 10.5px/1.3 var(--font-sans); letter-spacing: .08em; text-transform: uppercase; color: var(--color-ink-3); }
-/* The sentence reads like the landing page's (site/styles.css, .sentence .chip): each name is a
-   28px pill centred on the line's lowercase letters. A pill aligned to its baseline instead sat on
-   the bottom of its figure, above the words around it. The figure stands in it on its own, with no
-   circle or disc behind it, as every agent's avatar does. */
+/* The sentence reads like the landing page's (site/styles.css, .sentence .chip): each name is the
+   agent's chip, as the chat draws it (.tc-mention, team-chat.css), at 28px, centred on the line's
+   lowercase letters. A pill aligned to its baseline instead sat on the bottom of its figure, above
+   the words around it. */
 .team-story p { margin: 0; font: 400 18px/1.75 var(--font-serif); color: var(--color-ink-2); text-wrap: pretty; }
-.story-name, .story-schedule {
+.story-name { cursor: pointer; }
+.story-name:hover, .story-name:focus-visible { border-color: var(--color-accent); }
+.story-name.you { background: transparent; border-style: dashed; color: var(--color-ink); }
+/* Your mark sits inside the head's room, so its dashed ring stays finer than the chip's ring. */
+.story-name.you .tc-mention-face { box-sizing: border-box; padding: 3px; }
+.story-schedule {
   display: inline-flex; align-items: center; gap: 6px; vertical-align: middle;
   margin: 0 1px; padding: 0 10px; height: 28px; border-radius: 99px; white-space: nowrap;
   font: 600 13px/1 var(--font-sans); letter-spacing: -.005em; cursor: pointer;
-  background: var(--color-accent-tint);
+  color: var(--color-accent); background: transparent;
   border: 1px solid color-mix(in srgb, var(--color-accent) 35%, transparent);
 }
-.story-face { flex: none; width: 24px; height: 24px; margin: -4px 2px -4px -4px; }
-.story-face > * { display: block; width: 100%; height: 100%; object-fit: contain; }
-.story-name:hover, .story-name:focus-visible { border-color: var(--color-accent); }
-/* An agent's name wears its figure's colour (.hue-N), as in the chat. On the gold tint a touch of ink
-   keeps every colour at 4.8:1 or more; a name with no colour of its own, and you, stay ink. */
-.story-name { color: color-mix(in srgb, var(--hue, var(--color-ink)) 94%, var(--color-ink)); }
-.story-name.you { background: transparent; border-style: dashed; color: var(--color-ink); }
-.story-schedule { color: var(--color-accent); background: transparent; }
 span.story-schedule { cursor: default; }
 .story-warning { color: var(--color-alert); }
 @media (max-width: 767px) {
@@ -172,7 +169,6 @@ span.story-schedule { cursor: default; }
 .chat-faces { display: inline-flex; flex: none; }
 .chat-faces .chat-avatar + .chat-avatar { margin-left: -5px; }
 /* LoomWatch's answer in your place (ADR 0090) wears the app's mark, drawn still like the chat around it. */
-.chat-avatar-loomwatch .fr-mark { animation: none; }
 .chat-title { display: grid; gap: 1px; min-width: 0; }
 .chat-title h3 { margin: 0; font: 600 14px/1.3 var(--font-sans); color: var(--color-ink); }
 .chat-title span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--color-ink-3); }
@@ -219,7 +215,7 @@ span.story-schedule { cursor: default; }
 .chat-msg.mine .chat-bubble { border-top-left-radius: 16px; border-top-right-radius: 5px; background: var(--color-accent-tint); border-color: color-mix(in srgb, var(--color-accent) 30%, transparent); }
 .chat-msg.mine.continued .chat-bubble { border-top-right-radius: 16px; }
 .chat-msg.failed .chat-bubble { border-color: color-mix(in srgb, var(--color-alert) 55%, transparent); }
-.chat-msg.flash .chat-bubble, .chat-msg:focus-visible .chat-bubble, .chat-notice.flash span { box-shadow: 0 0 0 2px var(--color-accent); }
+.chat-msg.flash .chat-bubble, .chat-msg:focus-visible .chat-bubble, .chat-notice.flash > span { box-shadow: 0 0 0 2px var(--color-accent); }
 .chat-quote { display: grid; gap: 1px; margin: 1px 0 7px; padding: 4px 9px; border-left: 3px solid var(--color-ink-3); border-radius: 4px; background: color-mix(in srgb, var(--color-ink) 5%, transparent); font-size: 12px; }
 .chat-quote b { font-weight: 600; color: var(--color-ink-2); }
 .chat-quote span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-ink-3); }
@@ -272,7 +268,8 @@ span.story-schedule { cursor: default; }
 .chat-calls .delivery-link { font-size: 12px; color: var(--color-ink-2); }
 /* A note in the chat, centred: what happened without anyone typing it. */
 .chat-notice { display: flex; justify-content: center; align-items: baseline; flex-wrap: wrap; gap: 6px 8px; margin: 16px 0 4px; font-size: 12px; color: var(--color-ink-3); outline: none; }
-.chat-notice span { padding: 3px 11px; border-radius: 99px; background: color-mix(in srgb, var(--color-ink) 6%, transparent); color: var(--color-ink-2); }
+/* Its pill is the notice's own span, not every span inside it: an agent named there wears its chip. */
+.chat-notice > span { padding: 3px 11px; border-radius: 99px; background: color-mix(in srgb, var(--color-ink) 6%, transparent); color: var(--color-ink-2); }
 .chat-notice time { font: 500 11px/1.4 var(--font-mono); }
 /* An answer on its way: someone is typing. */
 .chat-bubble.typing { display: inline-flex; align-items: center; gap: 9px; border-style: dashed; background: transparent; color: var(--color-ink-3); font-size: 12.5px; }
@@ -389,16 +386,13 @@ span.story-schedule { cursor: default; }
   /* The header has no room on a phone: the bell drops below it, as an icon and a count, and only
      appears when something is working or waiting. */
   .needs-you-anchor { right: 12px; top: 52px; }
-  /* A team's page keeps its menu on a phone, at the end of that row: it is the way to Team memory,
-     About you, Connections, Usage and the guide there. Like the bell it keeps its 30 px look and
-     reaches 44 px, mostly down into the heading's empty corner; its reach meets the bell's at 56 px. */
+  /* A team's page keeps its ⋯ on a phone, at the end of that row: it is the way to Team memory, the
+     guide and feedback there. Like the bell it keeps its 30 px look and reaches 44 px, mostly down
+     into the heading's empty corner; its reach meets the bell's at 56 px. */
   .lw-shell .workspace-chrome > .prototype-workspace-menu { right: 19px; top: 59px; }
   .lw-shell .workspace-chrome > .prototype-workspace-menu > button { width: 30px; height: 30px; position: relative; }
   .lw-shell .workspace-chrome > .prototype-workspace-menu > button::before { content: ''; position: absolute; inset: -3px -7px -11px; }
   .lw-shell .workspace-chrome > .prototype-workspace-menu ~ .needs-you-anchor { right: 64px; top: 59px; }
-  /* Ask beside them reaches 44 px too: as wide, and down into the same corner. */
-  .workspace-chrome .ask-button { min-width: 44px; justify-content: center; }
-  .workspace-chrome .ask-button::before { content: ''; position: absolute; inset: 0 0 -14px; }
   .needs-you-bell .needs-you-label { display: none; }
   .needs-you-bell .needs-you-n { display: inline; font-variant-numeric: tabular-nums; }
   .needs-you-bell:not(.has):not(.working) { display: none; }
@@ -634,7 +628,7 @@ span.story-schedule { cursor: default; }
 .lw-canvas[data-depth="story"] .build-node-icon.mark-holder .agent-mark { width: 34px; height: 34px; }
 .mark-badge { position: absolute; right: -5px; bottom: -5px; display: grid; place-items: center; width: 15px; height: 15px; border-radius: 50%; background: var(--color-panel-solid); border: 1px solid var(--color-hairline); color: var(--color-ink-2); }
 .lw-canvas[data-depth="story"] .mark-badge { width: 20px; height: 20px; }
-.story-name .agent-mark { --mark-ground: var(--color-accent-tint); margin-left: -3px; }
+.story-name .agent-mark { --mark-ground: var(--color-accent-tint); }
 .story-name.you .agent-mark { --mark-ground: var(--color-ground); }
 .weft-names > span { display: inline-flex; align-items: center; gap: 6px; }
 .weft-names .agent-mark { --mark-ground: var(--color-panel); }
@@ -672,7 +666,7 @@ span.story-schedule { cursor: default; }
 
 .file-sheet {
   position: relative; flex: none; width: 60px; height: 76px; border-radius: 4px 14px 4px 4px;
-  background: var(--color-paper); color: var(--color-accent);
+  background: var(--color-paper); color: var(--color-paper-gold);
   box-shadow: 0 1px 0 var(--color-hairline), 0 6px 16px color-mix(in srgb, var(--color-black) 22%, transparent);
   transform: rotate(-2.5deg); transition: transform .18s ease;
 }
@@ -681,15 +675,17 @@ span.story-schedule { cursor: default; }
   background: linear-gradient(225deg, transparent 50%, var(--color-paper-rule) 50%);
 }
 .file-card.ready:hover .file-sheet { transform: rotate(0deg) translateY(-2px); }
-.file-sheet-icon { position: absolute; top: 9px; left: 8px; display: inline-flex; color: var(--color-accent-fill); }
+.file-sheet-icon { position: absolute; top: 9px; left: 8px; display: inline-flex; color: var(--color-paper-gold); }
 .file-sheet-rules { position: absolute; top: 29px; left: 8px; right: 9px; display: flex; flex-direction: column; gap: 5px; }
 .file-sheet-rules i { display: block; height: 2.5px; border-radius: 2px; background: var(--color-paper-rule); }
 .file-sheet-rules i:nth-child(2) { width: 82%; }
 .file-sheet-rules i:nth-child(4) { width: 58%; }
+/* A paper label, not a gold fill: every file card has one, and the screen's one fill is for what to
+   do now. */
 .file-sheet-ext {
   position: absolute; left: -5px; bottom: 8px; padding: 2px 6px; border-radius: 3px;
-  background: var(--color-accent-fill); color: var(--color-accent-on-fill);
-  font: 700 9.5px/1.2 var(--font-mono); letter-spacing: .06em;
+  background: var(--color-paper); box-shadow: inset 0 0 0 1px var(--color-paper-gold); color: var(--color-paper-ink);
+  font: 500 9.5px/1.2 var(--font-mono); letter-spacing: .06em;
 }
 .file-card.muted .file-sheet { filter: grayscale(1); opacity: .55; box-shadow: none; }
 
@@ -763,9 +759,12 @@ span.story-schedule { cursor: default; }
 }
 .file-chip svg { flex: none; color: var(--color-accent); }
 .file-chip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Its kind is a line, never a fill: an answer names many files, and a gold fill on each would leave
+   no one fill for the thing to do now (DESIGN_LANGUAGE §8). */
 .file-chip-ext {
-  flex: none; padding: 1px 5px; border-radius: 4px; background: var(--color-accent-fill); color: var(--color-accent-on-fill);
-  font: 700 0.72em/1.4 var(--font-mono); letter-spacing: .05em;
+  flex: none; padding: 1px 5px; border-radius: 4px; background: none;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 40%, var(--color-hairline));
+  color: var(--color-ink-2); font: 500 max(10px, 0.72em)/1.4 var(--font-mono); letter-spacing: .05em;
 }
 .file-chip:hover:not(:disabled) { border-color: var(--color-accent); background: color-mix(in srgb, var(--color-accent-fill) 22%, var(--color-accent-tint)); }
 .file-chip:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
@@ -798,6 +797,6 @@ span.story-schedule { cursor: default; }
 .file-chip:disabled { cursor: default; }
 .file-chip.muted { border-color: var(--color-hairline); background: transparent; color: var(--color-ink-3); }
 .file-chip.muted svg { color: var(--color-ink-3); }
-.file-chip.muted .file-chip-ext { background: var(--color-hairline); color: var(--color-ink-3); }
+.file-chip.muted .file-chip-ext { box-shadow: inset 0 0 0 1px var(--color-hairline); color: var(--color-ink-3); }
 .file-chip-said { margin-left: 6px; font-size: 0.86em; color: var(--color-ink-3); }
 .file-chip-said:empty { display: none; }

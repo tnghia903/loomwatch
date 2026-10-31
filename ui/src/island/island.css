@@ -60,7 +60,7 @@ body {
 .island [data-phase="tools"] { --act: island-tool var(--t-flow) var(--ease-out) infinite; }
 .island [data-phase="typing"] { --act: island-bob var(--t-settle) ease-in-out infinite; }
 .island .island-row-figure.glow[data-moment="work"] > * { transform-origin: 50% 90%; animation: var(--act, island-bob calc(var(--t-breathe) / 2) ease-in-out infinite); }
-.island :is(.island-head, .island-slot, .island-hang-figure, .island-row-figure, .island-slot-eyes, .island-stage-figure, .island-crew-figure, .island-pill-figure, .island-agent, .island-bench-figure) > :is(img, .figure-still) {
+.island :is(.island-head, .island-slot, .island-hang-figure, .island-row-figure, .island-tray-figure, .island-stage-figure, .island-crew-figure, .island-pill-figure, .island-bench-figure) > :is(img, .figure-still) {
   display: block;
   width: 100%;
   height: 100%;
@@ -129,13 +129,17 @@ body {
 }
 .island[data-view="hidden"] .island-shape { --w: 120px; --h: 0px; opacity: 0; pointer-events: none; }
 /* Something dragged near: the island opens as a slot, wide and deep enough to let go of it well
-   below the top edge, where macOS would open Mission Control instead. */
-.island[data-view="slot"] .island-shape { --w: calc(var(--notch-w) + 160px); --h: calc(var(--bar) + 64px); --r: 24px; }
+   below the top edge, where macOS would open Mission Control instead, and to hold a tray. */
+.island[data-view="slot"] .island-shape { --w: calc(var(--notch-w) + 220px); --h: calc(var(--bar) + 124px); --r: 28px; }
 
 /* ---- Popping out: the agent at work peeks up below the notch ---- */
-.island-balcony { position: absolute; top: calc(var(--bar) - var(--peek-up)); left: 50%; width: var(--fig); height: var(--fig); translate: -50% 0; }
-/* The list fills the island: whoever peeked last is not drawn over it. */
-.island:is([data-view="list"], [data-view="box"], [data-view="bench"]) .island-balcony { visibility: hidden; }
+/* Drawn only while someone is out: from when they start up (`--t-quick`, as `.island-slot.is-on`),
+   and as they tuck back in (`--t-move`, as `.island-slot`). Parked below, whoever peeked last would
+   show alone in the island as it shrinks from the list. */
+.island-balcony { position: absolute; top: calc(var(--bar) - var(--peek-up)); left: 50%; width: var(--fig); height: var(--fig); translate: -50% 0; visibility: hidden; transition: visibility 0s var(--t-move); }
+.island:is([data-view="work"], [data-view="done"], [data-view="fail"]) .island-balcony { visibility: visible; transition: visibility 0s var(--t-quick); }
+/* The list fills the island: whoever peeked last is not drawn over it, from the moment it opens. */
+.island:is([data-view="list"], [data-view="box"], [data-view="bench"]) .island-balcony { transition: none; }
 .island-slot { position: absolute; inset: 0; translate: 0 calc(var(--fig) * 1.15); transition: translate var(--t-move) var(--ease-in); }
 .island-slot > * { transform-origin: 50% 90%; }
 .island:is([data-view="work"], [data-view="done"], [data-view="fail"]) .island-slot.is-on {
@@ -233,6 +237,8 @@ body {
 .island-words small { font: 400 12px/16px var(--font-sans); color: var(--color-ink-2); }
 .island-words p { margin: 0; font: 500 14px/20px var(--font-sans); color: var(--color-ink); overflow-wrap: anywhere; }
 .island-words .island-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A finished team's answer, its first line as written: two lines at most. */
+.island-words .island-result { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
 .island-words .island-problem { color: var(--color-alert); }
 .island-words .island-said { color: var(--color-ink); }
 /* A long question shows four lines on its card and one in the list; LoomWatch has it whole. */
@@ -306,7 +312,12 @@ body {
    once something is written, as the line the message will go on, leaves on the way-out curve, and
    dims while the message goes. It takes the field's whole height at its end, its ring inside. */
 .island-field-box { position: relative; display: flex; flex: 1; min-width: 0; }
-.island-field-box > .island-field { padding-right: 38px; }
+.island-field-box > .island-field { padding-right: 38px; padding-left: 36px; }
+/* + at the field's start: files to go with the message, as dropping them does. */
+.island-add { position: absolute; top: 0; bottom: 0; left: 0; z-index: 1; display: grid; place-items: center; width: 36px; padding: 0; border: 0; border-radius: var(--r-full); background: transparent; color: var(--color-ink-2); cursor: pointer; transition: color var(--t-instant) var(--ease-out); }
+.island-add:hover:not(:disabled) { color: var(--color-ink); }
+.island-add:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -3px; }
+.island-add:disabled { opacity: .5; cursor: default; }
 .island-send {
   position: absolute;
   top: 0;
@@ -338,19 +349,58 @@ body {
 :is(.island-sent-failed .island-problem, .island-away) > span { min-width: 0; overflow-wrap: anywhere; }
 .island-away { grid-column: 2 / -1; font: 400 12px/16px var(--font-sans); }
 .island-away > span { white-space: pre-line; }
-/* ---- The pinned agent's slot: a gold lip, and its eyes just over it ---- */
+/* ---- The pinned agent's slot: a tray in a gold line, and the agent behind it ---- */
 .island-slot-open { position: absolute; inset: 0; pointer-events: none; }
-.island-slot-eyes { position: absolute; left: calc(50% - 26px); bottom: 2px; width: 52px; height: 52px; animation: island-rise var(--t-entrance) var(--ease-out) both; }
-.island-slot-lip { position: absolute; left: 18px; right: 18px; bottom: 6px; height: 3px; border-radius: 3px; background: var(--color-accent); box-shadow: 0 0 10px color-mix(in srgb, var(--color-accent) 70%, transparent); }
+/* It stands behind the tray's far edge, its face and shoulders over it, bobbing as it waits, all of
+   it below the notch's own band, where a camera's notch has no screen to draw on. */
+.island-tray-figure { position: absolute; left: calc(50% - 32px); bottom: 56px; width: 64px; height: 64px; animation: island-rise var(--t-entrance) var(--ease-out) both, island-bob calc(var(--t-breathe) / 2) ease-in-out var(--t-entrance) infinite; }
+/* The tray is drawn over its lower half, tinted gold; its edge is a dashed gold line that runs
+   around it, as a place to let go, its dashes measured along a fixed length so they meet evenly
+   at any notch's width. */
+.island-tray { position: absolute; left: 22px; right: 22px; bottom: 16px; height: 58px; border-radius: 16px; background: var(--color-accent-tint); animation: island-rise var(--t-entrance) var(--ease-out) both; }
+.island-tray > svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.island-tray rect { fill: none; stroke: var(--color-accent); stroke-width: 1.5; stroke-dasharray: 7 6; animation: island-tray-edge var(--t-flow) linear infinite; }
 
 /* ---- What went in, and the jobs that fit it ---- */
 .island-intake { grid-column: 2 / -1; display: grid; gap: 8px; min-width: 0; }
+/* Files one by one, as the team chat holds them before they go: a picture drawn small, any other
+   file as a page, LoomWatch's own with its corner folded, with its kind on it, and its name under
+   it. Room above and at the end for each one's ×, which sits on its corner. */
+.island-files { display: flex; flex-wrap: wrap; align-items: start; gap: 10px; margin: 0; padding: 6px 6px 0 0; list-style: none; }
+.island-file { position: relative; display: grid; justify-items: center; gap: 4px; width: 64px; }
+.island-file-face { position: relative; display: grid; place-items: center; width: 64px; height: 64px; overflow: hidden; border-radius: 12px; }
+.island-file-face > img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.island-file-face.is-page { border: 1px solid var(--color-hairline); border-radius: 4px 14px 4px 4px; background: color-mix(in srgb, var(--color-ink) 7%, var(--color-black)); color: var(--color-ink-2); }
+.island-file-face.is-page::after { content: ""; position: absolute; top: -1px; right: -1px; width: 14px; height: 14px; border-radius: 0 0 0 4px; background: linear-gradient(225deg, var(--color-black) 50%, var(--color-paper-rule) 50%); }
+.island-file-face.is-page > b { font: 600 11px/1 var(--font-mono); letter-spacing: .06em; color: var(--color-ink); }
+/* Two lines of its name at most; the page says its kind, and its whole name is its label. A name
+   cut into its first and last words has a line for each. */
+.island-file-name { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; width: 100%; font: 500 11px/14px var(--font-sans); color: var(--color-ink); text-align: center; overflow-wrap: anywhere; }
+.island-file-name.is-cut { display: grid; }
+.island-file-name.is-cut > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.island-file-remove, .island-file-in { position: absolute; top: -6px; right: -6px; display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: var(--r-full); background: var(--color-black); }
+.island-file-remove { box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-ink) 24%, transparent); color: var(--color-ink-2); cursor: pointer; transition: color var(--t-instant) var(--ease-out), box-shadow var(--t-instant) var(--ease-out); }
+.island-file-remove:hover { color: var(--color-ink); box-shadow: 0 0 0 1px var(--color-ink); }
+.island-file-remove:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+/* With the agent: a tick, in the done green, on its corner. */
+.island-file-in { box-shadow: 0 0 0 1px var(--color-ok); color: var(--color-ok); }
+/* On its way: a picture dims (a page's kind stays as it was, to be read), and a blue line, the
+   colour of work, runs along its foot, on a track of its own that shows on any picture. */
+.island-file.is-going .island-file-face > :is(img, svg) { opacity: .6; }
+.island-file-line { position: absolute; left: 6px; right: 6px; bottom: 6px; height: 3px; overflow: hidden; border-radius: 3px; background: color-mix(in srgb, var(--color-ink) 20%, var(--color-black)); }
+.island-file-line::after { content: ""; position: absolute; inset: 0; width: 40%; border-radius: inherit; background: var(--color-live); animation: island-file-going calc(var(--t-breathe) / 2) ease-in-out infinite; }
 .island-intake-what { display: inline-flex; align-items: center; gap: 6px; justify-self: start; max-width: 100%; padding: 4px 6px 4px 10px; border-radius: 8px; background: color-mix(in srgb, var(--color-ink) 10%, transparent); font: 500 12px/16px var(--font-sans); }
 .island-intake-what > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .island-intake-remove { flex: none; width: 20px; height: 20px; border: 0; border-radius: var(--r-full); background: transparent; color: var(--color-ink-2); font: 600 14px/1 var(--font-sans); cursor: pointer; }
 .island-intake-remove:hover { color: var(--color-ink); }
 .island-intake-remove:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
 .island-jobs { display: flex; flex-wrap: wrap; gap: 6px; }
+/* What to ask next, under the box: a long one is cut to the row, and reads whole once pressed. */
+.island-next { grid-column: 2 / -1; min-width: 0; }
+.island-next > .island-chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+/* While it listens they keep their room, out of sight, so the island doesn't shrink as someone
+   starts to speak; it settles once they let go. */
+.island-next.is-away { visibility: hidden; }
 .island-chip { min-height: 28px; padding: 0 12px; border: 1px solid color-mix(in srgb, var(--color-ink) 28%, transparent); border-radius: var(--r-full); background: transparent; color: var(--color-ink); font: 600 12px/16px var(--font-sans); cursor: pointer; transition: border-color var(--t-instant) var(--ease-out); }
 .island-chip:hover { border-color: var(--color-ink); }
 .island-chip:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
@@ -378,28 +428,29 @@ body {
    don't, and the team under it. In its row the bubble takes the row's width, its figure at the
    bubble's corner; on the card, the card is the bubble. */
 .island-pinned > .island-request { grid-column: 2 / -1; }
-/* Its figure opens its workbench; the other agents, on its line at the right, switch the box to
-   one of them, as Tab does. What it is doing goes under them, beside its figure. */
+/* Its figure opens its workbench. On its line at the right, how to talk to it, and, while ⌃⌥Space
+   is held, that it listens. What it is doing goes under them, beside its figure. */
 .island-bench-toggle { grid-row: 1; padding: 0; border: 0; border-radius: var(--r-md); background: transparent; text-align: start; cursor: pointer; }
 .island-bench-toggle:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 .island-box-head { grid-row: 1; grid-column: 2 / -1; display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; }
 .island-box-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 14px/20px var(--font-sans); color: var(--color-ink); }
-.island-agents { display: flex; flex: none; align-items: center; gap: 6px; }
+.island-talk { display: flex; flex: none; align-items: center; gap: 4px; font: 500 12px/16px var(--font-sans); color: var(--color-ink-2); }
+.island-talk > .island-key { color: var(--color-ink); }
+.island-talk.is-on { color: var(--color-ink); }
 .island-pinned > .island-words:not(.island-request) { grid-column: 2; }
-/* The others at full strength: their size says they aren't the one written to, and a faded figure
-   would read as resting or not there. */
-.island-agent { width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--r-sm); background: transparent; cursor: pointer; }
-.island-agent:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
-/* Switched to another agent: the one it was ducks below its row and the new one pops up in its
-   place, as agents hand over at the notch, and the one left pops into the row beside the name. The
-   duck is quick, not the island's exit pace, so Tab after Tab keeps up; it is a transition, so a
-   figure skipped while still rising ducks from where it got to. The row's floor, under the
-   figures' light, is drawn only while they switch. */
+/* Listening: the microphone and the word say so in the head, and bars in Send's place show how loud
+   it hears. The figure keeps its own glow, which is its state. */
+.island-pinned.is-listening .island-field-box > .island-field { padding-right: 48px; }
+.island-loudness { position: absolute; top: 0; right: 14px; bottom: 0; display: flex; align-items: center; gap: 2px; }
+.island-loudness > i { width: 3px; height: calc(4px + 14px * var(--level) * var(--share)); border-radius: var(--r-full); background: var(--color-ink); transition: height var(--t-instant) linear; }
+/* Another agent pinned while the box is open: the one it was ducks below its row and the new one
+   pops up in its place, as agents hand over at the notch. The duck is quick, not the island's exit
+   pace; it is a transition, so a figure skipped while still rising ducks from where it got to. The
+   row's floor, under the figures' light, is drawn only while they switch. */
 .island-switch { position: absolute; inset: 0; }
 .island-row-figures:has(> .island-switch:is(.is-leaving, .is-coming)) { clip-path: inset(-12px -12px -8px -12px); }
 .island-switch.is-leaving { translate: 0 150%; transition: translate var(--t-quick) var(--ease-in); }
 .island-switch.is-coming { animation: island-pop-up var(--t-spring) var(--ease-spring) calc(var(--t-quick) / 2) both; }
-.island-agent.is-coming { animation: island-agent-in var(--t-spring) var(--ease-spring) both; }
 .island-key { font: 500 11px/1 var(--font-sans); color: var(--color-ink-2); padding: 3px 5px; border: 1px solid color-mix(in srgb, var(--color-ink) 18%, transparent); border-radius: var(--r-xs); }
 /* Watching it at its workbench: what it is doing, on its figure's line. */
 .island-box-doing { min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 14px/20px var(--font-sans); color: var(--color-ink); }
@@ -450,7 +501,7 @@ body {
   transition: width var(--t-move) var(--ease-in), height var(--t-move) var(--ease-in), opacity var(--t-quick) var(--ease-out);
 }
 .island[data-notch="none"][data-view="pill"] .island-shape:not(:has(.island-time)) { --w: 76px; }
-.island[data-notch="none"][data-view="slot"] .island-shape { --w: 300px; --h: 88px; --r: 24px; }
+.island[data-notch="none"][data-view="slot"] .island-shape { --w: 360px; --h: 140px; --r: 28px; }
 .island[data-notch="none"] .island-drop { clip-path: inset(calc(var(--bar) + var(--pill-h)) 0 0 0); }
 .island[data-notch="none"] .island-slip { top: calc(var(--bar) + var(--pill-h) + 8px); }
 .island[data-notch="none"] .island-hang { top: calc(var(--bar) + var(--pill-h) + 10px); }
@@ -508,7 +559,8 @@ body {
 @keyframes island-ear-duck { to { translate: 0 calc(var(--bar) * 1.2); } }
 @keyframes island-ear-pop { from { translate: 0 calc(var(--bar) * 1.2); } }
 @keyframes island-pop-up { from { translate: 0 150%; } }
-@keyframes island-agent-in { from { opacity: 0; scale: .4; } }
+@keyframes island-tray-edge { to { stroke-dashoffset: -26; } }
+@keyframes island-file-going { from { translate: -100% 0; } to { translate: 260% 0; } }
 
 /* Reduced motion: every moment still shows, and still says what it is by pose and words, but
    nothing travels, loops or grows. The island and what drops out of it appear where they belong. */
@@ -520,6 +572,9 @@ body {
   .island-send { scale: 1; transition: opacity var(--t-quick) var(--ease-out); }
   .island-field-box[data-written] > .island-send { transition: opacity var(--t-quick) var(--ease-out); }
   .island-stage-bead { transition: none; }
+  .island-loudness > i { transition: none; }
+  /* A file on its way says so by its line standing still, part way along. */
+  .island-file-line::after { translate: 50% 0; }
   .island-shape { transition: opacity var(--t-quick) var(--ease-out); }
   .island-body { transition: none; }
   .island-hang, .island-slip, .island-slot, .island-head { translate: 0 0; transition: opacity var(--t-quick) var(--ease-out); }
@@ -527,6 +582,8 @@ body {
   .island-hang { opacity: 0; }
   .island[data-view="ask"] .island-hang { opacity: 1; }
   .island-slot, .island-head { opacity: 0; }
+  /* The island doesn't shrink around it on a spring here: whoever is out fades in from the start. */
+  .island:is([data-view="work"], [data-view="done"], [data-view="fail"]) .island-balcony { transition: none; }
   .island:is([data-view="work"], [data-view="done"], [data-view="fail"]) .island-slot.is-on, .island:is([data-view="rest"], [data-view="tucked"]) .island-head { opacity: 1; }
   /* Without its breath and its dip, a figure at work holds itself up a little, apart from one that
      is ready and from done's sitting down: told by its pose, not by its colour alone. */

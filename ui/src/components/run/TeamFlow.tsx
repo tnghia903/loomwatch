@@ -1,5 +1,5 @@
 import { Fragment, type ReactNode } from 'react'
-import { ArrowRight, Check, FileText, Sparkles } from 'lucide-react'
+import { ArrowRight, Check, FileText, Sparkles } from '../ui/icon'
 
 import type { WorkPhase } from '../../lib/library/figure'
 import type { CardActivity, UseKind } from '../../lib/watch/cardActivity'

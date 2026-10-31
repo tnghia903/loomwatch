@@ -1,7 +1,7 @@
 import { cleanup, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { useTeamCrews } from './teamCrews'
+import { crewOf, useTeamCrews } from './teamCrews'
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
@@ -47,5 +47,13 @@ describe('useTeamCrews', () => {
 
     await waitFor(() => expect(crews.result.current.teams?.find((team) => team.path === 'trip.yaml')?.agents.map((agent) => agent.name)).toEqual(['Booker']))
     expect(reads()).toEqual(['/api/team?path=demo.yaml', '/api/team?path=trip.yaml', '/api/team?path=trip.yaml'])
+  })
+})
+
+describe('crewOf', () => {
+  // ADR 0094: a team file holds no name for an agent that is one of My agents.
+  it('names an agent that is one of My agents as it is there, and one gone from there by its id', () => {
+    const crew = crewOf('name: Blog\nagents:\n  - {id: writer, from: {agent: writer}}\n  - {id: own, name: Own}\n  - {id: gone, from: {agent: gone}}\n', [{ id: 'writer', name: 'Writer' }])
+    expect(crew?.agents.map((agent) => agent.name)).toEqual(['Writer', 'Own', 'gone'])
   })
 })

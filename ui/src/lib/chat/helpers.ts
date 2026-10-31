@@ -1,5 +1,6 @@
 import type { Evidence, RunEvent } from '../watch/events'
 import { LOOMWATCH_ID } from '../watch/messages'
+import { STATE_WORDS } from '../state/words'
 
 /**
  * Helpers (ADR 0079): an agent working alone brings in copies of itself for the parts of a big
@@ -13,6 +14,14 @@ import { LOOMWATCH_ID } from '../watch/messages'
  */
 
 export const HELPER_SEPARATOR = '~'
+
+/**
+ * LoomWatch's own check of an answer (ADR 0098): it checks the work against what the person's
+ * message said done looks like when no checker is on the team. No team file can give an agent this
+ * id, so it is told apart by its id alone, and named and drawn as LoomWatch.
+ */
+export const LOOMWATCH_CHECK_ID = 'loomwatch:check'
+export const LOOMWATCH_NAME = 'LoomWatch'
 
 /** Whose helper `id` is, and its number; `null` for an agent of the team or you. */
 export function helperOf(id: string): { lead: string; number: number } | null {
@@ -34,8 +43,8 @@ export function helperShortName(number: number): string {
 export function nameWithHelpers(names: ReadonlyMap<string, string>, id: string): string | null {
   const own = names.get(id)
   if (own) return own
-  // LoomWatch itself, when it answered a question in your place (ADR 0090).
-  if (id === LOOMWATCH_ID) return 'LoomWatch'
+  // LoomWatch itself: its own check (ADR 0098), or its answer in your place (ADR 0090).
+  if (id === LOOMWATCH_CHECK_ID || id === LOOMWATCH_ID) return LOOMWATCH_NAME
   const helper = helperOf(id)
   if (!helper) return null
   const lead = names.get(helper.lead) ?? helper.lead
@@ -182,6 +191,6 @@ export function helpersLine(helpers: readonly HelperWork[]): string {
   const failed = helpers.filter((helper) => helper.state === 'failed').length
   const stopped = helpers.filter((helper) => helper.state === 'stopped').length
   if (working > 0) return `${count} · ${working} working`
-  const short = [failed > 0 ? `${failed} couldn’t finish` : '', stopped > 0 ? `${stopped} stopped` : ''].filter(Boolean)
+  const short = [failed > 0 ? `${failed} ${STATE_WORDS.failed}` : '', stopped > 0 ? `${stopped} stopped` : ''].filter(Boolean)
   return `${count} · ${short.length ? short.join(', ') : 'done'}`
 }

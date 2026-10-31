@@ -223,8 +223,9 @@ impl PolicyGate {
     }
 
     /// Puts a request the policy declined to the operator, and records that it was asked and how
-    /// it was answered: by the person, the clock, Auto mode, or nobody — a routine's run has
-    /// nobody to ask and declines at once (`not_asked`).
+    /// it was answered: by the person, the clock, Auto mode, or nobody — a run that has already
+    /// ended has nobody to ask and declines at once (`not_asked`). A routine's run asks and waits
+    /// (ADR 0090).
     async fn ask(
         &self,
         asker: &PermissionAsker,

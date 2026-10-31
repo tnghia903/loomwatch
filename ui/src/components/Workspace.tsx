@@ -51,6 +51,8 @@ import { DocumentSwitcher } from './canvas/DocumentSwitcher'
 import { EdgeRefusalPopover } from './canvas/EdgeRefusalPopover'
 import { EntrypointProblemBar } from './canvas/EntrypointProblemBar'
 import { DeleteTeamDialog } from './home/DeleteTeamDialog'
+import { setupDiffers, usePlaces } from '../lib/projects/places'
+import { takeTeamOut } from '../lib/projects/client'
 import { TeamReviewDialog } from './run/TeamReviewDialog'
 import { Home } from './home/Home'
 import { ALLOW_SWITCHES } from '../lib/team-file/allow'
@@ -68,7 +70,7 @@ import { BuildResourceInspector } from './canvas/BuildResourceInspector'
 import { NotionPagePicker } from './canvas/NotionPagePicker'
 import { BuildInspector } from './canvas/BuildInspector'
 import { ComponentPalette } from './library/ComponentPalette'
-import { MessageSquareText, MessagesSquare, Network, UserRound, X } from 'lucide-react'
+import { MessageSquareText, MessagesSquare, Network, X } from './ui/icon'
 import { Composer, type ComposerState } from './composer/Composer'
 import { RoutineNote } from './composer/RoutineNote'
 import { CAPABILITY_DRAG_MIME, CONNECTION_DRAG_MIME, LIBRARY_DRAG_MIME } from './library'
@@ -92,10 +94,12 @@ import { describeDocument, isDocument } from '../lib/chat/document'
 import type { AgentFacts } from '../lib/chat/faces'
 import { nameWithHelpers } from '../lib/chat/helpers'
 import { afterClosing, closedKey, fileTab, madeTabs, paneTabId, shownPaneTab, type MadeTab, type PaneTab } from '../lib/chat/paneTabs'
+import type { HandOver } from '../lib/chat/handed'
 import type { ReceiptLine } from '../lib/story/receipt'
 import { PromptNodeCard } from './run/StoryNodes'
-import { ChipDot, LoomMark, LoomWordmark } from './ui/glyphs'
+import { ChipDot } from './ui/glyphs'
 import { SegmentThumb } from './ui/SegmentThumb'
+import { InlineMarkdown } from './ui/Markdown'
 import { AttentionAlerts } from './workspace/AttentionAlerts'
 import { BuildHeading } from './workspace/BuildHeading'
 import { TeamAgents } from './workspace/TeamAgents'
@@ -108,7 +112,8 @@ import { inLibrary, turnedOffFor } from '../lib/team-file/turnedOff'
 import { TurnedOffNote, type TurnedOffNoteState } from './workspace/TurnedOffNote'
 import { capabilityEdgeId } from './workspace/canvasGraph'
 import { OutputEditor } from './workspace/OutputEditor'
-import { ConflictSheetFooter, InlineConfirm, NewTeamSheet, OpenTeamSheet, SaveCopySheet } from './workspace/Sheets'
+import { ConflictSheetFooter, InlineConfirm, LeaveConfirm, NewTeamSheet, OpenTeamSheet, SaveCopySheet } from './workspace/Sheets'
+import type { LeaveGuard } from './agents/leave'
 import { useCanvasGraph } from './workspace/useCanvasGraph'
 import { useRunAgents } from './workspace/runAgents'
 import { useRunController } from './workspace/useRunController'
@@ -121,9 +126,11 @@ import { APPROVAL_TEXT } from '../lib/story/needsYou'
 import { DEPTH_LABEL, DEPTH_ZOOM, STORY_MAX_ZOOM } from '../lib/story/depth'
 import { modelForPreset, ROLE_PRESETS, roleSource } from '../lib/library/roles'
 import { agentFigure, FIGURE_HUES, figureHue } from '../lib/library/figures'
-import { SavedAgentsContext, TeamFiguresContext } from './agents/figureContext'
-import { savedJobPreset, toolAllowOf, useSavedJobs, type SavedJob } from '../lib/library/jobs'
-import { fieldsForVersion, linkState } from '../lib/library/link'
+import { ChatOfContext, GuestNamesContext, SavedAgentsContext, TeamFiguresContext } from './agents/figureContext'
+import { alwaysAllowGuest } from '../lib/library/bringIn'
+import { benchChatOwner, savedJobPreset, toolAllowOf, useSavedJobs, type SavedJob } from '../lib/library/jobs'
+import { readKey } from '../lib/library/reads'
+import { guestsOf } from '../lib/chat/guests'
 import { teamAgentEdit } from '../lib/library/teamDraft'
 import { withAllowed, type AlwaysAllowed } from '../lib/tools/allow'
 import { actionCount, toolNamed, useConnectedTools, type ConnectedTool } from '../lib/tools/client'
@@ -135,7 +142,6 @@ import { WorkspaceMenu } from './workspace/WorkspaceMenu'
 import { useAsk } from '../lib/ask/useAsk'
 import { DEFAULT_ROUTINE_NOTION_TITLE, NOTION_PAGE_SOURCE, useNotionConnection, type NotionPageHit } from '../lib/notion/connection'
 import type { AskContext } from '../lib/ask/client'
-import { AskButton } from './ask/AskButton'
 import { AskPanel } from './ask/AskPanel'
 import type { CardActions } from './ask/AskCards'
 import { proposalSource, sameTeamFile, teamFileForAsk, useAskActions } from './ask/useAskActions'
@@ -144,12 +150,12 @@ import { sendBackFields, sendBackOf, type SendBackSetting } from '../lib/team-fi
 import { fileRefsIn, filesTouched, filesWritten, workspaceAgent } from '../lib/files/fileRefs'
 import { askedInChat, type AskedPassage } from '../lib/files/passage'
 import { baseName } from '../lib/files/paths'
-import { goToTeam } from '../lib/team-file/teamPage'
-import { openTeam, type TeamView as TeamTab } from '../lib/team-file/useTeamList'
-import type { LeaveGuard } from './rail/CrewRail'
-import { showTeamRail } from './rail/teamRailStore'
+import { registerAskToggle, showAsk } from './frame/frameStore'
+import { openTeam } from '../lib/team-file/useTeamList'
+import { useLeaveTeam } from '../lib/team-file/leaveTeam'
 import { FileOriginContext, FileReaderContext, readerFormat, type FileToRead } from '../lib/files/reader'
 import { useFilesFound } from '../lib/files/useFile'
+import { lookupFile } from '../lib/files/client'
 
 // The Workflow canvas: the team as it is configured. A run is read in the team's chat and its
 // Details, never drawn here. The Output card is the planned one: the canvas holds no answer.
@@ -218,13 +224,18 @@ function chosenCardItem(card: CapabilityNodeConfig): DetectedCapability {
   return card.notion ? notionItem(card) : chosenItem(card)
 }
 
+/** An effort to write with a model: '' takes it out, so the model runs at its own; none leaves it. */
+function withEffort(effort: string | undefined): { thinkingEffort?: string } {
+  return effort === undefined ? {} : { thinkingEffort: effort || undefined }
+}
+
 function memoryKey(memory: MemoryRef | undefined): string {
   if (memory?.team) return `team:${memory.team}`
   if (memory?.pack) return `pack:${memory.pack}`
   return ''
 }
 
-/** Build's two halves in the address: `view=agents` (and the agent on its bench), or neither for Workflow. */
+/** The Team tab in the address: `view=agents` (and the agent on its bench) while a workbench is open over it, or neither. */
 function writeBuildViewToUrl(agents: boolean, agentId: string | null) {
   const params = new URLSearchParams(window.location.search)
   if (agents) params.set('view', 'agents')
@@ -259,6 +270,25 @@ function useWideScreen(): boolean {
 
 export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, capabilitiesLoading = false, capabilitiesError = null, capabilitiesScannedAt = null, onRetryCapabilities = () => {}, onDocumentOpen, initialRunId }: WorkspaceProps) {
   const doc = useTeamDocument()
+  // The same team in other projects (ADR 0103): a save reaches them, and Delete team deletes them.
+  const places = usePlaces(doc.shares, doc.path)
+  // Only a change to the shared setup reaches them; a schedule, delivery or Brief stays this place's.
+  const setupChanged = useMemo(() => setupDiffers(doc.loadedYaml, doc.yamlPreview), [doc.loadedYaml, doc.yamlPreview])
+  const alsoIn = useMemo(() => (setupChanged ? places?.others.flatMap((place) => (place.project ? [place.project] : [])) ?? [] : []), [places, setupChanged])
+  // Another team, from the name chip's menu: once this one's changes are saved or dropped.
+  const leaveTeam = useLeaveTeam(doc.saveState, doc.save, doc.reloadFromDisk)
+  const { jobs: savedJobs, loaded: savedJobsLoaded } = useSavedJobs()
+  // ADR 0092: the person's other agents a run may bring in, named and drawn as in My agents.
+  const guests = useMemo(() => guestsOf(savedJobs, doc.nodes.map((node) => node.data.agent.name || node.id)), [savedJobs, doc.nodes])
+  // An agent's own chat, opened here from a link to one of its runs: its agent wears its figure.
+  const chatOf = benchChatOwner(doc.path)
+  // One of the agent's own reads in My agents (ADR 0094): knowledge isn't turned off for one team,
+  // so taking it off a team's canvas takes it off the agent, and the canvas says so.
+  const isOwnRead = useCallback((agent: AgentConfig, capability: Pick<CapabilityRef, 'kind' | 'path' | 'notion'>) => {
+    if (capability.kind !== 'knowledge' || !agent.from) return false
+    const job = savedJobs.find((candidate) => candidate.id === agent.from?.agent)
+    return Boolean(job?.reads?.some((read) => readKey(read) === readKey(capability)))
+  }, [savedJobs])
   const flow = useReactFlow()
   // Semantic zoom: the canvas carries its depth so every card can say more or less (lib/story/depth.ts).
   const depth = useStore((store) => depthForZoom(store.transform[2]))
@@ -364,7 +394,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   // Run team was pressed and the chat's box has not yet started with @team.
   const [startTeam, setStartTeam] = useState(false)
   const startTeamTaken = useCallback(() => setStartTeam(false), [])
-  // Build is two views: Workflow (the canvas) and Agents (each agent on its workbench).
+  // The Team tab is the canvas; an agent's workbench opens over it as a sheet (round 3).
   const [agentsView, setAgentsView] = useState(() => !initialRunId && new URLSearchParams(window.location.search).get('view') === 'agents')
   const [benchAgentId, setBenchAgentId] = useState<string | null>(() => new URLSearchParams(window.location.search).get('agent'))
   const showAgents = useCallback((agentId: string | null) => {
@@ -376,6 +406,29 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     setAgentsView(false)
     writeBuildViewToUrl(false, null)
   }, [])
+  // What closing the agent's workbench would lose, kept by its builder; and the move asked about.
+  const benchLeave = useRef<LeaveGuard | null>(null)
+  const [leaving, setLeaving] = useState<{ guard: LeaveGuard; then: () => void } | null>(null)
+  /** Does `then`, which closes the workbench or moves it to another agent, once nothing would be lost. */
+  const leaveBench = useCallback((then: () => void) => {
+    const guard = agentsView ? benchLeave.current : null
+    if (guard) setLeaving({ guard, then })
+    else then()
+  }, [agentsView])
+  const closeBench = useCallback(() => leaveBench(showWorkflow), [leaveBench, showWorkflow])
+  // Another team, picked from the name's menu with an agent's workbench open: the workbench asks
+  // first, then closes, and the move waits for that, so nothing it held still holds the page.
+  const afterBench = useRef<(() => void) | null>(null)
+  const [benchClosed, setBenchClosed] = useState(0)
+  useEffect(() => {
+    const then = afterBench.current
+    afterBench.current = null
+    then?.()
+  }, [benchClosed])
+  const beforeOtherTeam = useCallback((then: () => void) => {
+    if (!agentsView) { then(); return }
+    leaveBench(() => { showWorkflow(); afterBench.current = then; setBenchClosed((count) => count + 1) })
+  }, [agentsView, leaveBench, showWorkflow])
   // §15.2.1: the configured graph's positions are the document's, so what is left here is
   // presentation-only: where the operator dragged Build's docked Prompt and Output cards.
   const [overlayPositions, setOverlayPositions] = useState<Record<string, { x: number; y: number }>>({})
@@ -418,8 +471,8 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     agents: doc.nodes.map((node) => node.data.agent),
     responder: responderFromDoc,
     editable,
-    move: (agentId, model) => doc.applyAgentFields(agentId, { model }),
-    pin: (agentId, model) => doc.applyAgentFields(agentId, { model, followsSuggestion: undefined }),
+    move: (agentId, model, effort) => doc.applyAgentFields(agentId, { model, ...withEffort(effort) }),
+    pin: (agentId, model, effort) => doc.applyAgentFields(agentId, { model, followsSuggestion: undefined, ...withEffort(effort) }),
   })
   const runLessons = useRunLessons(doc.saveState === 'new' ? null : doc.path)
   const teamCheckup = useTeamCheckup(doc, responderFromDoc, setStatusAnnouncement, runLessons)
@@ -428,8 +481,10 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   const waiting = record?.status === 'running' ? record.waitingOn ?? null : null
   const projection = session.projection
   const runView = activeRunId !== null
-  // What the run's agents read or wrote: the answer names files from an agent's own folder.
+  // What the run's agents read or wrote: the answer names files from an agent's own folder, and
+  // what they wrote in plain words.
   const touchedFiles = useMemo(() => filesTouched(projection.evidence), [projection.evidence])
+  const writtenFiles = useMemo(() => filesWritten(projection.evidence), [projection.evidence])
   const routine = useMemo(() => scheduleForPath(schedules.entries, doc.path), [schedules.entries, doc.path])
   // A routine's run starting and ending is when it has news, such as when it tries again: read the
   // routines then, not at the next minute.
@@ -500,7 +555,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   // §15.2.2: the permanent Prompt node is the composer seen in a second place, so clicking it
   // puts the caret in the one editor rather than opening another.
   const focusComposer = useCallback(() => {
-    document.querySelector<HTMLTextAreaElement>('.tc-input, .lw-composer textarea')?.focus()
+    document.querySelector<HTMLElement>('.tc-input, .lw-composer textarea')?.focus()
   }, [])
 
   const closeRun = useCallback(() => {
@@ -802,7 +857,12 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
       doc.turnOff(new Map(working.map((agent) => [agent.id, off])))
       setTurnedOffNote({ names: off.map((entry) => entry.name), agents: working.map((agent) => agent.id), everyone: true })
     }
-  }, [capabilityCards, composerLayout, doc, docAgents, instructionUpdates])
+    const reading = working.filter((agent) => going.some((card) => isOwnRead(agent, card)))
+    if (reading.length > 0) {
+      const reads = going.filter((card) => reading.some((agent) => isOwnRead(agent, card)))
+      setTurnedOffNote({ names: reads.map((card) => card.name), agents: reading.map((agent) => agent.id), everyone: false, ownRead: true })
+    }
+  }, [capabilityCards, composerLayout, doc, docAgents, instructionUpdates, isOwnRead])
 
   /**
    * Edges into a memory card, read from `memory.inherits` — the team file, not the sidecar.
@@ -895,6 +955,8 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
         if (off && agent.kind !== 'operator') {
           doc.turnOff(new Map([[source, [off]]]))
           setTurnedOffNote({ names: [off.name], agents: [source], everyone: false })
+        } else if (isOwnRead(agent, capability)) {
+          setTurnedOffNote({ names: [capability.name], agents: [source], everyone: false, ownRead: true })
         }
       }
       // Layouts from before the kind was executable may still hold the same edge in the sidecar.
@@ -910,7 +972,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     })
     const owner = source === '__prompt' ? 'The whole team' : nodeNames.get(source) ?? source
     setStatusAnnouncement(`${owner} no longer ${RELATION[capability.kind]} ${capability.name}.`)
-  }, [capabilityCards, composerLayout, doc, keepUnusedCard, nodeNames, instructionUpdates])
+  }, [capabilityCards, composerLayout, doc, keepUnusedCard, nodeNames, instructionUpdates, isOwnRead])
 
   const problems = useMemo(() => reviewProblems(doc.entrypointProblem, doc.fieldProblemsByAgent, doc.documentProblems, nodeNames), [doc.entrypointProblem, doc.fieldProblemsByAgent, doc.documentProblems, nodeNames])
   const scheduleProblems = useMemo(() => problems.filter((problem) => problem.yamlPath?.[0] === 'schedule'), [problems])
@@ -1047,7 +1109,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   // The run's agents, each with what the run says of it, for Details and the agent panel it opens.
   const runAgents = useRunAgents(runView, {
     doc, session, projection, record, phase, orderedAgentIds, evidenceByAgent, leadId, waiting, packetAgentIds,
-    synthMeasurements, capabilityCards, allWiringEdges,
+    synthMeasurements, capabilityCards, allWiringEdges, guestNames: guests.names,
   })
 
   // Agents an Ask proposal adds or changes wear its dashes until it is applied (styles/ask.css).
@@ -1534,9 +1596,11 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   }, [detailsOpen, deliveryShown, clearSelection])
   // Details' timeline asks to read a message: the chat shows it, in the piece it belongs to.
   const [chatReveal, setChatReveal] = useState<{ runId: string; id: string; at: number } | null>(null)
-  const savedJobs = useSavedJobs().jobs
   // Each agent's figure, the one it wears in Your agents (lib/library/figures.ts agentFigure).
-  const agentFigures = useMemo(() => new Map(doc.nodes.filter((node) => node.data.agent.kind !== 'operator').map((node) => [node.id, agentFigure(node.data.agent, savedJobs)])), [doc.nodes, savedJobs])
+  const agentFigures = useMemo(() => new Map([
+    ...guests.figures,
+    ...doc.nodes.filter((node) => node.data.agent.kind !== 'operator').map((node) => [node.id, agentFigure(node.data.agent, savedJobs, chatOf)] as const),
+  ]), [doc.nodes, savedJobs, guests, chatOf])
   const chatAgents = useMemo(() => {
     const step = (id: string) => stepById.get(id)?.step ?? Infinity
     return [...doc.nodes].sort((left, right) => step(left.id) - step(right.id)).map((node) => ({ id: node.id, name: node.data.agent.name || node.id, operator: node.data.agent.kind === 'operator' }))
@@ -1547,9 +1611,12 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   const chatTeam = useMemo<TeamView>(() => {
     const members = chatAgents.filter((agent) => !agent.operator)
     return {
-      names: new Map(chatAgents.map((agent) => [agent.id, agent.operator ? 'You' : agent.name])),
+      names: new Map([...guests.names, ...chatAgents.map((agent) => [agent.id, agent.operator ? 'You' : agent.name] as const)]),
       // Each agent wears its figure's colour, so its name, avatar and figure agree; you are gold.
-      hues: new Map(chatAgents.map((agent) => { const figure = agentFigures.get(agent.id); return [agent.id, agent.operator ? 0 : figure ? figureHue(figure) : (members.indexOf(agent) % FIGURE_HUES) + 1] })),
+      hues: new Map([
+        ...[...guests.figures].map(([id, figure]) => [id, figureHue(figure)] as const),
+        ...chatAgents.map((agent) => { const figure = agentFigures.get(agent.id); return [agent.id, agent.operator ? 0 : figure ? figureHue(figure) : (members.indexOf(agent) % FIGURE_HUES) + 1] as const }),
+      ]),
       parties: chatAgents.map((agent) => ({ id: agent.id, name: agent.name, operator: agent.operator })),
       predecessors: handedBy,
       order: doc.mode === 'pipeline' ? chatAgents.map((agent) => agent.id) : [],
@@ -1557,7 +1624,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
       configs: new Map(doc.nodes.map((node) => [node.id, node.data.agent])),
       models: new Map(doc.nodes.map((node) => [node.id, modelLabelForAgent(node.data.agent, modelNames)])),
     }
-  }, [chatAgents, handedBy, doc.mode, doc.nodes, modelNames, agentFigures])
+  }, [chatAgents, handedBy, doc.mode, doc.nodes, modelNames, agentFigures, guests])
   /** Work starts on an exact snapshot of the file, as Run always has: save first (TNG89 §1.4). */
   const prepareChat = useCallback(async (): Promise<Prepared> => {
     if (['dirty', 'new'].includes(doc.documentChipState)) {
@@ -1580,9 +1647,11 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     for (const added of withFolderSource(doc.nodes.map((node) => ({ ...node.data.agent, id: node.id })), folder)) doc.setAgentCapabilities(added.id, added.capabilities)
     void doc.save()
   }, [doc, chatFolder])
-  // ADR 0051: Details is open by default on a wide screen, beside the chat, and follows the newest
-  // piece of work — until you open an older piece (it stays there) or close it (it stays closed).
-  // Starting work from the chat follows again. A narrow screen keeps the chat first.
+  // ADR 0051: the pane beside the chat opens when you open something in it — a piece's record, its
+  // answer or a file — and by itself only to hand you what the newest work made (ADR 0077), never
+  // on its record, so the chat is the screen. Open, it follows
+  // newer work, until you open an older piece (it stays there) or close it (it stays closed, and
+  // hands you nothing more until you start work again). A narrow screen keeps the chat first.
   const wide = useWideScreen()
   const [detailsFollow, setDetailsFollow] = useState(() => !initialRunId)
   const [newestPiece, setNewestPiece] = useState<string | null>(null)
@@ -1615,9 +1684,9 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   // The files its finished answer names that the reader reads and that are on this computer: the
   // files its answer's cards in the chat offer to Read.
   const responderFolder = responderAgent?.folder ?? null
-  const namedFiles = useMemo(() => (detailsOpen && session.terminal ? fileRefsIn(responseText, touchedFiles, responderFolder).filter((path) => readerFormat(path) !== null) : []), [detailsOpen, session.terminal, responseText, touchedFiles, responderFolder])
+  const namedFiles = useMemo(() => (detailsOpen && session.terminal ? fileRefsIn(responseText, touchedFiles, responderFolder, writtenFiles).filter((path) => readerFormat(path) !== null) : []), [detailsOpen, session.terminal, responseText, touchedFiles, responderFolder, writtenFiles])
   const foundFiles = useFilesFound(namedFiles)
-  const writtenFiles = useMemo(() => new Set(filesWritten(projection.evidence)), [projection.evidence])
+  const wrote = useMemo(() => new Set(writtenFiles), [writtenFiles])
   const paneTabs = useMemo(() => madeTabs({
     runId: activeRunId,
     files: (foundFiles ?? []).map(({ path, facts }) => {
@@ -1628,13 +1697,13 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
         label: baseName(path),
         kind: facts.kind,
         // Made by the work (written, or in an agent's own folder), and not code.
-        lead: (writtenFiles.has(path) || maker !== undefined) && readerFormat(path) !== 'code',
+        lead: (wrote.has(path) || maker !== undefined) && readerFormat(path) !== 'code',
       }
     }),
     answer: paneAnswer,
     kept: kept.map(({ file, kind }) => ({ file, label: baseName(file.path), kind })),
     closed: closedTabs,
-  }), [activeRunId, foundFiles, writtenFiles, askable, answerResponder, paneAnswer, kept, closedTabs])
+  }), [activeRunId, foundFiles, wrote, askable, answerResponder, paneAnswer, kept, closedTabs])
   // Its record stays on screen until what it made is known, so the pane moves once; work that
   // stopped or failed keeps its record on screen, where that is said.
   const shownTab = shownPaneTab(paneTab, paneTabs, detailsFollow, session.terminal && record?.status === 'succeeded' && foundFiles !== null)
@@ -1667,13 +1736,40 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   }, [detailsOpen, activeRunId, shownTab, closeDetails, newestPiece, showRun, reopen])
   const followNewest = useCallback((runId: string | null) => {
     setNewestPiece(runId)
-    if (runId && detailsFollow && wide && runId !== activeRunId) { keepShownFile(); showRun(runId) }
-  }, [detailsFollow, wide, activeRunId, showRun, keepShownFile])
+    if (runId && detailsFollow && wide && detailsOpen && runId !== activeRunId) { keepShownFile(); showRun(runId) }
+  }, [detailsFollow, wide, detailsOpen, activeRunId, showRun, keepShownFile])
+  // Work you start moves an open pane on to it; a closed one stays closed, and will hand you what
+  // this work makes.
   const followStarted = useCallback((runId: string) => {
     setDetailsFollow(true)
+    if (!detailsOpen || !wide) return
     keepShownFile()
-    if (wide) showRun(runId)
-  }, [wide, showRun, keepShownFile])
+    showRun(runId)
+  }, [detailsOpen, wide, showRun, keepShownFile])
+  // The newest piece, done, hands over what it made (ADR 0077): the files its answer names, and
+  // whether its answer is long enough to be read as a document. Found on this computer, the first
+  // file the work made opens in the pane, else the answer — once for each piece, and only while
+  // the pane follows the newest work and is closed; an open one already shows what it made.
+  const handedTo = useRef<string | null>(null)
+  const following = useRef({ follow: detailsFollow, wide, open: detailsOpen, newest: newestPiece })
+  useEffect(() => { following.current = { follow: detailsFollow, wide, open: detailsOpen, newest: newestPiece } })
+  const handOver = useCallback((runId: string, made: Omit<HandOver, 'runId'>) => {
+    if (handedTo.current === runId) return
+    const paths = made.files.filter((path) => readerFormat(path) !== null)
+    void Promise.all(paths.map((path) => lookupFile(path))).then((lookups) => {
+      const now = following.current
+      if (handedTo.current === runId || !now.follow || !now.wide || now.open || now.newest !== runId) return
+      const wrote = new Set(made.written)
+      const file = paths.find((path, at) => {
+        const lookup = lookups[at]
+        return lookup.state === 'found' && lookup.facts.exists && !lookup.facts.isDir && (wrote.has(path) || workspaceAgent(lookup.facts.folder) !== null) && readerFormat(path) !== 'code'
+      })
+      if (!file && !made.document) return
+      handedTo.current = runId
+      setPaneTab(file ? fileTab(file) : 'answer')
+      showRun(runId)
+    })
+  }, [showRun])
   const readHere = useCallback((file: FileToRead) => {
     const runId = file.runId ?? activeRunId ?? newestPiece
     reopen(runId, fileTab(file.path))
@@ -1692,9 +1788,9 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   }, [activeRunId, shownTab, paneTabs])
   // What is marked in the file goes to the chat; on a narrow screen the pane covers the chat, so it
   // steps aside for the message box and the file waits in its tab.
-  const [chatAsk, setChatAsk] = useState<{ reply: ReplyTo; words?: string; agent: string; at: number } | null>(null)
-  const askInChat = useCallback((reply: ReplyTo, words: string | undefined, agent: string) => {
-    setChatAsk({ reply, words, agent, at: Date.now() })
+  const [chatAsk, setChatAsk] = useState<{ reply: ReplyTo; words?: string; agent: string; pictures?: readonly File[]; at: number } | null>(null)
+  const askInChat = useCallback((reply: ReplyTo, words: string | undefined, agent: string, pictures?: readonly File[]) => {
+    setChatAsk({ reply, words, agent, ...(pictures?.length ? { pictures } : {}), at: Date.now() })
     if (!wide && !words) closeDetails()
   }, [wide, closeDetails])
   const [passages, setPassages] = useState<{ asked: AskedPassage[]; asking: string | null; faces: AgentFacts[] }>({ asked: [], asking: null, faces: [] })
@@ -1709,12 +1805,23 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   // Files the answer in the pane names are read and asked about as its responder's work.
   const answerOrigin = useMemo(() => (activeRunId && answerResponder ? { runId: activeRunId, from: answerResponder } : null), [activeRunId, answerResponder])
   const allowAlways = useCallback((agentId: string, what: AlwaysAllowed) => {
+    // One of the person's agents a run brought in (ADR 0092): it is changed in My agents itself.
+    const guest = guests.names.get(agentId)
+    if (guest) {
+      alwaysAllowGuest(agentId, what).then(
+        () => setStatusAnnouncement(typeof what === 'string'
+          ? `${guest} is allowed to ${ALLOW_SWITCHES.find((item) => item.key === what)?.label.toLowerCase() ?? what} from now on, in every team it works in.`
+          : `${guest} may do “${what.label}” without asking from now on, in every team it works in.`),
+        (failed: unknown) => setStatusAnnouncement(`Couldn’t change ${guest} in My agents: ${failed instanceof Error ? failed.message : String(failed)}`),
+      )
+      return
+    }
     const agent = doc.nodes.find((node) => node.id === agentId)?.data.agent
     const name = agent?.name ?? agentId
     if (typeof what === 'string') {
       doc.updateAgentAllow(agentId, what, true)
       void doc.save()
-      setStatusAnnouncement(`${name} is allowed to ${ALLOW_SWITCHES.find((item) => item.key === what)?.label.toLowerCase() ?? what} from now on.`)
+      setStatusAnnouncement(`${name} is allowed to ${ALLOW_SWITCHES.find((item) => item.key === what)?.label.toLowerCase() ?? what} from now on, in every team it’s in.`)
       return
     }
     // One call of a connected tool (ADR 0069): kept on the agent's tool entry, so later runs don't ask.
@@ -1722,8 +1829,8 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     if (change?.kind !== 'fields') return
     doc.applyAgentFields(agentId, change.fields)
     void doc.save()
-    setStatusAnnouncement(`${name} may do “${what.label}” without asking from now on.`)
-  }, [doc])
+    setStatusAnnouncement(`${name} may do “${what.label}” without asking from now on, in every team it’s in.`)
+  }, [doc, guests])
   const inspecting = Boolean(inspectedNode || inspectedCapability || inspectedEvidence || provenanceOpen || scheduleOpen || memoryPanelOpen)
   // Ask docks where the inspector does. It waits behind whatever holds the dock, and asking for it
   // again — the header button, ⌘J, the palette — clears the dock for it.
@@ -1748,16 +1855,12 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   }, [askOpen, askDockBusy, askSetOpen, askFor])
   const toggleAskRef = useRef(toggleAsk)
   useEffect(() => { toggleAskRef.current = toggleAsk })
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'j') {
-        event.preventDefault()
-        toggleAskRef.current()
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  // The dock's Ask opens this screen's own panel.
+  // ⌘J is the dock's, on every screen, so it reaches this one through the same toggle.
+  useEffect(() => registerAskToggle(() => toggleAskRef.current()), [])
+  const askActivity = ask.activity
+  useEffect(() => { showAsk({ open: askOpen, activity: askActivity }) }, [askOpen, askActivity])
+  useEffect(() => () => showAsk({ open: false, activity: null }), [])
   /** The inspected capability as a card: what wiring and the canvas compare it by. */
   const inspectedCard = inspectedCapability ? { kind: inspectedCapability.kind, name: inspectedCapability.item.name, source: inspectedCapability.item.source, memory: inspectedCapability.item.memory, ...(inspectedCapability.item.path ? { path: inspectedCapability.item.path } : {}), ...(inspectedCapability.item.notion ? { notion: inspectedCapability.item.notion } : {}) } : null
   // Kind and name identify a card, and a path identifies a folder or file; a recorded source can
@@ -2121,7 +2224,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     return () => window.removeEventListener('loomwatch:add-agent', add)
   }, [doc, editable, flow, placeJobSkills])
 
-  // From the Agents tab: one of Your agents joins the team, linked to the version it is now, to the
+  // From the add panel or the workbench sheet: one of Your agents joins the team, linked to the version it is now, to the
   // right of the agents already there, and its workbench opens. Workflow is where it gets connected.
   const addSavedAgent = useCallback((job: SavedJob) => {
     const source = editable && doc.path ? roleSource(savedJobPreset(job)) : null
@@ -2133,7 +2236,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     doc.addAgentFromDrop(raw, at)
     placeJobSkills(raw, at)
     if (added) { setBenchAgentId(added.id); writeBuildViewToUrl(true, added.id) }
-    setStatusAnnouncement(`${job.name} is in this team now. Connect it in Workflow, and save the team to keep it.`)
+    setStatusAnnouncement(`${job.name} is in this team now. Connect it on the Team tab, and save the team to keep it.`)
   }, [doc, editable, placeJobSkills])
 
   // ---- notifications + announcements -----------------------------------------------------
@@ -2214,7 +2317,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     try { setNotificationsOn((await Notification.requestPermission()) === 'granted') } catch { setNotificationsOn(false) }
   }, [notificationsOn, setStartError])
 
-  const statusById = useMemo(() => new Map(projection.agents.map((agent) => [agent.id, `${nodeNames.get(agent.id) ?? agent.id}: ${agent.taskState.toLowerCase()}`])), [projection.agents, nodeNames])
+  const statusById = useMemo(() => new Map(projection.agents.map((agent) => [agent.id, `${nameWithHelpers(nodeNames, agent.id) ?? agent.id}: ${agent.taskState.toLowerCase()}`])), [projection.agents, nodeNames])
   const priorStatuses = useRef<Map<string, string> | null>(null)
   useEffect(() => {
     const previous = priorStatuses.current
@@ -2260,24 +2363,6 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   // ---- commands + keys ----------------------------------------------------------------------
   // With a team open the dialog belongs to the workspace; on Home, Home owns it.
   const openNewTeam = useCallback(() => { if (doc.path) setNewTeamSheet(true); else window.dispatchEvent(new Event('loomwatch:new-team')) }, [doc.path])
-  // The team rail: this team as it is on screen, and leaving it for another. Changes not saved are
-  // saved or dropped first (the rail asks), and the page moves once they are, so the browser's own
-  // "Leave site?" prompt never asks a second time.
-  const railAgents = useMemo(() => doc.nodes.filter((node) => node.data.agent.kind !== 'operator').map((node) => node.data.agent), [doc.nodes])
-  const railTeam = useMemo(() => (doc.path ? { path: doc.path, name: doc.teamName ?? baseName(doc.path).replace(/\.ya?ml$/i, ''), agents: railAgents } : null), [doc.path, doc.teamName, railAgents])
-  const railTab: TeamTab = runView || runSetup ? 'chat' : agentsView ? 'agents' : 'workflow'
-  const unsavedTeam = ['dirty', 'invalid', 'conflict'].includes(doc.documentChipState)
-  const [leavingTo, setLeavingTo] = useState<string | null>(null)
-  useEffect(() => { if (leavingTo && !unsavedTeam) goToTeam(leavingTo) }, [leavingTo, unsavedTeam])
-  const { save: saveTeam, reloadFromDisk } = doc
-  const leaveTeam = useCallback((): LeaveGuard | null => (unsavedTeam
-    ? { save: saveTeam, problem: doc.isValid ? null : 'It has problems to fix before it can be saved.', discard: async () => { await reloadFromDisk() } }
-    : null), [unsavedTeam, saveTeam, reloadFromDisk, doc.isValid])
-  // The page frame draws the rail (FrameTeamRail), so it stays while teams change in place beside it.
-  useLayoutEffect(() => {
-    showTeamRail(railTeam ? { open: railTeam, runs: needsYou.records, savedJobs, view: railTab, go: setLeavingTo, onNewTeam: openNewTeam, leave: leaveTeam } : null)
-  }, [railTeam, needsYou.records, savedJobs, railTab, openNewTeam, leaveTeam])
-  useLayoutEffect(() => () => showTeamRail(null), [])
   const toggleLibrary = useCallback(() => window.dispatchEvent(new Event('loomwatch:toggle-library')), [])
   const actions = useMemo<CommandAction[]>(() => [
     { label: 'Ask LoomWatch…', shortcut: '⌘J', icon: MessageSquareText, run: () => askFor() },
@@ -2357,9 +2442,21 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     }
   }, [doc.path, editable, modelNames, flow, needsYou, setComposerText, savedJobs])
 
+  // The workbench is a sheet: the keyboard goes into it as it opens and, back on the Team tab, to
+  // the card it was opened from (the panel that opened it is gone), else the tab.
+  const benchShown = agentsView && !runView && !runSetup
+  const benchPage = useRef<HTMLDivElement>(null)
+  const benchWasShown = useRef(benchShown)
+  useEffect(() => {
+    if (benchShown === benchWasShown.current) return
+    benchWasShown.current = benchShown
+    if (benchShown) benchPage.current?.focus()
+    else if (!runView && !runSetup) (document.querySelector<HTMLElement>(`.react-flow__node[data-id=${JSON.stringify(benchAgentId ?? '')}]`) ?? document.querySelector<HTMLElement>('[data-tour="tab-workflow"]'))?.focus()
+  }, [benchShown, runView, runSetup, benchAgentId])
+
   useWorkspaceShortcuts({
     editable, doc, flow, theme, windowWidth, runView,
-    submit, openNewTeam, toggleLibrary, cycleProblem, clearSelection, closeDetails: detailsOpen ? closeDetails : undefined, organize, fitCanvas,
+    submit, openNewTeam, toggleLibrary, cycleProblem, clearSelection, closeDetails: detailsOpen ? closeDetails : undefined, closeBench: benchShown && !leaving ? closeBench : undefined, organize, fitCanvas,
     pendingNodeDelete, setPendingNodeDelete, requestNodeDelete, deleteNodes, discardConfirm, setDiscardConfirm,
     paletteOpen, setPaletteOpen, problemsOpen, setProblemsOpen,
     compareOpen, setCompareOpen, inspectedEvidenceId, setInspectedEvidenceId,
@@ -2381,8 +2478,6 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
 
   const canvasActions: CanvasActions = useMemo(() => ({
     editable, renameAgent: doc.renameAgent, touchField: doc.touchField, mode: doc.mode, stepById, nodeNames,
-    inspectHandover: (id) => { setHandoverAgentId(id); setInspectedEvidenceId(null) },
-    toggleProvenance: () => setProvenanceOpen((open) => !open),
     focusComposer,
     briefCount: memory?.entries.length ?? 0,
     teamDeliverAs: memory?.deliverAs,
@@ -2467,14 +2562,14 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   if (!doc.path) {
     return (
       <Home
+        part={window.location.pathname === '/projects' ? 'projects' : 'all'}
         notice={requestedPath && doc.saveState === 'error' ? `Couldn't open “${requestedPath}”. ${/no such file|not found/i.test(doc.saveError ?? '') ? 'It may have been moved, renamed or deleted — pick a team below.' : doc.saveError ?? ''}` : null}
         onPalette={() => setPaletteOpen(true)}
-        // Home's way into Ask is "Describe the job", so the header has no Ask button here, and the
-        // box steps aside while the panel is open: one place to type to Ask (ADR 0043).
+        // Ask is the dock's (ADR 0097's own button on Home moved there): Set up project asks it to
+        // set a project up, and the dock's Ask says while it is at work.
         topActions={needsYouTray()}
         runs={needsYou.records}
-        mark={needsYou.mark}
-        ask={ask.open ? undefined : { unavailable: ask.unavailable, onAsk: askFor }}
+        ask={{ unavailable: ask.unavailable, onAsk: askFor, open: ask.open }}
       >
         {paletteOpen && <CommandPalette actions={actions} interpret={interpret} fallback={askFallback} onClose={() => setPaletteOpen(false)} />}
         {openPathOpen && <OpenTeamSheet onClose={() => setOpenPathOpen(false)} />}
@@ -2495,9 +2590,11 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
 
   return (
     <SavedAgentsContext.Provider value={savedJobs}>
+    <ChatOfContext.Provider value={chatOf}>
     <TeamFiguresContext.Provider value={agentFigures}>
+    <GuestNamesContext.Provider value={guests.names}>
     <CanvasActionsContext.Provider value={canvasActions}>
-      <div className={shellClass} style={{ '--lw-palette-w': `${paletteWidth}px`, ...(chatWidth === null ? {} : { '--tc-chat-w': `clamp(${CHAT_WIDTH.min}px, ${chatWidth}px, calc(100vw - ${CHAT_WIDTH.details}px))` }) } as CSSProperties} data-tour="workspace" data-tour-agents={doc.nodes.length} data-tour-view={runView || runSetup ? 'chat' : agentsView ? 'agents' : 'workflow'} onDragEnter={(event) => { if (event.dataTransfer.types.includes(LIBRARY_DRAG_MIME)) setLibraryDragging(true) }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as HTMLElement | null)) { setLibraryDragging(false); setDropAgentId(null) } }}>
+      <div className={shellClass} style={{ '--lw-palette-w': `${paletteWidth}px`, ...(chatWidth === null ? {} : { '--tc-chat-w': `clamp(${CHAT_WIDTH.min}px, ${chatWidth}px, calc(100vw - ${CHAT_WIDTH.details}px))` }) } as CSSProperties} data-tour="workspace" data-tour-agents={doc.nodes.length} data-tour-proposal={askActions.preview ? 'showing' : undefined} data-tour-view={runView || runSetup ? 'chat' : agentsView ? 'agents' : 'workflow'} onDragEnter={(event) => { if (event.dataTransfer.types.includes(LIBRARY_DRAG_MIME)) setLibraryDragging(true) }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as HTMLElement | null)) { setLibraryDragging(false); setDropAgentId(null) } }}>
         {deliveryShown ? (
           <FileReaderContext.Provider value={readHere}>
           <TeamChat
@@ -2510,6 +2607,8 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
             routine={routine ? <RoutineNote schedule={routine} onRunNow={() => void runRoutineNow()} busy={routineBusy} /> : undefined}
             detailsRunId={detailsOpen ? activeRunId : null}
             answerRunId={detailsOpen && shownTab === 'answer' ? activeRunId : null}
+            recordRunId={detailsOpen && shownTab === 'details' ? activeRunId : null}
+            onHandOver={handOver}
             onOpenAnswer={openAnswer}
             blocked={composerState.kind === 'blocked' ? composerState.reason : null}
             prepare={prepareChat}
@@ -2521,6 +2620,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
             onAlwaysAllow={editable ? allowAlways : undefined}
             announce={setStatusAnnouncement}
             reveal={chatReveal}
+            landAt={initialRunId}
             onOpenFinding={openFinding}
             startTeam={startTeam}
             onStartTeamTaken={startTeamTaken}
@@ -2532,17 +2632,17 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
           {detailsOpen && (
             <aside className="tc-details" aria-label="Details of this piece of work">
               <header className="tc-details-head">
-                {paneTabs.length ? <PaneTabs tabs={paneTabs} shown={shownTab} hue={(id) => chatTeam.hues.get(id) ?? 1} onShow={setPaneTab} onClose={closeTab} /> : <span className="tc-pane-title">Details</span>}
-                <h2>{shownFile ? '' : record?.prompt ? record.prompt.split('\n')[0] : ''}</h2>
+                <PaneTabs tabs={paneTabs} shown={shownTab} hue={(id) => chatTeam.hues.get(id) ?? 1} onShow={setPaneTab} onClose={closeTab} />
+                <h2>{shownFile || !record?.prompt ? '' : <InlineMarkdown>{record.prompt.split('\n')[0] ?? ''}</InlineMarkdown>}</h2>
                 <button type="button" className="btn btn-icon" onClick={() => { closeDetails(); setKept([]) }} aria-label="Close details"><X size={15} aria-hidden="true" /></button>
               </header>
-              <div className="tc-details-body" id="tc-pane-body" role={paneTabs.length ? 'tabpanel' : undefined} aria-labelledby={paneTabs.length ? paneTabId(paneTabs, shownTab) : undefined}>
+              <div className="tc-details-body" id="tc-pane-body" role="tabpanel" aria-labelledby={paneTabId(paneTabs, shownTab)}>
                 {shownFile ? (
                   <FileReader key={shownFile.path} file={shownFile} name={(id) => chatTeam.names.get(id) ?? id} hue={(id) => chatTeam.hues.get(id) ?? 1} team={askable} role={(id) => agentRoles.get(id) ?? ''}
-                    onAsk={composerState.kind === 'blocked' ? undefined : askInChat} asked={passages.asked} asking={passages.asking} faces={passages.faces} onShowAsked={showAsked} />
+                    onAsk={composerState.kind === 'blocked' ? undefined : askInChat} asked={passages.asked} asking={passages.asking} faces={passages.faces} onShowAsked={showAsked} teamPath={doc.path} />
                 ) : shownTab === 'answer' ? (
                   <FileOriginContext.Provider value={answerOrigin}>
-                    <AnswerDocument text={responseText} by={nodeNames.get(record?.responder ?? '') ?? record?.responder ?? 'the team'} streaming={!session.terminal} touched={touchedFiles} folder={responderAgent?.folder} />
+                    <AnswerDocument text={responseText} by={nodeNames.get(record?.responder ?? '') ?? record?.responder ?? 'the team'} streaming={!session.terminal} touched={touchedFiles} folder={responderAgent?.folder} written={writtenFiles} />
                   </FileOriginContext.Provider>
                 ) : session.loading ? (
                   // The record is shown once it is read whole, so it opens as it ended rather than replaying.
@@ -2570,7 +2670,9 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
                   events={shownEvents}
                   focusAgentId={attentionFocusAgentId}
                   onInspectEvidence={(id) => setInspectedEvidenceId(id)}
-                  onRevealMessage={activeRunId ? (id) => setChatReveal({ runId: activeRunId, id, at: Date.now() }) : undefined}
+                  onShowRecorded={() => setProvenanceOpen((open) => !open)}
+                  onShowReceived={(id) => { setHandoverAgentId(id); setInspectedEvidenceId(null) }}
+                  onRevealMessage={activeRunId ? (id) => { setChatReveal({ runId: activeRunId, id, at: Date.now() }); if (!wide) closeDetails() } : undefined}
                   onSelectAgent={(id) => doc.onNodesChange(doc.nodes.map((node) => ({ id: node.id, type: 'select' as const, selected: node.id === id })))}
                 />
                 )}
@@ -2579,7 +2681,8 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
           )}
           </FileReaderContext.Provider>
         ) : (
-        <div ref={canvasRef} role="application" aria-label="Team canvas" className="lw-canvas" data-depth={depth}>
+        // Under the workbench the canvas is out of reach: no tabbing to cards that can't be seen.
+        <div ref={canvasRef} role="application" aria-label="Team canvas" className="lw-canvas" data-depth={depth} inert={benchShown || undefined}>
           <ReactFlow
             nodes={lit.nodes}
             edges={lit.edges}
@@ -2618,7 +2721,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
               </div>
             )}
           </ReactFlow>
-          {storyParts.length > 0 ? <TeamStory parts={storyParts} figures={agentFigures} onAgent={focusAgent} onSchedule={doc.teamSchedule ? openScheduleEditor : undefined} onConnect={editable ? (edges) => { for (const edge of edges) doc.onConnect({ source: edge.from, target: edge.to, sourceHandle: null, targetHandle: null }) } : undefined} /> : <div className="build-canvas-help"><strong>Connect your agents</strong><span>Drag from the dot on the right of a card to the next card to hand work along.</span></div>}<div className="build-canvas-legend"><span><i />Workflow</span><span><i className="resource" />Resources</span><span>Select a node to edit</span></div>{!runSetup && <div className="canvas-notes"><InstructionUpdateBar entries={instructionUpdates.entries} names={nodeNames} readOnly={!editable} onReview={focusAgent} onKeepAll={instructionUpdates.keepAll} onRewrite={ask.unavailable ? undefined : instructionUpdates.rewrite} />{turnedOffNote && <TurnedOffNote note={turnedOffNote} names={nodeNames} onDismiss={() => setTurnedOffNote(null)} />}</div>}
+          {storyParts.length > 0 ? <TeamStory parts={storyParts} figures={agentFigures} onAgent={focusAgent} onSchedule={doc.teamSchedule ? openScheduleEditor : undefined} onConnect={editable ? (edges) => { for (const edge of edges) doc.onConnect({ source: edge.from, target: edge.to, sourceHandle: null, targetHandle: null }) } : undefined} /> : <div className="build-canvas-help"><strong>Connect your agents</strong><span>Drag from the dot on the right of a card to the next card to hand work along.</span></div>}<div className="build-canvas-legend"><span><i />Handovers</span><span><i className="resource" />Resources</span><span>Select a card to edit</span></div>{!runSetup && <div className="canvas-notes"><InstructionUpdateBar entries={instructionUpdates.entries} names={nodeNames} readOnly={!editable} onReview={focusAgent} onKeepAll={instructionUpdates.keepAll} onRewrite={ask.unavailable ? undefined : instructionUpdates.rewrite} />{turnedOffNote && <TurnedOffNote note={turnedOffNote} names={nodeNames} onDismiss={() => setTurnedOffNote(null)} />}</div>}
         </div>
         )}
         <div className="lw-sweep" aria-hidden="true" />
@@ -2637,19 +2740,22 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
           <ComponentPalette capabilityInventory={capabilityInventory} capabilitiesLoading={capabilitiesLoading} capabilitiesError={capabilitiesError} capabilitiesScannedAt={capabilitiesScannedAt} onRetryCapabilities={onRetryCapabilities} onInspectCapability={inspectCapability} onDragStateChange={(dragging) => { setLibraryDragging(dragging); if (!dragging) setDropAgentId(null) }} onCollapsedChange={setLibraryCollapsed} teamSources={teamSources} onRevealSource={revealSource} teamPath={doc.path} teamAgents={ownAgents} onRevealAgent={focusAgent} notion={{ connection: notionConnection, pages: notionPages, ...(editable && doc.path ? { onChoosePage: () => setNotionPicker({ agentId: null, at: flow.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 }) }) } : {}) }} width={paletteWidth} onResize={windowWidth >= 768 ? setPaletteWidth : undefined} />
         )}
 
-        {agentsView && !runView && !runSetup && (
-          <div className="team-agents-page">
+        {benchShown && (
+          // An agent's workbench, over the Team tab: opened from its card, closed back to the team.
+          <div ref={benchPage} tabIndex={-1} className="team-agents-page" role="region" aria-label={`${doc.teamName || 'This team'}’s agents`}>
+            <button type="button" className="iconbtn team-agents-close" onClick={closeBench} aria-label="Back to the team" title="Back to the team" data-tour="bench-close"><X size={16} aria-hidden="true" /></button>
             <TeamAgents
               agents={doc.nodes.map((node) => node.data.agent).filter((agent) => agent.kind !== 'operator')}
               responder={responderFromDoc}
               selected={benchAgentId}
-              onSelect={(id) => { setBenchAgentId(id); writeBuildViewToUrl(true, id) }}
+              onSelect={(id) => leaveBench(() => { setBenchAgentId(id); writeBuildViewToUrl(true, id) })}
               teamName={doc.teamName || 'this team'}
               teamPath={doc.path}
               editable={editable}
               skills={capabilityInventory.skills}
               skillsLoading={capabilitiesLoading}
               savedJobs={savedJobs}
+              savedJobsLoaded={savedJobsLoaded}
               onEdit={(agentId, key, value) => {
                 const agent = doc.nodes.find((node) => node.id === agentId)?.data.agent
                 const change = agent && editable ? teamAgentEdit(agent, key, value) : null
@@ -2657,20 +2763,11 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
                 if (change.kind === 'rename') doc.renameAgent(agentId, change.field, change.value)
                 else doc.applyAgentFields(agentId, change.fields)
               }}
-              onApplyVersion={(agentId, job, previous) => {
-                const agent = doc.nodes.find((node) => node.id === agentId)?.data.agent
-                if (!agent || !editable) return
-                doc.applyAgentFields(agentId, fieldsForVersion(job, agent, previous))
-                setStatusAnnouncement(`${job.name} is up to date in this team. Save the team to keep it.`)
-              }}
-              onUnlink={(agentId) => {
-                if (!editable) return
-                doc.applyAgentFields(agentId, { from: undefined })
-                setStatusAnnouncement('It is now this team’s own. Save the team to keep it.')
-              }}
-              onShowWorkflow={showWorkflow}
-              onAdd={editable ? addSavedAgent : undefined}
-              onPickModel={(agentId, model, follow) => doc.applyAgentFields(agentId, { model, followsSuggestion: follow ? true : undefined })}
+              onAgentSaved={doc.refillAgent}
+              onShowWorkflow={closeBench}
+              leaveRef={benchLeave}
+              onAdd={editable ? (job) => leaveBench(() => addSavedAgent(job)) : undefined}
+              onPickModel={(agentId, model, follow, effort) => doc.applyAgentFields(agentId, { model, followsSuggestion: follow ? true : undefined, ...withEffort(effort) })}
               modelMoves={modelFollowing.moves}
               onUndoModelMove={modelFollowing.undo}
             />
@@ -2678,26 +2775,24 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
         )}
 
         <div className="workspace-chrome pointer-events-none absolute inset-x-0 z-40 flex flex-col items-center gap-2" style={{ top: 'var(--lw-panel-inset)' }}>
-          {/* The brand is the way home: every team is one click from the list of all teams. */}
-          {/* Home opens in place, as another team does; a click that asks for a new tab gets one. */}
-          <a className="delivery-brand" href="/" aria-label="LoomWatch, my team" title="My team" style={{ pointerEvents: 'auto', color: 'inherit', textDecoration: 'none' }}
-            onClick={(event) => { if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); goToTeam('/') }}><LoomMark size={26} state={needsYou.mark} /><LoomWordmark height={19} /></a>
+          {/* Home, Ask and the other places are the dock's; the header keeps what is this team's. */}
           <WorkspaceMenu runView={runView} onMemory={() => { clearSelection(); setMemoryOpen(true) }} />
-          <div className="needs-you-anchor"><AskButton ask={ask} onToggle={toggleAsk} />{needsYouTray(runView ? activeRunId : null)}</div>
+          <div className="needs-you-anchor">{needsYouTray(runView ? activeRunId : null)}</div>
           <nav className="workspace-view-tabs" aria-label="Workspace view" data-tour="view-tabs">
             <SegmentThumb />
-            {/* In the order a team is made: its agents, then its workflow, then its chat. */}
-            <button type="button" aria-pressed={!runView && !runSetup && agentsView} onClick={() => { const chosen = inspectedNode?.id ?? null; clearSelection(); closeRun(); showAgents(chosen) }} data-tour="tab-agents"><UserRound size={15} />Agents</button>
-            <button type="button" aria-pressed={!runView && !runSetup && !agentsView} onClick={() => { clearSelection(); closeRun(); showWorkflow() }} data-tour="tab-workflow"><Network size={15} />Workflow</button>
-            <button type="button" aria-pressed={runView || runSetup} onClick={() => { clearSelection(); if (!activeRunId) setRunSetup(true) }} data-tour="tab-chat"><MessagesSquare size={15} />Chat</button>
+            {/* In the order a team is made: its agents working together (Team), then its chat. */}
+            {/* A team's agents are on its Team tab; each one's workbench opens over it from its card (round 3). */}
+            <button type="button" aria-pressed={!runView && !runSetup} onClick={() => leaveBench(() => { clearSelection(); closeRun(); showWorkflow() })} data-tour="tab-workflow"><Network size={15} />Team</button>
+            <button type="button" aria-pressed={runView || runSetup} onClick={() => leaveBench(() => { clearSelection(); if (!activeRunId) setRunSetup(true) })} data-tour="tab-chat"><MessagesSquare size={15} />Chat</button>
           </nav>
           <DocumentSwitcher
-            path={doc.path} teamName={doc.teamName} saveState={doc.documentChipState} saveError={doc.saveError}
+            path={doc.path} teamName={doc.teamName} here={places && places.others.length > 0 ? places.here : null} alsoIn={alsoIn} saveState={doc.documentChipState} saveError={doc.saveError}
             entrypointProblem={doc.entrypointProblem} documentProblems={doc.documentProblems} fieldProblemsByAgent={doc.fieldProblemsByAgent} agentNames={nodeNames}
             isValid={doc.isValid} readOnlyReason={doc.readOnlyReason} fileGone={doc.fileGone} editingDisabled={windowWidth < 768}
             onSave={() => void doc.save()} onSaveCopy={() => setSaveCopyOpen(true)} onReload={() => void doc.reloadFromDisk()} onDiscard={() => void doc.reloadFromDisk()}
             onRename={editable ? doc.renameTeam : undefined} onDelete={doc.saveState !== 'new' && !doc.fileGone ? () => setDeleteTeamOpen(true) : undefined}
             onSelectProblem={selectProblem} problemsOpen={problemsOpen} onProblemsOpenChange={setProblemsOpen}
+            teams={{ view: runView || runSetup ? 'chat' : 'workflow', runs: needsYou.records, leave: leaveTeam, before: beforeOtherTeam }}
           />
           {doc.diskNotice && <p className="lw-notice t-meta" style={{ margin: 0 }}>{doc.diskNotice}</p>}
           {doc.entrypointProblem && doc.entrypointProblem.candidates.length > 0 && editable && <EntrypointProblemBar problem={doc.entrypointProblem} onPromote={doc.promoteEntrypoint} />}
@@ -2736,19 +2831,6 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
             figures={agentFigures} onFocusAgent={focusAgent}
             startAdvanced={forcedInspectorField?.agentId === inspectedNode.id} fixHint={forcedInspectorField?.agentId === inspectedNode.id ? forcedInspectorField.hint : undefined} onDismissFixHint={() => setForcedInspectorField(null)}
             node={inspectedNode} fieldProblems={doc.fieldProblemsByAgent.get(inspectedNode.id)} readOnly={!editable} pipeline={doc.mode === 'pipeline'}
-            link={{
-              state: linkState(inspectedNode.data.agent, savedJobs),
-              onApply: (job, previous) => {
-                if (!editable) return
-                doc.applyAgentFields(inspectedNode.id, fieldsForVersion(job, inspectedNode.data.agent, previous))
-                setStatusAnnouncement(`${job.name} is up to date in this team. Save the team to keep it.`)
-              },
-              onUnlink: () => {
-                if (!editable) return
-                doc.applyAgentFields(inspectedNode.id, { from: undefined })
-                setStatusAnnouncement(`${inspectedNode.data.agent.name} is now this team’s own. Save the team to keep it.`)
-              },
-            }}
             teamAutoMode={doc.teamPermissionMode === 'auto'}
             checkup={{ findings: teamCheckup.forAgent(inspectedNode.id), onFix: teamCheckup.apply, onDismiss: teamCheckup.dismiss, onAsk: ask.unavailable ? undefined : askFor }}
             usage={teamUsageFor(teamCheckup.usage, inspectedNode.id)}
@@ -2770,7 +2852,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
               doc.setAgentCapabilities(inspectedNode.id, [...(inspectedNode.data.agent.capabilities ?? []), ...added])
               setStatusAnnouncement(`${added.map((capability) => capability.name).join(', ')} ${added.length === 1 ? 'is' : 'are'} now supplied to ${inspectedNode.data.agent.name}. Save the team to keep this change.`)
             }}
-            onFieldBlur={(field) => doc.touchField(inspectedNode.id, field)} onRename={(field, value) => { retireFixHint(inspectedNode.id, field); doc.renameAgent(inspectedNode.id, field, value) }} onModelChange={(value, follow) => doc.applyAgentFields(inspectedNode.id, { model: value, followsSuggestion: follow ? true : undefined })} modelMove={modelFollowing.moves.get(inspectedNode.id) && { from: (modelFollowing.moves.get(inspectedNode.id) as ModelMove).from, onUndo: () => modelFollowing.undo(inspectedNode.id) }} onSpendChange={(perRun) => doc.updateAgentSpend(inspectedNode.id, perRun)} onThinkingEffortChange={(value) => doc.updateAgentThinkingEffort(inspectedNode.id, value)} onDoneWhenChange={(items) => doc.applyAgentFields(inspectedNode.id, { doneWhen: items.length ? items : undefined })} checkStep={checkStepFor(inspectedNode.data.agent)} suggestFor={{ agent: inspectedNode.data.agent, team: { agents: doc.nodes.map((node) => node.data.agent), responder: responderFromDoc } }}
+            onFieldBlur={(field) => doc.touchField(inspectedNode.id, field)} onRename={(field, value) => { retireFixHint(inspectedNode.id, field); doc.renameAgent(inspectedNode.id, field, value) }} onModelChange={(value, follow, effort) => doc.applyAgentFields(inspectedNode.id, { model: value, followsSuggestion: follow ? true : undefined, ...withEffort(effort) })} modelMove={modelFollowing.moves.get(inspectedNode.id) && { from: (modelFollowing.moves.get(inspectedNode.id) as ModelMove).from, fromEffort: (modelFollowing.moves.get(inspectedNode.id) as ModelMove).fromEffort, onUndo: () => modelFollowing.undo(inspectedNode.id) }} onSpendChange={(perRun) => doc.updateAgentSpend(inspectedNode.id, perRun)} onThinkingEffortChange={(value) => doc.updateAgentThinkingEffort(inspectedNode.id, value)} onDoneWhenChange={(items) => doc.applyAgentFields(inspectedNode.id, { doneWhen: items.length ? items : undefined })} onPartChange={(part) => doc.applyAgentFields(inspectedNode.id, { part })} checkStep={checkStepFor(inspectedNode.data.agent)} suggestFor={{ agent: inspectedNode.data.agent, team: { agents: doc.nodes.map((node) => node.data.agent), responder: responderFromDoc } }}
             onCwdChange={(value) => doc.updateAgentCwd(inspectedNode.id, value)}
             onAllowRecruitingChange={(value) => doc.updateAgentAllowRecruiting(inspectedNode.id, value)} onAllowChange={(key, on) => doc.updateAgentAllow(inspectedNode.id, key, on)} onPromoteEntrypoint={() => doc.promoteEntrypoint(inspectedNode.id)} onDelete={() => requestNodeDelete([inspectedNode.id])}
             briefCount={memory?.entries.length ?? 0} teamDeliverAs={memory?.deliverAs}
@@ -2948,13 +3030,27 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
         />}
 
         {paletteOpen && <CommandPalette actions={actions} interpret={interpret} fallback={askFallback} onClose={() => setPaletteOpen(false)} />}
+        {leaving && (
+          <LeaveConfirm name={leaving.guard.name ?? null} problem={leaving.guard.problem}
+            onSave={async () => { const saved = await leaving.guard.save(); if (saved) { setLeaving(null); leaving.then() } return saved }}
+            onDrop={() => { setLeaving(null); leaving.then() }}
+            onCancel={() => setLeaving(null)} />
+        )}
         {discardConfirm && <InlineConfirm message="Discard changes and reload from disk?" confirmLabel="Discard changes" onConfirm={() => { setDiscardConfirm(false); void doc.reloadFromDisk() }} onCancel={() => setDiscardConfirm(false)} />}
-        {pendingNodeDelete.length > 0 && <InlineConfirm message={`Delete ${pendingNodeDelete.length === 1 ? `${nodeNames.has(pendingNodeDelete[0]) ? `“${nodeNames.get(pendingNodeDelete[0])}”` : 'this card'} and its connections` : `${pendingNodeDelete.length} cards and their connections`}?`} confirmLabel="Delete" onConfirm={() => { deleteNodes(pendingNodeDelete); setPendingNodeDelete([]) }} onCancel={() => setPendingNodeDelete([])} />}
+        {pendingNodeDelete.length > 0 && (() => {
+          // An agent of My agents only leaves this team (ADR 0094): the confirmation says so.
+          const mine = pendingNodeDelete.every((id) => Boolean(doc.nodes.find((node) => node.id === id)?.data.agent.from))
+          const named = pendingNodeDelete.length === 1 && nodeNames.has(pendingNodeDelete[0]) ? `“${nodeNames.get(pendingNodeDelete[0])}”` : null
+          const message = mine
+            ? `Take ${named ?? `${pendingNodeDelete.length} agents`} off this team? ${pendingNodeDelete.length === 1 ? 'It stays' : 'They stay'} in My agents.`
+            : `Delete ${pendingNodeDelete.length === 1 ? `${named ?? 'this card'} and its connections` : `${pendingNodeDelete.length} cards and their connections`}?`
+          return <InlineConfirm message={message} confirmLabel={mine ? (pendingNodeDelete.length === 1 ? 'Take it off' : 'Take them off') : 'Delete'} onConfirm={() => { deleteNodes(pendingNodeDelete); setPendingNodeDelete([]) }} onCancel={() => setPendingNodeDelete([])} />
+        })()}
         {openPathOpen && <OpenTeamSheet onClose={() => setOpenPathOpen(false)} />}
         {newTeamSheet && <NewTeamSheet openTeamUnsaved={['dirty', 'invalid', 'conflict'].includes(doc.documentChipState)} onClose={() => setNewTeamSheet(false)} />}
         {saveCopyOpen && <SaveCopySheet error={doc.saveError} onClose={() => setSaveCopyOpen(false)} onSave={doc.saveCopy} />}
         {/* Home, not the deleted team's empty canvas, is where the operator goes next. */}
-        {deleteTeamOpen && doc.path && <DeleteTeamDialog path={doc.path} name={doc.teamName ?? baseName(doc.path).replace(/\.ya?ml$/i, '')} onDeleted={() => window.location.assign('/')} onClose={() => setDeleteTeamOpen(false)} />}
+        {deleteTeamOpen && doc.path && <DeleteTeamDialog path={doc.path} name={doc.teamName ?? baseName(doc.path).replace(/\.ya?ml$/i, '')} places={places && places.others.length > 0 ? { here: places.here ?? 'Not in a project', others: places.others.map((place) => ({ path: place.path, project: place.project ?? 'Not in a project' })) } : undefined} onTakeOut={() => takeTeamOut(doc.path ?? '').then(() => window.location.assign('/'))} onDeleted={() => window.location.assign('/')} onClose={() => setDeleteTeamOpen(false)} />}
         {/* ADR 0048: a team from outside LoomWatch is checked before its first run. */}
         {teamReview && <TeamReviewDialog review={teamReview} onTrust={trustAndRun} onClose={dismissReview} />}
         {chatFolder !== null && (
@@ -2972,7 +3068,9 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
         )}
       </div>
     </CanvasActionsContext.Provider>
+    </GuestNamesContext.Provider>
     </TeamFiguresContext.Provider>
+    </ChatOfContext.Provider>
     </SavedAgentsContext.Provider>
   )
 }

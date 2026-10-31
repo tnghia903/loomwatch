@@ -3,6 +3,7 @@ import type { FindTerm } from './findWords'
 import { readRun, type RunRecord } from '../runs/client'
 import type { Lesson } from '../lessons/client'
 import type { Face, Reaction, ReactionAbout } from './reactions'
+import type { SentChange } from '../files/changes'
 
 /**
  * A team's chat (ADR 0051): its runs and what you wrote to it, read as one conversation.
@@ -37,6 +38,8 @@ export interface ChatMessage {
   now: boolean
   /** The message it replies to, when it was written as one. Absent from chats before replies. */
   replyTo?: ReplyTo | null
+  /** Changes left on a file for this agent, sent together in this message (ADR 0107). */
+  changes?: SentChange[] | null
   /**
    * The agents' own answers to an @ message that needed no workflow ("hi @team"): the message
    * stayed a note, nothing ran, and the agents it was for answered it themselves, at the same time.
@@ -170,7 +173,36 @@ export interface ReplyTo {
   text: string
   /** A `passage`'s file, by its full path: the part was marked in it while reading it (ADR 0077). */
   file?: string
+  /** Where a `passage` that isn't words is in its file (ADR 0091); none for words. */
+  at?: PartAt
 }
+
+/**
+ * Where a part that isn't words is in its file (ADR 0091), as the daemon keeps it (`chat::PartAt`).
+ * A place on a picture, page, slide or frame is in ten-thousandths of its width and height from its
+ * top left, so the part keeps its place however large it is drawn.
+ */
+export type PartAt =
+  /** A box: on a picture, on page `page` (from 1) of a document, or on the frame of a recording at `ms`. */
+  | { kind: 'box'; x: number; y: number; w: number; h: number; page?: number; ms?: number }
+  /** A range of cells, by the sheet's own row and column numbers from 1, corners included; `sheet` names it in a workbook. */
+  | { kind: 'cells'; sheet?: string; top: number; left: number; bottom: number; right: number }
+  /** A moment of a recording, in milliseconds from its start, or the span to `end`. */
+  | { kind: 'time'; start: number; end?: number }
+  /**
+   * A part of a web page, found again by `path`, a CSS selector (`body > main > canvas:nth-of-type(2)`):
+   * a chart, a picture, a video, or any other part picked in it (a box in a drawing, a card, a table).
+   */
+  | { kind: 'element'; what: 'chart' | 'picture' | 'video' | 'part'; path: string }
+
+/** A box on a picture, a page or a frame. */
+export type BoxAt = Extract<PartAt, { kind: 'box' }>
+/** A range of cells on a sheet. */
+export type CellsAt = Extract<PartAt, { kind: 'cells' }>
+/** A moment or a span of a recording. */
+export type TimeAt = Extract<PartAt, { kind: 'time' }>
+/** A part of a web page. */
+export type ElementAt = Extract<PartAt, { kind: 'element' }>
 
 /** One item of the chat, newest first from the daemon. */
 export type ChatItem =

@@ -7,7 +7,7 @@ import type { FromApp } from './bridge'
 import { withPinned, type PinnedNow } from './pinned'
 import { advance, arrive, next, NOTHING_OUT, tuckNow, tuckOnClick, type Circumstances, type PopState } from './popouts'
 import type { TeamRequest } from '../lib/runs/teamRequests'
-import { withDropped, type Intake } from './intake'
+import { withDropped, withoutFile, type Intake } from './intake'
 import { momentsBetween, teamAskKey, teamsNow, tucked, type Pop, type PopKind, type TeamNow } from './teams'
 import { ISLAND_WAITS } from './waits'
 
@@ -68,6 +68,8 @@ export interface IslandState {
   /** A message to it is being written: the list stays open, wherever the pointer goes, until it is
       sent, put away with Escape, or a click lands elsewhere. */
   composing: boolean
+  /** ⌃⌥Space is held and the app listens: what is said writes itself into the box. */
+  listening: boolean
   /** Without a notch, after a message from the box: its agent's work shows in a pill until it
       answers, or a click lands elsewhere; pointing at the pill opens its workbench. */
   following: boolean
@@ -120,6 +122,8 @@ export type IslandAction =
   | { type: 'drop'; intake: Intake | null; away?: string | null }
   /** What was dropped went with a message, or was put away. */
   | { type: 'intakeDone' }
+  /** One of the files waiting is taken out. */
+  | { type: 'intakeLess'; file: File }
 
 export function initialIsland(now: number, inApp: boolean): IslandState {
   return {
@@ -138,6 +142,7 @@ export function initialIsland(now: number, inApp: boolean): IslandState {
     pinned: null,
     box: null,
     composing: false,
+    listening: false,
     following: false,
     bench: false,
     peeking: false,
@@ -230,6 +235,9 @@ export function islandReducer(state: IslandState, action: IslandAction & { now: 
     case 'intakeDone':
       s = { ...s, intake: null, away: null }
       break
+    case 'intakeLess':
+      s = { ...s, intake: s.intake && withoutFile(s.intake, action.file) }
+      break
   }
   // What a drop left out is said while what went in waits, or the list is open.
   return settle(s.listOpen || s.intake || !s.away ? s : { ...s, away: null })
@@ -271,7 +279,18 @@ function fromApp(s: IslandState, message: FromApp): IslandState {
     case 'seen':
       return markSeen(s, message.runs)
     case 'dropped':
-      // The files come as a drop of their own, once the page's picker has them (`takeDropped`).
+      // The files come as a drop of their own, once the page's picker has them (`pickFiles`).
+      return s
+    case 'listen':
+      // Held, ⌃⌥Space has opened the box already; should it have been put away since, listening
+      // opens it again, for the words to go into.
+      if (!message.on) return { ...s, listening: false }
+      if (!s.box) return s
+      return { ...(s.composing ? s : openToWrite(s)), listening: true }
+    case 'heard':
+    case 'level':
+    case 'cantListen':
+      // The words, the loudness and what stopped it are the page's (`useIsland`).
       return s
   }
 }

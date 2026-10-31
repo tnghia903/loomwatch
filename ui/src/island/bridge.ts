@@ -30,8 +30,21 @@ export type FromApp =
   | { kind: 'seen'; runs: string[] }
   /** Files dropped on the island that the app took itself, files another app writes only once
       dropped, as Mail does with a message: the page's file picker asks for them, and the app
-      answers it with them (`takeDropped`). */
+      answers it with them (`pickFiles`). */
   | { kind: 'dropped' }
+  /** ⌃⌥Space is held: the app listens, with the box open, until it is let go (`on: false`). */
+  | { kind: 'listen'; on: boolean }
+  /** Every word heard while it was held, so far; `done` once the last of them are in. */
+  | { kind: 'heard'; text: string; done: boolean }
+  /** How loud it hears, from 0 to 1, a dozen times a second while it listens. */
+  | { kind: 'level'; level: number }
+  /** It could not listen: the microphone or speech recognition is turned off for LoomWatch, macOS
+      has just asked for them (`asked`), this Mac can't turn speech into words now, or has no
+      microphone; or it stopped, still held, having listened as long as it may (`longest`). */
+  | { kind: 'cantListen'; why: CantListen }
+
+/** Why holding ⌃⌥Space did not listen, or stopped, as the app says. */
+export type CantListen = 'microphone' | 'speech' | 'asked' | 'unavailable' | 'noMicrophone' | 'longest'
 
 export interface Area {
   x: number
@@ -57,6 +70,8 @@ export type ToApp =
   | { kind: 'copy'; text: string; html: string | null }
   /** Results looked at here, by run: they leave the other screens' islands too. */
   | { kind: 'seen'; runs: string[] }
+  /** Open System Settings where the microphone, or speech recognition, is turned on for LoomWatch. */
+  | { kind: 'settings'; pane: 'microphone' | 'speech' }
 
 declare global {
   interface Window {

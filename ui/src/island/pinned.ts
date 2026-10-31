@@ -135,11 +135,12 @@ function live(records: readonly RunRecord[], pinned: PinnedNow): RunRecord[] {
 
 /**
  * Send `text` to the pinned agent, as its Chat tab would, with anything dropped into the slot
- * (`intake`): its files go as the chat's own attachments, a link or some text goes in the words.
- * When the agent is free, its chat is first written as it is saved in My agents, so it answers as
- * that version; while it works, the message is a note for its next turn.
+ * (`intake`): its files go as the chat's own attachments, each told to `uploaded` as it arrives, a
+ * link or some text goes in the words. When the agent is free, its chat is first written as it is
+ * saved in My agents, so it answers as that version; while it works, the message is a note for its
+ * next turn.
  */
-export async function sendToPinned(pinned: PinnedNow, said: string, records: readonly RunRecord[], intake: Intake | null = null): Promise<SendResult> {
+export async function sendToPinned(pinned: PinnedNow, said: string, records: readonly RunRecord[], intake: Intake | null = null, uploaded?: (file: File) => void): Promise<SendResult> {
   const text = intake ? messageFor(intake, said) : said
   const to = { kind: 'agent' as const, agent: pinned.agent }
   const where = destination(to, live(records, pinned), new Map([[pinned.agent, pinned.name]]), 1)
@@ -151,6 +152,11 @@ export async function sendToPinned(pinned: PinnedNow, said: string, records: rea
     const draft = draftFromJob(pinned.job)
     revision = (await saveTeamFile(teamPath, chatTeamYaml(draft, draft.model, pinned.id), current)).revision ?? null
   }
-  const files = intake?.files.length ? await Promise.all(intake.files.map((file) => uploadChatFile(teamPath, file, file.name))) : []
+  const files = intake?.files.length
+    ? await Promise.all(intake.files.map((file) => uploadChatFile(teamPath, file, file.name).then((kept) => {
+      uploaded?.(file)
+      return kept
+    })))
+    : []
   return sendChatMessage({ teamPath, text, to, expectedRevision: revision, startKey: where.route === 'agent' ? newStartKey() : undefined, files })
 }

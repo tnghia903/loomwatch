@@ -1,10 +1,11 @@
-import { AtSign } from 'lucide-react'
+import { AtSign } from '../ui/icon'
 import { useId, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 
 import { useAgentFaces, type AgentFacts } from '../../lib/chat/faces'
 import { AGENT_CARD_WIDTH, useAgentCard, type CardPlace } from '../../lib/chat/useAgentCard'
 import { AvatarFace } from '../agents/AvatarFace'
+import { Markdown } from '../ui/Markdown'
 
 
 /**
@@ -104,7 +105,8 @@ export function AgentCard({ facts, hint }: { facts: AgentFacts; hint?: ReactNode
         </span>
       </div>
       {facts.model && <p className="tc-agent-card-app">{facts.model}</p>}
-      {facts.role && <p className="tc-agent-card-role">{facts.role}</p>}
+      {/* Its instructions as written, Markdown and all; the card shows their first lines. */}
+      {facts.role && <div className="tc-agent-card-role"><Markdown>{facts.role}</Markdown></div>}
       {works && <p className="tc-agent-card-works">{works}</p>}
       {hint === undefined ? <p className="tc-agent-card-hint"><AtSign size={12} aria-hidden="true" />Click to mention {facts.name}</p> : hint}
     </>

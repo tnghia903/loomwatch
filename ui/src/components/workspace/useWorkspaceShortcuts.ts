@@ -27,6 +27,8 @@ export interface WorkspaceShortcutContext {
   clearSelection: () => void
   /** Details open beside the team's chat (ADR 0051): Esc closes it, live work or not, and keeps the chat. */
   closeDetails?: () => void
+  /** An agent's workbench open over the Team tab: Esc closes it, asking first about changes not saved. */
+  closeBench?: () => void
   organize: () => void
   fitCanvas: () => void
   // Esc unwinds these, deepest disclosure first.
@@ -84,7 +86,7 @@ export function useWorkspaceShortcuts(context: WorkspaceShortcutContext) {
 function handleWorkspaceKey(event: KeyboardEvent, context: WorkspaceShortcutContext) {
   const {
     editable, doc, flow, theme, windowWidth, runView, submit, openNewTeam,
-    toggleLibrary, cycleProblem, clearSelection, closeDetails, organize, fitCanvas, pendingNodeDelete,
+    toggleLibrary, cycleProblem, clearSelection, closeDetails, closeBench, organize, fitCanvas, pendingNodeDelete,
     setPendingNodeDelete, requestNodeDelete, deleteNodes, discardConfirm, setDiscardConfirm, paletteOpen,
     setPaletteOpen, problemsOpen, setProblemsOpen,
     compareOpen, setCompareOpen, inspectedEvidenceId, setInspectedEvidenceId,
@@ -116,6 +118,8 @@ function handleWorkspaceKey(event: KeyboardEvent, context: WorkspaceShortcutCont
       else if (problemsOpen) setProblemsOpen(false)
       else if (compareOpen) setCompareOpen(false)
       else if (doc.refusal) doc.dismissRefusal()
+      // The workbench covers the canvas, so what is picked behind it waits; typing is let go first.
+      else if (closeBench && !editingText) closeBench()
       else if (inspectedEvidenceId) setInspectedEvidenceId(null)
       else if (handoverAgentId) setHandoverAgentId(null)
       else if (inspectedCapability) clearSelection()

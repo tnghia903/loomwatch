@@ -65,7 +65,7 @@ describe('helpers (ADR 0079)', () => {
 
     const failed = helpersOf([...events, cameBack(130, 'ada~2', { error: 'the provider is down' })], evidence)
     expect(failed[1]).toMatchObject({ state: 'failed', error: 'the provider is down', now: null })
-    expect(helpersLine(failed)).toBe('2 helpers · 1 couldn’t finish')
+    expect(helpersLine(failed)).toBe('2 helpers · 1 didn’t finish')
     expect(took(failed[1].startedAt, failed[1].finishedAt)).toBe('2m 10s')
     expect(helpersLine(helpersOf([...events, cameBack(50, 'ada~2', { reply: 'Da Nang: $350.' })], evidence))).toBe('2 helpers · done')
     const stopped = { ...cameBack(50, 'ada~2', { reply: 'Da Nang so far.' }), payload: { ...cameBack(50, 'ada~2', { reply: 'Da Nang so far.' }).payload, stopped: true } }

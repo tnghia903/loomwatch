@@ -25,7 +25,7 @@ output, paths and other private data; this implementation does not publish it on
 
 ## Reading a run
 
-Open a team's **Chat** (or press **Run team** in Workflow) and send the team a request with
+Open a team's **Chat** (or press **Run team** on the **Team** tab) and send the team a request with
 `@team`. Unsaved changes to the team file are saved first: a run executes an exact snapshot of the
 file, so there is no “run without saving”. The run is then a piece of work in the chat, and
 **Details** beside it shows:
@@ -41,22 +41,44 @@ file, so there is no “run without saving”. The run is then a piece of work i
   sources, Team Bus delegations, permission requests and plans each carry owner, ordinal, elapsed
   time, status and relationship word. Click one for its input, output and raw events.
 
-Each piece of work in the team's chat shows **what they said to each other**: each pipeline handover,
-every Team Bus `ask` with the answer it got (and whether the asked agent answered from its open
-session or from a fresh start), `dispatch` and `handoff` tasks, `ask_user` questions with your
-answers, and your answers at a review step. It reads as a group chat inside the team's chat: each
-agent has its own colour and initials, numbered as its card is, and your messages sit on the
-right. A review's **Approve** and **Send back** stand where your reply goes, under the handover
-they decide. A question names who it is for with an @mention, and its answer quotes it. A handover
-shows as a document shared with the stage it was for. An answer still owed shows as someone
-writing while the run is live, and as **No answer** after it ends. A plain approval is a short
+Each piece of work in the team's chat has its **replies**, what the agents said to each other:
+each pipeline handover, every Team Bus `ask` with the answer it got (and whether the asked agent
+answered from its open session or from a fresh start), `dispatch` and `handoff` tasks, `ask_user`
+questions with your answers, and your answers at a review step. In the chat they are one line under
+your request, ending under its right corner with the faces of who spoke and how many replies ("3
+replies"; on hover, who they are from and when the last came), and the replies themselves under
+that line, in the chat. The newest piece
+and any piece still working show them as they are said; older pieces hide them, and the line shows
+or hides them again. They read as the rest of the group chat does: each agent has its own colour
+and figure, and your messages sit on the right. An agent's own chat (My agents) shows its replies
+the same way. A review's **Approve** and **Send back** stand where your reply goes, under the
+handover they decide, and a permission's buttons under the message that asks; while the replies
+are hidden, each has a card of its own in the chat, so each is answered in one place. **Reply** on that handover quotes it above the message box; what you type there is
+still your review note. <kbd>Enter</kbd> sends the work back with it and never approves; a note
+that @mentions another agent or the team waits for the buttons. A question names who it is for
+with an @mention, and its answer quotes it. A handover shows as a document shared with the stage
+it was for. An answer still owed shows as someone writing while the run is live, and as **No answer** after it ends. A plain approval is a short
 note in the chat; a review you approved with a note is one message from you to the stage it went
 on to, and the direction and handover that stage was then given fold into it, as they only
 repeat it. A long message shows its first lines and **Read more** shows it verbatim; **Info**
 says how long the answer took, what the agent did meanwhile, and leads to the record.
 `ui/src/lib/watch/messages.ts` collects the messages in the same pass as the rest of the
-projection, and the timeline's **Read the message** in Details opens the piece in the chat and
-lands on that message.
+projection, and the timeline's **Read the message** in Details opens the piece's replies in the
+chat and lands on that message, as a search result or a reply's quote of one does.
+
+When your message says what done looks like ("at most 250 words", "exactly three sections", "stop
+after 5 tries"), a few seconds after you send it **Done when** shows under it, with what LoomWatch
+read, in your own words, and "Up to N tries" when you named a number: the tries the run will use,
+the first work one of them (ADR 0098). The work is checked against them before it becomes the
+answer, by the team's check step when it checks the agent that answers, or else by LoomWatch
+itself, whose rounds show in the replies under LoomWatch's face alone, in the text colour. While
+the check can still change, each item has one mark that takes it off the check from the next round
+on; a dropped item stays, struck through, and the same mark puts it back. An item taken off is
+neither sent back nor counted in the answer's badge, even when it is taken off while the run waits
+at a stop. **Done when**'s tooltip says your message went as you wrote it and which model checks
+it, by whom. A read that failed says so in one quiet line; a message with nothing to check shows
+nothing. At a check's stop, **Send back** works with no note: the checks still open say what is
+wrong. `ui/src/lib/chat/doneWhen.ts` reads the run's `done_when` records.
 
 Who said what to whom is read from the record, not from the team file as it is now:
 
@@ -72,9 +94,14 @@ All five are additive: runs archived before them still read, and a handover send
 taken from the team's connections says so when its row is opened.
 
 Past work lives in each team's chat: the Chat tab lists the team's runs as pieces of
-work, oldest first. The newest piece and any piece still working show the talk between agents as
-it happens; older pieces fold it to one line. **Details** on a piece opens this view beside the
-chat, and Esc closes it. The chat holds what was said and Details how it was made: a piece's
+work, oldest first, as one conversation. Under each request is its line: while the work runs, who
+has it and what it spent; then, under the request's right corner, **Details**, **Stop** while it
+runs, and the faces of the agents who spoke, each glowing what it is doing (blue at work, gold
+waiting for you, red where the work stopped), with how many replies. That pill shows or hides the
+piece's replies under it, and **Details** next to it opens this view beside the chat; when nothing passed between the agents the line itself reads **Details** and
+opens it, and a stopped piece's card leaves that to the line. Clicked again, **Details** closes
+the pane, and Esc closes it too. The pane opens by itself only to hand over what the newest work
+made (below), never on its record. The chat holds what was said and Details how it was made: a piece's
 answer is read only in the chat, with its record's verdict (which opens the review), the files it
 names, **Copy**, **Download** and **Send to Notion** under it; Details shows the receipt (the
 run's tokens, and its cost on each turn's `turn_end`: as OpenRouter reported it, ≈ at Claude's list
@@ -89,19 +116,25 @@ skills (a required one it never had, once the run is over, leaves the mark dashe
 (pages read and searches, with the programs its model ran to search), files, commands, plan. A
 mark opens its list under the row: the pages read by site, marked when the team's answer links
 them, and what each search found; each skill's receipt; or the calls, each opening its record.
-The request and the answer themselves are read in the chat, not again here. What the work made
-is a tab of the pane beside the chat, after **Details**: first a long answer (or a titled one past
+The request and the answer themselves are read in the chat, not again here. A file the answer
+names that another agent wrote, such as the Writer's guide in the Lead's answer, comes into the
+chat as that agent's own message just before the answer, and the answer keeps the files its own
+agent wrote or only named. What the work made is a tab of the pane beside the chat, after
+**Details**: first a long answer (or a titled one past
 a few lines), as the chat shows a message, by the figure and name of the agent who gave it, in a
 bubble, with its title on hover; then, past a thin line, each file its answer names that
-LoomWatch can show and that is on this computer, by its name and the mark of its kind. In the chat
+LoomWatch can show and that is on this computer, by its name and the mark of its kind. A file the
+work wrote counts even when the answer names it in plain words, by its name or path, with no code
+or link around it. In the chat
 such an answer stays short, a card with its title, opening words and length, whose **Open** shows
-its tab. Once the work has finished well, the pane following
-the newest work switches to what it came to: the first page, document, sheet or picture it wrote,
-else its long answer. Code, and files it only read, wait as tabs; work that stopped keeps its
-record on screen. Each tab has its own ×, and closing the one on screen shows the next; a tab
+its tab. Once the newest work has finished well, the pane opens on what it came to, or switches
+to it when it is open on the newest work and you haven't chosen a tab: the first page, document,
+sheet or picture it wrote, else its long answer. Code, and files it only read, wait as tabs; work
+that stopped opens nothing, and an open pane keeps its record on screen. Closing the pane stops
+this until you start work again. Each tab has its own ×, and closing the one on screen shows the next; a tab
 closed stays closed for that work until **Read** on the file's card (or **Open** on the answer's)
-brings it back in its place. Past the pane's width the tabs scroll under **Details**, which stays
-put. A file that has been on screen stays a tab until its × is pressed. It stays when newer work
+brings it back in its place. Past the pane's width the tabs scroll under **Details**, which
+stays put. A file that has been on screen stays a tab until its × is pressed. It stays when newer work
 starts, so a change to a part asked about can be seen, and when **Read** opens a file from other
 work, which gets its own tab. The pane's own × closes them all. Mark
 any words in a file to ask about them (ADR 0077): **Ask** puts them in the message box, **Explain**
@@ -120,12 +153,119 @@ face in the chat does, and what you asked it. Ask about words that overlap words
 before and only the newer words keep the stroke, with the earlier bubbles beside them; an earlier
 answer then opens at the newer words and says which words it is about. A bubble opens its own
 answer, and the marked words open the one still waiting for you, or else the newest; Esc or ×
-closes it. A web page the agent made is marked the same way. Drag the edge between the
+closes it. A Markdown report shows the pictures it links to on this computer, such as a chart it
+links as `figures/chart.svg` beside it; a picture on the web shows as its words, so reading a report
+never tells a website you did. **Make changes** at the top of the reader (ADR 0107) turns a file
+you can change into a draft: a file an agent made in its own folder, or one in a folder you gave a
+team, that is a text, code or Markdown file, a table or workbook, a slide deck or a Word document.
+Ask and Explain wait while it is on, and one line at the foot of the file says where to type until a
+change is saved. A table's or workbook's cell is changed by a double-click (Enter saves, Esc puts
+it back, Tab goes on to the next); a cell whose formula other cells share can't be changed alone,
+and says so. A deck's slide words and speaker notes, and a Word document's paragraphs, are typed into
+where they are drawn, as a Markdown file's are; a part with a link, a field or a picture in it, a
+table on a slide and a chart are left as they are. A paragraph typed into takes the look of its
+first words. A Markdown file is typed into where it is drawn: click a paragraph, a heading
+or a list item and type. Leaving it, or Enter, saves that part in the file, and Esc puts it back as
+it was. Any other file is changed as its words in one box, saved when you leave it or
+stop typing for a moment; Esc there puts back what you typed. The header then says **Saved**, with
+**Undo**; after Undo it says **Undone**, with **Redo**. LoomWatch keeps a copy of the file as it was before each change, and Undo
+writes that copy back (keeping the one it replaces, which is what Redo writes). If the file changed since you opened it (an agent wrote it again), your
+change isn't saved, the header says "The file changed just now, so yours wasn't saved. Type it
+again.", and the file shows as it is now. When LoomWatch refuses a change for a reason of its own,
+the header says that reason. Beside a team's chat, Make changes is also how you leave changes for the agents, on
+any kind of file: mark a part as you would to ask about it (words, a box on a picture or page, cells,
+a moment, a part of a web page; over words you are typing into, **Change this…** comes first) and
+say what should change there (**Add**). It goes to the agent who made the file; a teammate's face
+gives it to them instead. Each change waits at its part as its agent's figure with a short gold line,
+dashed while it waits, and the header's **Send 2 changes** says how many wait. While you type into
+the words, a part's figures stand in the margin beside it, three at most with how many more. Send
+gives each agent one message holding all of its changes
+on the file, numbered, which it makes in one go and answers by number; the message shows in the
+chat with each change under it. Agents with changes on the same file take turns, the one who made
+it first, so one doesn't write over another; a change waiting its turn keeps its figure alone, one
+at work types, and one made shows a gold dot until you open it; the line goes solid once it is sent.
+Its card says **Your change**, with **Remove** while it waits, and **Put back** once it is made,
+which writes back the file as it was before that agent's turn: every change that turn made goes
+(**Put back all 3**), and anything changed in the file since. A change whose words the agent
+changed keeps its figure in the header, three at most. A web page the agent made is marked the same way. It runs in a sandbox of its own, and
+the data, clips, pictures and fonts beside it load as they would from the page's folder (a
+dashboard's `fetch('sales.csv')` works; LoomWatch reads them for it): its own folder and the folders
+in it only, never anything above it. To ask about any part of the page, not just its words, press
+the Pick switch at the top of the reader (a dashed box with a small page in it, beside Page and Code;
+the page's tip points to it). While it is on, the part under the pointer is outlined, the outline
+gliding from part to part as the pointer moves (it jumps where motion is reduced), and a click marks it: a box in a
+diagram, a card, a button, a table, a chart, a picture or a video. Click the same place again to
+mark the part around it (a box, then the area drawn around it, then the whole drawing), and once
+more past the biggest to go back to the first; drag across words to mark just the words, as always.
+The arrow keys walk the parts too (up and down to the ones beside, left to the one around, right to
+the first inside) and Enter marks one; turned on from the keyboard, the switch outlines the first
+part at once. While picking, a click is for picking, so the page's own buttons and links do
+nothing. Picking stops when you ask (Ask or Explain), when you press the switch again, or on Esc with
+nothing marked, and the page works as it made itself again (a chart that zooms on a drag still
+does). Words dragged across in a drawing mark the box they are on. The agent is told where the part
+is in the page's code, and sent a picture of it as it is shown when it is drawn (a chart, a picture,
+or a part of a drawing, cut out with a little around it); words and boxes go by their place in the
+code. Once asked, the part stays outlined with the agent's bubble at its corner. On a picture (ADR
+0091), drag over
+any part of it to mark a box, or click to mark all of it: the bubble leans in over the box, and the part
+goes with its picture, the box cut out of the picture, which the agent you ask sees when its model
+sees pictures. So **Explain** on a picture starts the agent's work rather than a quick answer in the
+chat. The agent is told where the box is as well, so it can open the file itself. The box stays on
+the picture with the bubble of each agent asked at its corner, and the box or its bubble opens the
+answer. A PDF is shown as its pages, and you mark its words as in any file. Drag over a picture or
+a chart on a page to mark a box there; to mark all of a page with one, press Tab until the page is
+ringed, then Enter (or tap it, on a touch screen). The agent is told the page and where the box is,
+and sent a sharp picture of the box. A PDF that can't be shown as its pages shows only its words.
+A PowerPoint deck is shown as its slides, and a Word document as its pages, drawn by LoomWatch
+itself: nothing else needs to be on the computer, and they open at once. Mark their words, or press
+the Pick switch and click any part of a slide or a page (a box, a table, a chart) to ask about it.
+A deck shows one slide at a time, under its number ("Slide 6 of 13"); a picked picture, shape or
+chart is named by its slide. Under the slide, its
+speaker notes are walked a step at a time: the paragraphs between empty lines are the steps, the
+one being said shown in full beside the agent's figure and the others a line each. The parts of
+the slide that step talks about are ringed in gold and the slide's other words fade back, so you
+see which part each note is about; a dot for each step shows how far you have come. A step is tied to a part only when it clearly says that part's own
+words (a list that goes through a table row by row lights each row in turn); a step that matches
+no part lights none. → under the slide (or the → key) goes to the next step, then the next slide,
+and ← back; press a step to go to it, point at one to light its parts, or press a part of the slide
+to go to the step about it. Page Up, Page Down, Home and End go by slides. While the Pick switch is on,
+the whole slide is shown and a press picks. Mark the notes' words to ask about them, as any words.
+A strip of every slide runs down the left when the reader is wide enough: press one to go to it,
+and the one shown is ringed. In a narrow reader the strip folds away and ‹ › at the top go a slide
+either way. When the deck has changed since you last looked at it (for example, after
+you ask an agent to change it), it opens at the first slide that changed. Each changed slide has a
+gold dashed line under it in the strip and beside its number, with the face of the agent whose
+file it is, and a short gold dashed line marks each part and each set of notes that changed. A deck or a document LoomWatch can't draw shows only its words,
+and an old `.ppt` or `.doc` opens in its own app. A CSV or TSV file and an Excel workbook are shown as a sheet: a workbook's
+sheets behind tabs, the first row as the column names, the rows numbered. Drag across any cells to ask about them,
+or press (or drag across) column names or row numbers for whole columns or rows; from the keyboard,
+Enter on a column's name or a row's number does the same, and ⌘C copies the marked cells. The agent
+is given the cells' words under their column names and after their row names, and told which cells
+they are and on which sheet (the workbook's sheets are drawn from the words LoomWatch reads out of
+it, as the agents read them). The cells stay marked with the agent's bubble beside them; a press on
+them opens the answer, and a sheet's tab shows a small box while it holds cells asked about. The chat
+quotes cells with their rows kept ("By region · Q1, Q2 · 120, 140"). A video or a sound recording
+plays in the reader, however large, and you can skip to any point (LoomWatch sends it in pieces as
+it plays). Under it is a bar, with the agent's face at its start: click it to ask about that moment,
+or drag along it for a stretch, and the recording skips there; the arrow keys move along it and
+Enter marks where it is. On a paused video, drag over the picture to mark a box on that frame. The
+agent is told the time to the millisecond, so a cut it is asked for lands where you put it, and is
+sent the frame, a stretch's first, middle and last frames, or the box cut out of its frame (for a
+sound recording the agent gets only the time). A box or a moment always starts the agent's work, so
+it can open the file, rather than a quick answer in the chat from the words alone. Each part stays
+on the bar with the agent's bubble above it; click the bubble to open the answer and skip to that
+moment. Drag the edge between the
 chat and the pane to resize; double-click resets it. The chat is paged from `GET /api/chat`. The magnifier in its header finds words anywhere in the
 team's chat (`GET /api/chat/find`, ADR 0081): what you asked, the answers, your notes and what the
 agents said to each other, in any order and any form of a word, with or without Vietnamese accents.
 What matches shows in place of the chat, best first; a line opens the chat at that message with
 the words lit, and **← Back to the list** returns to it.
+
+In the message box, each agent you @mention becomes its chip (its figure's head and its name), as
+in sent messages and in **Your team, in one sentence**. A chip is one piece: the arrow keys step
+over it and Backspace removes it whole. A name you are still typing stays plain text until you move
+past it, so a typo can be fixed a letter at a time. What you send or copy is plain text, each chip as
+@Name.
 
 Pictures and files go with a message (ADR 0082): paste one into the message box, drop files on the
 chat (a dashed gold line goes round it while you drag), or press the paperclip. Each is kept the
@@ -140,7 +280,10 @@ answer in the chat. Your sent message shows the pictures small, opening full siz
 beside the chat, and other files as cards. An answer to an agent's question takes words only, and
 the box says so while files are in it. A dropped folder isn't sent: the folder picker opens, its
 button waits until that folder is open, and it is added for every agent of the team as a linked
-source, with a line over the box saying so. Deep links use `?run=<id>`, which opens the chat with that run's Details; the legacy
+source, with a line over the box saying so. Deep links use `?run=<id>`, which opens the chat at that run's message, read back to
+when it is older, with the run's Details. A run of one of My agents' own chats (`.jobs/.bench/<id>.yaml`) opens in that agent's
+chat instead, `/agents/<id>?view=chat&run=<run>`, with the run's Details over its bench: the bell, the notch, the menu bar and the
+daemon's links all go there (a chat that is none of My agents' opens on the team page as before). The legacy
 `/watch?session=<id>` route redirects there, and a bare `/watch` opens the team list. A run the
 daemon no longer remembers (restart) is read from the archive alone.
 
@@ -205,8 +348,11 @@ always has its archive; a router built without one (tests) answers 503.
 | `GET /api/runs` | Every run since the daemon started, newest first; `?preview=true` cuts each `reply` to its first 400 characters, which is what the browser's lists read; `?finishedWithin=<seconds>` keeps the runs still under way and those that finished in that many seconds, which is what the Mac menu bar, the island at a MacBook's notch and the Windows notification-area menu read |
 | `GET /api/runs/{id}` | One run record, or 404 |
 | `GET /api/chat/answering` | The messages agents are answering in the team chat themselves, where no run starts (a greeting, or a quick question such as **Explain** on a part of a file), and those answered in the last hour, oldest first; `?finishedWithin=<seconds>` keeps the ones still being answered and those answered in that many seconds. Each answer is cut to its first 400 characters; an agent whose answer failed (out of credit, too slow) is listed under `answers.failed` with why, in a stopped run's words. Kept in memory for an hour; a restart clears it. The island at a MacBook's notch reads it beside `GET /api/runs` |
+| `POST /api/runs/{id}/done-when` | `{"item": 0, "checked": false}` takes item 0 of what the run's message said done looks like off the check, `true` puts it back (ADR 0098): 200 with the `done_when` record as it now stands; 409 when the run isn't checking its message, has no such item, or its check has ended |
 | `POST /api/runs/{id}/cancel` | Abort a live run: 200 with the record; 409 with the record when it already finished; 404 when unknown |
-| `GET /api/pinned-agent` | `{"agent": "<id>", "notchShown": true}`, the one of My agents pinned to the notch, which the Mac app's box (⌃⌥Space) opens with, or `{"agent": null, …}`; an agent taken out of My agents is no longer pinned. The box pins the agent it is switched to, and the first it sends to while none is pinned (`PUT /api/pinned-agent`). `notchShown` is `false` while Show at the notch is unticked in the Mac app's menu (it keeps `app-notch-off` in the state folder): the pin stays, but there is no island or ⌃⌥Space to reach the agent, so My agents says to turn it on. The island reads it beside `GET /api/runs`, and a message from its box goes into that agent's own chat through `POST /api/chat/messages` |
+| `GET /api/pinned-agent` | `{"agent": "<id>", "notchShown": true}`, the one of My agents pinned to the notch, which the Mac app's box (⌃⌥Space) opens with, or `{"agent": null, …}`; an agent taken out of My agents is no longer pinned. The box pins the first of My agents it sends to while none is pinned (`PUT /api/pinned-agent`); another is pinned in My agents. `notchShown` is `false` while Show at the notch is unticked in the Mac app's menu (it keeps `app-notch-off` in the state folder): the pin stays, but there is no island or ⌃⌥Space to reach the agent, so My agents says to turn it on. The island reads it beside `GET /api/runs`, and a message from its box goes into that agent's own chat through `POST /api/chat/messages` |
+| `GET /api/next-steps`, `PUT /api/next-steps` | `{"on": true, "written": 12, "spent": 0.0021}`: whether next steps are written after the pinned agent's answers (ADR 0105), how many answers they were written for and what they cost, as the providers reported. `PUT {"on": false}` turns writing off, kept in `next-steps.json` in the state folder; what was asked more than once still shows. A change needs the `X-LoomWatch-Request: 1` header the app sends |
+| `GET /api/pinned-agent/suggestions` | `{"suggestions": [{"text": "Make it shorter", "kind": "next"}, …], "writing": false}`: up to three things the person may ask the pinned agent next, for the buttons under the island's box (ADR 0105). `next` are next steps from its newest answer, written once for that answer by a small model on the source the agent runs on, while the answer is younger than 12 hours and nothing has been sent since; `again` are requests sent to it more than once without files. `writing` is `true` while that answer's next steps are being written: ask again in a moment. The island asks only while its box is open. An agent on a free model writes them with that model. Each call is counted in `model_calls` (`call_kind` `next_steps`, under the agent's chat), so `GET /api/usage` shows it, and the answers written and what they cost (as the provider reported) are added to `next-steps.json` in the state folder |
 | `PUT /api/pinned-agent` | Pin `{"agent": "<id>"}` in place of any other, or unpin with `{"agent": null}`; only from `LoomWatch`'s own page (`X-LoomWatch-Request: 1`, else 403), and 404 for an id that is not one of My agents. Answers as `GET` does. Only the agent is kept, in `pinned.json` in the state folder |
 | `GET /api/team-requests` | The pinned agent's requests for one of your teams (`ask_team`), oldest first: `{id, askedBy: {runId, agent, chatPath}, team: {path, name}, request, status, runId, problem, createdAt, finishedAt}`, `status` one of `waiting`, `started`, `declined`, `done`, `failed`. Waiting and started ones always; the others within `?finishedWithin=<seconds>`, and for an hour at most. Kept in memory; a restart clears them. The island reads it beside `GET /api/runs` |
 | `POST /api/team-requests/{id}` | `{"decision": "start" \| "decline"}`. Start runs the team on the request as the person would (`team_needs_review` and spend limits apply; a refusal becomes `failed` with a plain `problem`); once it ends, its answer is sent into the agent's chat and starts its next turn. That chat message carries `handedBack: {teamPath, teamName, agent, fromAgent, request, heading}` in `GET /api/chat`, and the chat shows it as the team's; a page cannot set it. 404 for an unknown id, 409 once answered |
@@ -519,10 +665,17 @@ another site cannot set one.
 the last days: by source (with the last five hours and seven days), by day and by agent, from the
 `model_calls` table every recorded call fills. Neither OpenAI nor Anthropic tells an app what is
 left of a plan or credit, so the Usage page shows LoomWatch's own count and links to each company
-for the rest. Its table names a helper after its agent ("Writer's helper 2"). Calls LoomWatch makes
-outside a team's run show as LoomWatch: "Working out what your messages need" (`reader`, which
-reads each chat message before the team starts on it) and "Learning from your feedback"
-(`learner`).
+for the rest. Every call is one of two kinds (ADR 0106): an agent's work (`agents`, by team and
+agent; a helper named after its agent, "Writer's helper 2") or LoomWatch's own help (`features`, by
+what it did: `ask`; `reading`, the `reader` that reads each chat message before the team starts on
+it and each message for what it says done looks like, outside any run; `checking`, LoomWatch's own
+check of an answer, `loomwatch:check`; `learning`, the `learner`, outside any run; `next_steps`; and
+`choosing_models`, Let AI choose's readings). Each source's `loomwatch` and each day's `loomwatch` say
+how much of its total was LoomWatch's own help. The page opens with the two side by side, splits each
+way of paying and its daily bars the same way (dollars, or a ChatGPT plan's tokens, as its chart
+counts them; the help striped at each bar's foot), and lists the help with a switch for the two a
+person can do without: next steps (`/api/next-steps`, listed on a Mac) and Let AI choose
+(`/api/models/reading`, listed with OpenRouter connected).
 
 `model` is `chatgpt:<slug>` on the ChatGPT plan, `anthropic:<id>` on the Claude credit, or an
 OpenRouter id such as `anthropic/claude-opus-5.5`, and `thinkingEffort` its reasoning effort (an

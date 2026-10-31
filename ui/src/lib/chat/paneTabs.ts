@@ -3,8 +3,8 @@ import type { FileToRead } from '../files/reader'
 /**
  * The pane beside the team chat (ADR 0051, ADR 0077): the record of the piece of work on screen
  * (Details), and everything it came to, each a tab of its own — the answer itself when it is long
- * enough to be a document, then the files its answer names that LoomWatch reads. The chat keeps the
- * answer short (a card, for a document); what the work made is read here.
+ * enough to be a document, then the files its answer names that LoomWatch reads. The chat keeps
+ * what is said, the agents' replies to each other included; its record and what it made are read here.
  */
 export type PaneTab = 'details' | 'answer' | `file:${string}`
 

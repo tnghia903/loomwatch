@@ -16,3 +16,20 @@ it.each(['/usage', '/agents', '/skills', '/quests', '/connections', '/you'])('%s
   render(<App />)
   expect(screen.getAllByRole('link').length).toBeGreaterThan(0)
 })
+
+// The guide's "put it in a team" step happens in a project's room (ADR 0097), so the room carries it.
+it('carries the getting-started guide on in a project’s room, where its teams are started', async () => {
+  const room = { projects: [{ id: 'trip', name: 'Weekend trip', teams: [] }], loose: [], missing: [] }
+  vi.stubGlobal('fetch', vi.fn((url: string) => (url === '/api/projects'
+    ? Promise.resolve(new Response(JSON.stringify(room), { headers: { 'content-type': 'application/json' } }))
+    : new Promise(() => {}))))
+  localStorage.setItem('loomwatch:tour', JSON.stringify({ status: 'active', step: 'new-team', runAtStepStart: null }))
+  try {
+    window.history.replaceState({}, '', '/projects/trip')
+    render(<App />)
+    expect(await screen.findByRole('heading', { name: 'Weekend trip' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Put it in a team' }, { timeout: 3000 })).toBeInTheDocument()
+  } finally {
+    localStorage.removeItem('loomwatch:tour')
+  }
+})

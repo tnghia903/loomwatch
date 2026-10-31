@@ -647,6 +647,10 @@ pub struct PermissionAsker {
     run_id: String,
     agent: String,
     name: String,
+    /// `LoomWatch`'s own check of an answer (ADR 0098): commands that only read run without
+    /// asking, as in Auto mode whatever the run's mode, and everything else is declined without
+    /// asking. A check measures the work; it never changes it, and never stops the run to ask.
+    reading_only: bool,
 }
 
 impl PermissionAsker {
@@ -657,7 +661,16 @@ impl PermissionAsker {
             run_id: run_id.to_owned(),
             agent: agent.to_owned(),
             name: if name.trim().is_empty() { agent } else { name }.to_owned(),
+            reading_only: false,
         }
+    }
+
+    /// This asker, for an agent that may only read (ADR 0098): it runs what only reads, declines
+    /// the rest at once, and still draws on the run's spool.
+    #[must_use]
+    pub fn reading_only(mut self) -> Self {
+        self.reading_only = true;
+        self
     }
 
     /// The asker for `agent` of the run `run_id`, when the run has an operator to ask: the CLI path
@@ -720,7 +733,7 @@ impl PermissionAsker {
         request: &Value,
         policy: &PermissionPolicy,
     ) -> Option<crate::auto_mode::Verdict> {
-        if !self.desk.registry().auto_mode(&self.run_id) {
+        if !self.reading_only && !self.desk.registry().auto_mode(&self.run_id) {
             return None;
         }
         crate::auto_mode::decide(request, policy)
@@ -733,6 +746,9 @@ impl PermissionAsker {
     /// every request was before ADR 0040.
     #[must_use]
     pub fn open(&self, request: &Value, auto: Option<String>) -> Option<OpenRequest> {
+        if self.reading_only {
+            return None;
+        }
         let (title, kind, detail) = describe(request);
         let now = chrono::Utc::now();
         let wait = self
@@ -856,6 +872,60 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    /// ADR 0098: `LoomWatch`'s own check runs what only reads, whatever the run's mode, and declines
+    /// the rest without asking anyone: it measures the work, never changes it, and never stops the
+    /// run to ask. An ordinary asker on a run not in Auto mode has no verdict at all.
+    #[test]
+    fn a_reading_only_asker_runs_what_only_reads_and_asks_nobody() {
+        use crate::auto_mode::Verdict;
+        let scratch = Scratch::new();
+        let policy = PermissionPolicy::new(
+            AgentAllow::default(),
+            &scratch.0,
+            Vec::<PathBuf>::new(),
+            Vec::<String>::new(),
+        );
+        let command = |text: &str| json!({"params": {"toolCall": {"kind": "execute", "title": "Bash", "rawInput": {"command": text}}}});
+        // A run someone started, which can ask the person: an ordinary asker's request opens on it.
+        let team = crate::config::TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    model: test/model\n",
+        )
+        .expect("a team of one");
+        let record = crate::runs::RunRecord::queued(
+            "team.yaml".into(),
+            "go".into(),
+            &team,
+            crate::runs::RunTrigger::Manual,
+        )
+        .expect("a run");
+        let run = record.run_id.clone();
+        let registry = crate::runs::RunRegistry::default();
+        registry.insert(record);
+        let checker = PermissionAsker::new(
+            registry.operator_desk(None),
+            &run,
+            "loomwatch:check",
+            "LoomWatch",
+        )
+        .reading_only();
+        assert_eq!(
+            checker.auto(&command("wc -w answer.md"), &policy),
+            Some(Verdict::Approved)
+        );
+        let change = command("rm answer.md");
+        assert!(matches!(
+            checker.auto(&change, &policy),
+            Some(Verdict::Undecided(_))
+        ));
+        assert!(checker.open(&change, None).is_none(), "nobody is asked");
+        let plain = PermissionAsker::new(registry.operator_desk(None), &run, "a", "A");
+        assert_eq!(plain.auto(&command("wc -w answer.md"), &policy), None);
+        assert!(
+            plain.open(&change, None).is_some(),
+            "an ordinary agent of the same run asks the person"
+        );
+    }
 
     struct Scratch(PathBuf);
 

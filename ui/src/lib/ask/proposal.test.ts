@@ -41,7 +41,7 @@ describe('proposalChanges', () => {
       edge('collector', 'writer') + edge('writer', 'old'),
       'schedule:\n  cron: "0 8 * * 1-5"\n  prompt: Today\n',
     )
-    expect(proposalChanges(BEFORE, proposed).lines).toEqual([expect.stringMatching(/^Runs on its own: weekdays at 8/)])
+    expect(proposalChanges(BEFORE, proposed).lines).toEqual([expect.stringMatching(/^Runs on its own: every weekday at 8/)])
   })
 
   it('names the skills an agent is given or loses, whatever their case, and a new team’s skills', () => {
@@ -68,8 +68,39 @@ describe('proposalChanges', () => {
     expect(proposalChanges(BEFORE, `${BEFORE}# a note\n`).lines).toEqual(['Small changes to the team file'])
   })
 
-  it('orders a team with no connections by its first agent', () => {
-    const proposed = 'schemaVersion: 1\nid: solo\nname: Solo\nentrypoint: b\nagents:\n' + agent('a', 'A', 'x') + agent('b', 'B', 'y') + 'edges: []\n'
-    expect(proposalChanges(null, proposed).order).toEqual(['B', 'A'])
+  it('orders a team with no connections by its first agent, and says who leads it', () => {
+    const proposed = 'schemaVersion: 1\nid: solo\nname: Solo\nentrypoint: b\nagents:\n' + agent('a', 'A', 'x') + agent('b', 'B', 'y') + agent('c', 'C', 'z') + 'edges: []\n'
+    const changes = proposalChanges(null, proposed)
+    expect(changes.order).toEqual(['B', 'A', 'C'])
+    expect(changes.lines).toEqual(['Led by B, with A and C'])
+    const alone = 'schemaVersion: 1\nid: solo\nname: Solo\nentrypoint: a\nagents:\n' + agent('a', 'A', 'x') + 'edges: []\n'
+    expect(proposalChanges(null, alone).lines).toEqual(['1 step: A'])
+  })
+
+  it('names an agent from My agents by its name there, and says which folders, files and tools each is given (ADR 0096)', () => {
+    const given = (...items: string[]) => `    capabilities:\n${items.map((item) => `      - ${item}\n`).join('')}`
+    const proposed = team(
+      '  - id: collector\n    from: { agent: researcher }\n' + given("{ kind: knowledge, name: Client notes, path: '/Users/me/Client notes' }")
+        + agent('writer', 'Writer', 'Write.') + given('{ kind: tool, name: Gmail }', '{ kind: tool, name: Linear }', '{ kind: knowledge, name: Q3.pdf, path: /Users/me/Q3.pdf }'),
+      edge('collector', 'writer'),
+    )
+    const named = proposalChanges(null, proposed, { collector: 'Researcher', writer: 'Writer' })
+    expect(named.lines).toEqual([
+      '2 steps: Researcher → Writer',
+      'Gives Researcher Client notes to read',
+      'Gives Writer the tools Gmail and Linear',
+      'Gives Writer Q3.pdf to read',
+    ])
+    expect(proposalChanges(null, proposed).order, 'without names, its id').toEqual(['collector', 'Writer'])
+
+    const changed = proposedWithout(proposed)
+    const changes = proposalChanges(proposed, changed, { collector: 'Researcher' })
+    expect(changes.changed).toEqual(['collector', 'writer'])
+    expect(changes.lines).toEqual(['Disconnects Client notes from Researcher', 'Disconnects the tool Linear from Writer'])
   })
 })
+
+/** `yaml` with the Client notes and Linear lines taken out. */
+function proposedWithout(yaml: string): string {
+  return yaml.split('\n').filter((line) => !line.includes('Client notes') && !line.includes('Linear')).join('\n').replace('  - id: collector\n    from: { agent: researcher }\n    capabilities:\n', '  - id: collector\n    from: { agent: researcher }\n')
+}

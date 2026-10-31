@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { NoteAnswering } from '../lib/chat/client'
+import { figureFor, figureStill } from '../lib/library/figures'
 import type { SavedJob } from '../lib/library/jobs'
 import type { TeamRequest } from '../lib/runs/teamRequests'
 import type { RunRecord } from '../lib/runs/client'
@@ -31,6 +32,8 @@ let sendFails = false
 let requests: TeamRequest[] = []
 const answeredTeams: { id: string; decision: string }[] = []
 const uploads: string[] = []
+/** Uploads held back, by file name, until their promise settles. */
+let holdUploads: Partial<Record<string, Promise<void>>> = {}
 let jobs: SavedJob[] = []
 const posted: { url: string; body: unknown }[] = []
 /** Team files written, and messages sent to a chat. */
@@ -43,6 +46,9 @@ let holdRunReads: Promise<void> | null = null
 let sessionEvents: Record<string, Record<string, unknown>[]> = {}
 /** While set, reading a run's events waits for it. */
 let holdEventReads: Promise<void> | null = null
+/** What the daemon suggests asking the pinned agent next, and how many times it was asked. */
+let suggested: { suggestions: unknown[]; writing: boolean } | null = null
+let suggestionReads = 0
 
 /** One of a run's events, as the archive returns it, just now. */
 function runEvent(runId: string, seq: number, agentId: string, kind: string, payload: Record<string, unknown>) {
@@ -70,6 +76,7 @@ beforeEach(() => {
   requests = []
   answeredTeams.length = 0
   uploads.length = 0
+  holdUploads = {}
   jobs = []
   posted.length = 0
   wrote.length = 0
@@ -78,6 +85,8 @@ beforeEach(() => {
   holdRunReads = null
   sessionEvents = {}
   holdEventReads = null
+  suggested = null
+  suggestionReads = 0
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     if (url.startsWith('/api/runs?')) return json(runs)
@@ -98,6 +107,10 @@ beforeEach(() => {
       return json({ agent: pinnedAgent, notchShown: true })
     }
     if (url === '/api/pinned-agent') return json({ agent: pinnedAgent })
+    if (url === '/api/pinned-agent/suggestions') {
+      suggestionReads += 1
+      return suggested ? json(suggested) : json({ error: 'not found' }, 404)
+    }
     if (url.startsWith('/api/team-requests?')) return json(requests)
     if (url.startsWith('/api/team-requests/') && init?.method === 'POST') {
       const id = decodeURIComponent(url.split('/').at(-1)!)
@@ -108,6 +121,7 @@ beforeEach(() => {
     }
     if (url.startsWith('/api/chat/files?')) {
       const name = new URLSearchParams(url.split('?')[1]).get('name')!
+      if (holdUploads[name]) await holdUploads[name]
       uploads.push(name)
       return json({ name, path: `/teams/.jobs/.bench/files/${name}`, bytes: 10, picture: false })
     }
@@ -178,8 +192,9 @@ describe('the island page', () => {
 
     fireEvent.click(card.getByRole('button', { name: 'Allow' }))
     await waitFor(() => expect(posted).toEqual([{ url: '/api/runs/r1/permissions', body: { requestId: 'p1', decision: 'allow_once' } }]))
-    // It says what it did before the card goes.
-    expect(await card.findByText('Allowed once.')).toBeTruthy()
+    // It says what it did before the card goes: a yes to the web is for the rest of the run (ADR
+    // 0104), which the daemon makes of an Allow from anywhere.
+    expect(await card.findByText('Allowed for the rest of the run.')).toBeTruthy()
     expect(card.queryByRole('button', { name: 'Allow' })).toBeNull()
   })
 
@@ -253,6 +268,17 @@ describe('the island page', () => {
     expect(posted).toEqual([])
   })
 
+  // The owner (2026-10-26): Researcher's work waited for a review, and the figure holding it at the
+  // notch was the review step's own, not Researcher's, as the chat draws it.
+  it('hangs a review from the figure of the agent whose work it is, not the review step’s', async () => {
+    expect(figureStill(figureFor('review'))).not.toBe(figureStill(figureFor('researcher')))
+    runs = [run('r1', { waitingOn: { node: 'review', name: 'You', kind: 'review_stop', handoverFrom: 'researcher', since: '2026-10-22T10:02:00Z', question: 'Researcher is done. Approve the findings, or say what to change.', park: 'reloadable', parkNote: '', sendBackAvailable: true } })]
+    const { container } = render(<Island />)
+    tellPage({ kind: 'place', notch: { width: 188, height: 32 }, menuBar: 32 })
+    await waitFor(() => expect(container.querySelector('.island-card')).toBeTruthy())
+    expect(container.querySelector('.island-hang-figure img')?.getAttribute('src')).toBe(figureStill(figureFor('researcher')))
+  })
+
   it('opens the list when the pointer reaches the island, one row per team', async () => {
     runs = [run('r1', { working: ['writer'] }), run('r2', { teamPath: 'digest.yaml', teamName: 'Weekly digest', agentIds: ['checker'], agentNames: { checker: 'Checker' }, working: ['checker'] })]
     const { container } = render(<Island />)
@@ -266,6 +292,18 @@ describe('the island page', () => {
     // log, Quit.
     fireEvent.click(container.querySelector('.island-list')!.querySelector<HTMLElement>('[aria-label="More"]')!)
     expect(toApp.at(-1)).toMatchObject({ kind: 'menu' })
+  })
+
+  // The owner (2026-10-26): Cole wore another figure than in My agents wherever its chat's runs
+  // showed. An agent's own chat (`.jobs/.bench/<id>.yaml`) is that agent, pinned to the notch or not.
+  it('shows a run of an agent’s own chat in the figure the agent wears in My agents', async () => {
+    // Maya is first in My agents, so the box opens with her; Writer is the one at work.
+    jobs = [maya, { ...writer, figure: { kind: 'cone', color: 'sky' } }]
+    expect(figureStill(figureFor('writer'))).not.toContain('cone-sky')
+    runs = [run('r1', { teamPath: '.jobs/.bench/writer.yaml', teamName: 'Writer · chat', entrypoint: 'writer', responder: 'writer', agentIds: ['writer'], agentNames: { writer: 'Writer' }, working: ['writer'] })]
+    const { container } = render(<Island />)
+    tellPage({ kind: 'place', notch: { width: 188, height: 32 }, menuBar: 32 })
+    await waitFor(() => expect(container.querySelector('.island-head img')?.getAttribute('src')).toContain('cone-sky'))
   })
 
   it('lists an agent answering in the chat, where no run is', async () => {
@@ -478,6 +516,43 @@ describe('beside the notch at rest, on every screen', () => {
     }
   })
 
+  it('the agent that peeked out last is not drawn as the island shrinks back from the list: only while out, and as it tucks in', async () => {
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(noteReads).toBeGreaterThan(0))
+    await act(async () => {})
+    // A team starts: its researcher peeks out below the notch.
+    runs = [run('r1', { working: ['researcher'] })]
+    await waitFor(() => expect(view(container)).toBe('work'), { timeout: 5_000 })
+    const balcony = container.querySelector<HTMLElement>('.island-balcony')!
+    // Drawn unless a rule hides it, at once unless a rule says to wait.
+    const drawn = () => cascaded(balcony, 'visibility', DESKTOP, islandRules) || 'visible'
+    const waits = () => cascaded(balcony, 'transition', DESKTOP, islandRules) || 'none'
+    // Out, it is drawn from when it starts up: not before, parked below, which an island coming
+    // straight from the list (a team starting while it was open) is still deep enough to show. Its
+    // island doesn't shrink on a spring with reduced motion: there it fades in from the start.
+    const rise = cascaded(balcony.querySelector<HTMLElement>('.island-slot.is-on')!, 'transition', DESKTOP, islandRules)!
+    expect([drawn(), waits()]).toEqual(['visible', `visibility 0s ${rise.split(' ').at(-1)}`])
+    expect(cascaded(balcony, 'transition', { ...DESKTOP, reducedMotion: true }, islandRules)).toBe('none')
+    // Pointed at, the list opens over it, and it is gone from the first frame.
+    const shape = container.querySelector('.island-shape')!
+    fireEvent.pointerEnter(shape, { pointerType: 'mouse' })
+    await waitFor(() => expect(view(container)).toBe('list'))
+    expect([drawn(), waits()]).toEqual(['hidden', 'none'])
+    // Left, the list closes and the island shrinks back beside the notch on its spring. The
+    // researcher, parked below where it peeked out, is inside the island while it is still nearly as
+    // deep as the list: it stays out of sight, rather than showing there alone.
+    fireEvent.pointerLeave(shape, { pointerType: 'mouse' })
+    await waitFor(() => expect(view(container)).toBe('tucked'), { timeout: ISLAND_WAITS.closeList + 2_000 })
+    expect(balcony.querySelector('.island-slot')?.getAttribute('data-agent')).toBe('researcher')
+    expect(drawn()).toBe('hidden')
+    // Tucking in from below the notch instead, it is drawn until it is down: as long as it slides.
+    const slide = cascaded(balcony.querySelector<HTMLElement>('.island-slot')!, 'transition', DESKTOP, islandRules)!
+    expect(waits()).toBe(`visibility 0s ${slide.split(' ')[1]}`)
+  }, 15_000)
+
   it('without a notch, nothing is drawn at rest, nor for the teams: nothing to point at, the face has their news', async () => {
     runs = [run('r1', { permissionRequests: [permission('p1')] })]
     const { container } = render(<Island />)
@@ -678,7 +753,7 @@ describe('the agent pinned to the notch', () => {
     expect(container.querySelector('.island-pinned .island-words')?.textContent).toBe('Maya just started')
     await waitFor(() => expect(container.querySelector('.island-pinned .island-row-figure')?.getAttribute('data-phase')).toBe('typing'))
     // A note's mark is the team chat's: a return arrow, where a message that starts work goes up.
-    expect(within(container).getByRole('button', { name: 'Send note' }).querySelector('svg.lucide-corner-down-left')).toBeTruthy()
+    expect(within(container).getByRole('button', { name: 'Send note' }).querySelector('svg.lw-icon-enter')).toBeTruthy()
     expect(container.querySelectorAll('.island-row:not(.island-pinned)')).toHaveLength(0)
     fireEvent.focus(field)
     fireEvent.change(field, { target: { value: 'Also check the weather' } })
@@ -852,7 +927,7 @@ describe('the agent pinned to the notch', () => {
     // Send: a mark at the field's end, out of sight until something is written.
     const rules = rulesOf(readFileSync(resolve(process.cwd(), 'src/island/island.css'), 'utf8'))
     const send = row.getByRole('button', { name: 'Send' })
-    expect([send.textContent, Boolean(send.querySelector('svg.lucide-arrow-up')), cascaded(send, 'opacity', DESKTOP, rules)]).toEqual(['', true, '0'])
+    expect([send.textContent, Boolean(send.querySelector('svg.lw-icon-send')), cascaded(send, 'opacity', DESKTOP, rules)]).toEqual(['', true, '0'])
     fireEvent.change(row.getByRole('textbox', { name: 'Message Maya' }), { target: { value: 'And the way back?' } })
     expect(cascaded(send, 'opacity', DESKTOP, rules)).toBe('1')
     // It comes by fading in and growing; with reduced motion it only fades, never growing.
@@ -950,7 +1025,7 @@ describe('the box: any of My agents, and its workbench', () => {
     expect(within(container).getByRole('status', { name: 'Drop it here for Maya' })).toBeTruthy()
   })
 
-  it('switches to another of My agents with Tab, or a click on its figure, before anything is written; the message pins the one it goes to', async () => {
+  it('writes only to the agent pinned at the notch: no other agents beside its name, and Tab moves on as anywhere', async () => {
     pinnedAgent = 'maya'
     jobs = [maya, writer]
     const { container } = render(<Island />)
@@ -959,29 +1034,212 @@ describe('the box: any of My agents, and its workbench', () => {
     tellPage({ kind: 'compose' })
     const field = await within(container).findByRole('textbox', { name: 'Message Maya' })
     expect(container.querySelector('.island-box-name')?.textContent).toBe('Maya')
-    // Tab is the box's: the next agent, not the next button. Option-Tab still moves on.
-    expect(fireEvent.keyDown(field, { key: 'Tab', altKey: true })).toBe(true)
-    expect(fireEvent.keyDown(field, { key: 'Tab' })).toBe(false)
-    await within(container).findByRole('textbox', { name: 'Message Writer' })
-    expect(container.querySelector('.island-box-name')?.textContent).toBe('Writer')
-    // Only for this message: nothing is pinned yet, and ⌃⌥Space still opens with Maya.
-    expect(pins).toEqual([])
-    expect(toApp.filter((message) => (message as { kind: string }).kind === 'agent').at(-1)).toEqual({ kind: 'agent', name: 'Maya' })
-    // Back by its figure among the others; Shift-Tab goes the other way round.
-    fireEvent.click(within(container).getByRole('button', { name: 'Message Maya instead' }))
-    const toMaya = await within(container).findByRole('textbox', { name: 'Message Maya' })
-    fireEvent.keyDown(toMaya, { key: 'Tab', shiftKey: true })
-    const box = await within(container).findByRole('textbox', { name: 'Message Writer' })
-    // Once something is written, Tab moves on as anywhere: a habit Tab must not change who gets it.
-    fireEvent.change(box, { target: { value: 'Draft the invite' } })
-    expect(fireEvent.keyDown(box, { key: 'Tab' })).toBe(true)
-    expect(within(container).getByRole('textbox', { name: 'Message Writer' })).toBe(box)
-    fireEvent.submit(box.closest('form')!)
+    // Writer is in My agents but not at the notch: nothing here switches the box to it.
+    expect(within(container).queryByRole('button', { name: /Writer/ })).toBeNull()
+    expect(container.querySelector('.island-box-head img')).toBeNull()
+    // Tab isn't the box's: it moves on, as it does anywhere, and the box still writes to Maya.
+    expect(fireEvent.keyDown(field, { key: 'Tab' })).toBe(true)
+    expect(within(container).getByRole('textbox', { name: 'Message Maya' })).toBe(field)
+    fireEvent.change(field, { target: { value: 'What is on my calendar today?' } })
+    fireEvent.submit(field.closest('form')!)
     await waitFor(() => expect(messages).toHaveLength(1))
-    expect(messages[0]).toMatchObject({ teamPath: '.jobs/.bench/writer.yaml', text: 'Draft the invite', to: { kind: 'agent', agent: 'writer' } })
-    // The message pinned Writer: the box opens with the agent last written to.
-    expect(pins).toEqual(['writer'])
-    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Writer' }))
+    expect(messages[0]).toMatchObject({ teamPath: '.jobs/.bench/maya.yaml', to: { kind: 'agent', agent: 'maya' } })
+  }, 15_000)
+
+  it('holding ⌃⌥Space, it listens: it says so, what is heard writes itself in after what was typed, and let go, the words wait for Send', async () => {
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
+    tellPage({ kind: 'compose' })
+    const field = await within(container).findByRole('textbox', { name: 'Message Maya' }) as HTMLInputElement
+    // Before anything is written, beside its name: how to talk to it instead.
+    const hint = within(container).getByLabelText('Hold Control-Option-Space to talk to Maya')
+    expect(hint.textContent).toBe('hold⌃⌥Space')
+    fireEvent.change(field, { target: { value: 'Book the ' } })
+    expect(within(container).queryByLabelText('Hold Control-Option-Space to talk to Maya')).toBeNull()
+
+    tellPage({ kind: 'listen', on: true })
+    const row = container.querySelector('.island-pinned')!
+    expect(row.classList.contains('is-listening')).toBe(true)
+    expect(within(container).getByRole('status', { name: '' }).textContent).toBe('listening')
+    // How loud it hears stands in Send's place, and only the bars are told.
+    expect(within(container).queryByRole('button', { name: 'Send' })).toBeNull()
+    const bars = container.querySelector<HTMLElement>('.island-loudness')!
+    tellPage({ kind: 'level', level: 0.6 })
+    expect(bars.style.getPropertyValue('--level')).toBe('0.60')
+    tellPage({ kind: 'level', level: 7 })
+    expect(bars.style.getPropertyValue('--level')).toBe('1.00')
+    // Each time, every word heard so far, after what was typed.
+    tellPage({ kind: 'heard', text: 'train to', done: false })
+    expect(field.value).toBe('Book the train to')
+    tellPage({ kind: 'heard', text: 'train to Kyoto on Friday', done: false })
+    expect(field.value).toBe('Book the train to Kyoto on Friday')
+    // The newest words are the ones in view: the box shows its end.
+    expect(field.selectionStart).toBe(field.value.length)
+
+    tellPage({ kind: 'listen', on: false })
+    tellPage({ kind: 'heard', text: 'train to Kyoto on Friday.', done: true })
+    expect(field.value).toBe('Book the train to Kyoto on Friday.')
+    expect(row.classList.contains('is-listening')).toBe(false)
+    expect(container.querySelector('.island-loudness')).toBeNull()
+    // Let go, nothing went: the words wait in the box to be read and put right, and Send is back.
+    expect(messages).toHaveLength(0)
+    expect(within(container).getByRole('button', { name: 'Send' })).toBeTruthy()
+    // Words heard after the last are in change nothing.
+    tellPage({ kind: 'heard', text: 'stray', done: false })
+    expect(field.value).toBe('Book the train to Kyoto on Friday.')
+    fireEvent.submit(field.closest('form')!)
+    await waitFor(() => expect(messages).toHaveLength(1))
+    expect(messages[0]).toMatchObject({ text: 'Book the train to Kyoto on Friday.' })
+  }, 15_000)
+
+  it('words still on their way after letting go never bring back a message sent, or undo a word put right', async () => {
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
+    tellPage({ kind: 'compose' })
+    const field = await within(container).findByRole('textbox', { name: 'Message Maya' }) as HTMLInputElement
+    tellPage({ kind: 'listen', on: true })
+    tellPage({ kind: 'heard', text: 'Book the train', done: false })
+    tellPage({ kind: 'listen', on: false })
+    // Put right before the last words are in: they don't undo it.
+    fireEvent.change(field, { target: { value: 'Book the plane' } })
+    tellPage({ kind: 'heard', text: 'Book the train.', done: true })
+    expect(field.value).toBe('Book the plane')
+    // Sent before the last words are in: they don't bring it back.
+    tellPage({ kind: 'listen', on: true })
+    tellPage({ kind: 'heard', text: 'to Kyoto', done: false })
+    tellPage({ kind: 'listen', on: false })
+    fireEvent.submit(field.closest('form')!)
+    await waitFor(() => expect(messages).toHaveLength(1))
+    expect(messages[0]).toMatchObject({ text: 'Book the plane to Kyoto' })
+    tellPage({ kind: 'heard', text: 'to Kyoto.', done: true })
+    // Opened again, the box is empty.
+    tellPage({ kind: 'clickOutside' })
+    tellPage({ kind: 'compose' })
+    const again = await within(container).findByRole('textbox', { name: /Maya/ }) as HTMLInputElement
+    expect(again.value).toBe('')
+  }, 15_000)
+
+  it('a hold that hears nothing says so', async () => {
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
+    tellPage({ kind: 'compose' })
+    await within(container).findByRole('textbox', { name: 'Message Maya' })
+    tellPage({ kind: 'listen', on: true })
+    tellPage({ kind: 'listen', on: false })
+    tellPage({ kind: 'heard', text: '', done: true })
+    expect(within(container).getByText('Nothing was heard. Hold ⌃⌥Space while you speak, or type instead.')).toBeTruthy()
+    // Heard the next time, it goes.
+    tellPage({ kind: 'listen', on: true })
+    expect(within(container).queryByText('Nothing was heard. Hold ⌃⌥Space while you speak, or type instead.')).toBeNull()
+  }, 15_000)
+
+  it('held while the box is away, listening opens it for the words to go into', async () => {
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
+    tellPage({ kind: 'listen', on: true })
+    const field = await within(container).findByRole('textbox', { name: 'Message Maya' }) as HTMLInputElement
+    tellPage({ kind: 'heard', text: 'What is on today?', done: true })
+    expect(field.value).toBe('What is on today?')
+  }, 15_000)
+
+  it('says why it could not listen, with System Settings a press away where a switch there puts it right', async () => {
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
+    tellPage({ kind: 'compose' })
+    await within(container).findByRole('textbox', { name: 'Message Maya' })
+    tellPage({ kind: 'cantListen', why: 'microphone' })
+    expect(within(container).getByRole('alert').textContent).toBe('The microphone is off for LoomWatch. Turn it on, then hold ⌃⌥Space again.')
+    fireEvent.click(within(container).getByRole('button', { name: 'Open System Settings' }))
+    expect(toApp).toContainEqual({ kind: 'settings', pane: 'microphone' })
+    tellPage({ kind: 'cantListen', why: 'speech' })
+    fireEvent.click(within(container).getByRole('button', { name: 'Open System Settings' }))
+    expect(toApp).toContainEqual({ kind: 'settings', pane: 'speech' })
+    // macOS asking is no problem: there is nothing to put right, only to hold again.
+    tellPage({ kind: 'cantListen', why: 'asked' })
+    expect(within(container).queryByRole('alert')).toBeNull()
+    expect(within(container).getByText('Allow LoomWatch when macOS asks, then hold ⌃⌥Space again.')).toBeTruthy()
+    expect(within(container).queryByRole('button', { name: 'Open System Settings' })).toBeNull()
+    // Holding again, it goes; so does what is said once the box is put away.
+    tellPage({ kind: 'listen', on: true })
+    expect(within(container).queryByText('Allow LoomWatch when macOS asks, then hold ⌃⌥Space again.')).toBeNull()
+    tellPage({ kind: 'listen', on: false })
+    tellPage({ kind: 'cantListen', why: 'unavailable' })
+    expect(within(container).getByText('Your Mac can’t turn speech into words right now. Type instead, or try again later.')).toBeTruthy()
+    tellPage({ kind: 'compose' })
+    await waitFor(() => expect(within(container).queryByRole('textbox', { name: 'Message Maya' })).toBeNull())
+    tellPage({ kind: 'compose' })
+    await within(container).findByRole('textbox', { name: 'Message Maya' })
+    expect(within(container).queryByText('Your Mac can’t turn speech into words right now. Type instead, or try again later.')).toBeNull()
+  }, 15_000)
+
+  it('suggests what to ask next under the box: pressing one puts it in the box to change or send, and nothing goes until it is sent', async () => {
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    // Its next steps are still being written as the box opens: the page asks again in a moment.
+    suggested = { suggestions: [], writing: true }
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
+    // Nothing is asked for, or written, until the box is opened.
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    expect(suggestionReads).toBe(0)
+    tellPage({ kind: 'compose' })
+    const field = await within(container).findByRole('textbox', { name: 'Message Maya' }) as HTMLInputElement
+    await waitFor(() => expect(suggestionReads).toBeGreaterThan(0))
+    expect(within(container).queryByRole('group', { name: 'Ask Maya' })).toBeNull()
+    suggested = { suggestions: [{ text: 'Draft a reply to Ana', kind: 'next' }, { text: 'Check my availability', kind: 'again' }, { text: 'Not one', kind: 'other' }, { text: ' ', kind: 'next' }], writing: false }
+    const group = await within(container).findByRole('group', { name: 'Ask Maya' }, { timeout: ISLAND_WAITS.suggestionReread + 2_000 })
+    expect(within(group).getAllByRole('button').map((button) => button.textContent)).toEqual(['Draft a reply to Ana', 'Check my availability'])
+
+    fireEvent.click(within(group).getByRole('button', { name: 'Draft a reply to Ana' }))
+    expect(field.value).toBe('Draft a reply to Ana')
+    expect(messages).toHaveLength(0)
+    // With something in the box they step aside, and come back once it is empty.
+    expect(within(container).queryByRole('group', { name: 'Ask Maya' })).toBeNull()
+    fireEvent.change(field, { target: { value: '' } })
+    expect(within(container).getByRole('group', { name: 'Ask Maya' })).toBeTruthy()
+    // So they do while it listens, keeping their room, so the island doesn't shrink as it starts.
+    tellPage({ kind: 'listen', on: true })
+    expect(within(container).queryByRole('group', { name: 'Ask Maya' })).toBeNull()
+    expect(container.querySelector('.island-next.is-away[aria-hidden="true"]')).toBeTruthy()
+    tellPage({ kind: 'heard', text: 'Draft', done: false })
+    expect(container.querySelector('.island-next.is-away')).toBeTruthy()
+    tellPage({ kind: 'listen', on: false })
+    tellPage({ kind: 'heard', text: '', done: true })
+    tellPage({ kind: 'listen', on: false })
+    fireEvent.click(within(container).getByRole('button', { name: 'Check my availability' }))
+    fireEvent.submit(field.closest('form')!)
+    await waitFor(() => expect(messages).toHaveLength(1))
+    expect(messages[0]).toMatchObject({ text: 'Check my availability' })
+  }, 15_000)
+
+  it('outside the Mac app, where nothing listens, says nothing about holding a key to talk', async () => {
+    delete window.webkit
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    const { container } = render(<Island />)
+    tellPage({ kind: 'place', notch: { width: 188, height: 32 }, menuBar: 32 })
+    // Maya stands beside the notch once the page has read who is pinned.
+    await waitFor(() => expect(container.querySelector('.island-head img')).toBeTruthy())
+    tellPage({ kind: 'compose' })
+    await within(container).findByRole('textbox', { name: 'Message Maya' })
+    expect(within(container).queryByLabelText('Hold Control-Option-Space to talk to Maya')).toBeNull()
+    expect(container.querySelector('.island-talk')).toBeNull()
   }, 15_000)
 
   it('⌃⌥Space gives the box the keyboard without scrolling the island, which would lift its agent’s row out of the top', async () => {
@@ -1004,7 +1262,7 @@ describe('the box: any of My agents, and its workbench', () => {
     }
   }, 15_000)
 
-  it('draws a switch to another agent: the one it was ducks and the new one pops up with its name, and the same workbench takes it', async () => {
+  it('draws another agent pinned while the box is open: the one it was ducks and the new one pops up with its name, and the same workbench takes it', async () => {
     await import('./BenchCard')
     pinnedAgent = 'maya'
     jobs = [maya, writer]
@@ -1017,10 +1275,12 @@ describe('the box: any of My agents, and its workbench', () => {
     // Opening the box draws no switch.
     expect(container.querySelector('.is-coming, .is-leaving')).toBeNull()
     const mayaStill = container.querySelector('.island-bench-toggle img')!.getAttribute('src')
-    fireEvent.keyDown(field, { key: 'Tab' })
-    await within(container).findByRole('textbox', { name: 'Message Writer' })
+    // Writer is pinned in My agents: the island reads it on its next look.
+    expect(field).toBeTruthy()
+    pinnedAgent = 'writer'
+    await within(container).findByRole('textbox', { name: 'Message Writer' }, { timeout: ISLAND_WAITS.poll + 2_000 })
     const toggle = within(container).getByRole('button', { name: 'See Writer’s workbench' })
-    // Maya ducks, Writer pops up in her place, his name rises, and she joins the others.
+    // Maya ducks, and Writer pops up in her place with his name.
     expect(toggle.querySelector('.island-switch.is-leaving')).toBeTruthy()
     expect(toggle.querySelector('.island-switch.is-coming')).toBeTruthy()
     const leaving = toggle.querySelector<HTMLElement>('.island-switch.is-leaving')!
@@ -1031,7 +1291,6 @@ describe('the box: any of My agents, and its workbench', () => {
     expect([cascaded(leaving, 'translate', DESKTOP, islandRules), cascaded(leaving, 'transition', DESKTOP, islandRules)]).toEqual(['0 150%', 'translate var(--t-quick) var(--ease-in)'])
     expect(cascaded(coming, 'animation', DESKTOP, islandRules)).toMatch(/^island-pop-up /)
     expect(container.querySelector('.island-box-name')?.textContent).toBe('Writer')
-    expect(within(container).getByRole('button', { name: 'Message Maya instead' }).classList.contains('is-coming')).toBe(true)
     // With motion reduced, the swap is at once: the one it was is gone, not ducking.
     expect(cascaded(leaving, 'display', { ...DESKTOP, reducedMotion: true }, islandRules)).toBe('none')
     // The same workbench, set up once, now Writer's.
@@ -1071,6 +1330,9 @@ describe('the box: any of My agents, and its workbench', () => {
       place()
       await waitFor(() => expect(container.querySelector('.island-pinned-head')).toBeTruthy())
       expect(view(container)).toBe('rest')
+      // ⌃⌥Space comes once the app knows whom the box opens with, as in the app: her head is drawn a
+      // moment before the box knows her, and on a busy machine a ⌃⌥Space between the two opens nothing.
+      await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
       tellPage({ kind: 'compose' })
       await within(container).findByRole('textbox', { name: 'Message Maya' })
       // Her figure in the row starts where she stood beside the notch, and comes down on the spring.
@@ -1119,22 +1381,6 @@ describe('the box: any of My agents, and its workbench', () => {
     })
     expect(team.previousElementSibling?.classList.contains('island-bench-slot')).toBe(true)
     expect(cascaded(team, 'border-top', DESKTOP, islandRules)).toBe('1px solid var(--color-hairline)')
-  }, 15_000)
-
-  it('opens as it was when put away unsent: what was chosen was only for that message', async () => {
-    pinnedAgent = 'maya'
-    jobs = [maya, writer]
-    const { container } = render(<Island />)
-    place()
-    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
-    tellPage({ kind: 'compose' })
-    fireEvent.keyDown(await within(container).findByRole('textbox', { name: 'Message Maya' }), { key: 'Tab' })
-    await within(container).findByRole('textbox', { name: 'Message Writer' })
-    tellPage({ kind: 'clickOutside' })
-    await waitFor(() => expect(view(container)).not.toBe('list'))
-    tellPage({ kind: 'compose' })
-    expect(await within(container).findByRole('textbox', { name: 'Message Maya' })).toBeTruthy()
-    expect(pins).toEqual([])
   }, 15_000)
 
   it('opens its agent’s workbench from its figure, to look at, in the island’s own dark; Escape folds it first', async () => {
@@ -1265,14 +1511,19 @@ describe('the notch as the pinned agent’s slot, and its crew', () => {
     const shape = container.querySelector<HTMLElement>('.island-shape')!
     fireEvent.dragEnter(shape, carrying([pdf]))
     expect(island.getAttribute('data-view')).toBe('slot')
-    expect(getByRole('status', { name: 'Drop it here for Maya' })).toBeTruthy()
+    // A tray in a gold line, with Maya behind it.
+    const slot = getByRole('status', { name: 'Drop it here for Maya' })
+    expect(slot.querySelector('.island-tray rect')).toBeTruthy()
+    expect(slot.querySelector('.island-tray-figure .figure-still, .island-tray-figure img')).toBeTruthy()
     fireEvent.drop(shape, carrying([pdf]))
     // The slot stays open while what was dropped is sorted, then the list opens to write.
     expect(island.getAttribute('data-view')).toBe('slot')
     await waitFor(() => expect(island.getAttribute('data-view')).toBe('list'))
-    // What went in, the jobs that fit it, and a box for your own words, which has the keyboard.
+    // What went in, as a page marked PDF with its name under it, the jobs that fit it, and a box
+    // for your own words, which has the keyboard.
     const row = within(container.querySelector<HTMLElement>('.island-pinned')!)
-    expect(row.getByText('Lease 2027.pdf')).toBeTruthy()
+    const lease = row.getByRole('listitem', { name: 'Lease 2027.pdf' })
+    expect([lease.querySelector('.island-file-face.is-page')?.textContent, lease.querySelector('.island-file-name')?.textContent]).toEqual(['PDF', 'Lease 2027'])
     expect(row.getAllByRole('button').map((button) => button.textContent)).toEqual(expect.arrayContaining(['What should I check?', 'Summarize it', 'Pull out the dates']))
     const field = await findByRole('textbox', { name: 'Or say what to do' })
     await waitFor(() => expect(document.activeElement).toBe(field))
@@ -1375,7 +1626,7 @@ describe('the notch as the pinned agent’s slot, and its crew', () => {
     fireEvent.drop(shape, carrying([pdf, recording]))
     await waitFor(() => expect(within(container).getByRole('alert').textContent).toBe('Left out Call with landlord.m4a. Maya can’t listen to recordings.'))
     const row = within(container.querySelector<HTMLElement>('.island-pinned')!)
-    expect(row.getByText('Lease 2027.pdf')).toBeTruthy()
+    expect(row.getAllByRole('listitem').map((file) => file.getAttribute('aria-label'))).toEqual(['Lease 2027.pdf'])
     fireEvent.click(row.getByRole('button', { name: 'What should I check?' }))
     await waitFor(() => expect(messages).toHaveLength(1))
     expect(uploads).toEqual(['Lease 2027.pdf'])
@@ -1393,7 +1644,7 @@ describe('the notch as the pinned agent’s slot, and its crew', () => {
     const plan = new File([new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x00])], 'Budget plan.pages')
     fireEvent.dragEnter(shape, carrying([pdf, plan]))
     fireEvent.drop(shape, carrying([pdf, plan]))
-    await waitFor(() => expect(within(container).getByRole('alert').textContent).toBe('Left out Budget plan.pages. Maya can’t open Pages files. In Pages, choose File › Export To › PDF, then drop the PDF.'))
+    await waitFor(() => expect(within(container).getByRole('alert').textContent).toBe('Left out Budget plan.pages. Maya can’t open Pages files. In Pages, choose File › Export To › PDF, then add the PDF.'))
     // The list closes while the person exports it: the line stays with the lease that waits.
     tellPage({ kind: 'clickOutside' })
     await waitFor(() => expect(container.querySelector('.island')!.getAttribute('data-view')).not.toBe('list'))
@@ -1403,13 +1654,218 @@ describe('the notch as the pinned agent’s slot, and its crew', () => {
     const exported = new File(['%PDF-1.7 plan'], 'Budget plan.pdf', { type: 'application/pdf' })
     fireEvent.dragEnter(shape, carrying([exported]))
     fireEvent.drop(shape, carrying([exported]))
-    await waitFor(() => expect(container.querySelector('.island-intake-what')?.textContent).toBe('2 files×'))
+    await waitFor(() => expect(names(container)).toEqual(['Lease 2027.pdf', 'Budget plan.pdf']))
     const row = within(container.querySelector<HTMLElement>('.island-pinned')!)
     expect(within(container).queryByRole('alert')).toBeNull()
     fireEvent.click(row.getByRole('button', { name: 'Summarize each' }))
     await waitFor(() => expect(messages).toHaveLength(1))
     expect(uploads).toEqual(['Lease 2027.pdf', 'Budget plan.pdf'])
   }, 15_000)
+
+  const budget = new File(['Month,Rent\nMarch,1200\n'], 'Budget.csv', { type: 'text/csv' })
+  const names = (container: HTMLElement) => [...container.querySelectorAll('.island-pinned .island-file')].map((file) => file.getAttribute('aria-label'))
+
+  it('takes one dropped file out with its ×, and sends only what is left', async () => {
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
+    const shape = container.querySelector<HTMLElement>('.island-shape')!
+    fireEvent.drop(shape, carrying([pdf, budget]))
+    await waitFor(() => expect(names(container)).toEqual(['Lease 2027.pdf', 'Budget.csv']))
+    // Each file is a page with its kind on it and its name under it; both together, the jobs for files.
+    expect([...container.querySelectorAll('.island-file-face.is-page')].map((page) => page.textContent)).toEqual(['PDF', 'CSV'])
+    expect([...container.querySelectorAll('.island-file-name')].map((name) => name.textContent)).toEqual(['Lease 2027', 'Budget'])
+    const row = within(container.querySelector<HTMLElement>('.island-pinned')!)
+    expect(row.getByRole('button', { name: 'Compare them' })).toBeTruthy()
+    // The lease out, as the team chat says it, the keyboard staying in the box: the budget stays,
+    // and the jobs are a table's.
+    expect(within(container).getByRole('list', { name: 'Going with your message' })).toBeTruthy()
+    const notLease = row.getByRole('button', { name: 'Don’t send Lease 2027.pdf' })
+    expect(fireEvent.pointerDown(notLease)).toBe(false)
+    fireEvent.click(notLease)
+    expect(names(container)).toEqual(['Budget.csv'])
+    expect(row.getByRole('button', { name: 'What stands out?' })).toBeTruthy()
+    // The last one out: nothing waits.
+    fireEvent.click(row.getByRole('button', { name: 'Don’t send Budget.csv' }))
+    expect(container.querySelector('.island-intake')).toBeNull()
+    // Dropped again, only what is there goes.
+    fireEvent.drop(shape, carrying([pdf]))
+    await waitFor(() => expect(names(container)).toEqual(['Lease 2027.pdf']))
+    fireEvent.click(within(container.querySelector<HTMLElement>('.island-pinned')!).getByRole('button', { name: 'Summarize it' }))
+    await waitFor(() => expect(messages).toHaveLength(1))
+    expect(uploads).toEqual(['Lease 2027.pdf'])
+  }, 15_000)
+
+  it('+ in the box chooses files through the picker the app answers, and they join what waits', async () => {
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
+    tellPage({ kind: 'compose' })
+    const add = await within(container).findByRole('button', { name: 'Add pictures or files' })
+    // Pressing it keeps the keyboard in the box.
+    expect(fireEvent.pointerDown(add)).toBe(false)
+    let chosen: File[] = []
+    const asked: HTMLInputElement[] = []
+    const click = vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(function (this: HTMLInputElement) {
+      asked.push(this)
+      Object.defineProperty(this, 'files', { value: chosen })
+      this.dispatchEvent(new Event('change'))
+    })
+    chosen = [pdf]
+    fireEvent.click(add)
+    await waitFor(() => expect(names(container)).toEqual(['Lease 2027.pdf']))
+    chosen = [budget]
+    fireEvent.click(within(container).getByRole('button', { name: 'Add pictures or files' }))
+    await waitFor(() => expect(names(container)).toEqual(['Lease 2027.pdf', 'Budget.csv']))
+    click.mockRestore()
+    // One picker each time, for several files, gone once it has answered.
+    expect(asked.map((picker) => [picker.type, picker.multiple, picker.isConnected])).toEqual([['file', true, false], ['file', true, false]])
+    const field = within(container).getByRole('textbox', { name: 'Or say what to do' })
+    fireEvent.change(field, { target: { value: 'Can I afford it?' } })
+    fireEvent.submit(field.closest('form')!)
+    await waitFor(() => expect(messages).toHaveLength(1))
+    expect(uploads).toEqual(['Lease 2027.pdf', 'Budget.csv'])
+  }, 15_000)
+
+  it('after + the box asks for the keyboard again, whether files were chosen or the Open panel was cancelled', async () => {
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
+    tellPage({ kind: 'compose' })
+    const field = await within(container).findByRole('textbox', { name: 'Message Maya' })
+    await waitFor(() => expect(document.activeElement).toBe(field))
+    // The Open panel takes the keyboard: the field loses it but stays the page's focused element.
+    const focused = vi.spyOn(document, 'hasFocus').mockReturnValue(false)
+    let answer: (picker: HTMLInputElement) => void = () => {}
+    const click = vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(function (this: HTMLInputElement) { answer(this) })
+    const asks = () => toApp.filter((message) => JSON.stringify(message) === JSON.stringify({ kind: 'keyboard', on: true })).length
+    // Cancelled: the box asks for it back.
+    answer = (picker) => {
+      fireEvent.blur(field)
+      picker.dispatchEvent(new Event('cancel'))
+    }
+    let before = asks()
+    fireEvent.click(within(container).getByRole('button', { name: 'Add pictures or files' }))
+    expect(asks()).toBe(before + 1)
+    expect(container.querySelector('.island')!.getAttribute('data-view')).toBe('list')
+    // Chosen: the files arrive in the box, and it asks for the keyboard again.
+    answer = (picker) => {
+      fireEvent.blur(field)
+      Object.defineProperty(picker, 'files', { value: [pdf] })
+      picker.dispatchEvent(new Event('change'))
+    }
+    before = asks()
+    fireEvent.click(within(container).getByRole('button', { name: 'Add pictures or files' }))
+    await waitFor(() => expect(names(container)).toEqual(['Lease 2027.pdf']))
+    await waitFor(() => expect(asks()).toBe(before + 1))
+    expect(document.activeElement).toBe(within(container).getByRole('textbox', { name: 'Or say what to do' }))
+    click.mockRestore()
+    focused.mockRestore()
+  }, 15_000)
+
+  it('as a message goes, each file shows a line until it is with Maya, then a tick; if it fails, they wait as before', async () => {
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
+    const shape = container.querySelector<HTMLElement>('.island-shape')!
+    fireEvent.drop(shape, carrying([pdf, budget]))
+    await waitFor(() => expect(names(container)).toEqual(['Lease 2027.pdf', 'Budget.csv']))
+    const file = (name: string) => container.querySelector<HTMLElement>(`.island-file[aria-label^="${name}"]`)!
+    // It fails: the files wait as they were, each with its ×.
+    sendFails = true
+    fireEvent.click(within(container).getByRole('button', { name: 'Compare them' }))
+    await within(container).findByText('That didn’t go through. Try again, or open Maya’s chat.')
+    expect(container.querySelectorAll('.island-file-in, .island-file-line')).toHaveLength(0)
+    expect(within(container).getAllByRole('button', { name: /^Don’t send / })).toHaveLength(2)
+    // Again, with the lease slow to arrive: the budget is in, the lease on its way, and none can be
+    // taken out while they go.
+    sendFails = false
+    let arrive = () => {}
+    holdUploads = { 'Lease 2027.pdf': new Promise<void>((done) => { arrive = done }) }
+    uploads.length = 0
+    fireEvent.click(within(container).getByRole('button', { name: 'Compare them' }))
+    await waitFor(() => expect(file('Budget.csv').querySelector('.island-file-in')).toBeTruthy())
+    expect([file('Budget.csv').getAttribute('aria-label'), file('Budget.csv').getAttribute('aria-busy')]).toEqual(['Budget.csv, with Maya', 'false'])
+    expect(file('Lease 2027.pdf').getAttribute('aria-busy')).toBe('true')
+    expect(file('Lease 2027.pdf').querySelector('.island-file-line')).toBeTruthy()
+    expect(file('Lease 2027.pdf').querySelector('.island-file-in')).toBeNull()
+    expect(within(container).queryAllByRole('button', { name: /^Don’t send / })).toHaveLength(0)
+    expect(messages).toHaveLength(0)
+    arrive()
+    await waitFor(() => expect(messages).toHaveLength(1))
+    expect(uploads).toEqual(['Budget.csv', 'Lease 2027.pdf'])
+    expect(container.querySelector('.island-files')).toBeNull()
+  }, 15_000)
+
+  it('while files wait in the box, two teams show and the rest are counted, so the box keeps its room', async () => {
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    runs = ['r1', 'r2', 'r3', 'r4'].map((id, index) => run(id, { teamPath: `team${index}.yaml`, teamName: `Team ${index + 1}`, working: ['writer'] }))
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
+    await waitFor(() => expect(container.querySelector('.island')?.getAttribute('data-view')).toBe('tucked'))
+    fireEvent.pointerEnter(container.querySelector('.island-shape')!, { pointerType: 'mouse' })
+    const teamRows = () => container.querySelectorAll('.island-row:not(.island-pinned)').length
+    await waitFor(() => expect(teamRows()).toBe(4))
+    fireEvent.drop(container.querySelector<HTMLElement>('.island-shape')!, carrying([pdf, budget]))
+    await waitFor(() => expect(names(container)).toEqual(['Lease 2027.pdf', 'Budget.csv']))
+    expect(teamRows()).toBe(2)
+    expect(container.querySelector('.island-list-foot')?.textContent).toContain('2 more teams in LoomWatch')
+    // Taken out, the teams come back.
+    fireEvent.click(within(container).getByRole('button', { name: 'Don’t send Lease 2027.pdf' }))
+    fireEvent.click(within(container).getByRole('button', { name: 'Don’t send Budget.csv' }))
+    expect(teamRows()).toBe(4)
+  }, 15_000)
+
+  it('shows a dropped picture as itself, and lets it go once it is taken out', async () => {
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    const made = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:kyoto')
+    const letGo = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
+    const photo = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])], 'Kyoto trip.png', { type: 'image/png' })
+    fireEvent.drop(container.querySelector<HTMLElement>('.island-shape')!, carrying([photo, pdf]))
+    await waitFor(() => expect(container.querySelector('.island-file[aria-label="Kyoto trip.png"] img')?.getAttribute('src')).toBe('blob:kyoto'))
+    // Only the picture is drawn from its file; the lease is a page.
+    expect(made.mock.calls.map(([file]) => (file as File).name)).toEqual(['Kyoto trip.png'])
+    expect(container.querySelector('.island-file[aria-label="Lease 2027.pdf"] img')).toBeNull()
+    fireEvent.click(within(container).getByRole('button', { name: 'Don’t send Kyoto trip.png' }))
+    expect(letGo).toHaveBeenCalledWith('blob:kyoto')
+    expect(names(container)).toEqual(['Lease 2027.pdf'])
+    made.mockRestore()
+    letGo.mockRestore()
+  }, 15_000)
+
+  it('opens as a tray in a gold line with Maya behind it, which reduced motion holds still', () => {
+    const rules = rulesOf(readFileSync(resolve(process.cwd(), 'src/island/island.css'), 'utf8'))
+    const css = readFileSync(resolve(process.cwd(), 'src/island/island.css'), 'utf8')
+    const reduced = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)'))
+    // Gold is a line here, never a fill: the tray is the notch's black, tinted.
+    const tray = document.createElement('span')
+    tray.className = 'island-tray'
+    tray.innerHTML = '<svg><rect></rect></svg>'
+    document.body.append(tray)
+    expect(cascaded(tray, 'background', DESKTOP, rules)).toBe('var(--color-accent-tint)')
+    // Its edge is a dashed gold line, which runs; a file on its way has a running line. Reduced
+    // motion stops both, and the line stands part way along instead.
+    const edge = tray.querySelector('rect')!
+    expect([cascaded(edge, 'fill', DESKTOP, rules), cascaded(edge, 'stroke', DESKTOP, rules), cascaded(edge, 'stroke-dasharray', DESKTOP, rules)]).toEqual(['none', 'var(--color-accent)', '7 6'])
+    expect(cascaded(edge, 'animation', DESKTOP, rules)).toMatch(/^island-tray-edge /)
+    tray.remove()
+    expect(reduced).toContain('.island *, .island *::before, .island *::after { animation: none !important; }')
+    expect(reduced).toContain('.island-file-line::after { translate: 50% 0; }')
+  })
 
   it('sends a dropped link with the job picked, and opens when the app says something is dragged near', async () => {
     pinnedAgent = 'maya'
@@ -1493,9 +1949,10 @@ describe('the notch as the pinned agent’s slot, and its crew', () => {
     await waitFor(() => expect(row.querySelector('.island-for')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('to First-principles school · no spending limit'))
     await waitFor(() => expect(row.querySelectorAll('.island-crew-figure')).toHaveLength(2))
     expect(row.querySelector('.island-request')?.querySelectorAll('small')).toHaveLength(1)
-    // Start sits where Send would, and is the only other button but her figure, her workbench's.
+    // Start sits where Send would, and is the only other button but her figure, her workbench's,
+    // and + to add files to the message.
     const field = inRow.getByRole('textbox', { name: 'Or message Maya' })
-    expect(inRow.getAllByRole('button').map((button) => button.getAttribute('aria-label') ?? button.textContent)).toEqual(['See Maya’s workbench', 'Don’t start First-principles school', 'Start First-principles school'])
+    expect(inRow.getAllByRole('button').map((button) => button.getAttribute('aria-label') ?? button.textContent)).toEqual(['See Maya’s workbench', 'Don’t start First-principles school', 'Add pictures or files', 'Start First-principles school'])
     expect(field.closest('form')?.contains(inRow.getByRole('button', { name: 'Start First-principles school' }))).toBe(true)
     // Writing something else brings Send back; an empty box, Start.
     fireEvent.change(field, { target: { value: 'Make it shorter first' } })

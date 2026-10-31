@@ -1,6 +1,6 @@
 [package]
 name = "loomwatch-backend"
-version = "0.13.2"
+version = "0.22.1"
 description = "Local execution backend for LoomWatch"
 edition.workspace = true
 license.workspace = true
@@ -19,6 +19,10 @@ default = ["chatgpt"]
 # Agents may run on the person's ChatGPT plan (ADR 0073). A paid build ships without it until
 # OpenAI approves one.
 chatgpt = []
+# The quality bench's developer build: every fixed text agents are given can be replaced by a file
+# (src/prompt_blocks, `LOOMWATCH_PROMPT_OVERRIDES`, `--dump-prompt-blocks`). Never in a release, a
+# package, or any CI job but the one that tests it.
+prompt-overrides = []
 
 [dependencies]
 anyhow = "1.0"
@@ -41,7 +45,7 @@ regex = "1.11"
 unicode-normalization = "0.1"
 # The archive keeps raw ACP frames compressed (archive/codec.rs).
 zstd = { version = "0.13", default-features = false }
-tokio = { version = "1.47", features = ["io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
+tokio = { version = "1.47", features = ["fs", "io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 # Skills installed from GitHub arrive as a .tar.gz (marketplace.rs).
 flate2 = "1.1"
 tar = "0.4"
@@ -49,7 +53,7 @@ tar = "0.4"
 # the flate2 above, nothing else.
 zip = { version = "9.0.4", default-features = false, features = ["deflate-flate2"] }
 uuid = { version = "1.18", features = ["v4", "v7"] }
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "stream"] }
 cron = "0.17"
 chrono-tz = "0.10"
 toml = { version = "1", default-features = false, features = ["parse", "serde", "std"] }
@@ -78,11 +82,20 @@ image = { version = "0.25.10", default-features = false, features = ["png", "jpe
 # bodies in any transfer encoding and charset, and HTML-only mail as text. `full_encoding` adds the
 # Asian charsets through encoding_rs, already in the build through calamine and lopdf.
 mail-parser = { version = "0.11.9", features = ["full_encoding"] }
+# The door other devices come in by (ADR 0102): their keys, and a computer's live connections passed
+# through as they are.
+getrandom = "0.3"
+hyper = "1"
+hyper-util = { version = "0.1", features = ["tokio"] }
+tower = { version = "0.5", features = ["util"] }
+# A phone's answers, compressed for mobile data.
+tower-http = { version = "0.6", features = ["compression-gzip"] }
+# A pairing link as a QR code, for a phone's camera.
+qrcode = { version = "0.14", default-features = false }
 
 [dev-dependencies]
-tokio-tungstenite = "0.29"
 http-body-util = "0.1"
-tower = { version = "0.5", features = ["util"] }
+tokio-tungstenite = "0.29"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3", default-features = false, features = ["apple-native"] }

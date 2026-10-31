@@ -32,13 +32,36 @@ describe('a permission ticket in the tray (ADR 0040)', () => {
     fireEvent.keyDown(screen.getByRole('dialog'), { key: 'd' })
     expect(onPermission).toHaveBeenLastCalledWith(ticket, 'deny')
   })
+
+  // ADR 0104: a yes to the web is for the rest of the run, so it has one Allow, and says so.
+  it('answers a request for the web with one Allow, for the rest of the run', async () => {
+    const web: Ticket = { ...ticket, switch: 'web' }
+    const onPermission = vi.fn(() => Promise.resolve())
+    render(<NeedsYouTray tickets={[web]} working={0} onAnswer={vi.fn()} onPermission={onPermission} onDismiss={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: /1 needs you/ }))
+    expect(screen.queryByRole('button', { name: 'Allow for this run' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /^Allow\s*A$/ }))
+    expect(await screen.findByText('Researcher: Allowed for the rest of the run.')).toBeInTheDocument()
+  })
+})
+
+describe('opened from a Review on Home (ADR 0097)', () => {
+  it('opens at the item whose Review was pressed, and at the first when it names none', () => {
+    const second: Ticket = { ...ticket, id: 'r2:question', kind: 'question', runId: 'r2', teamName: 'Blog', text: 'Which tone?', requestId: undefined }
+    render(<NeedsYouTray tickets={[ticket, second]} working={0} onAnswer={vi.fn()} onPermission={vi.fn(() => Promise.resolve())} onDismiss={vi.fn()} />)
+    const active = () => document.querySelector('li.active')?.textContent ?? ''
+    act(() => { window.dispatchEvent(new CustomEvent('loomwatch:open-needs-you', { detail: 'r2' })) })
+    expect(active()).toMatch(/Which tone\?/)
+    act(() => { window.dispatchEvent(new CustomEvent('loomwatch:open-needs-you')) })
+    expect(active()).toMatch(/Researcher wants to use the web/)
+  })
 })
 
 // A review's context is what the step before wrote, in Markdown, starting with a check's open lines.
 describe('what a review ticket quotes', () => {
   it('shows the agent’s Markdown formatted, and its tooltip as plain words', () => {
     const context = 'Not met: Gives **2 empty slots** — see [the code](https://example.org/q1) in `/tmp/q1.py`\n## Draft\nThe `idf()` line.'
-    const question: Ticket = { ...ticket, id: 'quote-q:question', kind: 'question', runId: 'quote-q', text: 'Which slot?', context: 'Use the **filled** slots', requestId: undefined }
+    const question: Ticket = { ...ticket, id: 'quote-q:question', kind: 'question', runId: 'quote-q', text: 'Which **slot**, `a` or `b`?', context: 'Use the **filled** slots', requestId: undefined }
     render(<NeedsYouTray tickets={[{ ...review('quote-r'), context }, { ...ticket, context: 'Run `ls *.md` in **notes**' }, question]} working={0} onAnswer={vi.fn()} onPermission={vi.fn()} onDismiss={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: /3 need you/ }))
     const [quote, command, asked] = [...screen.getByRole('dialog').querySelectorAll('blockquote')]
@@ -55,6 +78,11 @@ describe('what a review ticket quotes', () => {
     // What an agent asking a question handed over is its Markdown too.
     expect(asked.querySelector('strong')).toHaveTextContent('filled')
     expect(asked).toHaveAttribute('title', 'Use the filled slots')
+    // The question the agent asks is its Markdown too.
+    const line = asked.parentElement?.querySelector('.ticket-text') as HTMLElement
+    expect(line).toHaveTextContent('asks: “Which slot, a or b?”')
+    expect(line.querySelector('strong')).toHaveTextContent('slot')
+    expect(line.querySelectorAll('code')).toHaveLength(2)
   })
 })
 
@@ -241,7 +269,7 @@ describe('the tray with several tickets open', () => {
     const dialog = screen.getByRole('dialog')
     const filled = () => [...dialog.querySelectorAll('.btn-primary')].map((button) => button.textContent)
     const active = () => [...dialog.querySelectorAll('li.active .btn-primary')].map((button) => button.textContent)
-    expect(filled()).toEqual(['Looks goodA'])
+    expect(filled()).toEqual(['ApproveA'])
     for (const main of ['AllowA', 'Answer…R', 'Add $5 and carry on']) {
       fireEvent.keyDown(dialog, { key: 'j' })
       expect(filled()).toEqual([main])
@@ -252,7 +280,7 @@ describe('the tray with several tickets open', () => {
     expect(filled()).toEqual(['AllowA'])
     expect(active()).toEqual(['AllowA'])
     fireEvent.keyDown(dialog, { key: 'k' })
-    expect(filled()).toEqual(['Looks goodA'])
+    expect(filled()).toEqual(['ApproveA'])
     // Replying keeps one fill: Send is filled while its ticket is active, and gives it up when you move on.
     fireEvent.click(screen.getByRole('button', { name: /^Add a note/ }))
     expect(filled()).toEqual(['Send'])
@@ -264,11 +292,11 @@ describe('the tray with several tickets open', () => {
   it('leaves focus on a button you Tab to in another ticket, and the fill follows it there', () => {
     render(<NeedsYouTray tickets={[review('tab-a', 'Team A'), review('tab-b', 'Team B')]} working={0} onAnswer={vi.fn()} onDismiss={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: /2 need you/ }))
-    const second = screen.getAllByRole('button', { name: /^Looks good/ })[1]
+    const second = screen.getAllByRole('button', { name: /^Approve/ })[1]
     act(() => second.focus())
     expect(document.activeElement).toBe(second)
     expect(second).toHaveClass('btn-primary')
-    expect(screen.getAllByRole('button', { name: /^Looks good/ })[0]).not.toHaveClass('btn-primary')
+    expect(screen.getAllByRole('button', { name: /^Approve/ })[0]).not.toHaveClass('btn-primary')
   })
 
   it('makes a filled button at least 32 px, and 44 px under a finger', () => {
@@ -316,7 +344,7 @@ describe('the bell on a phone', () => {
 })
 
 // Home on a phone. The bell sits mid-row in Home's header, and a tray as wide as the screen, hung
-// from the bell's right edge, began 155 px off the left edge at 390 px wide: Looks good and Open run
+// from the bell's right edge, began 155 px off the left edge at 390 px wide: Approve and Open run
 // could not be reached. The header's own buttons ran 87 px past the right edge, so the page scrolled
 // sideways. The placement is CSS, which jsdom doesn't apply, so these read the rules a phone gets.
 describe('the tray on Home on a phone', () => {
@@ -522,7 +550,7 @@ describe('the open tray beside the page’s own gold fill', () => {
       const run = screen.getByRole('button', { name: 'Run team' })
       expect(filled()).toEqual(['Run team'])
       fireEvent.click(screen.getByRole('button', { name: /2 need you/ }))
-      expect(filled()).toEqual(['Looks goodA'])
+      expect(filled()).toEqual(['ApproveA'])
       expect(background(run)).toBe('transparent')
       expect(cascaded(run, 'color')).toBe('var(--color-ink)')
       expect(cascaded(run, 'border-color')).toBe('var(--color-accent)')
@@ -532,14 +560,14 @@ describe('the open tray beside the page’s own gold fill', () => {
       run.setAttribute('data-hovered', '')
       expect(background(run)).toBe('var(--color-accent-tint)')
       expect(cascaded(run, 'filter')).toBe('none')
-      const [main] = screen.getAllByRole('button', { name: /^Looks good/ })
+      const [main] = screen.getAllByRole('button', { name: /^Approve/ })
       main.setAttribute('data-hovered', '')
       expect(gold).toContain(background(main))
       run.removeAttribute('data-hovered')
       // J moves the fill to the next ticket; the page stays a ring.
       fireEvent.keyDown(screen.getByRole('dialog'), { key: 'j' })
-      expect(filled()).toEqual(['Looks goodA'])
-      expect(screen.getAllByRole('button', { name: /^Looks good/ })[1]).toHaveClass('btn-primary')
+      expect(filled()).toEqual(['ApproveA'])
+      expect(screen.getAllByRole('button', { name: /^Approve/ })[1]).toHaveClass('btn-primary')
       // A press outside closes the tray first, so the page gets its fill back before the click lands.
       fireEvent.mouseDown(run)
       expect(screen.queryByRole('dialog')).toBeNull()
@@ -575,7 +603,7 @@ describe('the open tray beside the page’s own gold fill', () => {
     act(() => screen.getAllByRole('button', { name: /^Add a note/ })[1].focus())
     act(() => bell.focus())
     expect(screen.getByRole('dialog')).toBeInTheDocument()
-    expect(filled()).toEqual(['Looks goodA'])
+    expect(filled()).toEqual(['ApproveA'])
     act(() => screen.getByRole('button', { name: 'Run team' }).focus())
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(filled()).toEqual(['Run team'])
@@ -604,5 +632,29 @@ describe('the open tray beside the page’s own gold fill', () => {
     unmount()
     expect(gold).toContain(background(outside))
     outside.remove()
+  })
+})
+
+// The owner (2026-10-26): a one-to-one chat with one of My agents opens in My agents, at the piece
+// that waits on you; a team's run opens on the team's page.
+describe('opening the run a ticket is about', () => {
+  const real = window.location
+  afterEach(() => { Object.defineProperty(window, 'location', { configurable: true, value: real }) })
+
+  it('opens a run of an agent’s own chat in that agent’s chat', () => {
+    const assign = vi.fn()
+    Object.defineProperty(window, 'location', { configurable: true, value: { href: 'http://localhost/?path=trip.yaml', origin: 'http://localhost', pathname: '/', search: '?path=trip.yaml', assign } })
+    // A team's page is on screen: it takes a team's link in place, never an agent's page.
+    const inPlace = vi.fn((event: Event) => event.preventDefault())
+    window.addEventListener('loomwatch:open-team', inPlace)
+    try {
+      render(<NeedsYouTray tickets={[{ ...ticket, runId: 'c1', teamPath: '.jobs/.bench/cole.yaml', teamName: 'Cole · chat' }]} working={0} onAnswer={vi.fn()} onPermission={vi.fn()} onDismiss={vi.fn()} />)
+      fireEvent.click(screen.getByRole('button', { name: /1 needs you/ }))
+      fireEvent.click(screen.getByRole('button', { name: 'Open run' }))
+      expect(assign).toHaveBeenCalledWith('/agents/cole?view=chat&run=c1')
+      expect(inPlace).not.toHaveBeenCalled()
+    } finally {
+      window.removeEventListener('loomwatch:open-team', inPlace)
+    }
   })
 })

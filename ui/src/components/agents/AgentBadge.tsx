@@ -1,14 +1,13 @@
-import { Check, FilePen, Globe, Pin, SquareTerminal } from 'lucide-react'
+import { Check, Pin } from '../ui/icon'
 
 import { modelNameFromId } from '../../lib/ai/modelIds'
 import type { AgentDraft } from '../../lib/library/draft'
 import { figureWords, type FigureChoice } from '../../lib/library/figures'
 import { FigureStill } from './FigureStill'
 import { ALLOW_SWITCHES } from '../../lib/team-file/allow'
-import type { AllowSwitch } from '../../lib/team-file/types'
 import { AgentMark } from '../ui/AgentMark'
-
-const ICONS: Record<AllowSwitch, typeof Globe> = { web: Globe, edits: FilePen, commands: SquareTerminal }
+import { InlineMarkdown } from '../ui/Markdown'
+import { SWITCH_ICONS } from './switchIcons'
 
 export interface AgentBadgeProps {
   /** Stable id for the woven mark: the saved agent's id, else its name. */
@@ -20,8 +19,10 @@ export interface AgentBadgeProps {
   modelName?: string
   /** Its thinking effort's name, when it has one other than the model's default. */
   effortName?: string
-  /** Teams that use it, how many of those run on a schedule, and how many have an update ready. */
-  usedIn?: { teams: number; scheduled: number; behind: number }
+  /** Teams that use it, and how many of those run on a schedule. */
+  usedIn?: { teams: number; scheduled: number }
+  /** The page lists the teams that use it right under the card, so the card doesn't count them too. */
+  usesListed?: boolean
   /** Kept at the notch of a Mac, to message from the top of the screen (ADR 0083). */
   pinned?: boolean
   compact?: boolean
@@ -32,7 +33,7 @@ export interface AgentBadgeProps {
  * right now — what it carries, and where it is used. It is the staff badge of the design notes:
  * an access card with an "after hours" rule, because a scheduled team has nobody to answer.
  */
-export function AgentBadge({ markId, figure, draft, modelName, effortName, usedIn, pinned = false, compact = false }: AgentBadgeProps) {
+export function AgentBadge({ markId, figure, draft, modelName, effortName, usedIn, usesListed = false, pinned = false, compact = false }: AgentBadgeProps) {
   const scheduled = (usedIn?.scheduled ?? 0) > 0
   const asks = ALLOW_SWITCHES.filter(({ key }) => !draft.allow[key])
   const name = draft.name.trim() || 'New agent'
@@ -44,7 +45,7 @@ export function AgentBadge({ markId, figure, draft, modelName, effortName, usedI
           : <AgentMark id={markId} name={name} size={compact ? 26 : 34} animate={false} />}
         <div className="agent-badge-who">
           <strong>{name}{pinned && <Pin className="agent-badge-pin" size={13} role="img" aria-label="pinned to the notch"><title>Pinned to the notch</title></Pin>}</strong>
-          {draft.does.trim() && <span className="agent-badge-does">{draft.does.trim()}</span>}
+          {draft.does.trim() && <span className="agent-badge-does"><InlineMarkdown clickable={false}>{draft.does.trim()}</InlineMarkdown></span>}
           <span className="agent-badge-app t-mono-sm">{modelName || modelNameFromId(draft.model)}{effortName ? ` · ${effortName.toLowerCase()} effort` : ''}</span>
         </div>
       </div>
@@ -54,7 +55,7 @@ export function AgentBadge({ markId, figure, draft, modelName, effortName, usedI
           {ALLOW_SWITCHES.map(({ key, short, label }) => {
             const on = draft.allow[key] === true
             const state = on ? 'on' : 'asks'
-            const Icon = ICONS[key]
+            const Icon = SWITCH_ICONS[key]
             const word = on ? 'Allowed' : 'Asks you'
             return <span key={key} className={`agent-badge-tile ${state}`} title={`${label}: ${word}`}>{on && <Check size={10} strokeWidth={3} aria-hidden="true" />}<Icon size={13} aria-hidden="true" /><span>{short}</span><em>{word}</em></span>
           })}
@@ -74,10 +75,10 @@ export function AgentBadge({ markId, figure, draft, modelName, effortName, usedI
         <span className="agent-badge-label">Carries</span>
         <span>{draft.skills.length ? `${draft.skills.length} skill${draft.skills.length === 1 ? '' : 's'}` : 'No skills'}{!compact && draft.skills.length > 0 ? `: ${draft.skills.join(', ')}` : ''}</span>
       </div>
-      {usedIn && (
+      {usedIn && !usesListed && (
         <div className="agent-badge-row">
           <span className="agent-badge-label">Used in</span>
-          <span>{usedIn.teams === 0 ? 'No team yet' : `${usedIn.teams} team${usedIn.teams === 1 ? '' : 's'}`}{usedIn.behind > 0 ? <em className="agent-badge-behind"> · update ready in {usedIn.behind}</em> : null}</span>
+          <span>{usedIn.teams === 0 ? 'No team yet' : `${usedIn.teams} team${usedIn.teams === 1 ? '' : 's'}`}</span>
         </div>
       )}
     </div>

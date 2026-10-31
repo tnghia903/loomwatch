@@ -3,9 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { SavedJob } from '../../lib/library/jobs'
 import { forgetYou } from '../../lib/you/client'
-import { goldFilled, heightOf, isGoldFill, PHONE } from '../../test/cascade'
+import { cascaded, goldFilled, heightOf, isGoldFill, PHONE } from '../../test/cascade'
 import type { AgentFigureProps } from './AgentFigure'
 import { AgentsPage } from './AgentsPage'
+import { openBenchRows } from '../../test/benchRows'
+
+// Each setting is a row that opens; these tests are about the editors inside them.
+openBenchRows()
 
 // The bench is drawn with WebGL, which jsdom has none of: here it is only its labels.
 vi.mock('./AgentFigure', () => ({
@@ -32,30 +36,22 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); window.history.replaceState(
 
 const page = () => render(<AgentsPage skills={[]} skillsLoading={false} tray={<button type="button">All clear</button>} />)
 
-// An agent's page in a team page's frame: the same header, made of the same parts, and the rail.
+// An agent's page in a team page's frame: the same header, made of the same parts, beside the dock.
 describe('An agent’s page in the team page’s frame', () => {
-  it('has a team page’s header: the brand home, the name chip, the tabs, the bell and the menu', async () => {
+  it('has a team page’s header: the name chip, the tabs and the bell, and leaves the places to the dock', async () => {
     window.history.replaceState({}, '', '/agents/writer?view=chat')
     page()
     const chip = await screen.findByRole('button', { name: /^Writer, Saved, open agent menu$/ }, { timeout: 5000 })
     const header = chip.closest('.workspace-chrome') as HTMLElement
     expect(header).not.toBeNull()
-    // The brand is the way to your teams, and says so on hover.
-    expect(within(header).getByRole('link', { name: 'LoomWatch, my team' })).toHaveAttribute('href', '/')
-    expect(within(header).getByRole('link', { name: 'LoomWatch, my team' })).toHaveAttribute('title', 'My team')
     const tabs = within(header).getByRole('navigation', { name: 'Agent view' })
     expect(within(tabs).getByRole('button', { name: 'Chat' })).toHaveAttribute('aria-pressed', 'true')
     expect(within(header).getByRole('button', { name: 'All clear' })).toBeInTheDocument()
-    fireEvent.click(within(header).getByRole('button', { name: 'Menu' }))
-    const items = within(header).getAllByRole('menuitem').map((item) => item.textContent)
-    expect(items).toEqual(expect.arrayContaining(['My agents…', 'Skills…', 'Quests…']))
-    expect(items.some((item) => /^Switch to (light|dark) theme$/.test(item ?? ''))).toBe(true)
-    expect(within(header).queryByRole('menuitem', { name: 'Team memory' })).not.toBeInTheDocument()
     // The page's own heading is the agent's name, for the reader that goes by headings.
     expect(screen.getByRole('heading', { level: 1, name: 'Writer' })).toBeInTheDocument()
-    // Home's header is gone from it: no second brand, no My team button.
-    expect(screen.queryByRole('link', { name: 'My team' })).not.toBeInTheDocument()
-    expect(screen.getAllByRole('link', { name: /LoomWatch/ })).toHaveLength(1)
+    // Home, Skills, Quests and the look are the dock's and You's: no brand, no menu, no My team.
+    expect(within(header).queryByRole('button', { name: /^(Menu|More)$/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /LoomWatch|My team/ })).not.toBeInTheDocument()
   })
 
   it('switches tabs from the header', async () => {
@@ -86,23 +82,24 @@ describe('An agent’s page in the team page’s frame', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Writer, Saved, open agent menu$/ }))
     fireEvent.click(within(screen.getByRole('dialog', { name: 'Agent menu' })).getByRole('button', { name: 'Remove from My agents…' }))
     expect(calls).toEqual([])
-    await act(async () => { fireEvent.click(within(screen.getByRole('alertdialog', { name: 'Remove from My agents' })).getByRole('button', { name: 'Remove' })) })
+    await act(async () => { fireEvent.click(within(screen.getByRole('alertdialog', { name: 'Remove “Writer” from My agents?' })).getByRole('button', { name: 'Remove' })) })
     expect(calls).toEqual(['DELETE /api/jobs/writer'])
     expect(window.location.pathname).toBe('/agents')
   })
 
-  it('keeps the rail as it is while the agent beside it changes', async () => {
+  // ADR 0100: its menu holds Remove, so its arrow shows where a team's chip drops its own for room.
+  it('shows the arrow on its name at every width', async () => {
     window.history.replaceState({}, '', '/agents/writer')
     page()
-    const rail = screen.getByRole('navigation', { name: 'My agents' })
-    fireEvent.click(await within(rail).findByRole('link', { name: 'Editor' }, { timeout: 5000 }))
-    expect(await screen.findByRole('button', { name: /^Editor, Saved/ }, { timeout: 5000 })).toBeInTheDocument()
-    expect(screen.getByRole('navigation', { name: 'My agents' })).toBe(rail)
+    const open = await screen.findByRole('button', { name: /^Writer, Saved, open agent menu$/ }, { timeout: 5000 })
+    const arrow = open.querySelector('.chev') as HTMLElement
+    expect(arrow.closest('.workspace-chrome')).not.toBeNull()
+    expect(cascaded(arrow, 'display', { width: 1024 })).toBe('grid')
   })
 
-  // A team's header hides its name chip and menu in a narrow window; an agent's Save is in its chip,
-  // so on an agent's page they move to a row under the header instead of going away.
-  it('keeps the name chip, Save and the menu in a narrow window', async () => {
+  // A team's header hides its name chip in a narrow window; an agent's Save is in its chip, so on an
+  // agent's page it moves to a row under the header, with the bell, instead of going away.
+  it('keeps the name chip, Save and the bell in a narrow window', async () => {
     vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(max-width: 767px)', media: query, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
     window.history.replaceState({}, '', '/agents/writer')
     page()
@@ -111,12 +108,10 @@ describe('An agent’s page in the team page’s frame', () => {
     expect(chip.closest('.workspace-chrome')).toBeNull()
     expect(chip.closest('.agent-bar-narrow')).not.toBeNull()
     expect(within(chip).getByRole('button', { name: 'Save' })).toBeEnabled()
-    expect(screen.getAllByRole('button', { name: 'Menu' })).toHaveLength(1)
-    expect(screen.getByRole('button', { name: 'Menu' }).closest('.agent-bar-narrow')).not.toBeNull()
     expect(screen.getByRole('button', { name: 'All clear' }).closest('.agent-bar-narrow')).not.toBeNull()
   })
 
-  it('starts a new agent in the same frame, and the list keeps Home’s header', async () => {
+  it('starts a new agent in the same frame, and the list has no header of its own', async () => {
     window.history.replaceState({}, '', '/agents/new')
     const view = page()
     expect(screen.getByText('New agent').closest('.workspace-chrome')).not.toBeNull()
@@ -124,19 +119,20 @@ describe('An agent’s page in the team page’s frame', () => {
     view.unmount()
     window.history.replaceState({}, '', '/agents')
     page()
-    expect(screen.getByRole('link', { name: 'My team' })).toBeInTheDocument()
-    expect(screen.queryByRole('navigation', { name: 'My agents' })).not.toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 1 })).toBeInTheDocument()
+    expect(screen.queryByRole('banner')).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'My team' })).not.toBeInTheDocument()
   })
 })
 
 // One gold fill per screen (DESIGN_LANGUAGE §8): on an agent's page it is Save, at least 32 px, and
-// each key is offered with a plain button. Three gold Hand it over buttons once stood beside Save.
+// each switch is offered with a plain button. Three gold buttons once stood beside Save.
 describe('the gold on an agent’s page', () => {
-  it('fills only Save, at least 32 px, while its keys are offered with plain buttons', async () => {
+  it('fills only Save, at least 32 px, while its switches are offered with plain buttons', async () => {
     window.history.replaceState({}, '', '/agents/writer')
     page()
     fireEvent.change(await screen.findByRole('textbox', { name: /Instructions/ }, { timeout: 5000 }), { target: { value: 'Write a short draft with a title.' } })
-    const offers = screen.getAllByRole('button', { name: 'Hand it over' })
+    const offers = screen.getAllByRole('button', { name: /^Allow: / })
     expect(offers.length).toBeGreaterThan(1)
     for (const offer of offers) expect(isGoldFill(offer)).toBe(false)
     expect(goldFilled()).toEqual(['Save'])

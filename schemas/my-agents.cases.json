@@ -1,0 +1,208 @@
+[
+  {
+    "name": "a pointer gets the agent's own fields and keeps the team's",
+    "agent": "researcher",
+    "entry": {
+      "id": "researcher",
+      "from": { "agent": "researcher", "version": 2 },
+      "spawn": { "cwd": "work" },
+      "turnedOff": [{ "kind": "skill", "name": "pdf" }],
+      "spend": { "perRun": 2 },
+      "learns": false
+    },
+    "job": {
+      "name": "Researcher",
+      "instructions": "Find facts with sources.",
+      "model": "anthropic/claude-sonnet-5.5",
+      "thinkingEffort": "high",
+      "skills": ["cite", "pdf"],
+      "tools": ["Linear"],
+      "toolAllow": { "Linear": ["create_issue"] },
+      "doneWhen": ["Every figure has a source."],
+      "allow": { "web": true },
+      "helpers": false,
+      "bringsIn": false
+    },
+    "filled": {
+      "id": "researcher",
+      "from": { "agent": "researcher" },
+      "spawn": { "cwd": "work" },
+      "turnedOff": [{ "kind": "skill", "name": "pdf" }],
+      "spend": { "perRun": 2 },
+      "learns": false,
+      "name": "Researcher",
+      "role": "Find facts with sources.",
+      "model": "anthropic/claude-sonnet-5.5",
+      "thinkingEffort": "high",
+      "capabilities": [
+        { "kind": "skill", "name": "cite" },
+        { "kind": "tool", "name": "Linear", "alwaysAllow": ["create_issue"] }
+      ],
+      "doneWhen": ["Every figure has a source."],
+      "allow": { "web": true },
+      "allowRecruiting": false,
+      "allowMyAgents": false
+    }
+  },
+  {
+    "name": "what the team connected stays, the agent's reads come after it with labels of their own, a copy of one of its reads goes, and the skills and tools the team wired stay the team's",
+    "agent": "writer",
+    "entry": {
+      "id": "writer",
+      "from": { "agent": "writer" },
+      "model": "fake/offline",
+      "capabilities": [
+        { "kind": "knowledge", "name": "Notes", "path": "/team/notes" },
+        { "kind": "knowledge", "name": "Brand page", "notion": { "page": "abc123" } },
+        { "kind": "skill", "name": "old-skill" },
+        { "kind": "tool", "name": "Old tool" }
+      ]
+    },
+    "job": {
+      "name": "Writer",
+      "instructions": "Write plainly.",
+      "reads": [
+        { "name": "Notes", "path": "/reads/notes" },
+        { "name": "Brand", "notion": { "page": "ABC-123" } }
+      ]
+    },
+    "filled": {
+      "id": "writer",
+      "from": { "agent": "writer" },
+      "model": "fake/offline",
+      "name": "Writer",
+      "role": "Write plainly.",
+      "capabilities": [
+        { "kind": "knowledge", "name": "Notes", "path": "/team/notes" },
+        { "kind": "knowledge", "name": "Notes (2)", "path": "/reads/notes" },
+        { "kind": "knowledge", "name": "Brand", "notion": { "page": "ABC-123" } },
+        { "kind": "skill", "name": "old-skill" },
+        { "kind": "tool", "name": "Old tool" }
+      ]
+    }
+  },
+  {
+    "name": "a skill or tool the team turned off is left out, and one it wired that is the agent's own is the agent's",
+    "agent": "designer",
+    "entry": {
+      "id": "designer",
+      "from": { "agent": "designer" },
+      "model": "fake/offline",
+      "capabilities": [
+        { "kind": "skill", "name": "cite" },
+        { "kind": "tool", "name": "Linear", "alwaysAllow": ["delete_issue"] },
+        { "kind": "skill", "name": "draw" },
+        { "kind": "tool", "name": "Figma", "alwaysAllow": ["export"] }
+      ],
+      "turnedOff": [{ "kind": "tool", "name": "Gmail" }, { "kind": "skill", "name": "pdf" }]
+    },
+    "job": {
+      "name": "Designer",
+      "instructions": "Draw the slides.",
+      "skills": ["cite", "pdf"],
+      "tools": ["Linear", "Gmail"],
+      "toolAllow": { "Linear": ["create_issue"], "Gmail": ["send"] }
+    },
+    "filled": {
+      "id": "designer",
+      "from": { "agent": "designer" },
+      "model": "fake/offline",
+      "turnedOff": [{ "kind": "tool", "name": "Gmail" }, { "kind": "skill", "name": "pdf" }],
+      "name": "Designer",
+      "role": "Draw the slides.",
+      "capabilities": [
+        { "kind": "skill", "name": "cite" },
+        { "kind": "tool", "name": "Linear", "alwaysAllow": ["create_issue"] },
+        { "kind": "skill", "name": "draw" },
+        { "kind": "tool", "name": "Figma", "alwaysAllow": ["export"] }
+      ]
+    }
+  },
+  {
+    "name": "an agent that names no model runs on the team's, as the app suggested it",
+    "agent": "editor",
+    "entry": {
+      "id": "editor",
+      "from": { "agent": "editor" },
+      "model": "openai/gpt-6.1-mini",
+      "followsSuggestion": true,
+      "thinkingEffort": "low"
+    },
+    "job": { "name": "Editor", "instructions": "Tighten the draft." },
+    "filled": {
+      "id": "editor",
+      "from": { "agent": "editor" },
+      "model": "openai/gpt-6.1-mini",
+      "followsSuggestion": true,
+      "thinkingEffort": "low",
+      "name": "Editor",
+      "role": "Tighten the draft."
+    }
+  },
+  {
+    "name": "a model the agent names replaces the team's, its effort goes with it, and it no longer follows a suggestion",
+    "agent": "coder",
+    "entry": {
+      "id": "coder",
+      "from": { "agent": "coder" },
+      "model": "openai/gpt-6.1-mini",
+      "followsSuggestion": true,
+      "thinkingEffort": "high"
+    },
+    "job": { "name": "Coder", "instructions": "Write the code.", "model": "anthropic/claude-opus-5.5" },
+    "filled": {
+      "id": "coder",
+      "from": { "agent": "coder" },
+      "model": "anthropic/claude-opus-5.5",
+      "name": "Coder",
+      "role": "Write the code."
+    }
+  },
+  {
+    "name": "switches the agent doesn't have are off, and helpers are on unless it says no",
+    "agent": "analyst",
+    "entry": {
+      "id": "analyst",
+      "from": { "agent": "analyst" },
+      "model": "fake/offline",
+      "allow": { "web": true, "commands": true },
+      "allowRecruiting": false,
+      "allowMyAgents": false,
+      "doneWhen": ["An old item."]
+    },
+    "job": { "name": "Analyst", "instructions": "Compare the options." },
+    "filled": {
+      "id": "analyst",
+      "from": { "agent": "analyst" },
+      "model": "fake/offline",
+      "name": "Analyst",
+      "role": "Compare the options."
+    }
+  },
+  {
+    "name": "an entry with instructions of its own runs as it is written",
+    "agent": "researcher",
+    "entry": {
+      "id": "lead",
+      "name": "Lead",
+      "role": "The team's own copy.",
+      "model": "fake/offline",
+      "from": { "agent": "researcher", "version": 3 }
+    },
+    "job": { "name": "Researcher", "instructions": "The saved one." },
+    "filled": {
+      "id": "lead",
+      "name": "Lead",
+      "role": "The team's own copy.",
+      "model": "fake/offline",
+      "from": { "agent": "researcher", "version": 3 }
+    }
+  },
+  {
+    "name": "a review stop is never filled in",
+    "agent": "researcher",
+    "entry": { "id": "review", "kind": "operator", "role": "Approve it?" },
+    "job": { "name": "Researcher", "instructions": "The saved one." },
+    "filled": { "id": "review", "kind": "operator", "role": "Approve it?" }
+  }
+]

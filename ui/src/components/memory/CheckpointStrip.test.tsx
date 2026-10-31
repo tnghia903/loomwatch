@@ -40,8 +40,7 @@ it('offers to start a new run from the checkpoint, and never says Resume', async
     />,
   )
   expect(screen.getByText(/Run 03 stopped at Technical Writer/)).toBeInTheDocument()
-  expect(screen.getByText(/Done: Sections 1-3 drafted\./)).toBeInTheDocument()
-  expect(screen.getByText(/Next: Section 4\./)).toBeInTheDocument()
+  expect(screen.getByTestId('checkpoint-strip')).toHaveTextContent(/Done: Sections 1-3 drafted\. Next: Section 4\./)
   expect(screen.queryByText(/Resume/i)).not.toBeInTheDocument()
 
   fireEvent.click(screen.getByRole('button', { name: 'Start a new run from this checkpoint' }))
@@ -81,7 +80,7 @@ it('leads with the stage the run reached last, and carries its blockers', () => 
     />,
   )
   expect(screen.getByText(/stopped at Technical Writer/)).toBeInTheDocument()
-  expect(screen.getByText(/Blocked on: The pricing table\./)).toBeInTheDocument()
+  expect(screen.getByTestId('checkpoint-strip')).toHaveTextContent(/Blocked on: The pricing table\./)
 })
 
 /** A run that left no checkpoint has nothing to offer, so the strip is absent rather than empty. */

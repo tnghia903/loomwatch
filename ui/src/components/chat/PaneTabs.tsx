@@ -1,4 +1,4 @@
-import { X } from 'lucide-react'
+import { X } from '../ui/icon'
 import { createElement, Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 
 import { paneTabId, type MadeTab, type PaneTab } from '../../lib/chat/paneTabs'
@@ -17,10 +17,10 @@ function initials(name: string): string {
 }
 
 /**
- * The pane's tabs: the piece's record; its long answer as the chat shows a message, by the figure
- * and name of who gave it, shaped as a bubble and set apart; then each file it made, by its own name
- * and the mark of its kind. Each has its own close. When they outgrow the pane the made tabs scroll
- * under Details, which stays put; the side with more fades, and the one on screen is kept in view.
+ * The pane's tabs: the piece's record; its long answer as the chat shows a message, by the figure and name of who gave
+ * it, shaped as a bubble and set apart; then each file it made, by its own name and the mark of its
+ * kind. Each made tab has its own close. When they outgrow the pane the made tabs scroll under
+ * Details, which stays put; the side with more fades, and the one on screen is kept in view.
  */
 export function PaneTabs({ tabs, shown, hue, onShow, onClose }: { tabs: readonly MadeTab[]; shown: PaneTab; hue: (id: string) => number; onShow: (tab: PaneTab) => void; onClose: (made: MadeTab) => void }) {
   const list = useRef<HTMLDivElement>(null)
@@ -63,7 +63,9 @@ export function PaneTabs({ tabs, shown, hue, onShow, onClose }: { tabs: readonly
     // A mouse wheel turns the strip too, as a trackpad's sideways swipe does.
     <div className="tc-pane-tabs" role="tablist" aria-label="Show" ref={list} data-more={fade} style={{ '--tc-pane-pin': `${more.pin}px` } as CSSProperties}
       onScroll={measure} onWheel={(event) => { if (Math.abs(event.deltaY) > Math.abs(event.deltaX)) event.currentTarget.scrollLeft += event.deltaY }}>
-      <button type="button" role="tab" id="tc-pane-details" className="tc-pane-details" aria-selected={shown === 'details'} aria-controls="tc-pane-body" onClick={() => onShow('details')}>Details</button>
+      <span className="tc-pane-own">
+        <button type="button" role="tab" id="tc-pane-details" aria-selected={shown === 'details'} aria-controls="tc-pane-body" onClick={() => onShow('details')}>Details</button>
+      </span>
       {tabs.map((made, at) => {
         const [stem, extension] = made.file ? nameParts(made.label) : [made.label, '']
         const said = made.file ? made.label : `${made.label}’s answer`

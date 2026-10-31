@@ -15,8 +15,12 @@ instructions and tools.
 
 - **A turn** adds the prompt to the conversation and streams the model's reply. It then works
   through every tool call the model asks for, each one allowed or declined first (see
-  [Permissions](#permissions)). It ends when the model replies without a tool call, when the turn
-  has made 200 tool calls, or when it is cancelled. What the model writes alongside tool calls
+  [Permissions](#permissions)). It ends when the model replies without a tool call, when it has
+  answered at its tool-call limit, or when it is cancelled. A turn may make 200 tool calls: the
+  result of the 180th says how many are left (a summary made after it says so again), and after
+  the 200th no call runs and the model is asked for its answer from what it has, once more with no
+  tool it may call if it called one instead. That turn ends `max_turn_requests`, with the answer
+  as its reply (ADR 0088). What the model writes alongside tool calls
   ("I'll read the notes first."), or before a web search its provider runs part way through a
   message ("Let me check the prices."), is recorded as said on the way, a paragraph of its own, and
   the turn's reply leaves it out unless it is all the turn wrote. A reply the length limit cut off
@@ -27,7 +31,9 @@ instructions and tools.
   the searches, page reads and code it runs itself is carried on within the same call, five times
   at most; one still paused after that is kept without the step the provider hadn't run (a
   conversation with a step that has no result is refused), and the model is told so and carries
-  on. How full the context is comes from the last of those requests, not their total, and within
+  on, twice at most. Of both kinds together, at most four replies in a row are carried on with
+  nothing run, whichever way they take turns and whether or not a summary comes between them;
+  the next one ends the turn. How full the context is comes from the last of those requests, not their total, and within
   one request from what was sent, what the model wrote and the size of what those steps brought
   back: the provider's usage counts the conversation again for every step it ran. A long tool
   output is set aside behind an id the
@@ -35,7 +41,10 @@ instructions and tools.
   larger one, is replaced by a summary the model writes.
 - **What the provider caches** stays the same from call to call: the tools offered (all of them
   from the first call), the opening instructions, and the conversation, which is only ever added
-  to. The summary call offers the same tools, so it reads the conversation from the cache too.
+  to. The summary call offers the same tools, so it reads the conversation from the cache too, and
+  so does the request for the answer at the tool-call limit. Only when the model calls a tool
+  instead is it asked again with `tool_choice: none` and the same tools (with no tools on
+  OpenRouter's chat completions), as a summary is.
   Each call carries the session's id, which keeps its calls on one OpenRouter route.
 - **A provider** answers each model call. **OpenRouter** (`agent/openrouter.rs`) makes one
   streamed `POST /chat/completions` per call. A Claude from 4.6 on goes to OpenRouter's
@@ -45,8 +54,19 @@ instructions and tools.
   without a model. It runs the offline demo team (`model: fake/offline`), which needs no key and
   no internet, and the tests.
 - **Built-in tools** (`agent/tools/`) are `list_files`, `read_file`, `search_files`,
-  `write_file`, `edit_file`, `run_command`, `update_plan` and `read_tool_output`. An agent
-  allowed the web also gets OpenRouter's web search and fetch. Tools the daemon serves itself,
+  `write_file`, `edit_file`, `run_command`, `update_plan` and `read_tool_output`. A Word, Excel,
+  PowerPoint, PDF or email file that `write_file` or `edit_file` changed is read back with the
+  document readers, and a CSV or JSON file parsed; the tool's answer says whether it opens and
+  what it holds (pages, sheets, slides, rows), or why not. Plain text and files over 10 MB aren't
+  checked, and the check never fails the write. An agent allowed the web also gets OpenRouter's
+  web search and fetch. One that isn't gets `search_web` and `read_page` (ADR 0104), and its
+  instructions say which of its abilities ask first. Both ask through the permission policy as a
+  `fetch`; a yes sets the session's web on, so its next call carries the provider's web tools and
+  its commands the network (`Snapshot::web` keeps it across a park). `read_page`
+  (`agent/tools/link.rs`) is fetched by the daemon and goes ahead without asking for a link the
+  operator wrote, which the engine hands each session from the run's message and the operator's
+  notes (`ProcessSpec::links`, the Team Bus for teammates), never from anything an agent read or
+  wrote. Tools the daemon serves itself,
   such as the Team Bus and Ask's tools, come in through the `HostTools` trait. Calls a provider
   runs on its own side are recorded as finished tool calls named by what they were
   (`session.rs` `server_tool_title`): code Claude's web tools run is "Run code: <first line>"
@@ -62,6 +82,60 @@ instructions and tools.
   `function_call_output`, and on OpenRouter in a user message after the tool results. Every file
   is read in a short-lived `loomwatchd read-document` process with a time limit, so a damaged file
   costs nothing else. The same reader gives knowledge files their text.
+- **Slides and Word documents drawn by the reader** (`ui/src/lib/files/drawnPage.ts`, ADR 0091): the
+  reader takes a `.pptx` or `.docx` as bytes from `/api/files/raw` and draws it itself, in the
+  browser, as a web page shown in the same sandboxed frame as a page an agent made, so its words are
+  marked and any part is picked as on that page. A deck is read by `pptxtojson`, after
+  `deckStyles.ts` writes onto each slide what it takes from its master (its placeholders' bullets,
+  and PowerPoint's default table style, which a deck names but rarely carries), and drawn by
+  `slidesPage.ts`: one slide shown at a time, at its own size in points under a "Slide n of m"
+  heading, scaled to the frame, its charts drawn from the numbers the deck keeps for them, and a
+  strip of inert copies of the slides beside it. Its speaker notes are walked as steps
+  (`noteSteps.ts`): a step is tied to the slide's parts whose own words it clearly says, weighted
+  by how few of the slide's parts have each word, a table counting by its rows and columns, with
+  no model involved; the page's own script rings the parts of the step being said and fades the
+  slide's other words. `deckSeen.ts` fingerprints each
+  slide, part and note (numbering left out, as a script that writes the deck again renumbers it)
+  and keeps the version last shown in the browser's local storage (the latest 40 decks); a later
+  version is compared with it, or, while the deck is open, with the version on screen before, and
+  what changed is marked: a slide found anywhere before counts as moved, not changed. A Word document is laid
+  out by `docx-preview` (`documentPage.ts`), its fonts given fallbacks and Word's Symbol bullets
+  drawn as the marks they are. Pictures are kept in the page as data. With Make changes on (ADR
+  0107) the draw marks the parts that can be typed into (a slide's text boxes and its notes, read
+  from its notes slide by `deckNotes.ts`; a Word document's body paragraphs, found by bookmarks
+  `editableParts.ts` writes into a copy it draws), and a part left posts its words to the reader,
+  which writes them into the file's own XML (`officeEdits.ts`) and the file through
+  `/api/files/write`; a table's or a workbook's cell is written by `cellEdits.ts`. The drawing code is loaded
+  only when such a file is first opened; a file it can't draw shows its words. (The daemon used
+  to have `LibreOffice` make a PDF of them; the PDFs it kept in `<state>/pages/` are removed at
+  start.)
+- **Files changed in the reader** (`kept.rs`, ADR 0107): `PUT /api/files/write` writes the bytes
+  the reader sends into a file it may change (`files::writable`): a text, code, data or table
+  file, or a deck, that an agent made in its own folder under `.loomwatch/` (not its hidden
+  folders, its `knowledge/` copies or its `AGENTS.md`), or that is in a folder given to a team,
+  outside any hidden folder there. The request names the version it was made on in `If-Match`:
+  the file's SHA-256 (`files::version_of`), which `/api/files/read` answers as `version` and
+  `/api/files/raw` as its `ETag`. A file that changed on disk since is refused with 409. Before a
+  file is written, the file as it was is kept in `<state>/kept/<id>/` with a note of its path,
+  time and why, and `POST /api/files/put-back` writes a kept copy back, keeping what it replaces
+  the same way. The newest 30 copies of each file are kept, and 2 GB at most in all, the oldest
+  going first. Only LoomWatch's own page sends these, with `X-LoomWatch-Request`. A text that
+  started with a byte order mark keeps it.
+- **Changes left for agents** (`changes.rs`, ADR 0107): with Make changes on, a part of a file
+  marked in the reader can be left a change for one of the team's agents (`POST /api/changes`),
+  kept in `file_changes` until Send (`POST /api/changes/send`). A refusal answers a sentence for
+  the person (too many waiting, a change already sent), which the reader shows as it is. The
+  waiting changes on the file are numbered in the order they were left (by `rowid` when two share
+  a millisecond) and grouped by agent, the file's maker first (the agent whose `.loomwatch/<team>/<agent>/`
+  folder holds it), then the team file's order. Each agent gets one chat message from the person,
+  its text "2 changes to report.md" and its changes on it (`changes`, a nullable column of
+  `chat_messages`). Its task names the file once and quotes every part as
+  `ReplyTo::for_agents_in_named_file` does, as source material, with what should change in the
+  person's own words and up to ten of the parts' pictures. Agents take turns on a file (`Lanes`, one
+  lock per file, held for all of a Send's turns): before each turn the file is kept
+  (`kept::Why::Changes`) and the copy's id put on its changes, and the next turn starts when the run
+  before it has ended. An agent already at work takes its changes as a note. At start, a change whose
+  turn never came goes back to waiting. A team renamed takes its changes with it.
 - **Files sent in the chat** (`chat_files.rs`, ADR 0082) are kept in `<team>.files/chat/`, a
   folder `PermissionPolicy::for_run_agent` lets every agent of the team read. The run carries them
   on `RunLineage::files` (a note on `QueuedNote::files`), and they are listed by path under the
@@ -101,6 +175,18 @@ instructions and tools.
   (`.agents/skills`, `.claude/skills`) and LoomWatch's skills folder. The agent reads a skill's
   `SKILL.md` itself when the task calls for it. An `AGENTS.md` in the work folder is read in as
   project notes.
+- **Fixed texts have ids** (`src/prompt_blocks/`). What an agent reads that its team file doesn't
+  hold (the habits above, its place in the team, helpers, the built-in and Team Bus tools'
+  descriptions, the items every check step checks) is made of `Block`s: a stable id such as
+  `orientation.delegation`, and words with `{placeholders}` the code fills. `rendered.txt` there
+  holds them as agents get them; a test fails at the first byte that differs, and
+  `WRITE_RENDERED_PROMPTS=1` rewrites it after a change made on purpose. For the quality bench, a
+  build with `--features prompt-overrides` can swap any block for a file:
+  `loomwatchd --dump-prompt-blocks <dir>` writes each as `<id>.md` and lists the ids with their
+  placeholders, and `LOOMWATCH_PROMPT_OVERRIDES=<dir>` starts the daemon with every file there in
+  place of its block, for every agent. Any other file, or a placeholder the block doesn't fill,
+  stops the start. Only the CI job that tests it turns the feature on, and a test checks that the
+  program built without it holds no trace of the setting.
 
 `src/engine/` is the run engine, built on the `agent::Session` API. `AgentRun` is what the
 pipeline, team mode, the Team Bus, chat and Ask hold for one agent: open a session, take a turn,
@@ -190,7 +276,10 @@ as a `Problem` (`not_connected`, `key_refused`, `out_of_credits`, `plan_limit`,
 `plan_not_eligible`, `plan_use_off`, `sign_in_again`) that the app turns into a button, such as
 Manage usage. Every call is a row in `model_calls`, filled from the run events, and
 `GET /api/usage` sums it by source, day and agent for the Usage page: neither OpenAI nor Anthropic
-tells an app how much of a plan or credit is left. `scripts/mock-vendors.py` stands in for both
+tells an app how much of a plan or credit is left. Each call is either the agents' work or
+`LoomWatch`'s own help (ADR 0106: Ask, reading a message, checking an answer, learning, the next
+steps at the notch, choosing a model), told apart by `FEATURE` in `archive/usage.rs`; calls made
+outside any session's events (next steps, choosing models) are counted with `count_call`. `scripts/mock-vendors.py` stands in for both
 companies in end-to-end checks.
 
 Each model tier (`schemas/model-tiers.json`, ADR 0057) names its model first; then a connected plan
@@ -229,14 +318,18 @@ daemon makes one call at a time, at most 50 a day, and none for ten minutes afte
 `model-reading.json` holds the switch and what readings have cost. Only the agent's own setup is
 sent, by name: never a skill's text, a file, a folder's path, the Brief or its teammates. Its
 instructions go as written, up to 6,000 characters, so whatever they mention goes with them.
-`modelSuggestion.eval.test.ts` measures the suggestion with and without readings.
+`modelSuggestion.eval.test.ts` measures the suggestion with and without readings. The suggestion
+also names a thinking effort, from the same `schemas/model-tiers.json` row Ask and the templates
+use (ADR 0062): a check step's is the checker's, a built-in job's its own, any other agent's a new
+agent's. Picking the suggestion of a model that reasons sets `thinkingEffort` with `model`.
 
 An agent with `followsSuggestion: true` in its team file follows its suggestion (ADR 0072): a team's
 own agent added in the app starts that way, picking the suggestion in its model list sets it, and
 picking any other model takes it out. `ui/src/lib/team-file/useModelFollowing.ts` watches the open
 team: when a following agent's configuration settles after a change, it works the suggestion out
 again (with a reading when Let AI choose is on) and moves `model`, and the model list says what it
-was, with Undo, which pins it back. The team as it opened is left as it is, except who pays: a
+was, with Undo, which pins it back. `thinkingEffort` moves with it, on a model that reasons, while
+it is still the effort the last suggestion gave; an effort set by hand stays. The team as it opened is left as it is, except who pays: a
 following agent whose model a plan connected since offers moves onto that plan. A following agent
 moves from OpenRouter onto a plan, or onto its tier's first choice, but never onto OpenRouter by
 itself. The daemon never reads the flag; a run uses `model`.
@@ -262,6 +355,8 @@ The backend is `loomwatchd`, a single binary the user runs locally. Its job:
 - **Event archive:** one SQLite file, the durable and unbounded history
 - **UI host:** serves the single-page web UI (static assets), a WebSocket for live events, and a
   REST surface (see §5)
+- **Other devices:** the door a phone or another computer comes in by, and `loomwatchd connect`
+  on a computer that shows LoomWatch on another one (`devices/`, see Other devices below)
 
 **Why Rust:** the agent loop needs no vendor SDK. Every model call is one streamed HTTP request
 in OpenAI's chat shape, through OpenRouter, so a JavaScript ecosystem advantage disappears. What
@@ -284,6 +379,21 @@ which is what makes a run replayable. How it stays fast as history grows:
   recorded from. A tool update's frame carries its output again, which the projected payload
   already holds. So `raw` is stored as the frame minus the values it shares with `payload`,
   compressed when that is smaller (`archive/codec.rs`). It is read back byte for byte.
+- **What a run made.** When a run ends, however it ends (finished, cancelled, cut off by a
+  restart), the daemon reads its tool calls once, payloads only, and keeps the full paths its
+  edit calls named in the run's `made` column (`made.rs`): calls that failed or that the person
+  refused are left out, the same rule as the app's `filesWritten`, at most 100 per run. The run
+  list sends it as `made`, so Home and a project's room show what the agents made without
+  replaying any run. Runs recorded before it get theirs once, in the background, after a start.
+- **A renamed team's history.** Rename moves the team file to the new name
+  (`POST /api/team/rename`, `team_rename.rs`, ADR 0099), with `<team>.brief/`, `<team>.layout.json`
+  and `<team>.files/`, and changes those names inside the file. One transaction files its `runs`,
+  `chat_messages` and `work_passages` under the new path, gives rows filed by `path:<file>` the
+  team's id, and names the files sent in the chat and the files its runs made in `<team>.files/`
+  where they are now. The id never changes (one is written in for a team without it), so notes,
+  lessons and the workspace, filed by id, stay put. The approval moves with the file only for the
+  text that was approved, so a move never approves a team. It is refused while a run is live or a
+  routine waits to try again, and the files go back when the history can't move.
 - **Search** in the Notebook is SQLite FTS5 with English stemming.
 - **Finding in a team's chat** (`chat_find.rs`, ADR 0081) searches every request, answer, note and
   line of the agents' talk (handovers, check verdicts, questions, Team Bus messages), cut into
@@ -303,6 +413,42 @@ apps' Update and restart saves one before it installs a release, and so does the
 Docker; 0.5.0 is the last release that copies such a history into the file. `loomwatchd` runs as a native process. The container
 image (`Dockerfile`, `docker-compose.yml`) runs the same binary, with the state folder on a
 volume. There the keys are in `keys.json` and `plans.json`.
+
+### Other devices
+
+One computer runs LoomWatch: its agents, keys, sign-ins, files and run history (ADR 0102). An
+iPhone or another computer connects to it and keeps nothing but a key of its own (`devices/`).
+
+- **The door.** `loomwatchd serve` opens a second listener on this computer's own address,
+  `127.0.0.1:3440` (`LOOMWATCH_DEVICES_LISTEN` moves it, `off` closes it; a taken port leaves
+  LoomWatch running without it). Nothing outside reaches it unless the person shares it: Your
+  devices, on Connections, runs `tailscale serve` on the press of Let my devices in, on a free one
+  of the ports 443, 8443 and 10000, and never changes what Tailscale already shares (`reach.rs`;
+  `LOOMWATCH_TAILSCALE` names Tailscale's program when it isn't in a usual place).
+- **Pairing.** Connections makes a code for an iPhone or a computer. It works once, for ten
+  minutes; five wrong codes in a row end it; a new code ends the one before. It travels as
+  `loomwatch://pair?address=…&code=…`, as a QR code for an iPhone and a link for a computer. The
+  device trades it at `POST /devices/v0/claim` for a 256-bit key it is shown once. LoomWatch
+  keeps only the key's SHA-256, in `devices.json` in the state folder, so Remove ends a device at
+  once and nothing else changes. Making codes, the list and Remove answer only on this computer's
+  own address, from its own page (`api.rs`).
+- **What each may do.** Every request at the door carries its key. An iPhone gets the phone's
+  routes (`/phone/v0/*`) and the short list in `phone::ALLOWED`: see, answer, approve, start,
+  stop, chat, Ask, and small changes to an agent or a team, never keys, sign-ins or settings
+  (`phone/`). A computer gets everything a person at this computer can do: its requests go on as
+  a local program's would, without its key, cookies or the page it came from, and marked
+  `x-loomwatch-via-device` so LoomWatch keeps a few things, such as connecting this computer to
+  another, to its own screen (`door.rs`, `pass.rs`). Live connections are joined byte for byte.
+- **A connected computer.** Connecting starts on that computer's own Connections page: Connect to
+  another computer takes the link, trades its code, keeps the key in the Keychain (Credential
+  Manager on Windows, `connection-key.json` elsewhere), writes `connected.json`, and exits with
+  76. The Mac and Windows apps then start `loomwatchd connect` instead of `serve`, on the same
+  port, so the notch, the menu bar and the browser show the other computer
+  (`connected.rs`). It applies this computer's own address and same-page checks, then passes
+  everything on with its key. A file opens on the computer it is on, so Open is refused here with
+  words that say so. When the other computer can't be reached or has removed this one, a page says
+  which, with Try again and Use LoomWatch on this computer, which forgets the connection and exits
+  with 76 again. `loomwatchd disconnect` does the same from a terminal.
 
 ### Schedules
 
@@ -375,17 +521,126 @@ MCP settings is not delivered (`delivery::WiredTool`): LoomWatch's agents don't 
 other apps' settings, which hold those apps' credentials. The run records the tool as unavailable
 (`tools_unavailable`) and goes on without it.
 
+### Projects
+
+Projects hold the work, and My agents hold who does it (ADR 0097). A project is
+`<teams root>/.projects/<id>.yaml` (`projects.rs`): its name, an About, folders every agent in it
+may read, notes, the colour of its mark, and whether it is put away. A team names its project with
+`project: <id>`; `TeamConfig::parse_in` reads the file with the team and gives every agent its
+folders, `memory::TeamMemory::load_for` puts its About and notes first in the packet, and
+`memory::notebook_scope` makes the Notebook the project's. A lesson the learner marks as about the
+project becomes one of its notes. `GET /api/projects` lists each project with its teams' paths and
+the teams in none; `PUT /api/projects/{id}` keeps one whole and `POST /api/projects/{id}/notes`
+adds the person's note. The daemon keeps a copy of every team file once before the app moves each
+team into a project of its own (`/api/move-into-projects`), through its normal save. Moving a
+team to another project later is the same save, with only its `project` changed.
+
+Deleting a project (ADR 0100), from the "…" on its card on Home or in its room:
+`DELETE /api/projects/{id}` takes the `project:` line out of each of its teams' files, all of them
+or none (`projects::without_project`), keeps an approved team approved, adds those teams to the
+`leftOut` list beside the move's record (renaming a team carries its entry to the new path) so the
+app never moves them into a project of their own,
+and moves the project's file to `.projects/.removed/`. Those teams stand on Home as cards of their
+own, whose "…" moves one into a project or deletes it. A removed project's id stays taken (`projects::removed_ids`, listed by `GET /api/projects` as
+`removed`): its notebook and Ask chat are kept under it.
+
+Removing one of My agents (ADR 0100), from the "…" on its card or its name's menu, takes it off
+every team it is in first, in the app (`lib/library/removeAgent.ts`): each team closes up around
+it (`lib/team-file/takeOff.ts`): whoever handed it work hands it on, the next one starts when it
+started the team, a review stop left at the front goes, and a team left with no agent goes to the
+trash. When it started a team and handed work to several, the confirmation asks which of them
+starts, and that one hands the work on to the others. `DELETE /api/jobs/{id}` still refuses an
+agent a team uses.
+
+In the app, Home is the studio (`components/studio/`, `lib/projects/studio.ts`). Home and a
+project's room open the same way, at a glance (`lib/projects/glance.ts`, `GlanceTiles`): four tiles
+that keep their places. Needs you counts by the bell's own rules (`ticketsFrom`), so the two never
+differ: what waits for the person, then work that stopped in the last day that the schedule won't
+try again and that wasn't dismissed. Each has the one press that answers it: Approve for work to
+check (`approveRun`, the same words the tray's Approve sends, with a "Read it first" icon beside it
+that opens the bell's tray at that item on Home, or the work itself in a room), Answer for a
+question, a permission or a limit (which open the same places); for stopped work, the fix LoomWatch knows for why it stopped
+(`problemAction`, such as adding credits), or See why, which opens it in its chat. With nothing
+waiting it shows the last work that went well: the agent who answered it, drawn big, and what it
+was asked. Then Working now: the longest at work drawn big with what it was given, its team and how
+long it has been at it, the next two under it; while nobody works, the agents of the teams shown
+(`crewOf`, each once), each lit as it is now. Next on a schedule in a room, Finished today on Home,
+each piece of today's work as the agent who answered it, one press from it. And This month, from the
+usage report (ADR 0073) so a ChatGPT plan is said as a plan and a list-price estimate with "≈",
+with the dollars split by agent (`monthSpenders`): a bar in shares of the whole, each part keyed
+under it, the three costliest by their figures, then everything else. Ask and LoomWatch's own
+reading of messages belong to no team, so to no agent's part.
+Only Working now lights its figures: elsewhere a figure says who did the work, not what it is doing
+now. Under the tiles a box gives a team work as its chat's box
+does (`WorkBox`, `POST /api/chat/messages` to the team with `work`), named for the team it goes to,
+with "To" when there is more than one. The first thing to do is the screen's one gold fill: the
+first item's answer, or Start while nothing waits.
+
+Home then has where the person left off (the newest things made, their chats with one agent, and
+Chat with one agent), a card per project, and what is in no project: each team in none on its line,
+as a card has it, with Add to a project (one pick moves it, ADR 0100) and a "…" with Delete team…,
+then the agents in no team. One team can work in several projects (ADR 0103): each project has a
+place of its own for it, a team file naming the same `shares:` id with its own id, project,
+schedule, delivery and Brief, and `PUT /api/team` writes the rest, the setup, into the other places
+(`team_places.rs`). Its line says "Also in" the others. A card lists the
+project's teams, one per line, waiting first, then working, then stopped, then the next to run on a
+schedule: a shape and words for how each is, its agents' figures, and its name opening its chat;
+then the newest thing made there and this month's cost. A room (`/projects/<id>`) has its teams as
+cards in the same order, kept while the person is in it, each with its desks, its "…" (Add to
+another project, Take out of the project, Delete team…) and its newest file; then Made here, everything its agents made, newest first, narrowed to one team by a
+row of teams; and beside them the wall (About, folders, notes), Add an agent, Add a team, New team and Ask
+about the project. A made file opens in the reader over the page, with a link to ask about it in
+its chat. An agent is lit only where it is now, gold at its own desk while it waits for the person:
+where it is busy in another team, its figure is faint and unlit, naming that team. Where the person
+checks, the desk holds the review step's ring, as on the canvas.
+
 ### Ask LoomWatch
 
 Ask (`control/`) is the same agent, on the operator's key and the model they chose, but outside
 any run. It is kept open across turns and archived as its own session. It gets the LoomWatch
 Control tools and nothing else: no files, no commands, no web. The tools are `list_teams`,
-`read_team`, `list_models`, `list_skills`, `propose_team`, `start_run`, `get_run` and
-`draft_review_note`, all direct calls in the daemon. They read and propose. None of them writes a
-team file or answers a review stop: a proposed team is shown on the canvas and saved only when the
-person presses Apply. A skill Ask gives an agent is wired by name (`kind: skill`), as the canvas
-wires one, from the skills `list_skills` reports, the same list a run delivers from. A proposal
-that wires a skill no run could find is refused, unless the saved team already wires it.
+`read_team`, `list_models`, `list_skills`, `list_jobs`, `read_job`, `list_my_agents`,
+`list_tools`, `find_files`, `propose_team`, `start_run`, `get_run` and `draft_review_note`, all
+direct calls in the daemon. They read and propose. None of them writes a team file or answers a
+review stop: a proposed team is shown on the canvas and saved only when the person presses Apply.
+
+Ask builds from what the person has (ADR 0096). Its first turn names their teams, My agents (with
+the ids a team points at), skills, connected tools and ways of paying. `list_jobs` and `read_job`
+give LoomWatch's built-in jobs from `schemas/built-in-jobs.json`, the list the app's palette and
+agent builder place from (`ui/src/lib/library/roles.ts`), on the models `schemas/model-tiers.json`
+gives each job. `list_my_agents` lists the person's agents, which a proposal points at with
+`from: {agent}`. `list_tools` lists the connected tools by what each reads and changes.
+`find_files` (`control/find.rs`) finds a folder or file by the person's words: first among what
+their teams and agents already read, then below their home folder and, on a Mac, iCloud Drive and
+each folder in `~/Library/CloudStorage`, at most five folders deep, skipping hidden folders, app
+data and bundles, within 40,000 folders and 3 seconds. It reads names only, and lists a found
+folder's first eight names. A folder near the top it wasn't allowed to open (macOS asks the person
+before an app reads Documents, Desktop or Downloads) is named in its answer, so Ask can say how to
+allow it rather than "not found". Ask is told never to ask the person for a path.
+
+`propose_team` checks a proposal as a run would read it, before it reaches the canvas: an agent
+that points at one of My agents is filled in from it, a skill must be installed, a tool connected,
+and a folder or file it connects, or a folder an agent works in, must be on this computer. What the
+saved team already names is let through. A check step that doesn't say how it sends work back gets
+`sendBack: {rounds: 2, whenStillNotMet: ask}`, as the editor writes it, and a new team that sets no
+`spend` gets `perRun: 1.00`, or `2.00` when it has three or more agents or a check step that sends
+work back. Ask's first turn also says whether this computer is a Mac, where an agent's commands run
+in a sandbox: there Ask gives a maker or the Analyst the edits and commands switches, so a newcomer
+isn't asked to approve each program it runs; elsewhere they ask first.
+
+Every agent Ask makes is saved to My agents and joins other teams as it is, so Ask writes its
+instructions and Done when for its kind of work and puts what the request is about into the team
+and its project (ADR 0097). Each agent's `part` says what this team needs from it, with Done when
+items of its own, which the agent reads under `## Your part in this team` and which come first in
+the Done when its check step checks. `propose_team` takes the team's `project`: one of the
+person's by `{id}`, or a new one as `{name, about, folders}`, which Apply keeps before it saves the
+team; a new team given neither works in a new project of its own. Its first turn lists the
+person's projects, and in a project's room (`AskContext.project`) Ask is told the project's About,
+folders, notes and teams. A `brief` becomes a note in the team's project when Apply runs; for a
+team in no project, a Brief note beside it, written after the team file and joined to it with a
+second save. Saving a team keeps the
+folders and files it connected to a new agent as the team's (`specOf` in `myAgents.ts`): an agent
+reads something of its own only when its builder gives it.
 
 ---
 
@@ -405,7 +660,8 @@ drawn on the canvas.
 | Tool | Meaning | Recorded as |
 |---|---|---|
 | `roster()` | Who's on the team, their roles, models and live status | none — discovery |
-| `dispatch(agent, task)` | Fire-and-forget assignment (team mode only) | A → B · delegation |
+| `my_agents()` | The person's other agents in My agents the team's starting agent may bring in for a part no one on the team does, by `mine+<id>` (ADR 0092; off unless `guards.myAgents` > 0) | none — discovery |
+| `dispatch(agent, task)` | Fire-and-forget assignment (team mode only). `mine+<id>` brings in one of My agents | A → B · delegation |
 | `ask(agent, question)` | Blocking ask / reply | A ⇄ B · query |
 | `handoff(agent, task)` | Start a successor and stop (team mode only) | A ⇒ B · handoff |
 | `report(status)` | Progress signal | none — node state |
@@ -430,7 +686,8 @@ are enforced server-side so no agent can prompt past them:
   may be outstanding
 - **Cycle detection:** A → B → A is rejected
 
-The agent loop adds one more: a turn stops after 200 tool calls (`max_turn_requests`). There are
+The agent loop adds one more: a turn makes at most 200 tool calls, then is asked for its answer
+and ends (`max_turn_requests`). There are
 no dollar budgets. Every model call is billed to the operator's OpenRouter account, and each
 turn's record carries its tokens and OpenRouter's exact cost.
 
@@ -465,6 +722,27 @@ Which mode applies is decided by whether the user drew edges between nodes.
 
 Drawn edges fix the macro sequence, but an agent may still recruit helpers within its own step,
 with a per-node lock available to forbid it.
+
+**What the message says done looks like (ADR 0098)** is checked in both modes, as a bounded loop
+on the agent whose reply is the answer, never as an edge. `runs::execute` starts the read
+(`message_done::read`, one turn of the fast model) beside the run and hands the run a
+`MessageDone` on its `RunLineage`; the API's `POST /api/runs/{id}/done-when` changes the same one.
+Only the run's own task writes to its archive, so `MessageDone::record_in` writes each change as a
+`done_when` event from the run's `EventLog`, and `close` writes the last before the run's events
+are counted.
+
+- **A check step on the answering agent** gets the message's items first in `check_items`, and
+  `send_back_with_message` decides its rounds. It sends back through the Team Bus
+  (`Author::Bus`), as every check step does.
+- **Anywhere else** — team mode's root (`run_answerable_session`, between `open_and_work` and
+  `finish_live`) or a pipeline's unchecked last stage — `check_the_answer` starts LoomWatch's own
+  checker (`AgentConfig::checker`, the built-in Checker job) in the answering agent's own folder,
+  so the files the reply names are where it looks, with the work as `answer.md` in the run's own
+  `answer_folder` outside it, under a `PermissionAsker::reading_only` and with nothing switched on.
+  Its rounds are `run_checks`'s, sending
+  back into the answering agent's open session through `work_round` (`Author::Open`).
+- **A number in digits is measured**: `CheckReading::settle` holds Met without a number in its
+  evidence to Not sure (`measured`), for every check.
 
 ---
 
@@ -513,10 +791,10 @@ work, and the right side empty until there is something to say. Unticking **Show
 writes `<state dir>/app-notch-off`, closes every panel, stops watching the pointer and gives
 ⌃⌥Space back; the face is in the menu bar instead until it is ticked again. `loomwatchd` reads the
 same file to answer `notchShown` with the pin, so My agents says to turn the notch on rather than
-promise ⌃⌥Space. The box writes to the agent pinned to the notch, else the first of My agents;
-switching it to another (Tab, or one of the figures beside it) or sending to one not yet pinned pins
-that one (`PUT /api/pinned-agent`, kept in `<state dir>/pinned.json` by `pinned.rs`), so the box
-and the island share one agent. Its figure opens its workbench under the box: the builder's 3D
+promise ⌃⌥Space. The box writes to the agent pinned to the notch, else the first of My agents,
+which sending to pins (`PUT /api/pinned-agent`, kept in `<state dir>/pinned.json` by `pinned.rs`),
+so the box and the island share one agent. It is the one agent at the notch: another is pinned in
+My agents, and Tab moves on in the box as anywhere. Its figure opens its workbench under the box: the builder's 3D
 bench (`AgentFigure`, read only, always in the island's dark), from the same view and labels the
 builder makes (`components/agents/benchOf.tsx`), acting out the agent's newest run in its chat. It
 loads with three.js only once the page is under way: the screen the pointer is on sets it up out of
@@ -524,8 +802,8 @@ sight once the pointer has been there a few seconds (`ISLAND_WAITS.benchSetUp`),
 opens, where setting it up froze the box (over a second the first time after an update, while
 `WebKit` compiled its shaders again), and keeps it for a while after the pointer leaves
 (`ISLAND_WAITS.benchKept`). It moves into the box as the box opens and out again as it closes, set
-up once (`useBenchHost`), so it is there at once under the box and when the message goes; switched
-to another agent, the box hands the same bench that agent (`WorkbenchScene.set(view, another)`),
+up once (`useBenchHost`), so it is there at once under the box and when the message goes; with
+another agent pinned, the box hands the same bench that agent (`WorkbenchScene.set(view, another)`),
 put in place as it is rather than set up again. After a message is sent, the box gives way to the
 agent at its workbench for a moment (`ISLAND_WAITS.bench`), and at a notch for as long as the
 pointer stays on it; without a notch it then tucks into a pill at the top of the screen, the agent
@@ -535,7 +813,37 @@ at a little desk, whose workbench opens while it is pointed at. For the agent in
   agent is saved), as its Chat tab would send it, with anything dropped onto the notch as the
   chat's attachments. The panel takes the keyboard only while that message is written (focus may
   move on to Copy, Open in LoomWatch or Start; Escape gives it back), without bringing `LoomWatch` to
-  the front;
+  the front. `AppKit` finds what ⌘V, ⌘C, ⌘X, ⌘A, ⌘Z and ⇧⌘Z do in the app's main menu, so the app
+  has one that nobody sees, with only an Edit menu in it (`edit_keys.rs`): ⌘Q, ⌘W or ⌘H meant for
+  the app in front still find nothing in `LoomWatch`;
+- ⌃⌥Space held past `island::HOLD_TO_LISTEN` (600 ms, so a slow press only opens the box) listens instead (`listen.rs`): Carbon reports
+  the keys coming up too, and while they are held `AVAudioEngine`'s microphone feeds macOS's speech
+  recognition (`SFSpeechRecognizer`, on this Mac where the language allows), whose words go to the
+  page as they come (`ToPage::Heard`) with how loud it hears (`ToPage::Level`). The page writes them
+  into the box after whatever was typed; let go, they wait there to be read and sent like typed
+  words. A press while the box is open closes it only once the keys come up before that, so holding
+  never closes it. Only the app is signed with the microphone entitlement
+  (`packaging/macos/LoomWatch-app.entitlements`), never `loomwatchd`, and the command sandbox denies
+  `device-microphone`, so an agent's command can't use the microphone the person allowed for
+  talking. The first hold asks macOS for the microphone and, once that is allowed, speech
+  recognition (`ToPage::CantListen`, `asked`); refused, the box says which and opens System Settings
+  there (`FromPage::Settings`). A Mac with no microphone says so (`noMicrophone`); listening stops
+  after `LONGEST_LISTEN` with the keys still held and says so (`longest`); a hold that hears nothing
+  says so too. Words still to come after letting go are dropped once the box is sent or written in;
+- under the box, what the person may ask next (ADR 0105, `suggestions.rs`,
+  `GET /api/pinned-agent/suggestions`): next steps from the agent's newest answer, written once for
+  that answer by a small model on the source the model of the agent's chat is paid from (its
+  `.jobs/.bench/<id>.yaml`, which for an agent saved with no model holds the one the app chose for
+  what is connected): on a `ChatGPT` plan, the plan's quick model (the fast tier's in
+  `schemas/model-tiers.json`) when the plan offers it, else that same model; an agent on a free model
+  writes with it
+  (`Provider::once`, no tools, the model named with its source, as a plan and a Claude key read
+  it), while the answer is younger than `NEXT_STEPS_FOR` and the
+  person hasn't written since; then what the person asked it more than once, without files.
+  Pressing one only puts it in the box. The page asks only while the box is open, so next steps are
+  written only for answers someone reaches for the box after, and again while they are being
+  written. Each call is counted in `model_calls` (`call_kind` `next_steps`) under the agent's chat,
+  so the Usage page shows it;
 - its answer is read whole before Copy can take it, and Copy carries it twice: as HTML
   (`island/answerHtml.ts`, loaded only then) for apps that paste formatting, and as plain text
   whose links keep their addresses. In the app, Copy writes both to the clipboard
@@ -549,7 +857,19 @@ at a little desk, whose workbench opens while it is pointed at. For the agent in
   the old way and the new, as Mail does, only the new are asked (`island::promises_to_ask`); the
   files are written into a new folder in the user's temporary folder, each kept once
   (`island::received_once`), and the page asks for them through a file picker the app answers
-  (`ToPage::Dropped`, `island/dropped.ts`), so they arrive as a file from Finder does;
+  (`ToPage::Dropped`, `pickFiles` in `island/dropped.ts`), so they arrive as a file from Finder
+  does. + at the start of the box's field asks through the same picker; with no dropped files
+  waiting, the app answers it with an Open panel (`choose_files` in `notch_panel.rs`), above the
+  island. That is the one time `LoomWatch` comes to the front: it stays there while the box is
+  written in after, so typing goes to the box, and the app that had the front has it again once the
+  box gives back the keyboard, unless the person has gone to another app since. Chosen or
+  cancelled, the box asks for the keyboard again;
+- what is waiting shows file by file (`FileTile` in `island/PinnedAgent.tsx`), as the team chat
+  holds files before they go: a picture drawn from the file itself, any other file as a page with
+  its corner folded and its extension on it, each with × to take it out (`withoutFile`). As the
+  message goes, each file has a line until its upload ends, then a tick (`uploaded` in
+  `useIsland`). While files wait, the list shows two teams' rows and counts the rest, so the box
+  keeps its room in the panel;
 - what is dropped goes in only as far as the box's agent can open it (`island/readable.ts`, the
   twin of `documents::Kind::of` and `read_file`'s check for text). A HEIC, TIFF or BMP picture is
   turned into a JPEG in the page first (`createImageBitmap` and a canvas, at most 2,576 px on its
@@ -570,12 +890,25 @@ at a little desk, whose workbench opens while it is pointed at. For the agent in
 
 - **Stack:** React + Vite + [React Flow](https://reactflow.dev) for the canvas, served by `axum`;
   `rust-embed` bakes the built `dist/` into `loomwatchd`, so the binary is self-contained.
-- **Teams open in place:** going to another team (the team rail, Home, Back and Forward) changes
-  the address without a page load (`ui/src/lib/team-file/teamPage.ts`). The next team's file is
-  read first, then the team's own part of the page, canvas included, starts fresh under a new
-  React key, as it would on a load. The page frame, the team rail and the app's own data (what
-  waits on you, the teams, your saved agents, the schema's checker) stay. With changes not saved,
-  the move is a page load, so the browser asks first.
+- **One frame (ADR 0101):** every screen sits beside the dock (`ui/src/components/frame/`): Home,
+  Projects, My agents, Skills, Quests, Ask and You, along the top on a phone. The place you are on
+  has the gold stitch, Home carries the count of what needs you, and each place's name shows until
+  it has been used `LABEL_USES` times. ⌘J opens Ask everywhere, through the panel the screen
+  registers (`registerAskToggle`), or Home's when it has none. One poll of the run registry serves
+  the dock and every screen (`useRunRecords` in `lib/story/useNeedsYou.ts`). A screen's own header
+  holds only what is its own; About you, Connections and Usage are You's tabs (`YouTabs`).
+- **Teams open in place:** going to another team (a room, the dock's Home or Projects, the team
+  name's menu, Back and Forward) changes the address without a page load
+  (`ui/src/lib/team-file/teamPage.ts`). The next team's file is read first, then the team's own
+  part of the page, canvas included, starts fresh under a new React key, as it would on a load. The
+  frame and the app's own data (what waits on you, the teams, your saved agents, the schema's
+  checker) stay, and the dock follows the address (`MOVED_EVENT`). With changes not saved, the move
+  is a page load, so the browser asks first. The team name's menu (`TeamSwitch` in
+  `DocumentSwitcher`) lists every team by project and opens one on the tab on screen. An open
+  agent's workbench with changes asks its own question first; then, with the team's changes not
+  saved, the menu asks the same question for the team (Save, Don't save, Cancel), and the page moves
+  in place once the save or the re-read has landed (`useLeaveTeam` in
+  `ui/src/lib/team-file/leaveTeam.ts`).
 - **Look and feel:** eye-catching and minimal. Few primary surfaces, one obvious action per
   screen, progressive disclosure of everything else. A run is drawn as Prompt → Run → agents →
   evidence → Output, projected from archived events, never from prose.
@@ -588,7 +921,11 @@ at a little desk, whose workbench opens while it is pointed at. For the agent in
 
 ```
 Agent    { id, name, role, kind: harness|operator, spawn{cwd}, model,
-           allow{web,commands,edits}, status }
+           allow{web,commands,edits}, from{agent}, part{text,doneWhen}, status }
+           # part: what this team needs from the agent (ADR 0097), always the team's.
+           # from: one of My agents (.jobs/<agent>.yaml, ADR 0094). The team file then holds only
+           # the team's fields; name, role, model, skills, tools, reads, doneWhen and allow are
+           # filled in from the agent's file when the team is read (my_agents.rs, myAgents.ts).
 Edge     { from, to, layer: configured|observed, kind: sequence|dispatch|ask|handoff, ts }
 RunEvent { id, sessionId, agentId, seq, ts, kind: message|thought|tool_call|tool_update|
                                                    plan|permission|session_meta|usage|

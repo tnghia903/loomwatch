@@ -82,6 +82,9 @@
   --color-live-dim:       var(--lw-blue-500);
   --color-live-tint:      var(--lw-blue-tint-light);
   --color-alert:          var(--lw-red-600);
+  /* A delete's confirm button and its label (5.6:1): the alert red as a fill, in both themes. */
+  --color-alert-fill:     var(--lw-red-600);
+  --color-alert-on-fill:  var(--color-white);
   --color-ok:             var(--lw-jade-700);
   --color-halt:           var(--lw-slate-600);
   /* Each figure's colour as text and as an avatar's disc (lib/library/figures.ts FIGURE_COLORS),
@@ -148,6 +151,9 @@
   --color-live-dim:       var(--lw-blue-500);
   --color-live-tint:      var(--lw-blue-tint-dark);
   --color-alert:          var(--lw-red-400);
+  /* White on red-400 reads 3.1:1, so the fill stays the deeper red here. */
+  --color-alert-fill:     var(--lw-red-600);
+  --color-alert-on-fill:  var(--color-white);
   --color-ok:             var(--lw-jade-400);
   --color-halt:           var(--lw-slate-400);
   /* Light enough to read on obsidian (9:1 or more); butter leans lemon, away from your gold. */
@@ -194,6 +200,10 @@
   --color-bubble-dark-gold:    var(--lw-gold-400);
   --color-bubble-dark-live:    var(--lw-blue-300);
   --color-bubble-dark-alert:   var(--lw-red-400);
+  /* What is drawn on a file's sheet of paper (FileCard, the reader's bar): the paper is light in
+     both themes, so what is drawn on it stays the same in both. */
+  --color-paper-gold:          var(--lw-gold-600);
+  --color-paper-ink:           var(--lw-ink-950);
 
   --lw-node-fill:        var(--color-panel-solid);
   --lw-node-border:      var(--color-hairline);
@@ -287,4 +297,17 @@
 
 @media (prefers-reduced-motion: reduce) {
   :root { --bloom: none; }
+}
+
+/* ---------------------------------------------------------------------------
+   STATE GLOWS — one light per state, the same on every screen (round 3):
+   green ready, blue working, gold waiting for you, red didn't finish, grey stopped.
+   Each follows its theme's colour, so one definition serves both themes.
+   --------------------------------------------------------------------------- */
+:root {
+  --glow-ready:   var(--color-ok);
+  --glow-working: var(--color-live);
+  --glow-waiting: var(--color-accent);
+  --glow-failed:  var(--color-alert);
+  --glow-stopped: var(--color-halt);
 }

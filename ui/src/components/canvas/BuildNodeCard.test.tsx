@@ -150,7 +150,7 @@ describe('BuildAgentCard at each depth', () => {
   it('says plainly when an agent is allowed and given nothing extra', () => {
     view.zoom = 1.4
     renderCard({ ...nodeData, agent: { ...nodeData.agent, model: undefined } })
-    expect(facts()).toEqual({ Model: 'Default model', Allowed: 'Reading only', Given: 'Nothing connected' })
+    expect(facts()).toEqual({ Model: 'Default model', Allowed: 'Reading; asks you for the rest', Given: 'Nothing connected' })
   })
 
   it('names a folder chosen for the agent, whatever is connected to it (ADR 0042)', () => {

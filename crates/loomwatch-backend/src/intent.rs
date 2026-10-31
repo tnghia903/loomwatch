@@ -49,7 +49,7 @@ const ROLE_CHARS: usize = 400;
 /// How much of its own instructions an agent answering in the chat is given.
 const OWN_ROLE_CHARS: usize = 6_000;
 /// What the read's session is recorded as.
-const READER_ID: &str = "reader";
+pub(crate) const READER_ID: &str = "reader";
 /// What the reader is told it is, in place of the base prompt every team agent gets.
 const READER_PROMPT: &str = "You read one message sent to a LoomWatch team's chat, as a \
      thoughtful colleague on that team would, and say what it needs. Answer in exactly the format \
@@ -72,6 +72,10 @@ pub(crate) struct Addressed<'a> {
 pub(crate) struct Context {
     pub(crate) conversation: Option<String>,
     pub(crate) replying: Option<String>,
+    /// The part of a file the message is about (ADR 0077), named with its file and quoted whole,
+    /// as a run is handed it: an answer with no tools can't open the file, and the name in
+    /// `replying` holds only its first line.
+    pub(crate) part: Option<String>,
 }
 
 /// The agents who would answer `message` themselves, in the team's order; `None` when it needs
@@ -177,7 +181,7 @@ fn reply_of(turn: Option<Result<String, String>>) -> Reply {
 }
 
 /// One turn with no tools, recorded as a session of its own: its reply, or why it failed.
-async fn one_turn(
+pub(crate) async fn one_turn(
     archive: &EventArchive,
     teams_root: &Path,
     agent_id: &str,
@@ -233,7 +237,7 @@ fn failure_words(error: &anyhow::Error) -> String {
 }
 
 /// A model that never calls a real one: the offline demo, or a test's scripted `demo/…` stand-in.
-fn stand_in(model: &str) -> bool {
+pub(crate) fn stand_in(model: &str) -> bool {
     let model = ModelRef::parse(model);
     model.id == OFFLINE_MODEL || model.id.starts_with("demo/")
 }
@@ -275,6 +279,7 @@ fn read_prompt(addressed: &Addressed<'_>, message: &str, context: &Context) -> S
     format!(
         "The person wrote this in the chat of their LoomWatch team{}, to {to}{}:\n\n\
          <message>\n{message}\n</message>\n\n\
+         {}\
          The team's agents, each with its id and the start of its instructions:\n{agents}\n\
          {}\
          Read the message as a thoughtful colleague on this team would, with the conversation, \
@@ -297,6 +302,7 @@ fn read_prompt(addressed: &Addressed<'_>, message: &str, context: &Context) -> S
             .replying
             .as_deref()
             .map_or_else(String::new, |reply| format!(", replying to {reply}")),
+        part_block(context),
         conversation_block(context),
     )
 }
@@ -382,7 +388,7 @@ fn reply_prompt(
     });
     format!(
         "{}{remembered}The person wrote this in the team's chat, to {to}{}:\n\n<message>\n{message}\n</message>\n\
-         {together}\n\n\
+         {together}\n\n{}\
          Reply as yourself, the way a person on a team replies in a group chat: in the language of \
          the message, plainly, in one to four short sentences unless the question needs a little \
          more. Answer from what you know about your own work and from the conversation, and speak \
@@ -394,7 +400,20 @@ fn reply_prompt(
             .replying
             .as_deref()
             .map_or_else(String::new, |reply| format!(", replying to {reply}")),
+        part_block(context),
     )
+}
+
+/// The part of a file the message is about, quoted whole, or nothing.
+fn part_block(context: &Context) -> String {
+    context
+        .part
+        .as_deref()
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map_or_else(String::new, |part| {
+            format!("The message is about this part of a file:\n<part>\n{part}\n</part>\n\n")
+        })
 }
 
 fn conversation_block(context: &Context) -> String {
@@ -553,6 +572,7 @@ mod tests {
         let context = Context {
             conversation: Some("You to the team: the RAG brief".to_owned()),
             replying: Some("Fact checker's answer (\u{201c}Not met\u{201d})".to_owned()),
+            part: None,
         };
         let prompt = read_prompt(&one, "why not met?", &context);
         assert!(prompt.contains(
@@ -594,6 +614,43 @@ mod tests {
         assert!(prompt.contains("speak only for yourself"));
         assert!(prompt.contains("Don't start your work or produce your usual result"));
         assert!(prompt.ends_with("reply with exactly PASS."));
+    }
+
+    /// A message about a part of a file is read, and answered, with the whole part in view.
+    #[test]
+    fn the_read_and_the_answer_see_the_whole_part_a_message_is_about() {
+        let team = team();
+        let part = "A part of sales.md from RAG researcher, in the file /w/sales.md:\n\
+                    > Region\tSales\n> West\t120\n> East\t80";
+        let context = Context {
+            replying: Some(
+                "a part of sales.md from RAG researcher (\u{201c}Region\u{201d})".into(),
+            ),
+            part: Some(part.to_owned()),
+            ..Context::default()
+        };
+        let whole = format!("The message is about this part of a file:\n<part>\n{part}\n</part>");
+        let read = read_prompt(
+            &to_team(&team),
+            "Explain this part in plain words.",
+            &context,
+        );
+        assert!(read.contains(&whole), "{read}");
+        let answer = reply_prompt(
+            &to_team(&team),
+            "Explain this part in plain words.",
+            &context,
+            None,
+        );
+        assert!(answer.contains(&whole), "{answer}");
+        assert!(
+            answer.contains(&format!("{whole}\n\nReply as yourself")),
+            "the part sits right before what the agent is asked to do: {answer}"
+        );
+
+        let without = reply_prompt(&to_team(&team), "hi", &Context::default(), None);
+        assert!(!without.contains("<part>"));
+        assert!(!read_prompt(&to_team(&team), "hi", &Context::default()).contains("<part>"));
     }
 
     #[tokio::test]
@@ -644,6 +701,7 @@ mod tests {
         let context = Context {
             conversation: Some("You to the team: the RAG brief".to_owned()),
             replying: None,
+            part: None,
         };
 
         let (model, reader) = scripted(Some("TALK researcher checker"));

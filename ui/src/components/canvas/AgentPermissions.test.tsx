@@ -20,10 +20,16 @@ describe('AgentPermissions', () => {
     expect(screen.getByRole('button', { name: /Edit files/ })).toHaveTextContent('Edit filesAsks you')
     // Only a switch that is on adds a line: off is what the tile already says.
     expect(screen.getByText('It can search and read web pages.')).toBeInTheDocument()
-    expect(screen.queryByText('It can read, but not change, files.')).not.toBeInTheDocument()
+    expect(screen.queryByText(/before it changes a file/)).not.toBeInTheDocument()
     expect(screen.queryByText(/waits for your answer\. If nobody answers, it is declined: after 10 minutes, or after 12 hours in a scheduled run\./)).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'About Allowed without asking' }))
     expect(screen.getByText(/waits for your answer\. If nobody answers, it is declined: after 10 minutes, or after 12 hours in a scheduled run\./)).toBeInTheDocument()
+    // Off, an agent still has the ability and asks first (ADR 0104): never "cannot".
+    const explained = screen.getByText(/waits for your answer\. If nobody answers, it is declined: after 10 minutes, or after 12 hours in a scheduled run\./).parentElement!.textContent
+    expect(explained).toContain('Search the web off: it asks you before it uses the web. It doesn’t ask to read a link you send it.')
+    expect(explained).toContain('Edit files off: it asks you before it changes a file.')
+    expect(explained).toContain('Run commands off: it asks you before it runs a command.')
+    expect(explained).not.toMatch(/cannot|only from what it is given/)
   })
 
   it('says Auto on the commands switch when the team is in Auto mode, and only while that switch is off', () => {

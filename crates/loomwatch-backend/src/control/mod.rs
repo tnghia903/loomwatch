@@ -10,7 +10,9 @@
 //! so the panel renders it from the same stream as the assistant's own words and tool calls, and a
 //! reload shows exactly what was proposed.
 
+mod find;
 mod instructions;
+mod jobs;
 mod mcp;
 #[cfg(test)]
 mod tests;
@@ -65,6 +67,8 @@ pub struct ControlOptions {
     /// A model that replaces the person's choice for every conversation, from
     /// `LOOMWATCH_ASK_MODEL`: `fake/offline` for an offline demo.
     pub ask_model: Option<String>,
+    /// The person's home folder, where `find_files` looks for the folders and files they name.
+    pub home: Option<PathBuf>,
 }
 
 #[derive(Clone)]
@@ -80,6 +84,7 @@ struct Inner {
     /// `http://127.0.0.1:<port>`: what links in tool results start with.
     origin: String,
     ask_model: Option<String>,
+    home: Option<PathBuf>,
     conversations: RwLock<BTreeMap<String, Arc<Conversation>>>,
     proposals: RwLock<BTreeMap<String, Proposal>>,
 }
@@ -142,13 +147,16 @@ struct RunRequest {
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AskContext {
-    /// `home`, `build` or `run`.
+    /// `home`, `build`, `run` or `project`.
     #[serde(default)]
     view: Option<String>,
     #[serde(default)]
     team_path: Option<String>,
     #[serde(default)]
     run_id: Option<String>,
+    /// The project whose room the person is in (ADR 0097).
+    #[serde(default)]
+    project: Option<String>,
 }
 
 struct Turn {
@@ -172,6 +180,16 @@ struct Proposal {
     base_revision: Option<String>,
     summary: String,
     created_at: String,
+    /// Each agent's name as the team is read, by id: an agent that points at one of My agents has
+    /// none in the file, and the card names it as My agents does (ADR 0096).
+    agent_names: BTreeMap<String, String>,
+    /// What every agent of the team should know about the work (ADR 0097), which Apply saves
+    /// beside the team as a Brief note: the request's details live in the team, not in an agent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    brief: Option<String>,
+    /// The project the team works in, and whether Apply makes it first (ADR 0097).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    project: Option<mcp::ProposedProject>,
 }
 
 impl Control {
@@ -193,6 +211,7 @@ impl Control {
                     .ask_model
                     .map(|model| model.trim().to_owned())
                     .filter(|model| !model.is_empty()),
+                home: options.home.filter(|home| home.is_absolute()),
                 conversations: RwLock::default(),
                 proposals: RwLock::default(),
             }),
@@ -224,12 +243,7 @@ impl Control {
     }
 
     fn run_url(&self, team_path: &str, run_id: &str) -> String {
-        format!(
-            "{}/?path={}&run={}",
-            self.inner.origin,
-            encode_query(team_path),
-            encode_query(run_id)
-        )
+        run_address(&self.inner.origin, team_path, run_id)
     }
 
     async fn conversation(&self, id: &str) -> Option<Arc<Conversation>> {
@@ -274,6 +288,15 @@ impl Control {
     }
 }
 
+/// The built-in Checker job (ADR 0096): its instructions, and the model and thinking effort it runs
+/// on — another maker's model where the person's sources have one. `LoomWatch`'s own check of an
+/// answer is this job (ADR 0098).
+pub(crate) fn checker_job() -> (String, String, String) {
+    let job = jobs::named("checker").expect("schemas/built-in-jobs.json has the checker job");
+    let (model, effort) = job.model();
+    (job.role(), model, effort)
+}
+
 /// The model `tier` runs on, paid by a connected plan that offers it, else `OpenRouter` (ADR 0073,
 /// `ModelTiers::model_on`); `OpenRouter`'s when nothing says.
 pub(crate) fn tier_model(tier: &str) -> String {
@@ -294,6 +317,24 @@ pub(crate) fn tier_model(tier: &str) -> String {
         Source::OpenRouter => true,
     };
     crate::ai::MODEL_TIERS.model_on(tier, &ai.connected_sources(), &offers)
+}
+
+/// Where a run opens in the app: its team's page on that run, or, for a run of an agent's own chat
+/// (`.jobs/.bench/<id>.yaml`), that agent's chat in My agents with the run's Details beside it, as
+/// the app's own links (`historyRunUrl` in ui/src/lib/runs/history.ts) open it.
+fn run_address(origin: &str, team_path: &str, run_id: &str) -> String {
+    match crate::jobs::chat_of(team_path) {
+        Some(agent) => format!(
+            "{origin}/agents/{}?view=chat&run={}",
+            encode_query(agent),
+            encode_query(run_id)
+        ),
+        None => format!(
+            "{origin}/?path={}&run={}",
+            encode_query(team_path),
+            encode_query(run_id)
+        ),
+    }
 }
 
 fn encode_query(value: &str) -> String {
@@ -427,6 +468,7 @@ pub(crate) fn ask_spec(workspace: PathBuf) -> ProcessSpec {
         asker: None,
         lessons: Vec::new(),
         pictures: Vec::new(),
+        links: Vec::new(),
     }
 }
 
@@ -494,7 +536,12 @@ async fn converse(
         let Ok(Some(turn)) = tokio::time::timeout(IDLE_LIMIT, turns.recv()).await else {
             break;
         };
-        let prompt = compose_prompt(&control, &turn, first);
+        let has = if first {
+            Some(what_they_have(&control).await)
+        } else {
+            None
+        };
+        let prompt = compose_prompt(&control, &turn, has.as_deref());
         first = false;
         control
             .record(
@@ -567,12 +614,14 @@ async fn fail(control: &Control, conversation: &Conversation, message: &str) {
     *conversation.turns.lock().await = None;
 }
 
-/// What the app is told. The first turn carries the instructions; every turn says where the person
-/// is, so the app never has to ask a tool for it.
-fn compose_prompt(control: &Control, turn: &Turn, first: bool) -> String {
+/// What the app is told. The first turn carries the instructions and what the person has (`has`);
+/// every turn says where the person is, so the app never has to ask a tool for it.
+fn compose_prompt(control: &Control, turn: &Turn, has: Option<&str>) -> String {
     let mut prompt = String::new();
-    if first {
+    if let Some(has) = has {
         prompt.push_str(mcp::INSTRUCTIONS);
+        prompt.push_str("\n\n");
+        prompt.push_str(has);
         prompt.push_str("\n\n");
     }
     prompt.push_str("## Where the person is\n");
@@ -580,6 +629,95 @@ fn compose_prompt(control: &Control, turn: &Turn, first: bool) -> String {
     prompt.push_str("\n\n## The person's message\n");
     prompt.push_str(turn.text.trim());
     prompt
+}
+
+/// The most names of one kind [`what_they_have`] lists.
+const NAMES_LISTED: usize = 25;
+
+/// What the person has to build with, by name, said once at the top of a conversation so Ask builds
+/// from it rather than from nothing (ADR 0096): their teams, My agents with the ids a team points
+/// at, their skills and connected tools, and the ways of paying they connected. The tools give
+/// the rest.
+async fn what_they_have(control: &Control) -> String {
+    let root = control.inner.teams_root.clone();
+    let skills_folder = control.inner.skills_folder.clone();
+    let on_disk = tokio::task::spawn_blocking(move || {
+        let teams = crate::api::discover_team_files(&root)
+            .unwrap_or_default()
+            .iter()
+            .map(|file| {
+                crate::api::summarize_team_file(&root, file)
+                    .name
+                    .unwrap_or_else(|| file.clone())
+            })
+            .collect::<Vec<_>>();
+        let agents = crate::jobs::list_jobs(&root)
+            .map(|list| {
+                list.jobs
+                    .iter()
+                    .map(|agent| format!("{} (`{}`)", agent.spec.name, agent.id))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let skills = crate::capabilities::detect_capabilities(skills_folder.as_deref(), &root)
+            .skills
+            .into_iter()
+            .map(|skill| skill.name)
+            .collect::<Vec<_>>();
+        let projects = crate::projects::list(&root)
+            .into_iter()
+            .filter(|(_, project)| !project.put_away)
+            .map(|(id, project)| format!("{} (`{id}`)", project.name))
+            .collect::<Vec<_>>();
+        (teams, agents, skills, projects)
+    })
+    .await;
+    let (teams, agents, skills, projects) = on_disk.unwrap_or_default();
+    let tools = mcp::connected_tool_names().await;
+    let paying = crate::ai::installed()
+        .map(crate::ai::Ai::connected_sources)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|source| {
+            serde_json::to_value(source)
+                .ok()?
+                .as_str()
+                .map(str::to_owned)
+        })
+        .collect::<Vec<_>>();
+    let line = |label: &str, names: &[String]| {
+        let shown = names.iter().take(NAMES_LISTED).cloned().collect::<Vec<_>>();
+        let listed = match names.len() {
+            0 => "none yet".to_owned(),
+            count if count > NAMES_LISTED => {
+                format!("{}, and {} more", shown.join(", "), count - NAMES_LISTED)
+            }
+            _ => shown.join(", "),
+        };
+        format!("- {label}: {listed}.\n")
+    };
+    let mut has = String::from("## What the person has\n");
+    has.push_str(&line("Projects", &projects));
+    has.push_str(&line("Teams", &teams));
+    has.push_str(&line("My agents", &agents));
+    has.push_str(&line("Skills", &skills));
+    has.push_str(&line("Connected tools", &tools));
+    has.push_str(&line("Ways of paying connected", &paying));
+    has.push_str(this_computer(cfg!(target_os = "macos")));
+    has.trim_end().to_owned()
+}
+
+/// What an agent's commands can reach on this computer, said to Ask so it knows whether a maker may
+/// run its programs without asking (the owner's ruling, ADR 0096): on a Mac, commands run in a
+/// sandbox that keeps the files they change to the agent's own folder and temporary folders
+/// (`agent/sandbox.rs`); elsewhere nothing does, so each command asks.
+fn this_computer(mac: bool) -> &'static str {
+    if mac {
+        "- This computer: a Mac, where an agent's commands run in a sandbox that keeps the files \
+         they change to its own folder.\n"
+    } else {
+        "- This computer: not a Mac, so an agent's commands could change any file the person can.\n"
+    }
 }
 
 fn describe_context(control: &Control, context: &AskContext) -> String {
@@ -606,12 +744,73 @@ fn describe_context(control: &Control, context: &AskContext) -> String {
             )
         })
     });
+    if let Some(room) = context
+        .project
+        .as_deref()
+        .and_then(|id| describe_room(&control.inner.teams_root, id))
+    {
+        return room;
+    }
     match (context.view.as_deref(), team, run) {
         (Some("run"), Some(team), Some(run)) => format!("Watching {run} of {team}."),
         (Some("run"), Some(team), None) => format!("On the Run view of {team}."),
         (_, Some(team), _) => format!("Building {team} on the canvas."),
         _ => "On Home, with no team open.".to_owned(),
     }
+}
+
+/// Where the person is when they ask in a project's room (ADR 0097): which project, what every
+/// agent in it knows, and its teams, so Ask answers from the room and proposes teams that work in it.
+fn describe_room(teams_root: &std::path::Path, id: &str) -> Option<String> {
+    use std::fmt::Write as _;
+    let project = crate::projects::read(teams_root, id).ok()??;
+    let teams = crate::projects::teams_of(teams_root)
+        .remove(id)
+        .unwrap_or_default()
+        .iter()
+        .map(|file| {
+            let name = crate::api::summarize_team_file(teams_root, file)
+                .name
+                .unwrap_or_else(|| file.clone());
+            format!("\"{name}\" (file `{file}`)")
+        })
+        .collect::<Vec<_>>();
+    let mut room = format!(
+        "In the room of the project \"{}\" (id `{id}`). A team you propose here works in this project: give `propose_team` `project: {{id: {id}}}`.\n",
+        project.name
+    );
+    let about = project.about.trim();
+    if !about.is_empty() {
+        let _ = write!(room, "Its About:\n{about}\n");
+    }
+    if !project.folders.is_empty() {
+        let folders = project
+            .folders
+            .iter()
+            .map(|folder| format!("{} (`{}`)", folder.name, folder.path))
+            .collect::<Vec<_>>();
+        let _ = writeln!(
+            room,
+            "Its folders, which every agent in it may read: {}.",
+            folders.join(", ")
+        );
+    }
+    if !project.notes.is_empty() {
+        room.push_str("Notes kept in it:\n");
+        for note in &project.notes {
+            let _ = writeln!(room, "- {}", note.text.trim());
+        }
+    }
+    let _ = write!(
+        room,
+        "Its teams: {}.",
+        if teams.is_empty() {
+            "none yet".to_owned()
+        } else {
+            teams.join(", ")
+        }
+    );
+    Some(room)
 }
 
 async fn conversation_status(

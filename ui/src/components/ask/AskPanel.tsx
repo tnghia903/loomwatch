@@ -1,15 +1,16 @@
-import { AlertCircle, ArrowUp, Check, RotateCcw, X } from 'lucide-react'
+import { AlertCircle, Check, RotateCcw, X } from '../ui/icon'
 import { useEffect, useId, useRef, type KeyboardEvent } from 'react'
 
 import type { AskContext } from '../../lib/ask/client'
-import { keys } from '../../lib/platform'
 import type { AskStep, AssistantTurn } from '../../lib/ask/thread'
 import type { AskController } from '../../lib/ask/useAsk'
-import { StatusGlyph } from '../ui/glyphs'
+import { LoomMark, StatusGlyph } from '../ui/glyphs'
 import { Markdown } from '../ui/Markdown'
 import { Sources } from '../connections/Sources'
 import { AskCardView, type CardActions } from './AskCards'
 import { AskModelPicker } from './AskModelPicker'
+import { SaidText } from '../chat/SaidText'
+import { SendButton } from '../box/BoxButtons'
 
 const SUGGESTIONS: Record<AskContext['view'], string[]> = {
   home: [
@@ -28,12 +29,18 @@ const SUGGESTIONS: Record<AskContext['view'], string[]> = {
     'Draft a note for the review step',
     'Why did this run stop?',
   ],
+  project: [
+    'Where are we with this project?',
+    'Set up a team for the next step',
+    'What do the agents here know?',
+  ],
 }
 
 const PLACEHOLDER: Record<AskContext['view'], string> = {
   home: 'Describe the job, in your own words',
   build: 'Ask for a change, or say “run it”',
   run: 'Ask about this run',
+  project: 'Ask about this project',
 }
 
 function StepIcon({ status }: { status: AskStep['status'] }) {
@@ -79,6 +86,8 @@ interface AskPanelProps {
   hidden?: boolean
   /** On Home, where there is no zoom bar to stop above. */
   onHome?: boolean
+  /** Its heading, when it answers about one thing: "Ask about SUTD final project" (ADR 0097). */
+  title?: string
 }
 
 /**
@@ -86,7 +95,7 @@ interface AskPanelProps {
  * sets up, changes, runs and reviews teams through LoomWatch's tools (ADR 0033). What it makes is shown, never done: a team
  * arrives on the canvas to apply, a run waits for Start, a review note goes in the box unsent.
  */
-export function AskPanel({ ask, view, cards, hidden = false, onHome = false }: AskPanelProps) {
+export function AskPanel({ ask, view, cards, hidden = false, onHome = false, title = 'Ask LoomWatch' }: AskPanelProps) {
   const titleId = useId()
   const input = useRef<HTMLTextAreaElement>(null)
   const scroller = useRef<HTMLDivElement>(null)
@@ -131,11 +140,12 @@ export function AskPanel({ ask, view, cards, hidden = false, onHome = false }: A
   const shownModel = (!finished && thread.model) || ask.selectedModel
 
   return (
-    <aside className={`ask-panel ${onHome ? 'on-home' : ''}`} aria-labelledby={titleId} onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); ask.setOpen(false) } }}>
+    <aside className={`ask-panel ${onHome ? 'on-home' : ''}`} data-tour="ask" aria-labelledby={titleId} onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); ask.setOpen(false) } }}>
       <div className="ask-glass" aria-hidden="true" />
       <header className="ask-head">
         <div className="ask-head-text">
-          <h2 id={titleId}>Ask LoomWatch</h2>
+          {/* In a project's room Ask answers under LoomWatch's own mark (ADR 0097). */}
+          <h2 id={titleId}>{view === 'project' && <LoomMark size={20} />}{title}</h2>
           {ask.unavailable
             ? <p className="unavailable">{ask.unavailable}</p>
             : (
@@ -152,15 +162,15 @@ export function AskPanel({ ask, view, cards, hidden = false, onHome = false }: A
             )}
         </div>
         {items.length > 0 && <button type="button" className="iconbtn" onClick={ask.startOver} aria-label="Start a new conversation" title="New conversation"><RotateCcw size={15} aria-hidden="true" /></button>}
-        <button type="button" className="iconbtn" onClick={() => ask.setOpen(false)} aria-label="Close Ask LoomWatch" title="Close (Esc)"><X size={15} aria-hidden="true" /></button>
+        <button type="button" className="iconbtn" onClick={() => ask.setOpen(false)} aria-label={`Close ${title}`} title="Close (Esc)"><X size={15} aria-hidden="true" /></button>
       </header>
 
       <div className="ask-scroll" ref={scroller}>
         {ask.needsKey && <div className="ask-key"><Sources title="Choose how Ask’s model is paid" intro={false} /></div>}
         {ask.needsKey ? null : empty ? (
           <div className="ask-empty">
-            <p className="ask-empty-title">What should your team do?</p>
-            <p className="ask-empty-text">I can set up a team, change one, start a run, or help you review one. Nothing is saved or run until you say so.</p>
+            <p className="ask-empty-title">{view === 'project' ? 'What should happen next here?' : 'What should your team do?'}</p>
+            <p className="ask-empty-text">{view === 'project' ? 'I know this project’s About, notes, folders and teams. I can answer about it, set up a team in it, or start one. Nothing is saved or run until you say so.' : 'I can set up or change a team from your own agents, folders and tools, start a run, or help you review one. Nothing is saved or run until you say so.'}</p>
             <ul className="ask-suggestions" aria-label="Try asking">
               {SUGGESTIONS[view].map((suggestion, index) => (
                 <li key={suggestion} style={{ ['--i' as string]: index }}>
@@ -172,9 +182,9 @@ export function AskPanel({ ask, view, cards, hidden = false, onHome = false }: A
         ) : (
           <ol className="ask-thread" role="log" aria-label="Conversation" aria-live="polite">
             {items.map((item) => item.kind === 'person'
-              ? <li key={item.id} className="ask-you"><p>{item.text}</p></li>
+              ? <li key={item.id} className="ask-you"><div className="ask-you-said"><SaidText text={item.text} /></div></li>
               : <Reply key={item.id} turn={item} cards={cards} />)}
-            {ask.pending && <li className="ask-you pending"><p>{ask.pending}</p></li>}
+            {ask.pending && <li className="ask-you pending"><div className="ask-you-said"><SaidText text={ask.pending} /></div></li>}
           </ol>
         )}
         {working && (
@@ -213,9 +223,7 @@ export function AskPanel({ ask, view, cards, hidden = false, onHome = false }: A
             maxLength={8000}
             disabled={Boolean(ask.unavailable)}
           />
-          <button type="submit" className="ask-send" aria-label="Send" title={`Send (${keys('↵')})`} disabled={!ask.draft.trim() || working || ask.sending || Boolean(ask.unavailable)}>
-            <ArrowUp size={16} aria-hidden="true" />
-          </button>
+          <SendButton label="Send" disabled={!ask.draft.trim() || working || ask.sending || Boolean(ask.unavailable)} />
         </div>
         <label className="ask-switch">
           <input type="checkbox" role="switch" checked={ask.askBeforeRun} onChange={(event) => ask.setAskBeforeRun(event.target.checked)} />

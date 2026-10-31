@@ -1,4 +1,4 @@
-import { Command, type LucideIcon } from 'lucide-react'
+import { Command, type IconComponent } from '../ui/icon'
 import { useMemo, useState } from 'react'
 import { keys } from '../../lib/platform'
 
@@ -7,7 +7,7 @@ export interface CommandAction {
   shortcut?: string
   run: () => void
   disabled?: boolean
-  icon?: LucideIcon
+  icon?: IconComponent
 }
 
 /** What the palette understood from plain words or a /command (lib/story/intent.ts). */

@@ -54,7 +54,7 @@ describe('ComponentPalette jobs', () => {
     expect(await screen.findByText(/Build one in/)).toBeInTheDocument()
     expect(screen.queryByText(/Add to My agents/)).toBeNull()
     // The review step is a step of the workflow, not an agent, so it stays here.
-    expect(within(section('Workflow steps')).getByRole('button', { name: /^You \(review step\)/ })).toBeInTheDocument()
+    expect(within(section('Other steps')).getByRole('button', { name: /^You \(review step\)/ })).toBeInTheDocument()
   })
 
   it('lists saved jobs first and places one with its skills, as the built-in jobs are placed', async () => {
@@ -64,7 +64,7 @@ describe('ComponentPalette jobs', () => {
     palette()
     const yours = await waitFor(() => section('My agents'))
     const headings = screen.getAllByRole('heading').map((heading) => heading.textContent)
-    expect(headings.indexOf('My agents')).toBeLessThan(headings.indexOf('Workflow steps'))
+    expect(headings.indexOf('My agents')).toBeLessThan(headings.indexOf('Other steps'))
     fireEvent.click(within(yours).getByRole('button', { name: /^Release notes/ }))
     const payload = JSON.parse((added.mock.calls[0][0] as CustomEvent<string>).detail)
     expect(payload).toMatchObject({ label: 'Release notes', role: 'Write the notes.', model: 'openai/gpt-6.1-sol', capabilities: [{ kind: 'skill', name: 'release-style' }], from: { agent: 'release-notes', version: 1 } })
@@ -75,10 +75,10 @@ describe('ComponentPalette jobs', () => {
   it('removes a saved job only on a second click', async () => {
     jobs = [{ id: 'release-notes', name: 'Release notes', instructions: 'Write the notes.', file: '.jobs/release-notes.yaml' }]
     palette()
-    const remove = await screen.findByRole('button', { name: 'Remove the agent Release notes' })
+    const remove = await screen.findByRole('button', { name: 'Remove Release notes from My agents' })
     fireEvent.click(remove)
     expect(removed).toEqual([])
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm removing Release notes' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm removing Release notes from My agents' }))
     await waitFor(() => expect(removed).toEqual(['release-notes']))
     expect(await within(section('My agents')).findByText('None yet')).toBeInTheDocument()
   })

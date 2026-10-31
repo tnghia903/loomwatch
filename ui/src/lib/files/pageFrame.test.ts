@@ -20,11 +20,11 @@ describe('a web page in the reader', () => {
       const url = String(input)
       if (url.startsWith('/api/files/raw') && url.includes('chart.png')) return new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), { status: 200, headers: { 'content-type': 'image/png' } })
       if (url.includes(encodeURIComponent('/w/site/style.css'))) return new Response(JSON.stringify({ text: 'body{color:red}' }), { status: 200 })
-      if (url.includes(encodeURIComponent('/w/app.js'))) return new Response(JSON.stringify({ text: 'run("</script>")' }), { status: 200 })
+      if (url.includes(encodeURIComponent('/w/site/js/app.js'))) return new Response(JSON.stringify({ text: 'run("</script>")' }), { status: 200 })
       return new Response(JSON.stringify({ error: 'gone' }), { status: 404 })
     }))
     const html = '<html><head><base href="http://evil/"><meta http-equiv="content-security-policy" content="default-src *"><link rel="stylesheet" href="style.css"></head>'
-      + '<body><img src="chart.png"><img src="https://cdn.example/x.png"><img src="missing.png"><script src="../app.js"></script></body></html>'
+      + '<body><img src="chart.png"><img src="https://cdn.example/x.png"><img src="missing.png"><script src="../app.js"></script><script src="js/app.js"></script></body></html>'
     const ready = await pageDocument(html, '/w/site/page.html')
     const doc = new DOMParser().parseFromString(ready, 'text/html')
     const head = doc.head.children
@@ -37,15 +37,125 @@ describe('a web page in the reader', () => {
     const images = [...doc.querySelectorAll('img')].map((image) => image.getAttribute('src'))
     expect(images[0]).toBe('data:image/png;base64,iVBORw==')
     expect(images.slice(1)).toEqual(['https://cdn.example/x.png', 'missing.png'])
-    const script = [...doc.querySelectorAll('script')].at(-1)!
+    const [outside, script] = [...doc.querySelectorAll('script')].slice(-2)
+    // A script above the page's folder is left as written: the page reaches only its own folder.
+    expect(outside.getAttribute('src')).toBe('../app.js')
+    expect(vi.mocked(fetch).mock.calls.map(([input]) => decodeURIComponent(String(input)))).not.toContainEqual(expect.stringContaining('/w/app.js'))
     expect(script.hasAttribute('src')).toBe(false)
     expect(ready).toContain('run("<\\/script>")')
   })
 
-  it('names a file beside the page by its full path', () => {
+  it('names a file beside the page by its full path, inside the page’s folder only', () => {
     expect(besidePath('/w/site/page.html', 'img/chart%20one.png?v=2#x')).toBe('/w/site/img/chart one.png')
-    expect(besidePath('/w/site/page.html', '../../../../etc/x.css')).toBe('/etc/x.css')
+    expect(besidePath('/w/site/page.html', 'img/../data/sales.csv')).toBe('/w/site/data/sales.csv')
+    expect(besidePath('/w/site/page.html', '/data.csv')).toBe('/w/site/data.csv')
     expect(besidePath('C:\\w\\page.html', './a.png')).toBe('C:\\w\\a.png')
+    for (const above of ['../other-team/secret.csv', 'img/../../x.css', '../../../../etc/x.css', '.', 'img/..']) expect(besidePath('/w/site/page.html', above)).toBeNull()
+    // Named from its stylesheet, still inside the page's folder.
+    expect(besidePath('/w/site/page.html', '../fonts/a.woff2', '/w/site/css/style.css')).toBe('/w/site/fonts/a.woff2')
+    expect(besidePath('/w/site/page.html', '../../a.woff2', '/w/site/css/style.css')).toBeNull()
+  })
+
+  it('hands a clip over as the page runs, and takes in its poster and the pictures and fonts its CSS names', async () => {
+    const bytes = (type: string) => new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { 'content-type': type } })
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = decodeURIComponent(String(input))
+      if (url.startsWith('/api/files/read') && url.includes('/w/site/css/style.css')) {
+        return new Response(JSON.stringify({ text: '@font-face{src:url(../fonts/brand.woff2)}body{background:url("../img/bg.png")}a{fill:url(#shine)}b{background:url(https://cdn.example/x.png)}i{background:url(../../up.png)}' }), { status: 200 })
+      }
+      if (url.startsWith('/api/files/raw') && url.endsWith('/w/site/fonts/brand.woff2')) return bytes('font/woff2')
+      if (url.startsWith('/api/files/raw') && /\/w\/site\/(img\/bg|img\/dot|poster)\.png$/.test(url)) return bytes('image/png')
+      return new Response(JSON.stringify({ error: 'gone' }), { status: 404 })
+    }))
+    const html = '<html><head><link rel="stylesheet" href="css/style.css"><style>.x{background:url(img/dot.png)}</style></head><body>'
+      + '<video src="clip.mp4" poster="poster.png"></video><video><source src="clips/b.webm"></video><audio src="../outside.mp3"></audio>'
+      + '<div style="background: url(\'img/dot.png\')"></div></body></html>'
+    const doc = new DOMParser().parseFromString(await pageDocument(html, '/w/site/page.html'), 'text/html')
+    const [video, holder] = [...doc.querySelectorAll('video')]
+    expect(video.hasAttribute('src')).toBe(false)
+    expect(video.getAttribute('data-lw-src')).toBe('clip.mp4')
+    expect(video.getAttribute('poster')).toBe('data:image/png;base64,AQID')
+    expect(holder.querySelector('source')!.getAttribute('data-lw-src')).toBe('clips/b.webm')
+    expect(holder.querySelector('source')!.hasAttribute('src')).toBe(false)
+    expect(doc.querySelector('audio')!.getAttribute('src')).toBe('../outside.mp3')
+    expect(doc.querySelector('audio')!.hasAttribute('data-lw-src')).toBe(false)
+    // The stylesheet's own files are named from where it is; the web, the page's own ids and
+    // anything above its folder are left as written.
+    const [linked, inline] = [...doc.querySelectorAll('style')].map((style) => style.textContent)
+    expect(inline).toBe('.x{background:url("data:image/png;base64,AQID")}')
+    expect(linked).toBe('@font-face{src:url("data:font/woff2;base64,AQID")}body{background:url("data:image/png;base64,AQID")}a{fill:url(#shine)}b{background:url(https://cdn.example/x.png)}i{background:url(../../up.png)}')
+    expect(doc.querySelector('div')!.getAttribute('style')).toBe('background: url("data:image/png;base64,AQID")')
+    expect(vi.mocked(fetch).mock.calls.map(([input]) => decodeURIComponent(String(input))).join(' ')).not.toMatch(/outside|up\.png|clip\.mp4|b\.webm/)
+  })
+
+  it('answers the page’s fetch and XMLHttpRequest for files beside it through the reader, and hands its clips over as blobs', async () => {
+    const holder = document.createElement('iframe')
+    document.body.append(holder)
+    const inner = holder.contentWindow! as Window & typeof globalThis
+    // jsdom's frames have none of fetch's own classes, which a browser's frame has. Its fetch
+    // stands for the page's own, which the policy stops.
+    const stopped = vi.fn(() => Promise.reject(new TypeError('stopped by the policy')))
+    Object.assign(inner, { fetch: stopped, Response, Blob, TextDecoder })
+    inner.URL.createObjectURL = () => 'blob:clip'
+    const sent: Record<string, unknown>[] = []
+    vi.spyOn(inner.parent, 'postMessage').mockImplementation((message: unknown) => { sent.push(message as Record<string, unknown>) })
+    const loadsOf = () => sent.filter((message) => message.type === 'load')
+    const answer = (id: unknown, file: Record<string, unknown>) => inner.dispatchEvent(new inner.MessageEvent('message', { data: { lw: 'reader', type: 'loaded', id, ...file }, source: inner.parent }))
+    const text = (words: string) => new TextEncoder().encode(words).buffer
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 0))
+    try {
+      holder.contentDocument!.body.innerHTML = '<video data-lw-src="clip.mp4"></video>'
+      new inner.Function(PAGE_BRIDGE)()
+      // The clip is asked for at once, and plays from a blob made in the page.
+      expect(loadsOf()).toEqual([{ lw: 'reader', type: 'load', id: 1, url: 'clip.mp4' }])
+      answer(1, { status: 200, mediaType: 'video/mp4', body: text('clip') })
+      await settle()
+      expect(holder.contentDocument!.querySelector('video')!.getAttribute('src')).toBe('blob:clip')
+
+      const fetched = inner.fetch('data/sales.csv')
+      expect(loadsOf().at(-1)).toEqual({ lw: 'reader', type: 'load', id: 2, url: 'data/sales.csv' })
+      answer(2, { status: 200, mediaType: 'text/csv; charset=utf-8', body: text('region,q3\nNorth,190\n') })
+      const response = await fetched
+      expect(response.ok).toBe(true)
+      expect(response.headers.get('content-type')).toBe('text/csv; charset=utf-8')
+      expect(await response.text()).toBe('region,q3\nNorth,190\n')
+      const gone = inner.fetch('../secret.csv')
+      answer(3, { status: 404, mediaType: '', body: null })
+      expect((await gone).status).toBe(404)
+      // The web is left to the page's own fetch.
+      await expect(inner.fetch('https://example.com/x.json')).rejects.toThrow('stopped by the policy')
+      expect(stopped).toHaveBeenCalledTimes(1)
+
+      const request = new inner.XMLHttpRequest()
+      const states: number[] = []
+      let loaded = ''
+      request.onreadystatechange = () => states.push(request.readyState)
+      request.addEventListener('load', function (this: XMLHttpRequest) { loaded = this.responseText })
+      request.open('GET', 'data/sales.csv')
+      request.send()
+      expect(loadsOf().at(-1)).toMatchObject({ id: 4, url: 'data/sales.csv' })
+      answer(4, { status: 200, mediaType: 'text/csv', body: text('a,b') })
+      await settle()
+      expect([request.status, loaded, request.getResponseHeader('Content-Type')]).toEqual([200, 'a,b', 'text/csv'])
+      expect(states).toEqual([1, 2, 3, 4])
+      const json = new inner.XMLHttpRequest()
+      json.responseType = 'json'
+      json.open('GET', 'data.json')
+      json.send()
+      answer(5, { status: 200, mediaType: 'application/json', body: text('{"q3":190}') })
+      await settle()
+      expect(JSON.stringify(json.response)).toBe('{"q3":190}')
+      const web = new inner.XMLHttpRequest()
+      let failed = false
+      web.onerror = () => { failed = true }
+      web.open('GET', 'https://example.com/x.json')
+      web.send()
+      await settle()
+      expect([failed, web.status, loadsOf().length]).toEqual([true, 0, 5])
+    } finally {
+      vi.restoreAllMocks()
+      holder.remove()
+    }
   })
 
   it('lets go of the marked words on Escape, which reaches the page and not the reader', async () => {
@@ -141,6 +251,11 @@ describe('a web page in the reader', () => {
       // one; the one whose answer is open is lit.
       expect(bubbles[0].className).toBe('lw-bubble lw-read lw-lit')
       expect(bubbles[1].className).toBe('lw-bubble lw-busy lw-dark')
+      // A change left for the agent wears its line (ADR 0107): dashed while it waits, solid once sent.
+      tell({ type: 'marks', asking: null, parts: [mark('beat Markov-chain', 'read', { change: 'waits' }), mark('Costs fell.', 'busy', { change: 'sent' }), mark('Sales fell.', 'read')] })
+      expect(bubbles[0].className).toBe('lw-bubble lw-read lw-change-waits')
+      expect(bubbles[1].className).toBe('lw-bubble lw-busy lw-change-sent lw-dark')
+      expect(bubbles[0].querySelector('svg.lw-change path')).not.toBeNull()
       tell({ type: 'marks', asking: null, parts: [] })
       expect(document.body.innerHTML).toBe(page)
     } finally {
@@ -246,6 +361,565 @@ describe('a web page in the reader', () => {
     }
   })
 
+  // jsdom lays nothing out: each element of a test page is where its `data-box` says (left, top,
+  // width, height); any other is nowhere.
+  const laidOut = (inner: Window & typeof globalThis) => vi.spyOn(inner.Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+    const [left, top, width, height] = (this.getAttribute('data-box') ?? '0 0 0 0').split(' ').map(Number)
+    return { left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) } as DOMRect
+  })
+  // A press, as a mouse makes one, at x, y on an element.
+  const press = (inner: Window & typeof globalThis, element: Element, x: number, y: number) => {
+    for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+      const init = { bubbles: true, cancelable: true, clientX: x, clientY: y }
+      element.dispatchEvent(type.startsWith('pointer') ? new inner.PointerEvent(type, { ...init, pointerType: 'mouse' }) : new inner.MouseEvent(type, init))
+    }
+  }
+
+  it('picks any part of the page while the Pick switch is on, rather than doing what the page does, and widens on a second click', async () => {
+    const holder = document.createElement('iframe')
+    document.body.append(holder)
+    const inner = holder.contentWindow! as Window & typeof globalThis
+    const doc = holder.contentDocument!
+    const sent: Record<string, unknown>[] = []
+    vi.spyOn(inner.parent, 'postMessage').mockImplementation((message: unknown) => { sent.push(message as Record<string, unknown>) })
+    laidOut(inner)
+    vi.spyOn(inner, 'requestAnimationFrame').mockImplementation((callback) => { callback(0); return 1 })
+    const opened = vi.spyOn(inner, 'open').mockImplementation(() => null)
+    // The page's clock, moved on by hand: the outline fades in for its first 160 ms.
+    let clock = 1000
+    vi.spyOn(inner.Date, 'now').mockImplementation(() => clock)
+    // It draws nothing: what is drawn into a part's picture, and where, is all there is to see.
+    const drawn: unknown[][] = []
+    const sizes: number[][] = []
+    vi.spyOn(inner.HTMLCanvasElement.prototype, 'getContext').mockImplementation(function (this: HTMLCanvasElement) {
+      sizes.push([this.width, this.height])
+      return { scale: () => undefined, fillRect: () => undefined, drawImage: (...args: unknown[]) => drawn.push(args) } as unknown as CanvasRenderingContext2D
+    })
+    vi.spyOn(inner.HTMLCanvasElement.prototype, 'toBlob').mockImplementation((done: BlobCallback) => done(new Blob(['png']) as Blob))
+    // A drawing is drawn as a picture of it, which loads at once.
+    Object.assign(inner, { Image: class { onload: (() => void) | null = null; set src(_: string) { setTimeout(() => this.onload?.()) } } })
+    const settle = (ms = 10) => new Promise((resolve) => setTimeout(resolve, ms))
+    const tell = (data: Record<string, unknown>) => inner.dispatchEvent(new inner.MessageEvent('message', { data: { lw: 'reader', ...data }, source: inner.parent }))
+    const picked = () => sent.filter((message) => message.type === 'thing').map((message) => [message.what, message.path, message.text])
+    try {
+      doc.body.innerHTML = '<h2 data-box="10 10 400 30">Plan</h2>'
+        + '<section id="plan" data-box="10 50 600 400"><div data-box="20 60 300 100"><p data-box="30 70 280 20">Costs <b data-box="70 70 30 20">rise</b> in <a href="https://x.example/may" data-box="120 70 40 20">May</a></p> '
+        + '<button data-box="30 100 80 30">Export</button></div><canvas id="chart" data-box="20 200 300 150"></canvas></section>'
+        + '<svg id="arch" data-box="10 500 600 400"><rect data-box="10 500 600 400"></rect><rect data-box="40 530 240 140"></rect><text data-box="45 532 100 10">Serving path</text>'
+        + '<g data-box="50 550 200 100"><rect data-box="50 550 200 100"></rect><text data-box="60 560 120 20">API · Container App</text><text data-box="60 590 150 20">FTS/BM25</text></g>'
+        + '<rect data-box="300 550 200 100"></rect><text data-box="310 560 100 20">Reranker app</text><text data-box="282 600 14 12">top 20</text></svg>'
+      new inner.Function(PAGE_BRIDGE)()
+      // The page's own handlers, added after LoomWatch's script, as a page's are.
+      const page: string[] = []
+      doc.querySelector('button')!.addEventListener('click', () => page.push('click'))
+      inner.addEventListener('mousedown', () => page.push('mousedown'), true)
+      inner.addEventListener('keydown', (event) => page.push(event.key), true)
+      const words = doc.querySelector('b')!
+
+      // Off, a click is the page's, and nothing is outlined or marked.
+      words.dispatchEvent(new inner.PointerEvent('pointermove', { bubbles: true, pointerType: 'mouse', clientX: 80, clientY: 75 }))
+      press(inner, doc.querySelector('button')!, 40, 110)
+      await settle()
+      expect(page).toEqual(['mousedown', 'click'])
+      expect(doc.querySelector('.lw-thing-box')).toBeNull()
+      expect(picked()).toEqual([])
+
+      // On, pointing at words outlines the block they are in, not the words.
+      tell({ type: 'pick', on: true })
+      page.length = 0
+      words.dispatchEvent(new inner.PointerEvent('pointermove', { bubbles: true, pointerType: 'mouse', clientX: 80, clientY: 75 }))
+      const pointing = doc.querySelector<HTMLElement>('.lw-thing-box.lw-pointing')!
+      expect([pointing.style.left, pointing.style.top, pointing.style.width, pointing.style.height]).toEqual(['28px', '68px', '284px', '24px'])
+      // The outlines are over the page, never in it.
+      expect(doc.body.querySelector('.lw-thing-box')).toBeNull()
+      // Pointed at another part, the outline glides there, though not while it is still fading in;
+      // while the page scrolls under it, it keeps to its part at once, and stays so until it moves on.
+      const glides = () => !doc.querySelector('.lw-thing-box.lw-pointing')!.classList.contains('lw-still')
+      const over = (element: Element, x: number, y: number) => element.dispatchEvent(new inner.PointerEvent('pointermove', { bubbles: true, pointerType: 'mouse', clientX: x, clientY: y }))
+      expect(glides()).toBe(false)
+      over(doc.querySelector('button')!, 40, 110)
+      expect(glides()).toBe(false)
+      clock += 200
+      over(words, 80, 75)
+      expect(glides()).toBe(true)
+      inner.dispatchEvent(new inner.Event('scroll'))
+      expect(glides()).toBe(false)
+      over(words, 82, 75)
+      expect(glides()).toBe(false)
+      over(doc.querySelector('button')!, 40, 110)
+      expect(glides()).toBe(true)
+      over(words, 80, 75)
+      expect([pointing.style.left, pointing.style.top]).toEqual(['28px', '68px'])
+      expect(glides()).toBe(true)
+      // The page's own cursors (a link's hand) give way while picking.
+      expect(doc.documentElement.classList.contains('lw-picking')).toBe(true)
+      // The fade and the glide are only for those who haven't asked for less motion, and never while still.
+      const css = [...doc.querySelectorAll('style')].map((style) => style.textContent).join('')
+      expect(css).toContain('html.lw-picking body :not(.lw-slot,.lw-slot *){cursor:auto!important}')
+      expect(css).toMatch(/@media \(prefers-reduced-motion:no-preference\)\{\.lw-thing-box\.lw-pointing\{animation:lw-point-in [^}]*\}\.lw-thing-box\.lw-pointing:not\(\.lw-still\)\{transition:left [^}]*\}\}/)
+      // A drag across words still marks the words, and the outline steps aside while they are marked.
+      Object.defineProperty(inner.Range.prototype, 'getBoundingClientRect', { configurable: true, value: () => ({ top: 70, bottom: 90, left: 70, right: 100 }) })
+      const range = doc.createRange()
+      range.selectNodeContents(words)
+      doc.getSelection()!.addRange(range)
+      doc.dispatchEvent(new inner.Event('pointerup'))
+      await settle()
+      expect(sent.at(-1)).toMatchObject({ type: 'selection', text: 'rise' })
+      expect(doc.querySelector('.lw-thing-box.lw-pointing')).toBeNull()
+      doc.dispatchEvent(new inner.KeyboardEvent('keydown', { key: 'Escape' }))
+      expect(sent.at(-1)).toMatchObject({ type: 'selection', text: '' })
+      expect(doc.querySelector('.lw-thing-box.lw-pointing')).not.toBeNull()
+      // A press that moves is a drag across words, and marks nothing more; a double click picks a word.
+      sent.length = 0
+      const at = (type: string, x: number, init: Record<string, unknown> = {}) => words.dispatchEvent(type.startsWith('pointer')
+        ? new inner.PointerEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: 75, pointerType: 'mouse', ...init })
+        : new inner.MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: 75, ...init }))
+      at('pointerdown', 72)
+      at('click', 98)
+      at('pointerdown', 80)
+      at('click', 80, { detail: 2 })
+      await settle()
+      expect(sent.filter((message) => message.type === 'thing')).toEqual([])
+      // Words still marked when a part is clicked (Safari keeps them through a press on a button) are let go of.
+      doc.getSelection()!.addRange(range)
+      press(inner, doc.querySelector('button')!, 40, 110)
+      await settle()
+      expect(String(doc.getSelection())).toBe('')
+      expect(sent.filter((message) => message.type === 'thing').map((message) => message.path)).toEqual(['section#plan > div > button'])
+      tell({ type: 'clear' })
+      sent.length = 0
+
+      // A click marks that part, and the page never sees it; a second click there marks the part
+      // around it, and the next the one around that, up to the biggest.
+      press(inner, words, 80, 75)
+      await settle()
+      expect(picked()).toEqual([['part', 'section#plan > div > p', 'The part “Costs rise in May”']])
+      // Words and boxes have no picture: the agent reads them in the page's code.
+      expect(sent.find((message) => message.type === 'thing')).not.toHaveProperty('picture')
+      expect(doc.querySelector('.lw-thing-box.lw-marking')).not.toBeNull()
+      // The part marked is not outlined twice.
+      expect(doc.querySelector('.lw-thing-box.lw-pointing')).toBeNull()
+      sent.length = 0
+      for (let count = 0; count < 3; count += 1) {
+        press(inner, words, 80, 75)
+        await settle()
+      }
+      // Past the biggest part below the page itself, the part first clicked again.
+      expect(picked().map(([, path]) => path)).toEqual(['section#plan > div', 'section#plan', 'section#plan > div > p'])
+      expect(doc.querySelectorAll('.lw-thing-box.lw-marking')).toHaveLength(1)
+      // A link is a part of its own, and isn't followed; a button isn't pressed.
+      sent.length = 0
+      press(inner, doc.querySelector('a')!, 130, 75)
+      await settle()
+      press(inner, doc.querySelector('button')!, 40, 110)
+      await settle()
+      expect(picked()).toEqual([['part', 'section#plan > div > p > a', 'The part “May”'], ['part', 'section#plan > div > button', 'The part “Export”']])
+      expect(opened).not.toHaveBeenCalled()
+      expect(page).toEqual([])
+      // Nor does the browser follow the link, or put a press into a button or a field.
+      expect(doc.querySelector('a')!.dispatchEvent(new inner.MouseEvent('click', { bubbles: true, cancelable: true }))).toBe(false)
+      expect(doc.querySelector('button')!.dispatchEvent(new inner.MouseEvent('mousedown', { bubbles: true, cancelable: true }))).toBe(false)
+      await settle()
+
+      // A chart whole, with its picture.
+      sent.length = 0
+      drawn.length = 0
+      press(inner, doc.querySelector('canvas')!, 100, 250)
+      await settle()
+      expect(picked()).toEqual([['chart', 'canvas#chart', 'The chart under “Plan”']])
+      expect(Object.prototype.toString.call(sent.find((message) => message.type === 'thing')!.picture)).toBe('[object ArrayBuffer]')
+      expect(drawn.map((args) => args[0])).toEqual([doc.querySelector('canvas')])
+
+      // In a drawing: the box under the pointer with the words on it, by its group; its picture is
+      // the drawing cut to it, with a little around it.
+      sent.length = 0
+      drawn.length = 0
+      sizes.length = 0
+      const [, api, , reranker, label] = [...doc.querySelectorAll('text')]
+      press(inner, api, 100, 600)
+      await settle()
+      expect(picked()).toEqual([['part', 'svg#arch > g', 'The part “API · Container App”']])
+      expect(sizes.at(-1)).toEqual([232, 132])
+      expect(drawn.at(-1)!.slice(1)).toEqual([-24, -34, 600, 400])
+      // Clicked again, the region drawn around it, by its own words; then the drawing.
+      sent.length = 0
+      press(inner, api, 100, 600)
+      await settle()
+      press(inner, api, 100, 600)
+      await settle()
+      expect(picked()).toEqual([['part', 'svg#arch > rect:nth-of-type(2)', 'The part “Serving path”'], ['chart', 'svg#arch', 'The chart under “Plan”']])
+      // A box with its words beside it rather than in a group: the words drawn on it.
+      sent.length = 0
+      press(inner, reranker, 360, 570)
+      await settle()
+      // A label on no box is a part of its own; the drawing's background is the drawing.
+      press(inner, label, 289, 606)
+      await settle()
+      press(inner, doc.querySelector('svg')!, 580, 880)
+      await settle()
+      expect(picked()).toEqual([
+        ['part', 'svg#arch > rect:nth-of-type(3)', 'The part “Reranker app”'],
+        ['part', 'svg#arch > text:nth-of-type(3)', 'The part “top 20”'],
+        ['chart', 'svg#arch', 'The chart under “Plan”'],
+      ])
+
+      // The arrow keys walk the parts as a tree: down and up to the ones beside, right to the
+      // first inside, left to the one around; Enter marks it. The page never sees those keys.
+      sent.length = 0
+      page.length = 0
+      tell({ type: 'clear' })
+      const keys = (...names: string[]) => names.forEach((key) => doc.body.dispatchEvent(new inner.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })))
+      const outlined = () => { const box = doc.querySelector<HTMLElement>('.lw-thing-box.lw-pointing'); return box && [box.style.left, box.style.top] }
+      words.dispatchEvent(new inner.PointerEvent('pointermove', { bubbles: true, pointerType: 'mouse', clientX: 80, clientY: 75 }))
+      // From the part pointed at last, the words' block: down to the one beside it and up again, left
+      // to the one around them, down to the chart, left, down to the drawing and right into it, its region.
+      const walked: unknown[] = []
+      for (const key of ['ArrowDown', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowDown', 'ArrowLeft', 'ArrowDown', 'ArrowRight']) {
+        keys(key)
+        walked.push(outlined())
+      }
+      expect(walked).toEqual([['28px', '98px'], ['28px', '68px'], ['28px', '98px'], ['18px', '58px'], ['18px', '198px'], ['8px', '48px'], ['8px', '498px'], ['38px', '528px']])
+      // Each is said, for a screen reader.
+      expect(sent.filter((message) => message.type === 'pointing').map((message) => message.text)).toEqual([
+        'The part “Export”', 'The part “Costs rise in May”', 'The part “Export”', 'The part “Costs rise in May Export”', 'The chart under “Plan”',
+        'The part “Costs rise in May Export”', 'The chart under “Plan”', 'The part “Serving path”',
+      ])
+      keys('Enter', 'a')
+      await settle()
+      expect(picked()).toEqual([['part', 'svg#arch > rect:nth-of-type(2)', 'The part “Serving path”']])
+      expect(page).toEqual(['a'])
+
+      // Esc lets go of it, and with nothing marked is the reader's (it stops picking).
+      keys('Escape')
+      expect(sent.at(-1)).toMatchObject({ type: 'selection', text: '' })
+      expect(doc.querySelector('.lw-thing-box.lw-marking')).toBeNull()
+      keys('Escape')
+      expect(sent.at(-1)).toMatchObject({ type: 'escape' })
+
+      // Off again, the outline goes, the page's cursors come back and a click is the page's.
+      tell({ type: 'pick', on: false })
+      expect(doc.querySelector('.lw-thing-box.lw-pointing')).toBeNull()
+      expect(doc.documentElement.classList.contains('lw-picking')).toBe(false)
+      page.length = 0
+      sent.length = 0
+      press(inner, doc.querySelector('button')!, 40, 110)
+      await settle()
+      expect(page).toEqual(['mousedown', 'click'])
+      expect(picked()).toEqual([])
+    } finally {
+      vi.restoreAllMocks()
+      holder.remove()
+    }
+  })
+
+  it('takes a drag across words in a drawing as the box they are on, switch or no switch', async () => {
+    const holder = document.createElement('iframe')
+    document.body.append(holder)
+    const inner = holder.contentWindow! as Window & typeof globalThis
+    const doc = holder.contentDocument!
+    const sent: Record<string, unknown>[] = []
+    vi.spyOn(inner.parent, 'postMessage').mockImplementation((message: unknown) => { sent.push(message as Record<string, unknown>) })
+    laidOut(inner)
+    vi.spyOn(inner.HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => null)
+    // Words, were they sent as words, are somewhere.
+    Object.defineProperty(inner.Range.prototype, 'getBoundingClientRect', { configurable: true, value: () => ({ top: 560, bottom: 610, left: 60, right: 210 }) })
+    try {
+      doc.body.innerHTML = '<svg id="arch" data-box="10 500 600 400"><g data-box="50 550 200 100"><rect data-box="50 550 200 100"></rect><text data-box="60 560 120 20">API · Container App</text><text data-box="60 590 150 20">FTS/BM25</text></g>'
+        + '<rect data-box="300 550 200 100"></rect><text data-box="310 560 100 20">Reranker app</text></svg>'
+      new inner.Function(PAGE_BRIDGE)()
+      const drag = async (from: Node, to: Node) => {
+        const range = doc.createRange()
+        range.setStart(from, 0)
+        range.setEnd(to, 3)
+        doc.getSelection()!.addRange(range)
+        doc.dispatchEvent(new inner.Event('pointerup'))
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+      const [api, fts, reranker] = [...doc.querySelectorAll('text')].map((text) => text.firstChild!)
+      await drag(api, fts)
+      // Not marked as words (a drawing's words can't carry the marker): the box they are on.
+      expect(sent.filter((message) => message.type === 'selection' && message.text)).toEqual([])
+      expect(sent.find((message) => message.type === 'thing')).toMatchObject({ what: 'part', path: 'svg#arch > g', text: 'The part “API · Container App”' })
+      expect(String(doc.getSelection())).toBe('')
+      // Words across two boxes: the drawing.
+      sent.length = 0
+      await drag(fts, reranker)
+      expect(sent.find((message) => message.type === 'thing')).toMatchObject({ what: 'chart', path: 'svg#arch' })
+    } finally {
+      vi.restoreAllMocks()
+      holder.remove()
+    }
+  })
+
+  it('outlines the parts asked about by their path, follows them as the page changes size, and finds one the page draws later', async () => {
+    const holder = document.createElement('iframe')
+    document.body.append(holder)
+    const inner = holder.contentWindow! as Window & typeof globalThis
+    const doc = holder.contentDocument!
+    const sent: Record<string, unknown>[] = []
+    vi.spyOn(inner.parent, 'postMessage').mockImplementation((message: unknown) => { sent.push(message as Record<string, unknown>) })
+    let width = 300
+    vi.spyOn(inner.Element.prototype, 'getBoundingClientRect').mockImplementation(() => ({ top: 20, left: 10, width, height: 150, right: 10 + width, bottom: 170, x: 10, y: 20, toJSON: () => ({}) }) as DOMRect)
+    // The page's own size changes, as a chart that fits itself to the page makes it.
+    const resized: (() => void)[] = []
+    Object.assign(inner, { ResizeObserver: class { constructor(callback: () => void) { resized.push(callback) } observe() {} unobserve() {} disconnect() {} } })
+    vi.spyOn(inner.Element.prototype, 'getClientRects').mockImplementation(() => [{ top: 20, left: 10, right: 310, bottom: 170 }] as unknown as DOMRectList)
+    vi.spyOn(inner, 'requestAnimationFrame').mockImplementation((callback) => { callback(0); return 1 })
+    const settle = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms))
+    try {
+      const page = '<h2>Sales by region</h2><canvas id="chart"></canvas><section><div class="card">North</div></section>'
+      doc.body.innerHTML = page
+      new inner.Function(PAGE_BRIDGE)()
+      const tell = (data: Record<string, unknown>) => inner.dispatchEvent(new inner.MessageEvent('message', { data: { lw: 'reader', ...data }, source: inner.parent }))
+      const ask = (key: string, what: string, path: string) => ({ key, text: `The ${what}\u0001element:${what}@${path}`, at: { kind: 'element', what, path }, look: 'read', fresh: false, lit: false, open: false, label: 'Writer’s answer', title: '', figure: null, initials: 'WR' })
+      tell({ type: 'marks', asking: null, parts: [ask('a', 'chart', 'canvas#chart'), ask('b', 'part', 'body > section > div'), ask('c', 'chart', 'canvas#later'), ask('d', 'part', 'aside#note')] })
+      expect([...doc.querySelectorAll('.lw-thing-box')].map((box) => box.className)).toEqual(['lw-thing-box lw-read', 'lw-thing-box lw-read'])
+      expect(doc.querySelectorAll('.lw-thing-holder .lw-bubble')).toHaveLength(2)
+      // The chart fits itself to the page after it is drawn: its outline and bubble follow it.
+      expect(doc.querySelector<HTMLElement>('.lw-thing-box')!.style.width).toBe('300px')
+      width = 640
+      resized.forEach((callback) => callback())
+      expect(doc.querySelector<HTMLElement>('.lw-thing-box')!.style.width).toBe('640px')
+      expect(doc.querySelector<HTMLElement>('.lw-thing-holder')!.style.left).toBe('650px')
+      width = 300
+      resized.forEach((callback) => callback())
+      // Each size change looks again a moment later: let that go by first.
+      await settle(350)
+      const reported = () => (sent.filter((message) => message.type === 'parts').at(-1)!.parts as { text: string; missing: boolean; rects: unknown[] }[]).map((part) => [part.text.split('@')[1], part.missing, part.rects.length])
+      expect(reported()).toEqual([['canvas#chart', false, 1], ['body > section > div', false, 1], ['canvas#later', true, 0], ['aside#note', true, 0]])
+      expect(doc.body.innerHTML).toBe(page)
+      // A part the page adds later is found when it does: a chart, or any part.
+      const later = doc.createElement('canvas')
+      later.id = 'later'
+      doc.body.append(later)
+      await settle(350)
+      expect(reported()).toEqual([['canvas#chart', false, 1], ['body > section > div', false, 1], ['canvas#later', false, 1], ['aside#note', true, 0]])
+      const note = doc.createElement('aside')
+      note.id = 'note'
+      doc.body.append(note)
+      await settle(350)
+      expect(reported()).toEqual([['canvas#chart', false, 1], ['body > section > div', false, 1], ['canvas#later', false, 1], ['aside#note', false, 1]])
+      expect(doc.querySelectorAll('.lw-thing-holder .lw-bubble')).toHaveLength(4)
+      // The bubble opens the answer.
+      sent.length = 0
+      doc.querySelector<HTMLButtonElement>('.lw-thing-holder .lw-bubble')!.click()
+      expect(sent).toContainEqual({ lw: 'reader', type: 'open', key: 'a' })
+      // Nothing asked about any more: the outlines go. A part in the message box is outlined dashed.
+      tell({ type: 'marks', asking: 'The part\u0001element:part@body > section > div', parts: [] })
+      expect([...doc.querySelectorAll('.lw-thing-box')].map((box) => box.className)).toEqual(['lw-thing-box lw-asking'])
+      expect(doc.querySelector('.lw-thing-holder')).toBeNull()
+      tell({ type: 'marks', asking: null, parts: [] })
+      expect(doc.querySelector('.lw-thing-box, .lw-thing-holder')).toBeNull()
+    } finally {
+      vi.restoreAllMocks()
+      holder.remove()
+    }
+  })
+
+  it('names a part as the person sees it: a drawing with no words is a picture, a video says its moment, a chart in layers is their holder', async () => {
+    const holder = document.createElement('iframe')
+    document.body.append(holder)
+    const inner = holder.contentWindow! as Window & typeof globalThis
+    const doc = holder.contentDocument!
+    const sent: Record<string, unknown>[] = []
+    vi.spyOn(inner.parent, 'postMessage').mockImplementation((message: unknown) => { sent.push(message as Record<string, unknown>) })
+    laidOut(inner)
+    vi.spyOn(inner.HTMLMediaElement.prototype, 'currentTime', 'get').mockReturnValue(42.4)
+    vi.spyOn(inner.HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => null)
+    try {
+      doc.body.innerHTML = '<h2 data-box="0 0 200 20">Brand</h2><div data-box="0 20 200 100"><svg id="logo" data-box="0 20 200 100"><circle r="4"></circle></svg></div>'
+        + '<figure data-box="0 120 200 100"><img alt="The team" data-box="0 120 200 100"></figure>'
+        + '<h2 data-box="0 220 200 20">Launch</h2><section data-box="0 240 400 100"><video data-box="0 240 200 100"></video><video id="clip" data-box="200 240 200 100"></video></section>'
+        + '<h2 data-box="0 340 200 20">Layers</h2><section data-box="0 360 200 100"><div data-box="0 360 200 100"><svg data-box="0 360 200 100"><text>x</text></svg><svg data-box="0 360 200 100"><text>legend</text></svg></div></section>'
+        + '<svg id="note" data-box="0 470 300 100"><foreignObject data-box="10 480 200 60"><p>Kept in Azure</p></foreignObject></svg>'
+      new inner.Function(PAGE_BRIDGE)()
+      // Turned on from the keyboard: the first part in view is outlined at once, for the keys to start from.
+      inner.dispatchEvent(new inner.MessageEvent('message', { data: { lw: 'reader', type: 'pick', on: true, keys: true }, source: inner.parent }))
+      const start = doc.querySelector<HTMLElement>('.lw-thing-box.lw-pointing')
+      expect(start).not.toBeNull()
+      expect([start!.style.left, start!.style.top, start!.style.width]).toEqual(['-2px', '-2px', '204px'])
+      for (const [thing, x, y] of [[doc.querySelector('#logo')!, 50, 50], [doc.querySelector('img')!, 50, 150], [doc.querySelector('section video')!, 50, 280], [doc.querySelectorAll('svg')[2], 50, 400]] as const) {
+        press(inner, thing, x, y)
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+      expect(sent.filter((message) => message.type === 'thing').map((message) => [message.what, message.path, message.text])).toEqual([
+        ['picture', 'svg#logo', 'The picture under “Brand”'],
+        ['picture', 'body > figure > img', 'The picture “The team”'],
+        ['video', 'body > section:nth-of-type(1) > video:nth-of-type(1)', 'The video under “Launch”, at 0:42'],
+        ['chart', 'body > section:nth-of-type(2) > div', 'The chart under “Layers”'],
+      ])
+      // A part of a drawing keeps its name's case in its path, so the page finds it again.
+      sent.length = 0
+      const keys = (...names: string[]) => names.forEach((key) => doc.body.dispatchEvent(new inner.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })))
+      press(inner, doc.querySelector('#note')!, 250, 550)
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      keys('ArrowRight', 'Enter')
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      const path = sent.filter((message) => message.type === 'thing').at(-1)!.path as string
+      expect(path).toBe('svg#note > foreignObject')
+      expect(doc.querySelector(path)).toBe(doc.querySelector('foreignObject'))
+    } finally {
+      vi.restoreAllMocks()
+      holder.remove()
+    }
+  })
+
+  it('lets a part drawn to be typed into be typed in: says so, and says its words when it is left changed (ADR 0107)', () => {
+    const holder = document.createElement('iframe')
+    document.body.append(holder)
+    const inner = holder.contentWindow! as Window & typeof globalThis
+    const doc = holder.contentDocument!
+    const sent: Record<string, unknown>[] = []
+    vi.spyOn(inner.parent, 'postMessage').mockImplementation((message: unknown) => { sent.push(message as Record<string, unknown>) })
+    const told = () => sent.splice(0).filter((message) => message.type !== 'ready').map(({ lw, ...rest }) => { expect(lw).toBe('reader'); return rest })
+    const key = (part: Element, key: string, extra: KeyboardEventInit = {}) => {
+      const event = new inner.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...extra })
+      part.dispatchEvent(event)
+      return event
+    }
+    /** The caret at the end of a part's words. */
+    const atEnd = (part: Element) => {
+      const range = doc.createRange()
+      range.selectNodeContents(part)
+      range.collapse(false)
+      doc.getSelection()!.removeAllRanges()
+      doc.getSelection()!.addRange(range)
+    }
+    try {
+      doc.documentElement.setAttribute('data-lw-editing', '')
+      doc.body.innerHTML = '<div class="lw-canvas"><p data-lw-edit="shape:0:3:0" contenteditable="true"><span>Sales grew</span></p></div>'
+        + '<p data-lw-edit="note:0:1" contenteditable="true" data-lw-lines="">It rose<br>since spring.</p>'
+      const [box, note] = [...doc.querySelectorAll<HTMLElement>('[data-lw-edit]')]
+      new inner.Function(PAGE_BRIDGE)()
+      told()
+
+      // Typed in and left: what it says now, a line break as a new line.
+      box.focus()
+      expect(doc.activeElement).toBe(box)
+      expect(told()).toEqual([{ type: 'typing', on: true }])
+      box.querySelector('span')!.textContent = 'Sales grew 14%'
+      box.blur()
+      expect(told()).toEqual([{ type: 'edit', part: 'shape:0:3:0', words: 'Sales grew 14%' }, { type: 'typing', on: false }])
+      // Left as it was: nothing to write.
+      box.focus()
+      box.blur()
+      expect(told()).toEqual([{ type: 'typing', on: true }, { type: 'typing', on: false }])
+
+      // Escape puts it back and leaves it, and is not the reader's.
+      box.focus()
+      box.querySelector('span')!.textContent = 'Sales fell'
+      expect(key(box, 'Escape').defaultPrevented).toBe(true)
+      expect(box.textContent).toBe('Sales grew 14%')
+      expect(doc.activeElement).not.toBe(box)
+      expect(told()).toEqual([{ type: 'typing', on: true }, { type: 'typing', on: false }])
+
+      // Enter leaves it, Shift+Enter too: a box on a slide takes no line breaks.
+      box.focus()
+      box.querySelector('span')!.textContent = 'Sales grew 15%'
+      expect(key(box, 'Enter').defaultPrevented).toBe(true)
+      expect(told()).toEqual([{ type: 'typing', on: true }, { type: 'edit', part: 'shape:0:3:0', words: 'Sales grew 15%' }, { type: 'typing', on: false }])
+      box.focus()
+      key(box, 'Enter', { shiftKey: true })
+      expect(told()).toEqual([{ type: 'typing', on: true }, { type: 'typing', on: false }])
+      // A key finishing a word being composed stays the word's.
+      box.focus()
+      expect(key(box, 'Enter', { isComposing: true }).defaultPrevented).toBe(false)
+      expect(doc.activeElement).toBe(box)
+      expect(told()).toEqual([{ type: 'typing', on: true }])
+
+      // Pasted words arrive as plain words, on one line in a box.
+      atEnd(box)
+      const paste = new inner.Event('paste', { bubbles: true, cancelable: true })
+      Object.defineProperty(paste, 'clipboardData', { value: { getData: (type: string) => (type === 'text/plain' ? ' in Q3\r\nand Q4' : '<b>bold</b>') } })
+      box.dispatchEvent(paste)
+      expect(paste.defaultPrevented).toBe(true)
+      expect(box.innerHTML).not.toContain('<b>')
+      box.blur()
+      expect(told()).toEqual([{ type: 'edit', part: 'shape:0:3:0', words: 'Sales grew 15% in Q3 and Q4' }, { type: 'typing', on: false }])
+      // Nothing is made bold, nor dropped in.
+      for (const inputType of ['formatBold', 'formatItalic', 'insertFromDrop']) {
+        const input = new inner.InputEvent('beforeinput', { inputType, bubbles: true, cancelable: true })
+        box.dispatchEvent(input)
+        expect(input.defaultPrevented).toBe(true)
+      }
+      const typed = new inner.InputEvent('beforeinput', { inputType: 'insertText', data: 'x', bubbles: true, cancelable: true })
+      box.dispatchEvent(typed)
+      expect(typed.defaultPrevented).toBe(false)
+
+      // The notes take line breaks: Shift+Enter makes one, and the part stays typed in.
+      note.focus()
+      atEnd(note)
+      key(note, 'Enter', { shiftKey: true })
+      expect(doc.activeElement).toBe(note)
+      const lines = new inner.Event('paste', { bubbles: true, cancelable: true })
+      Object.defineProperty(lines, 'clipboardData', { value: { getData: () => 'And it\nkept rising.' } })
+      note.dispatchEvent(lines)
+      note.blur()
+      expect(told()).toEqual([{ type: 'typing', on: true }, { type: 'edit', part: 'note:0:1', words: 'It rose\nsince spring.\nAnd it\nkept rising.' }, { type: 'typing', on: false }])
+
+      // The Pick switch stays off on a page drawn to be typed into.
+      inner.dispatchEvent(new inner.MessageEvent('message', { data: { lw: 'reader', type: 'pick', on: true }, source: inner.parent }))
+      expect(doc.documentElement.classList.contains('lw-picking')).toBe(false)
+    } finally {
+      vi.restoreAllMocks()
+      holder.remove()
+    }
+  })
+
+  it('tells words marked in a part being typed into, so a change can be left on them (ADR 0107)', async () => {
+    const holder = document.createElement('iframe')
+    document.body.append(holder)
+    const inner = holder.contentWindow! as Window & typeof globalThis
+    const doc = holder.contentDocument!
+    const sent: Record<string, unknown>[] = []
+    vi.spyOn(inner.parent, 'postMessage').mockImplementation((message: unknown) => { sent.push(message as Record<string, unknown>) })
+    // jsdom lays nothing out: the marked words are somewhere.
+    Object.defineProperty(inner.Range.prototype, 'getBoundingClientRect', { configurable: true, value: () => ({ top: 10, bottom: 30, left: 5, right: 80 }) })
+    try {
+      doc.documentElement.setAttribute('data-lw-editing', '')
+      doc.body.innerHTML = '<p data-lw-edit="note:0:0" contenteditable="true">Open with why: one email a week.</p>'
+      new inner.Function(PAGE_BRIDGE)()
+      const note = doc.querySelector<HTMLElement>('p')!
+      note.focus()
+      doc.dispatchEvent(new inner.Event('pointerdown'))
+      const range = doc.createRange()
+      range.setStart(note.firstChild!, 15)
+      range.setEnd(note.firstChild!, 32)
+      doc.getSelection()!.removeAllRanges()
+      doc.getSelection()!.addRange(range)
+      doc.dispatchEvent(new inner.Event('pointerup'))
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(sent.filter((message) => message.type === 'typing')).toEqual([{ lw: 'reader', type: 'typing', on: true }])
+      expect(sent.at(-1)).toMatchObject({ lw: 'reader', type: 'selection', text: 'one email a week.' })
+    } finally {
+      vi.restoreAllMocks()
+      holder.remove()
+    }
+  })
+
+  it('types into nothing on a page not drawn to be typed into, whatever its parts say', () => {
+    const holder = document.createElement('iframe')
+    document.body.append(holder)
+    const inner = holder.contentWindow! as Window & typeof globalThis
+    const doc = holder.contentDocument!
+    const sent: Record<string, unknown>[] = []
+    vi.spyOn(inner.parent, 'postMessage').mockImplementation((message: unknown) => { sent.push(message as Record<string, unknown>) })
+    try {
+      doc.body.innerHTML = '<p data-lw-edit="para:0" contenteditable="true">Words</p>'
+      new inner.Function(PAGE_BRIDGE)()
+      const part = doc.querySelector<HTMLElement>('p')!
+      part.focus()
+      part.textContent = 'Other words'
+      part.blur()
+      expect(sent.filter((message) => message.type === 'edit' || message.type === 'typing')).toEqual([])
+      inner.dispatchEvent(new inner.MessageEvent('message', { data: { lw: 'reader', type: 'pick', on: true }, source: inner.parent }))
+      expect(doc.documentElement.classList.contains('lw-picking')).toBe(true)
+    } finally {
+      vi.restoreAllMocks()
+      holder.remove()
+    }
+  })
+
   it('takes only well-formed messages from the page’s script', () => {
     expect(pageMessage({ lw: 'reader', type: 'ready' })).toEqual({ type: 'ready' })
     expect(pageMessage({ lw: 'reader', type: 'open', key: 'writer:Sales' })).toEqual({ type: 'open', key: 'writer:Sales' })
@@ -264,6 +938,29 @@ describe('a web page in the reader', () => {
     expect(pageMessage({ lw: 'reader', type: 'selection', text: 'Sales', rect: { top: 'x' } })).toEqual({ type: 'selection', text: 'Sales', rect: undefined })
     expect(pageMessage({ type: 'selection', text: 'Sales' })).toBeNull()
     expect(pageMessage({ lw: 'reader', type: 'navigate', url: 'x' })).toBeNull()
+    expect(pageMessage({ lw: 'reader', type: 'load', id: 3, url: 'data/sales.csv' })).toEqual({ type: 'load', id: 3, url: 'data/sales.csv' })
+    expect(pageMessage({ lw: 'reader', type: 'load', id: 1.5, url: 'x.csv' })).toBeNull()
+    expect(pageMessage({ lw: 'reader', type: 'load', id: 2, url: 'x'.repeat(5000) })).toBeNull()
+    expect(pageMessage({ lw: 'reader', type: 'load', url: 'x.csv' })).toBeNull()
+    const rect = { top: 1, bottom: 2, left: 3, right: 4 }
+    const picture = new ArrayBuffer(4)
+    expect(pageMessage({ lw: 'reader', type: 'thing', what: 'chart', path: 'canvas#chart', text: 'The chart', rect, picture })).toEqual({ type: 'thing', what: 'chart', path: 'canvas#chart', text: 'The chart', rect, picture })
+    expect(pageMessage({ lw: 'reader', type: 'thing', what: 'video', path: 'body > video', text: 'The video', rect, picture: 'x' })).toEqual({ type: 'thing', what: 'video', path: 'body > video', text: 'The video', rect })
+    expect(pageMessage({ lw: 'reader', type: 'thing', what: 'part', path: 'svg#arch > g', text: 'The part “API”', rect })).toEqual({ type: 'thing', what: 'part', path: 'svg#arch > g', text: 'The part “API”', rect })
+    expect(pageMessage({ lw: 'reader', type: 'pointing', text: 'The part “API”' })).toEqual({ type: 'pointing', text: 'The part “API”' })
+    for (const text of ['', ' ', 'x'.repeat(201), 3]) expect(pageMessage({ lw: 'reader', type: 'pointing', text })).toBeNull()
+    for (const bad of [{ what: 'table' }, { path: '' }, { path: 'a\nb' }, { path: 'a`b' }, { text: '' }, { rect: { top: 'x' } }]) {
+      expect(pageMessage({ lw: 'reader', type: 'thing', what: 'chart', path: 'canvas', text: 'The chart', rect, ...bad })).toBeNull()
+    }
+    // A part typed into, by its name in the file, and its words; a name of anything else, or words too many to be a paragraph's, are refused.
+    expect(pageMessage({ lw: 'reader', type: 'edit', part: 'shape:0:12:3', words: 'Sales grew\n14%' })).toEqual({ type: 'edit', part: 'shape:0:12:3', words: 'Sales grew\n14%' })
+    expect(pageMessage({ lw: 'reader', type: 'edit', part: 'note:2:0', words: '' })).toEqual({ type: 'edit', part: 'note:2:0', words: '' })
+    expect(pageMessage({ lw: 'reader', type: 'edit', part: 'para:7', words: 'x'.repeat(100_000) })).toEqual({ type: 'edit', part: 'para:7', words: 'x'.repeat(100_000) })
+    for (const bad of [{ part: 'para:7', words: 'x'.repeat(100_001) }, { part: 'para:7' }, { part: 'para:7', words: 3 }, { part: 'para:x', words: 'a' }, { part: 'body:1', words: 'a' }, { part: '../para:1', words: 'a' }, { part: `para:${'1'.repeat(70)}`, words: 'a' }, { words: 'a' }]) {
+      expect(pageMessage({ lw: 'reader', type: 'edit', ...bad })).toBeNull()
+    }
+    expect(pageMessage({ lw: 'reader', type: 'typing', on: true })).toEqual({ type: 'typing', on: true })
+    expect(pageMessage({ lw: 'reader', type: 'typing', on: 'yes' })).toEqual({ type: 'typing', on: false })
     expect(pageMessage('hello')).toBeNull()
   })
 })
@@ -276,9 +973,12 @@ describe('what the reader reads', () => {
     expect(readerFormat('/w/data.json')).toBe('code')
     expect(readerFormat('/w/notes.txt')).toBe('text')
     expect(readerFormat('/w/brief.docx')).toBe('document')
-    expect(readerFormat('/w/deck.pdf')).toBe('document')
+    expect(readerFormat('/w/deck.pdf')).toBe('pdf')
+    expect(readerFormat('/w/deck.pptx')).toBe('slides')
+    expect(readerFormat('/w/old.ppt')).toBeNull()
     expect(readerFormat('/w/chart.png')).toBe('picture')
     expect(readerFormat('/w/old.doc')).toBeNull()
+    expect(readerFormat('/w/notes.odt')).toBeNull()
     expect(readerFormat('/w/archive.zip')).toBeNull()
   })
 })

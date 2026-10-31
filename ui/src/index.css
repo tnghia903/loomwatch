@@ -9,6 +9,7 @@
 @import './styles/run-canvas.css';
 @import './styles/settings.css';
 @import './styles/home.css';
+@import './styles/studio.css';
 @import './styles/first-run.css';
 @import './styles/chrome.css';
 @import './styles/loom.css';
@@ -30,6 +31,8 @@
 @import './styles/tools.css';
 @import './styles/reader.css';
 @import './styles/rail.css';
+@import './styles/frame.css';
+@import './styles/box.css';
 
 .operator-context { max-height: min(180px, 25vh); overflow: auto; padding-bottom: var(--sp-2); }
 .operator-context summary { cursor: pointer; color: var(--color-accent); font-size: 12px; }

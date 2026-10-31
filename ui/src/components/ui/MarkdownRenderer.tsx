@@ -1,19 +1,26 @@
-import ReactMarkdown, { type Components, type ExtraProps } from 'react-markdown'
+import ReactMarkdown, { defaultUrlTransform, type Components, type ExtraProps, type UrlTransform } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
-import { useMemo } from 'react'
+import { useContext, useMemo, useState, type ComponentProps, type ReactNode } from 'react'
+import { sourceSpans } from '../../lib/files/markdownEdits'
 import { BACKED, CLAIM_MARK } from '../../lib/chat/claims'
+import { withoutCitationMarks } from '../../lib/chat/citationMarks'
 import { segments, useFoundWords, type FindTerm } from '../../lib/chat/findWords'
 import { filePathFrom, filePathFromLink } from '../../lib/files/fileRefs'
 import { FileChip } from './FileChip'
+import { MarkdownPictures } from './markdownPictures'
+import { SaidMention, type SaidMarks } from './saidMention'
 
 /**
  * The real Markdown renderer, shown by [`Markdown`](./Markdown.tsx). Its own download
  * (markdownCode.ts), fetched beside the app's first draw: the unified / micromark stack is the
  * largest dependency in the app, and the page draws before it is in.
  *
- * Raw HTML is skipped and images are never fetched — a report is untrusted model output, and an
- * embedded `<img src>` is a tracking pixel the operator never agreed to load.
+ * Raw HTML is skipped and pictures on the web are never fetched — a report is untrusted model
+ * output, and an embedded `<img src>` is a tracking pixel the operator never agreed to load. A
+ * picture on this computer is shown where the screen says where it is ([`MarkdownPictures`]: the
+ * reader, for the pictures beside the file it reads), through LoomWatch itself; anywhere else a
+ * picture is its words.
  *
  * A file the reply names — an absolute path in inline code, a link to one, or a `file://` URL — is
  * shown as a file the operator can open (FileChip, ADR 0026), not as a path to copy by hand. Fenced
@@ -23,21 +30,104 @@ import { FileChip } from './FileChip'
  *
  * Research answers mark each claim and cite it: "[Sourced] … [Paper](https://…)". The mark reads
  * as a small tag and the links after the claim as its sources, not as bracketed text and a run of
- * underlined titles.
+ * underlined titles. The private citation marks a ChatGPT model wrote into answers saved before the
+ * daemon took them out are dropped ([`withoutCitationMarks`]).
  *
  * `inline` keeps it inside a sentence: bold, code and links are shown, and a paragraph, heading or
  * list is kept as its words. With `clickable={false}` as well, a link is its words and a file path
  * stays code: for a quote cut short, where a hidden link would still take the Tab key.
+ *
+ * `said` is for words a person typed in the chat: a line they broke stays broken, as they see it in
+ * the box they typed in, and each @mention `said.find` names in the words is drawn by the
+ * [`SaidMention`] around it (the agent's chip).
  */
-export default function MarkdownRenderer({ children, inline = false, clickable = true }: { children: string; inline?: boolean; clickable?: boolean }) {
+export default function MarkdownRenderer({ children, inline = false, clickable = true, said = null }: { children: string; inline?: boolean; clickable?: boolean; said?: SaidMarks | null }) {
   // The words a chat search found, while the chat shows where one was said (ADR 0081).
   const found = useFoundWords()
-  const rehype = useMemo(() => (found ? [...REHYPE_PLUGINS, () => (tree: { children: HastChild[] }) => markFound(tree, found)] : REHYPE_PLUGINS), [found])
+  const rehype = useMemo(() => {
+    const plugins = [...REHYPE_PLUGINS]
+    if (said) plugins.push(() => (tree: { children: HastChild[] }) => markSaid(tree, said))
+    if (found) plugins.push(() => (tree: { children: HastChild[] }) => markFound(tree, found))
+    return plugins
+  }, [found, said])
   return (
-    <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={rehype} skipHtml components={clickable ? COMPONENTS : WORDS_ONLY} allowedElements={inline ? (clickable ? INLINE_ELEMENTS : INLINE_WORDS) : undefined} unwrapDisallowed={inline}>
-      {children}
+    <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={rehype} skipHtml urlTransform={urlTransform} components={clickable ? COMPONENTS : WORDS_ONLY} allowedElements={inline ? (clickable ? INLINE_ELEMENTS : INLINE_WORDS) : undefined} unwrapDisallowed={inline}>
+      {inline ? numbersAsWords(withoutCitationMarks(children)) : withoutCitationMarks(children)}
     </ReactMarkdown>
   )
+}
+
+/**
+ * A person's words, as they typed them: a line break inside a paragraph is kept, and each @mention
+ * becomes a `span` the components draw with [`SaidMention`]. Code is left as it is.
+ */
+function markSaid(tree: { children: HastChild[] }, said: SaidMarks) {
+  const visit = (parent: { children: HastChild[] }) => {
+    parent.children = parent.children.flatMap((node): HastChild[] => {
+      if (node.type === 'element') {
+        if (node.tagName !== 'pre' && node.tagName !== 'code') visit(node)
+        return [node]
+      }
+      // Only words carry a person's line breaks: the line breaks between a paragraph and a list,
+      // or between two items, are the renderer's own.
+      if (node.type !== 'text' || node.value.trim() === '') return [node]
+      return node.value.split('\n').flatMap((line, index, lines): HastChild[] => {
+        const parts: HastChild[] = []
+        let at = 0
+        for (const mention of said.find(line)) {
+          const from = Math.max(at, Math.min(mention.from ?? mention.start, mention.start))
+          const until = Math.max(mention.end, mention.until ?? mention.end)
+          if (from > at) parts.push({ type: 'text', value: line.slice(at, from) })
+          const chip: HastChild = { type: 'element', tagName: 'span', properties: { className: ['md-said-mention'], dataAgent: mention.agent ?? '' }, children: [{ type: 'text', value: line.slice(mention.start, mention.end) }] }
+          // The words touching a mention stay on its line with it.
+          const kept: HastChild[] = [
+            ...(from < mention.start ? [{ type: 'text' as const, value: line.slice(from, mention.start) }] : []),
+            chip,
+            ...(until > mention.end ? [{ type: 'text' as const, value: line.slice(mention.end, until) }] : []),
+          ]
+          parts.push(kept.length > 1 ? { type: 'element', tagName: 'span', properties: { className: ['md-said-keep'] }, children: kept } : chip)
+          at = until
+        }
+        if (at < line.length) parts.push({ type: 'text', value: line.slice(at) })
+        return index < lines.length - 1 ? [...parts, { type: 'element', tagName: 'br', properties: {}, children: [] }] : parts
+      })
+    })
+  }
+  visit(tree)
+}
+
+/**
+ * Inside a sentence a list is kept as its words, and a numbered item's number is no word of its
+ * own: "2025." alone would read as nothing. So a number that would start a list stays a number.
+ */
+function numbersAsWords(text: string): string {
+  return text.replace(/^( {0,3})(\d{1,9})([.)])(?=\s|$)/gm, '$1$2\\$3')
+}
+
+/** A span, or a person's @mention drawn as [`SaidMention`] says. */
+function Span({ children, className, title, node }: { children?: ReactNode; className?: string; title?: string; node?: HastElement }) {
+  const draw = useContext(SaidMention)
+  if (className === 'md-said-mention' && draw) {
+    const agent = String(node?.properties.dataAgent ?? '')
+    const text = node?.children.map((child) => (child.type === 'text' ? child.value : '')).join('') ?? ''
+    return <>{draw(agent || undefined, text)}</>
+  }
+  return <span className={className} title={title}>{children}</span>
+}
+
+/**
+ * A picture's link reaches [`Picture`] as it was written (`file:///…`, `C:\…`), which only ever
+ * hands it to [`MarkdownPictures`]; every other link is made safe as usual.
+ */
+const urlTransform: UrlTransform = (url, key, node) => (node.tagName === 'img' && key === 'src' ? url : defaultUrlTransform(url))
+
+/** A picture, shown from where [`MarkdownPictures`] says it is; its words where it says none, or it can't be shown. */
+function Picture({ src, alt }: { src?: string; alt?: string }) {
+  const where = useContext(MarkdownPictures)
+  const shown = src && where ? where(src) : null
+  const [failed, setFailed] = useState<string | null>(null)
+  if (!shown || failed === shown) return <span className="delivery-image-reference">[Image: {alt || 'reference'}]</span>
+  return <img className="md-picture" src={shown} alt={alt ?? ''} onError={() => setFailed(shown)} />
 }
 
 const REMARK_PLUGINS = [remarkGfm]
@@ -161,7 +251,43 @@ const COMPONENTS: Components = {
     const path = inline ? filePathFrom(text) : null
     return path ? <FileChip path={path} /> : <code className={className}>{text}</code>
   },
-  img: ({ alt }) => <span className="delivery-image-reference">[Image: {alt || 'reference'}]</span>,
+  img: Picture,
+  span: Span,
 }
 // Nothing to click: inline code stays code, a path in it too.
 const WORDS_ONLY: Components = { ...COMPONENTS, code: ({ children: text, className }) => <code className={className}>{text}</code> }
+
+/**
+ * A Markdown file drawn from its own words to be typed into in place (ADR 0107;
+ * components/reader/Draft.tsx). Each paragraph, heading and list item whose words are placed in the
+ * file can be typed into, its runs of words saying where they are in it (lib/files/markdownEdits.ts).
+ * A link is its words here, and a path is code: nothing opens while you write. Pictures show as
+ * when reading.
+ */
+export function EditableMarkdown({ source }: { source: string }) {
+  const rehype = useMemo(() => [sourceSpans(source)], [source])
+  return (
+    <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={rehype} skipHtml urlTransform={urlTransform} components={TYPED_INTO}>
+      {source}
+    </ReactMarkdown>
+  )
+}
+
+/** A block that can be typed into when its words are placed in the file (`data-lw-block`). */
+function typedInto(tag: 'p' | 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6' | 'li') {
+  return function TypedInto(props: ExtraProps) {
+    const { node, ...rest } = props
+    void node
+    const placed = 'data-lw-block' in rest
+    // Drawn as `tag`, with the props the Markdown gives it.
+    const Tag = tag as 'p'
+    return <Tag {...(rest as ComponentProps<'p'>)} {...(placed ? { contentEditable: true, suppressContentEditableWarning: true } : {})} />
+  }
+}
+
+// Module-level, as COMPONENTS is.
+const TYPED_INTO: Components = {
+  p: typedInto('p'), h1: typedInto('h1'), h2: typedInto('h2'), h3: typedInto('h3'), h4: typedInto('h4'), h5: typedInto('h5'), h6: typedInto('h6'), li: typedInto('li'),
+  a: ({ children: label, href }) => <a href={href} onClick={(event) => event.preventDefault()}>{label}</a>,
+  img: Picture,
+}

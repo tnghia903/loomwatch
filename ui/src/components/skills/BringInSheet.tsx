@@ -1,4 +1,4 @@
-import { Check, Undo2 } from 'lucide-react'
+import { Check, Undo2 } from '../ui/icon'
 import { useEffect, useState } from 'react'
 
 import {
@@ -7,6 +7,7 @@ import {
 } from '../../lib/library/skillStore'
 import { Sheet } from './Sheet'
 import { Locked, Tick } from './SkillTags'
+import { InlineMarkdown } from '../ui/Markdown'
 
 type Step =
   | { kind: 'looking' }
@@ -144,7 +145,7 @@ function Row({ candidate, checked, onToggle }: { candidate: BringInCandidate; ch
     <li className={locked ? 'locked' : ''}>
       <Tick checked={checked && !locked} disabled={locked !== undefined} onToggle={onToggle}>
         <b>{displayName(candidate.name)}</b>
-        {candidate.description && <span className="lw-skills-pick-desc">{candidate.description}</span>}
+        {candidate.description && <span className="lw-skills-pick-desc"><InlineMarkdown clickable={false}>{candidate.description}</InlineMarkdown></span>}
       </Tick>
       <span className="lw-skills-pick-facts">
         {candidate.plugin && <span className="lw-skills-tag">{candidate.plugin} plugin</span>}

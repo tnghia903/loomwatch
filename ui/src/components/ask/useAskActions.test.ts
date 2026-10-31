@@ -14,6 +14,10 @@ const client = vi.hoisted(() => ({
 vi.mock('../../lib/ask/client', () => client)
 const runs = vi.hoisted(() => ({ startRun: vi.fn(), newStartKey: () => 'start-key-1' }))
 vi.mock('../../lib/runs/client', () => runs)
+const memory = vi.hoisted(() => ({ fetchMemory: vi.fn(), writeMemoryFile: vi.fn(async () => ({})) }))
+vi.mock('../../lib/memory/client', async (importOriginal) => ({ ...(await importOriginal<typeof import('../../lib/memory/client')>()), ...memory }))
+const projects = vi.hoisted(() => ({ saveProject: vi.fn(async () => ({})), addProjectNote: vi.fn(async () => ({})), fetchProjects: vi.fn(async () => ({ projects: [], loose: [], missing: [] })), projectsChanged: vi.fn() }))
+vi.mock('../../lib/projects/client', async (importOriginal) => ({ ...(await importOriginal<typeof import('../../lib/projects/client')>()), ...projects }))
 
 const SAVED = 'schemaVersion: 1\nid: brief\nname: Brief\nentrypoint: a\nagents:\n  - { id: a, name: Collector, role: Collect, model: m, spawn: { cmd: c, args: [], env: {}, cwd: "." } }\nedges: []\n'
 const CHANGED = SAVED.replace('role: Collect,', 'role: Collect with links,') + ''
@@ -27,7 +31,7 @@ const HOME: DocState = { path: null, saveState: 'no-file', loadedYaml: null, yam
 
 /** The editor as far as these actions use it: edits change its YAML, undo puts the last one back. */
 function setup(initial: DocState = OPEN_TEAM, extra: Partial<{ activeRunId: string | null; waiting: boolean; saves: boolean }> = {}) {
-  const spies = { applyYaml: vi.fn(), save: vi.fn(async () => extra.saves ?? true), undo: vi.fn(), closeDocument: vi.fn() }
+  const spies = { applyYaml: vi.fn(), save: vi.fn(async () => extra.saves ?? true), undo: vi.fn(), closeDocument: vi.fn(), loadMyAgents: vi.fn(async () => {}), addBriefEntry: vi.fn() }
   const options = {
     conversationId: 'ask-1', activeRunId: extra.activeRunId ?? null, waiting: extra.waiting ?? false,
     toBuild: vi.fn(), showRun: vi.fn(), applyRecord: vi.fn(), onDocumentOpen: vi.fn(), frame: vi.fn(),
@@ -38,6 +42,7 @@ function setup(initial: DocState = OPEN_TEAM, extra: Partial<{ activeRunId: stri
     const [history, setHistory] = useState<string[]>([])
     const doc = {
       ...state,
+      loadMyAgents: () => spies.loadMyAgents(),
       applyYaml: (yaml: string, file?: string) => {
         spies.applyYaml(...(file ? [yaml, file] : [yaml]))
         if (!file) setHistory((past) => [...past, state.yamlPreview])
@@ -57,6 +62,10 @@ function setup(initial: DocState = OPEN_TEAM, extra: Partial<{ activeRunId: stri
         setState((current) => ({ ...current, yamlPreview: previous, saveState: previous === current.loadedYaml ? 'clean' : 'dirty' }))
       },
       closeDocument: () => { spies.closeDocument(); setState(HOME) },
+      addBriefEntry: (entry: { path: string }) => {
+        spies.addBriefEntry(entry)
+        setState((current) => ({ ...current, saveState: 'dirty' }))
+      },
     }
     person.undo = doc.undo
     person.save = doc.save
@@ -66,6 +75,9 @@ function setup(initial: DocState = OPEN_TEAM, extra: Partial<{ activeRunId: stri
 }
 
 beforeEach(() => {
+  memory.fetchMemory.mockReset()
+  memory.fetchMemory.mockResolvedValue({ enabled: true, entries: [] })
+  memory.writeMemoryFile.mockClear()
   client.fetchProposal.mockReset()
   client.reportProposalOutcome.mockClear()
   client.decideRunRequest.mockClear()
@@ -93,6 +105,34 @@ describe('useAskActions', () => {
     expect(result.current.actions.preview).toBeNull()
     expect(result.current.actions.notice?.text).toBe('Applied the changes to “Brief”.')
     expect(result.current.actions.marks.get('a')).toBe('settled')
+  })
+
+  it('keeps a proposal’s Brief beside the team once the team is saved, and not one the team already has (ADR 0097)', async () => {
+    const brief = 'Colin’s SUTD final project: a gate for the campus library.'
+    client.fetchProposal.mockResolvedValue(proposal({ brief }))
+    const { result, spies } = setup()
+    await act(async () => { await result.current.actions.showProposal('p1') })
+    await act(async () => { await result.current.actions.applyProposal() })
+    expect(memory.writeMemoryFile).toHaveBeenCalledWith('/Users/me/teams/brief.yaml', expect.stringMatching(/^brief\.brief\/.+\.md$/), `${brief}\n`)
+    const file = (memory.writeMemoryFile.mock.calls[0] as unknown as [string, string, string])[1]
+    expect(spies.addBriefEntry).toHaveBeenCalledWith({ path: file })
+    expect(spies.save).toHaveBeenCalledTimes(2)
+    // The team on disk first, then its Brief file, then the entry that names it.
+    const order = (spy: { mock: { invocationCallOrder: number[] } }, at = 0) => spy.mock.invocationCallOrder[at]
+    expect(order(spies.save)).toBeLessThan(order(memory.writeMemoryFile))
+    expect(order(memory.writeMemoryFile)).toBeLessThan(order(spies.addBriefEntry))
+    expect(order(spies.addBriefEntry)).toBeLessThan(order(spies.save, 1))
+    expect(result.current.actions.notice?.text).toBe('Applied the changes to “Brief”.')
+
+    memory.writeMemoryFile.mockClear()
+    memory.fetchMemory.mockResolvedValue({ enabled: true, entries: [{ path: file, title: 'Colin', body: `${brief}\n`, chars: brief.length, sha256: 'x' }] })
+    client.fetchProposal.mockResolvedValue(proposal({ id: 'p2', brief, yaml: CHANGED.replace('with links', 'with sources') }))
+    const again = setup()
+    await act(async () => { await again.result.current.actions.showProposal('p2') })
+    await act(async () => { await again.result.current.actions.applyProposal() })
+    expect(memory.writeMemoryFile).not.toHaveBeenCalled()
+    expect(again.spies.addBriefEntry).not.toHaveBeenCalled()
+    expect(again.spies.save).toHaveBeenCalledTimes(1)
   })
 
   // A step timed after showing a proposal once fired after the hook was gone (CI: "window is not
@@ -155,6 +195,40 @@ describe('useAskActions', () => {
     await waitFor(() => expect(client.reportProposalOutcome).toHaveBeenCalledWith('p1', 'applied'))
   })
 
+  it('makes a proposal’s new project before it saves the team, and keeps its Brief as a note there (ADR 0097)', async () => {
+    projects.saveProject.mockClear()
+    projects.addProjectNote.mockClear()
+    client.fetchProposal.mockResolvedValue(proposal({ brief: 'Colin picked option B.', project: { id: 'sutd', name: 'SUTD final project', isNew: true, about: 'Colin’s gate.', folders: [{ name: 'SUTD', path: '/Users/colin/SUTD' }] } }))
+    const { result, spies } = setup()
+    await act(async () => { await result.current.actions.showProposal('p1') })
+    await act(async () => { await result.current.actions.applyProposal() })
+    expect(projects.saveProject).toHaveBeenCalledWith('sutd', { name: 'SUTD final project', about: 'Colin’s gate.', folders: [{ name: 'SUTD', path: '/Users/colin/SUTD' }] })
+    expect(projects.saveProject.mock.invocationCallOrder[0]).toBeLessThan(spies.save.mock.invocationCallOrder[0])
+    expect(projects.addProjectNote).toHaveBeenCalledWith('sutd', 'Colin picked option B.')
+    // Not a Brief note beside the team: the project holds what the work is about.
+    expect(memory.writeMemoryFile).not.toHaveBeenCalled()
+    expect(spies.save).toHaveBeenCalledTimes(1)
+
+    // A project that can't be kept leaves the proposal on the canvas, saying why, and saves nothing.
+    projects.saveProject.mockRejectedValueOnce(new Error('A project needs a name.'))
+    const again = setup()
+    await act(async () => { await again.result.current.actions.showProposal('p1') })
+    await act(async () => { await again.result.current.actions.applyProposal() })
+    expect(again.spies.save).not.toHaveBeenCalled()
+    expect(again.result.current.actions.preview?.error).toBe('Couldn’t set up the project. A project needs a name.')
+  })
+
+  it('keeps the proposal’s Brief when it is saved another way too (ADR 0097)', async () => {
+    const brief = 'Colin’s SUTD final project.'
+    client.fetchProposal.mockResolvedValue(proposal({ brief }))
+    const { result, person, spies } = setup()
+    await act(async () => { await result.current.actions.showProposal('p1') })
+    await act(async () => { await person.save() })
+    await waitFor(() => expect(memory.writeMemoryFile).toHaveBeenCalledWith('/Users/me/teams/brief.yaml', expect.stringMatching(/^brief\.brief\/.+\.md$/), `${brief}\n`))
+    await waitFor(() => expect(spies.addBriefEntry).toHaveBeenCalled())
+    await waitFor(() => expect(spies.save).toHaveBeenCalledTimes(2))
+  })
+
   it('opens a new team from Home unsaved, and Discard goes back to no team', async () => {
     client.fetchProposal.mockResolvedValue(proposal({ isNew: true, baseRevision: null, file: 'new-brief.yaml' }))
     const { result, options, spies } = setup(HOME)
@@ -205,7 +279,7 @@ describe('useAskActions', () => {
 
   it('falls back to the file the conversation recorded when the daemon no longer has the proposal', async () => {
     client.fetchProposal.mockRejectedValue(new Error('This proposal is no longer available.'))
-    const recorded: ProposalCard = { kind: 'proposal', id: 'p1', at: '2026-10-02T09:00:00Z', file: 'brief.yaml', name: 'Brief', isNew: false, summary: '', yaml: CHANGED, outcome: null, superseded: false }
+    const recorded: ProposalCard = { kind: 'proposal', id: 'p1', at: '2026-10-02T09:00:00Z', file: 'brief.yaml', name: 'Brief', isNew: false, summary: '', yaml: CHANGED, agentNames: {}, outcome: null, superseded: false }
     const { result, spies } = setup()
     await act(async () => { await result.current.actions.showProposal('p1', recorded) })
     expect(spies.applyYaml).toHaveBeenCalledWith(CHANGED)
@@ -257,6 +331,19 @@ describe('team file names', () => {
     expect(sameTeamFile(null, 'brief.yaml')).toBe(false)
     expect(teamFileForAsk('/Users/me/teams/nested/brief.yaml', '/Users/me/teams')).toBe('nested/brief.yaml')
     expect(teamFileForAsk('brief.yaml', null)).toBe('brief.yaml')
+  })
+
+  it('reads My agents before it puts a proposal on the canvas, so an agent from there shows as itself', async () => {
+    let read: () => void = () => {}
+    const { result, spies } = setup(HOME)
+    spies.loadMyAgents.mockImplementation(() => new Promise<void>((resolve) => { read = resolve }))
+    client.fetchProposal.mockResolvedValue(proposal({ isNew: true, file: 'client-review.yaml', yaml: SAVED }))
+    await act(async () => { await result.current.actions.showProposal('p1') })
+    expect(spies.loadMyAgents).toHaveBeenCalledTimes(1)
+    expect(spies.applyYaml).not.toHaveBeenCalled()
+    await act(async () => { read() })
+    await waitFor(() => expect(spies.applyYaml).toHaveBeenCalledWith(SAVED, 'client-review.yaml'))
+    expect(result.current.actions.preview?.proposal.file).toBe('client-review.yaml')
   })
 
   it('credits Ask LoomWatch with a proposal, and names what an AI app connected earlier proposed', () => {

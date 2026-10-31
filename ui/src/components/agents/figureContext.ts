@@ -7,13 +7,16 @@ import type { AgentConfig } from '../../lib/team-file/types'
 
 /**
  * Your agents, for anything inside a team that draws an agent (the canvas cards, the team sentence,
- * the Agents tab): with them, an agent placed from Your agents wears the figure it wears there.
+ * its workbench): with them, an agent placed from Your agents wears the figure it wears there.
  */
 export const SavedAgentsContext = createContext<readonly SavedJob[]>([])
 
+/** Whose own chat the open team is (`benchChatOwner`), or `null` for any other team. */
+export const ChatOfContext = createContext<string | null>(null)
+
 /** The figure a team's agent wears (lib/library/figures.ts `agentFigure`). */
 export function useAgentFigure(agent: Pick<AgentConfig, 'id' | 'from'>): FigureChoice {
-  return agentFigure(agent, useContext(SavedAgentsContext))
+  return agentFigure(agent, useContext(SavedAgentsContext), useContext(ChatOfContext))
 }
 
 /**
@@ -21,6 +24,12 @@ export function useAgentFigure(agent: Pick<AgentConfig, 'id' | 'from'>): FigureC
  * that only know an agent by id (the chat, Details). You, the review step, are not in it.
  */
 export const TeamFiguresContext = createContext<ReadonlyMap<string, FigureChoice>>(new Map())
+
+/**
+ * The names the person's other agents go by when a run of the open team brings one in from My
+ * agents (ADR 0092), by their id there (`mine+<id>`): for the places that name agents by id.
+ */
+export const GuestNamesContext = createContext<ReadonlyMap<string, string>>(new Map())
 
 /** The figure the open team's agent `id` wears, or `null` for you or an agent the team doesn't list. */
 export function useTeamFigure(id: string): FigureChoice | null {

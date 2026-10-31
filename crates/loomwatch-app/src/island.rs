@@ -210,6 +210,169 @@ pub fn near_island(screen: &Screen, x: f64, y: f64) -> bool {
 pub const SHORTCUT_KEY: u32 = 49;
 pub const SHORTCUT_MODIFIERS: u32 = 0x1000 | 0x0800;
 
+/// Held this long, ⌃⌥Space listens: what the person says is written into the box until they let
+/// go. Pressed and let go sooner, it opens the box, or puts it away, as it always has: long enough
+/// that a slow press to open the box doesn't turn the microphone on.
+pub const HOLD_TO_LISTEN: Duration = Duration::from_millis(600);
+/// Listening stops by itself after this long, keys held or not: macOS's speech recognition stops a
+/// little after a minute anyway, and a key held down by something on it shouldn't keep the
+/// microphone on.
+pub const LONGEST_LISTEN: Duration = Duration::from_secs(55);
+/// After letting go, the last words take a moment to arrive; with none by then, the words heard
+/// so far are the last.
+pub const LAST_WORDS_WAIT: Duration = Duration::from_millis(1500);
+/// How often the page hears how loud it is while listening: about twelve times a second.
+pub const LOUDNESS_EVERY: Duration = Duration::from_millis(80);
+
+/// What ⌃⌥Space does as it goes down, is held, and comes up (`Hold`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HoldDoes {
+    /// Open the box, or put it away: what pressing ⌃⌥Space has always done.
+    Compose,
+    /// Held long enough: listen.
+    Listen,
+    /// Let go after listening: stop listening.
+    StopListening,
+    /// Still held when listening has gone on as long as it may: stop, and say so.
+    HeldTooLong,
+    Nothing,
+}
+
+/// ⌃⌥Space as it goes down and comes up. Pressed with the box closed, the box opens at once, so a
+/// person sees where their words will go. Pressed with it open, nothing happens until it is let go:
+/// let go soon, it puts the box away, as it always has; held, it listens instead, and letting go
+/// then only stops listening, so the box and what is in it stay.
+#[derive(Debug, Default)]
+pub struct Hold {
+    down: Option<Down>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Down {
+    at: Instant,
+    /// The box was open as it went down.
+    open: bool,
+    listening: bool,
+    /// Listening already stopped while it was still held, after `LONGEST_LISTEN`.
+    stopped: bool,
+}
+
+impl Hold {
+    /// ⌃⌥Space went down at `now`, with the box `open` or not. A second press while it is held, as
+    /// a key repeating, changes nothing.
+    pub fn pressed(&mut self, now: Instant, open: bool) -> HoldDoes {
+        if self.down.is_some() {
+            return HoldDoes::Nothing;
+        }
+        self.down = Some(Down {
+            at: now,
+            open,
+            listening: false,
+            stopped: false,
+        });
+        if open {
+            HoldDoes::Nothing
+        } else {
+            HoldDoes::Compose
+        }
+    }
+
+    /// Time passed while it is held: once held `HOLD_TO_LISTEN`, listen; once listening
+    /// `LONGEST_LISTEN`, stop.
+    pub fn tick(&mut self, now: Instant) -> HoldDoes {
+        let Some(down) = self.down.as_mut() else {
+            return HoldDoes::Nothing;
+        };
+        let held = now.saturating_duration_since(down.at);
+        if !down.listening && !down.stopped && held >= HOLD_TO_LISTEN {
+            down.listening = true;
+            return HoldDoes::Listen;
+        }
+        if down.listening && held >= HOLD_TO_LISTEN + LONGEST_LISTEN {
+            down.listening = false;
+            down.stopped = true;
+            return HoldDoes::HeldTooLong;
+        }
+        HoldDoes::Nothing
+    }
+
+    /// ⌃⌥Space came up at `now`. Held long enough to listen, it stops listening, and only that;
+    /// let go sooner with the box open, it puts the box away.
+    pub fn released(&mut self, now: Instant) -> HoldDoes {
+        let Some(down) = self.down.take() else {
+            return HoldDoes::Nothing;
+        };
+        if down.listening {
+            HoldDoes::StopListening
+        } else if down.open
+            && !down.stopped
+            && now.saturating_duration_since(down.at) < HOLD_TO_LISTEN
+        {
+            HoldDoes::Compose
+        } else {
+            HoldDoes::Nothing
+        }
+    }
+
+    /// When `tick` next has something to do, while ⌃⌥Space is held.
+    pub fn wakes_at(&self) -> Option<Instant> {
+        let down = self.down?;
+        if down.stopped {
+            None
+        } else if down.listening {
+            Some(down.at + HOLD_TO_LISTEN + LONGEST_LISTEN)
+        } else {
+            Some(down.at + HOLD_TO_LISTEN)
+        }
+    }
+}
+
+/// How loud the microphone is, from 0 to 1, from the root mean square of a buffer of its samples:
+/// on a scale of decibels, so a quiet room sits near 0 and ordinary speech between about 0.3 and
+/// 0.8.
+pub fn loudness(rms: f32) -> f64 {
+    const QUIET: f64 = -50.0;
+    const LOUD: f64 = -10.0;
+    let rms = f64::from(rms);
+    if !rms.is_finite() || rms <= 0.0 {
+        return 0.0;
+    }
+    ((20.0 * rms.log10() - QUIET) / (LOUD - QUIET)).clamp(0.0, 1.0)
+}
+
+/// Why ⌃⌥Space held can't listen, as the page says it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CantListen {
+    /// The microphone is turned off for `LoomWatch` in System Settings.
+    Microphone,
+    /// Speech recognition is turned off for `LoomWatch` in System Settings.
+    Speech,
+    /// macOS has just asked the person to allow it: holding again listens, once they have.
+    Asked,
+    /// macOS can't turn speech into words now: not for this language, or not offline.
+    Unavailable,
+    /// The Mac has no microphone to listen with, as a Mac mini without one plugged in.
+    NoMicrophone,
+    /// It listened as long as it may (`LONGEST_LISTEN`) with the keys still held: what was heard
+    /// stays, and holding again goes on.
+    Longest,
+}
+
+/// The System Settings page where the microphone, or speech recognition, is turned on for an app,
+/// for a page's Open Settings (`FromPage::Settings`); `None` for any other.
+pub fn settings_address(pane: &str) -> Option<&'static str> {
+    match pane {
+        "microphone" => {
+            Some("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+        }
+        "speech" => Some(
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_SpeechRecognition",
+        ),
+        _ => None,
+    }
+}
+
 /// The panel's frame on `screen`: hanging from its top edge, centred on the notch, or on the
 /// screen with none, where the box hangs from the middle of the top.
 pub fn panel_frame(screen: &Screen) -> Rect {
@@ -363,6 +526,9 @@ pub enum FromPage {
     },
     /// Results looked at on this screen's island, by run: they leave every island.
     Seen { runs: Vec<String> },
+    /// Open System Settings where the microphone (`microphone`), or speech recognition (`speech`),
+    /// is turned on for `LoomWatch` (`settings_address`), after ⌃⌥Space held couldn't listen.
+    Settings { pane: String },
 }
 
 impl FromPage {
@@ -420,6 +586,16 @@ pub enum ToPage {
     /// they are dropped, as Mail does with a message. The page asks for them through a file
     /// picker, which the app answers with them, so they arrive as a file from Finder does.
     Dropped,
+    /// ⌃⌥Space is held and the box listens: what is said is written into it (`Heard`); or the keys
+    /// were let go, and it no longer listens.
+    Listen { on: bool },
+    /// Every word heard while ⌃⌥Space was held this time, so far; `done` once the last of them are
+    /// in, after it was let go.
+    Heard { text: String, done: bool },
+    /// How loud the microphone is while the box listens, from 0 to 1 (`loudness`).
+    Level { level: f64 },
+    /// ⌃⌥Space was held, and the box can't listen, and why.
+    CantListen { why: CantListen },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
@@ -798,6 +974,175 @@ mod tests {
             ToPage::Dropped.script(),
             r#"window.loomwatchIsland && window.loomwatchIsland.receive({"kind":"dropped"})"#
         );
+    }
+
+    #[test]
+    fn listening_is_said_to_the_page_as_it_happens() {
+        assert_eq!(
+            ToPage::Listen { on: true }.script(),
+            r#"window.loomwatchIsland && window.loomwatchIsland.receive({"kind":"listen","on":true})"#
+        );
+        assert_eq!(
+            ToPage::Heard {
+                text: "Draft a reply to Ana".into(),
+                done: false
+            }
+            .script(),
+            r#"window.loomwatchIsland && window.loomwatchIsland.receive({"kind":"heard","text":"Draft a reply to Ana","done":false})"#
+        );
+        assert_eq!(
+            ToPage::Level { level: 0.5 }.script(),
+            r#"window.loomwatchIsland && window.loomwatchIsland.receive({"kind":"level","level":0.5})"#
+        );
+        for (why, said) in [
+            (CantListen::Microphone, "microphone"),
+            (CantListen::Speech, "speech"),
+            (CantListen::Asked, "asked"),
+            (CantListen::Unavailable, "unavailable"),
+            (CantListen::NoMicrophone, "noMicrophone"),
+            (CantListen::Longest, "longest"),
+        ] {
+            assert_eq!(
+                ToPage::CantListen { why }.script(),
+                format!(
+                    r#"window.loomwatchIsland && window.loomwatchIsland.receive({{"kind":"cantListen","why":"{said}"}})"#
+                )
+            );
+        }
+        assert_eq!(
+            FromPage::parse(r#"{"kind":"settings","pane":"microphone"}"#),
+            Some(FromPage::Settings {
+                pane: "microphone".into()
+            })
+        );
+    }
+
+    #[test]
+    fn open_settings_goes_only_to_the_microphone_or_speech_recognition() {
+        assert_eq!(
+            settings_address("microphone"),
+            Some("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+        );
+        assert_eq!(
+            settings_address("speech"),
+            Some(
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_SpeechRecognition"
+            )
+        );
+        assert_eq!(settings_address("camera"), None);
+        assert_eq!(settings_address("https://example.com"), None);
+    }
+
+    #[test]
+    fn pressing_the_shortcut_with_the_box_closed_opens_it_at_once_and_holding_listens() {
+        let start = Instant::now();
+        let mut hold = Hold::default();
+        assert_eq!(hold.pressed(start, false), HoldDoes::Compose);
+        // Before it has been held long enough, nothing more; then it listens, once.
+        assert_eq!(hold.wakes_at(), Some(start + HOLD_TO_LISTEN));
+        assert_eq!(hold.tick(start + HOLD_TO_LISTEN / 2), HoldDoes::Nothing);
+        assert_eq!(hold.tick(start + HOLD_TO_LISTEN), HoldDoes::Listen);
+        assert_eq!(hold.tick(start + HOLD_TO_LISTEN * 2), HoldDoes::Nothing);
+        // Let go: it stops listening, and the box stays open with what was said.
+        assert_eq!(
+            hold.released(start + Duration::from_secs(3)),
+            HoldDoes::StopListening
+        );
+        assert_eq!(hold.wakes_at(), None);
+    }
+
+    #[test]
+    fn a_quick_press_with_the_box_open_puts_it_away_as_it_always_has() {
+        let start = Instant::now();
+        let mut hold = Hold::default();
+        // Nothing as it goes down: it may be the start of a hold.
+        assert_eq!(hold.pressed(start, true), HoldDoes::Nothing);
+        assert_eq!(
+            hold.released(start + Duration::from_millis(120)),
+            HoldDoes::Compose
+        );
+        // A quick press with the box closed opens it on the way down, and does nothing coming up.
+        assert_eq!(hold.pressed(start, false), HoldDoes::Compose);
+        assert_eq!(
+            hold.released(start + Duration::from_millis(120)),
+            HoldDoes::Nothing
+        );
+    }
+
+    #[test]
+    fn holding_the_shortcut_with_the_box_open_listens_and_never_puts_it_away() {
+        let start = Instant::now();
+        let mut hold = Hold::default();
+        assert_eq!(hold.pressed(start, true), HoldDoes::Nothing);
+        assert_eq!(hold.tick(start + HOLD_TO_LISTEN), HoldDoes::Listen);
+        assert_eq!(
+            hold.released(start + Duration::from_secs(2)),
+            HoldDoes::StopListening
+        );
+        // Let go late without the app having had a moment to listen: it doesn't put the box away.
+        assert_eq!(hold.pressed(start, true), HoldDoes::Nothing);
+        assert_eq!(hold.released(start + HOLD_TO_LISTEN * 2), HoldDoes::Nothing);
+    }
+
+    #[test]
+    fn a_key_repeating_or_a_release_never_pressed_changes_nothing() {
+        let start = Instant::now();
+        let mut hold = Hold::default();
+        assert_eq!(hold.released(start), HoldDoes::Nothing);
+        assert_eq!(hold.pressed(start, false), HoldDoes::Compose);
+        assert_eq!(
+            hold.pressed(start + Duration::from_millis(50), true),
+            HoldDoes::Nothing
+        );
+        assert_eq!(hold.tick(start + HOLD_TO_LISTEN), HoldDoes::Listen);
+    }
+
+    /// A slow press to open the box or put it away, half a second, only does that: the microphone
+    /// stays off, and macOS doesn't ask for it.
+    #[test]
+    fn a_slow_press_only_opens_or_closes_the_box() {
+        let start = Instant::now();
+        let mut hold = Hold::default();
+        assert_eq!(hold.pressed(start, true), HoldDoes::Nothing);
+        assert_eq!(
+            hold.tick(start + Duration::from_millis(500)),
+            HoldDoes::Nothing
+        );
+        assert_eq!(
+            hold.released(start + Duration::from_millis(500)),
+            HoldDoes::Compose
+        );
+    }
+
+    #[test]
+    fn listening_stops_by_itself_when_held_too_long() {
+        let start = Instant::now();
+        let mut hold = Hold::default();
+        hold.pressed(start, false);
+        assert_eq!(hold.tick(start + HOLD_TO_LISTEN), HoldDoes::Listen);
+        let too_long = start + HOLD_TO_LISTEN + LONGEST_LISTEN;
+        assert_eq!(hold.wakes_at(), Some(too_long));
+        assert_eq!(hold.tick(too_long), HoldDoes::HeldTooLong);
+        // Still held: it doesn't listen again, and letting go then does nothing more.
+        assert_eq!(hold.wakes_at(), None);
+        assert_eq!(hold.tick(too_long + HOLD_TO_LISTEN), HoldDoes::Nothing);
+        assert_eq!(
+            hold.released(too_long + Duration::from_secs(1)),
+            HoldDoes::Nothing
+        );
+    }
+
+    #[test]
+    fn loudness_puts_a_quiet_room_near_nothing_and_speech_in_the_middle() {
+        assert!(loudness(0.0).abs() < f64::EPSILON);
+        assert!(loudness(f32::NAN).abs() < f64::EPSILON);
+        // -60 dB, a quiet room: nothing.
+        assert!(loudness(0.001).abs() < f64::EPSILON);
+        // -30 dB and -20 dB, ordinary speech.
+        assert!((loudness(0.031_623) - 0.5).abs() < 0.01);
+        assert!((loudness(0.1) - 0.75).abs() < 0.01);
+        // Shouting into the microphone: the top, and never past it.
+        assert!((loudness(1.0) - 1.0).abs() < f64::EPSILON);
     }
 
     #[test]

@@ -16,6 +16,9 @@ export interface SpawnConfig {
 export interface GuardsConfig {
   maxDispatchDepth?: number
   maxConcurrentDispatches?: number
+  maxHelpers?: number
+  /** How many of My agents the starting agent is shown when it may bring one in (ADR 0092). `0`, the default, is off. */
+  myAgents?: number
 }
 
 /** Where a run's answer goes once it succeeds. `$defs/Deliver`; ADR 0010 and ADR 0038. */
@@ -52,13 +55,13 @@ export type AgentStatus =
  * 0029). Team memory is never a capability: it is wired through `memory.inherits`.
  */
 /**
- * A versioned link to one of Your agents (`<teams root>/.jobs/<agent>.yaml`). The team keeps a
- * copy of that version's fields, so it runs exactly what it was approved with; a newer version
- * reaches the team only when the operator chooses Update.
+ * The agent in My agents this one is (`<teams root>/.jobs/<agent>.yaml`, ADR 0094). Its own fields
+ * are filled in from there when the team is read (`lib/team-file/myAgents.ts`); the team file keeps
+ * only what is the team's. `version` is what an earlier LoomWatch wrote, read and ignored.
  */
 export interface AgentLink {
   agent: string
-  version: number
+  version?: number
 }
 
 export interface CapabilityRef {
@@ -143,6 +146,15 @@ export interface SendBack {
   whenStillNotMet?: 'answer' | 'ask'
 }
 
+/**
+ * An agent's part in one team (ADR 0097): a line or two of what the team needs from it, and that
+ * part's own Done when items. At most 1000 characters and five items, as the schema says.
+ */
+export interface AgentPart {
+  text?: string
+  doneWhen?: string[]
+}
+
 export interface AgentConfig {
   id: string
   name: string
@@ -158,6 +170,10 @@ export interface AgentConfig {
   /** What the finished result must satisfy (ADR 0062): checked before it replies, and anything
       it could not meet is listed under "Not met". At most five short lines. */
   doneWhen?: string[]
+  /** What this team needs from it (ADR 0097): the team's, never the agent's, so it stays in the
+      team file when the agent is saved to My agents. Its items come first in the Done when a run
+      reads. */
+  part?: AgentPart
   /** Makes it a check step (ADR 0062): the agent whose work it checks, its direct predecessor. */
   checks?: string
   /** With `checks`: what happens when a check is not met. Read it through `sendBackOf`. */
@@ -166,6 +182,9 @@ export interface AgentConfig {
       editor writes `sendBack` and removes this when the setting is changed. */
   sendBackOnce?: boolean
   allowRecruiting?: boolean
+  /** `false`: as the starting agent, or working alone, it brings in none of the person's other
+      agents from My agents (ADR 0092). The agent's own switch, filled in from My agents. */
+  allowMyAgents?: boolean
   /** Capabilities the daemon delivers into this agent's workspace before the run. Executable, so
       it lives in the team file and saves explicitly — unlike the card positions in the sidecar. */
   capabilities?: CapabilityRef[]
@@ -178,8 +197,8 @@ export interface AgentConfig {
   /** Skills and tools the operator turned off for it by taking them off the canvas (ADR 0060).
       Absent means none: the agent chooses from every skill in LoomWatch's library. */
   turnedOff?: TurnedOff[]
-  /** The agent in Your agents this one was placed from, and the version its fields copy. Absent
-      means the agent is this team's own. */
+  /** The agent in My agents this one is. Absent only on a team not yet saved since ADR 0094, or
+      one from elsewhere: saving it makes each of its agents one of My agents. */
   from?: AgentLink
   // Runtime-only annotation. Team-file writers must never set this field;
   // it is exposed here only because readers must tolerate it on load.
@@ -230,6 +249,11 @@ export interface TeamDocument {
   schemaVersion: 1
   id: string
   name: string
+  /** The project this team works in (ADR 0097): `<teams root>/.projects/<id>.yaml`. */
+  project?: string
+  /** The team this file is one place of (ADR 0103): every file naming the same id shares its
+      setup, and keeps its own id, project, schedule, delivery and Brief. */
+  shares?: string
   entrypoint: string
   /** Optional explicit owner of the canonical team output. */
   responder?: string

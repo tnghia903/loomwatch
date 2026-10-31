@@ -1,4 +1,4 @@
-import { ArrowRight, CheckCircle2, ChevronDown, CircleAlert, CircleDot, Copy, Download, Reply, Share2 } from 'lucide-react'
+import { ArrowRight, CheckCircle2, ChevronDown, CircleAlert, CircleDot, Copy, Download, Reply, Share2 } from '../ui/icon'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 import { answerFileName } from '../../lib/chat/format'
@@ -53,7 +53,6 @@ const FILES_SHOWN = 3
  */
 export function AnswerTools({ run, answer, check, files, makers, finished, reviewed, onReviewed, onOpenFinding, onReply, replyLabel }: AnswerToolsProps) {
   const [copied, setCopied] = useState(false)
-  const [allFiles, setAllFiles] = useState(false)
   const [reviewing, setReviewing] = useState(false)
   const notion = useNotionSend(run, finished && Boolean(answer.trim()))
   const verdict = check?.verdict ?? null
@@ -61,16 +60,7 @@ export function AnswerTools({ run, answer, check, files, makers, finished, revie
   const save = () => saveAnswer(answer, run.createdAt)
   return (
     <>
-      {files.length > 0 && (
-        <div className="delivery-files tc-files" role="group" aria-label="Files in this answer">
-          {(allFiles ? files : files.slice(0, FILES_SHOWN)).map((path) => <FileCard key={path} path={path} compact agents={makers} />)}
-          {files.length > FILES_SHOWN && (
-            <button type="button" className="tc-link tc-files-more" aria-expanded={allFiles} onClick={() => setAllFiles((value) => !value)}>
-              {allFiles ? 'Show fewer files' : `${files.length - FILES_SHOWN} more ${files.length - FILES_SHOWN === 1 ? 'file' : 'files'}`}
-            </button>
-          )}
-        </div>
-      )}
+      <HandedFiles files={files} makers={makers} label="Files in this answer" />
       {finished && (
         <div className="chat-under">
           {verdict && (verdict.reviewable
@@ -95,6 +85,25 @@ export function AnswerTools({ run, answer, check, files, makers, finished, revie
  * Saving and sending, behind one button: the answer as Markdown, and to Notion when it has not
  * gone there yet. Esc and a click elsewhere close it.
  */
+/**
+ * Files handed over in a message, attached as files posted in a chat are: the first few as cards,
+ * the rest behind "N more".
+ */
+export function HandedFiles({ files, makers, label }: { files: readonly string[]; makers: ReadonlyArray<{ id: string; name: string }>; label: string }) {
+  const [allFiles, setAllFiles] = useState(false)
+  if (files.length === 0) return null
+  return (
+    <div className="delivery-files tc-files" role="group" aria-label={label}>
+      {(allFiles ? files : files.slice(0, FILES_SHOWN)).map((path) => <FileCard key={path} path={path} compact agents={makers} />)}
+      {files.length > FILES_SHOWN && (
+        <button type="button" className="tc-link tc-files-more" aria-expanded={allFiles} onClick={() => setAllFiles((value) => !value)}>
+          {allFiles ? 'Show fewer files' : `${files.length - FILES_SHOWN} more ${files.length - FILES_SHOWN === 1 ? 'file' : 'files'}`}
+        </button>
+      )}
+    </div>
+  )
+}
+
 function Share({ onSave, notion }: { onSave: () => void; notion: NotionSendState }) {
   const [open, setOpen] = useState(false)
   const box = useRef<HTMLSpanElement>(null)

@@ -1,9 +1,10 @@
-import { ChevronDown, ExternalLink, Search } from 'lucide-react'
+import { ChevronDown, ExternalLink, Search } from '../ui/icon'
 import { useState } from 'react'
 
 import { describeOrigin, displayName, errorText, formatSize, licenseLabel, originShort, removeSkill, shortPath, type SkillRecord, type SkillsFolder } from '../../lib/library/skillStore'
 import { SectionHead } from '../ui/SectionHead'
 import { Glyph, NeedTags } from './SkillTags'
+import { InlineMarkdown } from '../ui/Markdown'
 
 /**
  * My skills: what is in LoomWatch's folder, which every agent can use. Each row opens to say
@@ -63,7 +64,7 @@ function Item({ skill, fresh, onChanged }: { skill: SkillRecord; fresh: boolean;
         <ChevronDown size={14} aria-hidden="true" className="lw-skills-chev" />
       </button>
       {open && <div className="lw-skills-item-more">
-        {skill.description && <p>{skill.description}</p>}
+        {skill.description && <p><InlineMarkdown>{skill.description}</InlineMarkdown></p>}
         <NeedTags runtimes={skill.runtimes} needs={skill.needs} hasScripts={skill.hasScripts} />
         <dl className="lw-skills-facts">
           <dt>From</dt><dd>{describeOrigin(skill.origin)}{skill.origin.url && <>{' · '}<a className="link lw-skills-out" href={skill.origin.url} target="_blank" rel="noreferrer">Open its page<ExternalLink size={11} aria-hidden="true" /></a></>}</dd>

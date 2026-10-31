@@ -1,5 +1,5 @@
 import { useRef, useState, type ReactNode } from 'react'
-import { Trash2, Wrench, X } from 'lucide-react'
+import { Trash2, Wrench, X } from '../ui/icon'
 import { AgentCheckup } from './AgentCheckup'
 import { AgentContext } from './AgentContext'
 import { AgentWorkFolder } from './AgentWorkFolder'
@@ -9,26 +9,14 @@ import { AgentUsageLine } from './AgentUsageLine'
 import { CheckStep } from './CheckStep'
 import { InstructionsUpdated } from './InstructionsUpdated'
 import { Inspector, type InspectorProps } from './Inspector'
-import { LinkedAgent } from './LinkedAgent'
 import { FigureStill } from '../agents/FigureStill'
 import { StatusGlyph } from '../ui/glyphs'
 import type { FigureChoice } from '../../lib/library/figures'
 import { modelLabelForAgent } from '../../lib/models'
-import type { JobSpec, SavedJob } from '../../lib/library/jobs'
-import type { AgentLinkState } from '../../lib/library/link'
-
-/** The agent's versioned link to Your agents, and what the panel may do about it. */
-export interface BuildInspectorLink {
-  /** `null` for an agent that is this team's own. */
-  state: AgentLinkState | null
-  onApply: (job: SavedJob, previous: JobSpec | null) => void
-  onUnlink: () => void
-}
 
 export function BuildInspector(props: InspectorProps & {
   startAdvanced?: boolean
-  link?: BuildInspectorLink
-  /** Open this agent on its workbench, in the team's Agents tab. */
+  /** Open this agent's workbench, over the Team tab. */
   onOpenWorkbench?: () => void
   /** The figure each agent wears, for the agent and its neighbours. */
   figures?: ReadonlyMap<string, FigureChoice>
@@ -47,9 +35,7 @@ export function BuildInspector(props: InspectorProps & {
     setWasForced(forced)
     if (forced) setAdvanced(true)
   }
-  const link = props.link
-  const linkPanel = (headClassName: string) => link?.state ? <LinkedAgent agent={node.data.agent} link={link.state} readOnly={readOnly} onApply={link.onApply} onUnlink={link.onUnlink} teamPath={props.teamPath} headClassName={headClassName} /> : undefined
-  if (advanced) return <div className="advanced-node-settings"><Inspector {...props} linked={linkPanel('zone-head t-micro')} onClose={() => setAdvanced(false)} /></div>
+  if (advanced) return <div className="advanced-node-settings"><Inspector {...props} onClose={() => setAdvanced(false)} /></div>
   const reviewStep = node.data.agent.kind === 'operator'
   // The same panel in Build and in a run (ADR 0041); a run adds what this agent is doing in it.
   const runtime = node.data.runtime
@@ -70,13 +56,10 @@ export function BuildInspector(props: InspectorProps & {
   // agent in this team: where it sits in the workflow, what the team gives it, and what only a team
   // decides, like where it works and what a run may spend.
   const figure = props.figures?.get(node.id)
-  // An agent placed from My agents takes its spend limit from its version; it changes there.
-  const locked = readOnly || Boolean(link?.state)
   return <aside className="node-inspector agent-in-team" aria-label="Selected node settings" onKeyDown={e => { if (e.key === 'Escape') onClose() }}>
     {head(node.data.modelLabel ?? modelLabelForAgent(node.data.agent), figure ? <FigureStill className="inspector-figure" figure={figure} headOnly alt="" /> : undefined)}
     <div className="inspector-fields">
-      {props.onOpenWorkbench && <button type="button" className="btn btn-primary inspector-workbench" onClick={props.onOpenWorkbench} title="Its name, instructions, model, skills, tools and what it may do"><Wrench size={14} aria-hidden="true" />Open its workbench</button>}
-      {linkPanel('build-context-head')}
+      {props.onOpenWorkbench && <button type="button" className="btn btn-primary inspector-workbench" onClick={props.onOpenWorkbench} title="Its name, instructions, model, skills, tools and what it may do"><Wrench size={14} aria-hidden="true" />Edit {node.data.agent.name.trim() || 'this agent'}</button>}
       {props.instructionUpdate && <InstructionsUpdated {...props.instructionUpdate} agent={node.data.agent} readOnly={readOnly} />}
       {props.place && <AgentWorkflowPlace agentId={node.id} name={node.data.agent.name} place={props.place} figures={props.figures} onFocus={props.onFocusAgent} onPromoteEntrypoint={props.onPromoteEntrypoint} readOnly={readOnly} />}
       {props.checkStep && <CheckStep {...props.checkStep} readOnly={readOnly} />}
@@ -92,7 +75,7 @@ export function BuildInspector(props: InspectorProps & {
       <section className="build-context" aria-label="Works in">
         <AgentWorkFolder agent={node.data.agent} readOnly={readOnly} onChange={props.onCwdChange} problem={props.fieldProblems?.cwd} teamPath={props.teamPath} headClassName="build-context-head" />
       </section>
-      {props.onSpendChange && <AgentSpendGuard perRun={node.data.agent.spend?.perRun ?? null} readOnly={locked} onChange={props.onSpendChange} />}
+      {props.onSpendChange && <AgentSpendGuard perRun={node.data.agent.spend?.perRun ?? null} readOnly={readOnly === true} onChange={props.onSpendChange} />}
       {props.usage && <AgentUsageLine usage={props.usage.agent} runs={props.usage.runs} alone={props.usage.alone} />}
     </div>
   </aside>

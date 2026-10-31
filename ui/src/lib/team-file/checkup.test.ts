@@ -336,6 +336,9 @@ describe('checkup helpers', () => {
     // A research lead leads; it is not a researcher on the faster model.
     expect(jobFor({ name: 'Research lead', role: '' })?.id).toBe('lead')
     expect(jobFor({ name: 'Lead researcher', role: '' })?.id).toBe('lead')
+    // The makers, by name; a designer of slides is still the Designer.
+    expect(['Presentation maker', 'Document maker', 'Spreadsheet maker', 'Chart maker', 'Dashboard maker', 'Video maker'].map((name) => jobFor({ name, role: '' })?.id)).toEqual(['deck', 'document', 'sheet', 'chart', 'dashboard', 'video'])
+    expect(jobFor({ name: 'Slide designer', role: '' })?.id).toBe('designer')
   })
 
   it('appends after a blank line', () => {

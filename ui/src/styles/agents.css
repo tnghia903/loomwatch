@@ -11,7 +11,6 @@
 :is(.agents-hero, .home-agents) .agents-know-you { font-size: 13px; line-height: 1.45; color: var(--color-ink-3); }
 :is(.agents-hero, .home-agents) .agents-know-you strong { color: var(--color-ink); font-weight: 600; }
 .home-agents .agents-know-you { margin: calc(var(--sp-2) - var(--sp-4)) 0 0; }
-.lw-agents a.home-brand { color: inherit; text-decoration: none; }
 
 /* ---------- start chooser ---------- */
 .agents-start { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-5); border: 1px solid var(--color-hairline); border-radius: var(--r-lg); background: var(--color-panel-solid); }
@@ -25,8 +24,39 @@
 .agents-start-card em { margin-top: auto; padding-top: 4px; font: 500 11px var(--font-mono); font-style: normal; color: var(--color-ink-3); }
 
 /* ---------- the ID card ---------- */
-.agents-grid { grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
-.agent-card { min-height: 0; padding-right: var(--sp-6); }
+.agents-grid { grid-template-columns: repeat(auto-fill, minmax(208px, 1fr)); }
+/* One of My agents (round 3): the figure big and lit by what it is doing, its name, a word when it
+   is not just ready, and one row of marks whose words are their tooltips. */
+.agent-tile { display: flex; flex-direction: column; align-items: center; gap: var(--sp-2); min-height: 260px; padding: var(--sp-4) var(--sp-2) var(--sp-3); box-sizing: border-box; text-align: center; }
+.agent-tile-figure { margin-bottom: var(--sp-1); }
+.agent-tile-name { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; max-width: 100%; overflow: hidden; overflow-wrap: anywhere; font-size: 15px; line-height: 1.3; font-weight: 600; color: var(--color-ink); }
+.agent-tile-name .agent-badge-pin { margin-left: 6px; vertical-align: -1px; }
+/* What it does, as My agents has always said it, in two lines at most. */
+.agent-tile-does { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; max-width: 100%; overflow: hidden; overflow-wrap: anywhere; font-size: 12.5px; line-height: 1.4; color: var(--color-ink-2); }
+.agent-tile-state { font-size: 12.5px; line-height: 16px; color: var(--color-ink-2); }
+.agent-tile-state.waiting { color: var(--color-accent); }
+.agent-tile-state.working { color: var(--color-live); }
+.agent-tile-state.failed { color: var(--color-alert); }
+.agent-tile-marks { margin-top: auto; display: inline-flex; flex-wrap: wrap; justify-content: center; gap: var(--sp-2); }
+/* A switch is solid with a check when it is allowed, and dashed when the agent asks you first:
+   shape, not colour. Both lines are drawn dark enough to see on the card (3:1). */
+.agent-tile-mark { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-width: 28px; height: 28px; padding: 0 6px; box-sizing: border-box; border: 1.5px solid var(--color-hairline); border-radius: var(--r-sm); color: var(--color-ink-2); font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.agent-tile-mark.on { border-style: solid; border-color: var(--color-ink-2); color: var(--color-ink); }
+.agent-tile-mark.asks { border-style: dashed; border-color: var(--color-ink-3); }
+.agent-tile-mark.count { border-color: transparent; }
+/* The check is a small badge on the mark's corner, ringed so the badge and its tick read as one. */
+.agent-tile-check { position: absolute; top: -5px; right: -5px; padding: 1px; border-radius: 50%; background: var(--color-panel-solid); box-shadow: 0 0 0 1.5px var(--color-ink-2); color: var(--color-ink); }
+@media (max-width: 560px) {
+  .agents-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .agent-tile { min-height: 216px; }
+  .agent-tile-figure > :is(img, svg, .figure-still) { width: 84px; height: 84px; }
+}
+.agent-card { min-height: 0; }
+/* The tile sizes its card, and every card in a row is as tall as the tallest: the older card's
+   fixed height cut its row of marks off. */
+.agents-grid > li { display: flex; }
+.agents-grid > li > .agent-card { flex: 1; height: auto; padding: 0; overflow: visible; }
+.agents-grid > li > .agent-card > .agent-tile { flex: 1; }
 .agent-badge { display: flex; flex-direction: column; gap: 9px; min-width: 0; padding: var(--sp-4); border: 1px solid var(--color-hairline); border-radius: var(--r-lg); background: var(--color-panel-solid); }
 .agent-card .agent-badge { padding: 0; border: 0; background: none; }
 .agent-badge-head { display: flex; align-items: flex-start; gap: var(--sp-3); }
@@ -52,7 +82,6 @@
 .agent-badge-warn { margin: 0; font-size: 12px; color: var(--color-alert); }
 .agent-badge-after { color: var(--color-ink-3); }
 .agent-badge-after.live { color: var(--color-ink-2); }
-.agent-badge-behind { font-style: normal; color: var(--color-accent); }
 
 /* ---------- the builder ---------- */
 .agent-builder { position: relative; display: flex; flex-direction: column; gap: var(--sp-5); }
@@ -119,8 +148,6 @@
 .agent-uses li { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2); font-size: 13.5px; }
 .agent-uses a { display: inline-flex; align-items: center; gap: 4px; color: var(--color-ink); text-decoration: none; font-weight: 500; }
 .agent-uses a:hover { color: var(--color-accent); }
-.agent-use-version { font: 500 12px var(--font-mono); color: var(--color-ink-3); }
-.agent-use-version.behind { color: var(--color-accent); }
 
 /* ---------- Home's row of agents ---------- */
 .home-agents-all { display: inline-flex; align-items: center; gap: 4px; text-decoration: none; }
@@ -134,16 +161,6 @@
 /* A team's own agent says which team, in words rather than a version number. */
 .home-agent-chip .home-agent-team { font: 400 12px var(--font-sans); max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agents-in-teams-note { margin: 0 0 var(--sp-3); font-size: 13px; color: var(--color-ink-3); }
-
-/* ---------- the agent panel: From Your agents ---------- */
-.linked-agent { display: flex; flex-direction: column; gap: 8px; padding: var(--sp-3); border: 1px solid color-mix(in srgb, var(--color-accent) 35%, var(--color-hairline)); border-radius: var(--r-md); background: var(--color-accent-tint); }
-.linked-agent p { margin: 0; }
-.linked-agent-line { font-size: 13.5px; color: var(--color-ink); }
-.linked-agent-update, .linked-agent-changed { display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; color: var(--color-ink-2); }
-.linked-agent-changed p { color: var(--color-alert); }
-.linked-agent-acts { display: flex; flex-wrap: wrap; gap: 6px; }
-.linked-agent .btn { gap: 5px; font-size: 12.5px; text-decoration: none; }
-.linked-agent-note { color: var(--color-ink-3); }
 
 @media (max-width: 900px) {
   .agent-builder-side { grid-template-columns: minmax(0, 1fr); }
@@ -179,21 +196,38 @@
    as tall as the window allows, so its message box stays in view while the log scrolls. */
 .byhand.chatting .byhand-main { grid-template-columns: minmax(0, 1fr) minmax(400px, 1fr); }
 .byhand-chat { min-width: 0; }
-.byhand-chat .tc { position: relative; inset: auto; height: clamp(480px, calc(100dvh - 300px), 900px); border: 1px solid var(--color-hairline); border-radius: var(--r-lg); overflow: hidden; }
+.byhand.chatting { --byhand-chat-h: clamp(480px, calc(100dvh - 300px), 900px); }
+.byhand-chat .tc { position: relative; inset: auto; height: var(--byhand-chat-h); border: 1px solid var(--color-hairline); border-radius: var(--r-lg); overflow: hidden; }
 .byhand-chat .tc-head { padding: 10px var(--sp-4); }
 .agent-chat-wait { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-5); border: 1px dashed var(--color-hairline); border-radius: var(--r-lg); }
 .agent-chat-wait h3 { margin: 0; font: 600 16px/1.3 var(--font-sans); }
 .agent-chat-wait p { margin: 0; }
-/* A long answer from the chat, read over the bench; Back (or Esc) shows the figure again. */
+/* A long answer from the chat, read over the bench; Back (or Esc) shows the figure again. It covers
+   the bench alone, as tall as the chat beside or below it, not the bench's 4:3. */
+.byhand.chatting .byhand-stage:has(> .byhand-cover) { height: var(--byhand-chat-h); }
 .byhand-cover { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; min-height: 0; border: 1px solid var(--color-hairline); border-radius: var(--r-lg); background: var(--color-panel-solid); overflow: hidden; }
 .agent-answer { display: flex; flex-direction: column; min-height: 0; height: 100%; }
 .agent-answer-back { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; margin: var(--sp-3) var(--sp-4) 0; text-decoration: none; }
 .agent-answer .tc-document { position: relative; inset: auto; flex: 1; min-height: 0; overflow: auto; background: transparent; }
 .agent-answer .tc-document-by { margin-top: var(--sp-3); padding: 0 var(--sp-5); }
 .agent-answer .tc-document .tc-document-page { padding: 4px var(--sp-5) var(--sp-6); }
+/* A piece's Details over the bench, as a team's chat shows it beside the chat: the record fills the
+   bench, and a record opened from it floats at its right, under the way back (the floating panels
+   are placed in the cover), on a solid card, since it is read with care over a lane that moves. */
+.agent-details { --lw-panel-top: calc(var(--sp-3) * 2 + 30px); }
+.agent-details-body { position: relative; flex: 1; min-height: 0; margin-top: var(--sp-3); border-top: 1px solid var(--color-hairline); container: details / inline-size; }
+.agent-details .delivery-lane { position: absolute; inset: 0; background: transparent; }
+.agent-details > .lw-activity { -webkit-backdrop-filter: none; backdrop-filter: none; background: var(--color-panel-solid); }
+@media (max-width: 767px) {
+  .agent-answer-back { min-height: 44px; }
+  /* A phone reads the record as the team screen's Details does: a sheet along the bottom. */
+  .agent-details > .lw-activity { position: fixed; top: auto; bottom: var(--sp-3); left: var(--sp-3); right: var(--sp-3); max-height: 60vh; }
+}
 @media (max-width: 1000px) {
   .byhand-main, .byhand.chatting .byhand-main { grid-template-columns: minmax(0, 1fr); }
   .byhand-stage { position: static; }
+  /* The stage is in the page's flow here, so it is made the cover's box, above the chat. */
+  .byhand.chatting .byhand-stage:has(> .byhand-cover) { position: relative; top: auto; }
 }
 
 /* One block per setting: what it is, where it is on the bench, what it adds up to, then its controls. */
@@ -203,7 +237,28 @@
 .byhand-block-head h3 { margin: 0; font: 600 14.5px/1.3 var(--font-sans); color: var(--color-ink); }
 .byhand-block-where { font-size: 12px; color: var(--color-ink-3); white-space: nowrap; }
 .byhand-block-says { margin: 0 0 var(--sp-1); font-size: 13.5px; line-height: 1.45; color: var(--color-ink-2); overflow-wrap: anywhere; }
-.byhand-block > .t-meta { margin: 0; color: var(--color-ink-3); }
+/* Each setting a row (round 3): its mark, its name and what it is set to on one line; it opens to
+   change it. A closed block is the row alone. */
+.byhand-block:not(.open) { padding-block: var(--sp-1); }
+.byhand-row-head { margin: 0; font: inherit; }
+.byhand-row { display: flex; align-items: flex-start; gap: var(--sp-3); width: 100%; min-height: 44px; padding: 12px 0; box-sizing: border-box; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+/* Each row is its words alone: what it is, then what it is set to, both on the first line's height. */
+.byhand-row-title { flex: none; width: 150px; padding-top: 1px; font: 500 13px/1.3 var(--font-sans); color: var(--color-ink-2); }
+.byhand-row-says { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 14px/1.35 var(--font-sans); color: var(--color-ink); }
+.byhand-block.open .byhand-row-says { white-space: normal; }
+.byhand-row-chev { flex: none; margin: 3px 0 0 auto; color: var(--color-ink-3); transition: rotate var(--t-quick) var(--ease-out); }
+.byhand-block.open .byhand-row-chev { rotate: 180deg; }
+.byhand-row-body { display: flex; flex-direction: column; gap: var(--sp-2); }
+@media (prefers-reduced-motion: reduce) { .byhand-row-chev { transition: none; } }
+/* Narrow, what it is set to goes under its title, whole, rather than cut beside it. */
+@media (max-width: 560px) {
+  .byhand-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: var(--sp-3); row-gap: 2px; }
+  .byhand-row-title { width: auto; grid-area: 1 / 1; }
+  .byhand-row-chev { grid-area: 1 / 2; margin-left: 0; }
+  .byhand-row-says { grid-area: 2 / 1 / 3 / 3; white-space: normal; }
+  .byhand-row-says:empty { display: none; }
+}
+.byhand-row-body > .t-meta { margin: 0; color: var(--color-ink-3); }
 /* What the agent learned from your feedback (ADR 0078): a lesson a line, where it came from under it. */
 .learned-list { display: grid; gap: var(--sp-2); margin: 0; padding: 0; list-style: none; }
 .learned-item { display: flex; align-items: flex-start; gap: var(--sp-2); }
@@ -272,6 +327,8 @@
 .byhand-keys li.on > svg { color: var(--color-accent); }
 .byhand-keys li span { display: flex; flex-direction: column; gap: 2px; font-size: 13.5px; color: var(--color-ink); }
 .byhand-keys li em { font-style: normal; font-size: 12.5px; color: var(--color-ink-2); }
+/* Allow and Ask me first take the same room, so pressing one doesn't move the row. */
+.byhand-keys li .btn { min-width: 100px; justify-content: center; }
 .byhand-reads { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-2); }
 .byhand-reads li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--sp-3); align-items: center; padding: var(--sp-3); border-radius: var(--r-md); border: 1px solid var(--color-hairline); color: var(--color-ink-2); }
 /* What a team gives it besides its own, changed in that team's Workflow: dashed, like a given card. */
@@ -308,9 +365,16 @@
 .byhand-cards li:nth-child(3n + 2) .byhand-card-tab { background: #D9D2C4; }
 .byhand-cards li:nth-child(3n) .byhand-card-tab { background: #85817A; }
 
-/* A team's Agents tab (TeamAgents): its agents across the top, the chosen one on its workbench. It
-   covers the canvas under the workspace's own chrome, which stays on top. */
+/* An agent's workbench, a sheet over the Team tab (TeamAgents): the team's agents across the top,
+   the chosen one on its workbench. It covers the canvas under the workspace's own chrome, which
+   stays on top. It takes the keyboard as it opens; the sheet itself draws no ring. */
 .team-agents-page { position: absolute; inset: 0; z-index: 30; overflow: auto; background: var(--color-ground); padding: 96px var(--sp-6) var(--sp-8); box-sizing: border-box; }
+.team-agents-page:focus { outline: none; }
+/* Its close stands in its corner, under the header; the agents' chips keep clear of it. */
+.team-agents-close { position: absolute; top: 80px; right: var(--sp-6); width: 40px; height: 40px; z-index: 1; }
+@media (min-width: 721px) { .team-agents-page .team-agents-strip { padding-right: 56px; } }
+@media (max-width: 767px) { .team-agents-close { width: 44px; height: 44px; } }
+@media (max-width: 720px) { .team-agents-close { top: 104px; right: var(--sp-4); } }
 .team-agents { width: min(1440px, 100%); margin: 0 auto; display: flex; flex-direction: column; gap: var(--sp-5); }
 .team-agents-strip { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 .team-agents-chip { display: inline-flex; align-items: center; gap: 10px; padding: 8px 14px 8px 10px; border: 1px solid var(--color-hairline); border-radius: var(--r-md); background: var(--color-panel-solid); color: var(--color-ink); font: inherit; text-align: left; cursor: pointer; }
@@ -323,7 +387,6 @@
 .team-agents-linked { display: flex; flex-direction: column; gap: var(--sp-4); }
 /* Spaced as one of My agents' page (.agent-builder), whose head it shares. */
 .team-agents-own { display: flex; flex-direction: column; gap: var(--sp-5); }
-.team-agents-linked > :first-child { max-width: 760px; }
 /* Choosing agents for the team: the first step of a team, and the strip's last chip. */
 .team-agents-chip.add { border-style: dashed; color: var(--color-ink-2); }
 .team-agents-chip.add > svg { color: var(--color-accent); }
@@ -362,3 +425,24 @@
 .figure-still > .worn-overlay { pointer-events: none; }
 /* Whether it brings in helpers for a big task (ADR 0079), under its model: how it works, as a switch. */
 .byhand-helpers { margin-top: var(--sp-1); }
+
+/* ---------- An agent's "…" on its card (ADR 0100) ---------- */
+/* Beside the card's own button, not inside it, over its top right corner. */
+.agent-card-box { position: relative; }
+/* Only its top row shares the corner with the "…", so only that row makes room for it. */
+.agent-card-box .agent-badge-head { padding-right: calc(44px - var(--sp-3)); }
+/* A strip along the tile's top holds the "…" at its right and lets a press anywhere else through to
+   the tile. Its menu opens under the "…", toward the tile's middle: in a phone's left column from the
+   tile's left edge, so it never runs off the window. */
+.agent-card-menu { position: absolute; top: 6px; left: 6px; right: 6px; z-index: 2; display: flex; justify-content: flex-end; pointer-events: none; }
+.agent-card-menu > * { pointer-events: auto; }
+.agent-card-menu:has([aria-expanded="true"]) { z-index: 3; }
+@media (max-width: 560px) {
+  .agents-grid > li:nth-child(odd) > .agent-card-menu > .idle-agent-menu { right: auto; left: 0; }
+}
+/* Each card rises in on its own layer, so the card with the open menu is lifted over the next. */
+.agents-grid > li:has(.agent-card-menu [aria-expanded="true"]) { z-index: 1; }
+.agent-card-menu .iconbtn { width: 44px; height: 44px; }
+/* Its name at the top of its own page always shows its arrow: its menu holds Remove. A team's chip
+   drops the arrow between 768 and 1180 px for room (prototype-parity.css); this one keeps it. */
+.lw-shell .workspace-chrome .lw-chip.agent-chip .chev { display: grid; }

@@ -1,5 +1,6 @@
 //! REST surface consumed by the `LoomWatch` web UI.
 
+use std::collections::BTreeSet;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -205,6 +206,10 @@ pub fn router_with_archive(
         .route("/api/capabilities/{id}", get(get_capability_details))
         .route("/api/teams", get(get_teams))
         .route("/api/team", get(get_team).put(put_team).delete(delete_team))
+        .route("/api/team/rename", axum::routing::post(post_team_rename))
+        // One team in several projects (ADR 0103): its place in another project, and taking one out.
+        .route("/api/team/places", axum::routing::post(post_team_place))
+        .route("/api/team/take-out", axum::routing::post(post_team_take_out))
         .route("/api/instructions", get(get_instructions))
         .route("/api/team/layout", get(get_layout).put(put_layout))
         .route("/api/memory", get(get_memory))
@@ -222,6 +227,23 @@ pub fn router_with_archive(
             axum::routing::put(put_job).delete(delete_job),
         )
         .route("/api/jobs/{id}/versions", get(get_job_versions))
+        // Projects hold the work (ADR 0097): each one, its teams, and the one-time move of every
+        // team into a project of its own, which the app makes.
+        .route("/api/projects", get(get_projects))
+        .route(
+            "/api/projects/{id}",
+            axum::routing::put(put_project).delete(delete_project),
+        )
+        .route("/api/projects/{id}/notes", axum::routing::post(post_project_note))
+        .route(
+            "/api/move-into-projects",
+            get(get_projects_move).post(post_projects_moved),
+        )
+        // The one-time move of every team onto My agents (ADR 0094), which the app makes.
+        .route(
+            "/api/my-agents/move",
+            get(get_my_agents_move).post(post_my_agents_moved),
+        )
         // The agent builder's test bench: where its one-agent teams are written.
         .route("/api/bench", axum::routing::post(post_bench))
         // ADR 0035: the folder picker, and adding a file to a team as knowledge.
@@ -403,32 +425,120 @@ async fn get_file_read(
         .map(Json)
 }
 
-/// A produced picture or recording as it is (ADR 0077). Answered sandboxed: opened on its own, an
-/// SVG's scripts would otherwise run as this daemon's page.
+/// A produced picture or recording as it is (ADR 0077), all of it or the part a player asks for
+/// with `Range` (ADR 0091), read from disk as it goes, so a recording of any size plays and seeks,
+/// in Safari too. Answered sandboxed: opened on its own, an SVG's scripts would otherwise run as
+/// this daemon's page.
 async fn get_file_raw(
     State(state): State<ApiState>,
+    headers: HeaderMap,
     Query(query): Query<TeamPath>,
 ) -> Result<Response, ApiError> {
     let teams_root = state.teams_root.clone();
-    let (media_type, bytes) =
-        tokio::task::spawn_blocking(move || crate::files::raw(&teams_root, &query.path))
-            .await
-            .map_err(|error| {
-                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, error.to_string())
-            })??;
-    Ok((
+    let file = tokio::task::spawn_blocking(move || crate::files::raw(&teams_root, &query.path))
+        .await
+        .map_err(|error| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))??;
+    file_answer(file, &headers).await
+}
+
+/// A file answered as it is, all of it or the part a player asks for with `Range`.
+async fn file_answer(
+    file: crate::files::RawFile,
+    headers: &HeaderMap,
+) -> Result<Response, ApiError> {
+    use crate::files::Wanted;
+    let range = headers
+        .get(header::RANGE)
+        .and_then(|value| value.to_str().ok());
+    let wanted = crate::files::wanted(range, file.size);
+    let (status, start, length, content_range) = match wanted {
+        Wanted::Whole => (StatusCode::OK, 0, file.size, None),
+        Wanted::Part { start, end } => (
+            StatusCode::PARTIAL_CONTENT,
+            start,
+            end - start + 1,
+            Some(format!("bytes {start}-{end}/{}", file.size)),
+        ),
+        Wanted::Unsatisfiable => (
+            StatusCode::RANGE_NOT_SATISFIABLE,
+            0,
+            0,
+            Some(format!("bytes */{}", file.size)),
+        ),
+    };
+    let body = if length == 0 {
+        axum::body::Body::empty()
+    } else {
+        file_body(&file.path, start, length).await?
+    };
+    let mut response = (
+        status,
         [
-            (header::CONTENT_TYPE, media_type),
-            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+            (header::CONTENT_TYPE, file.media_type.to_owned()),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff".to_owned()),
             (
                 header::CONTENT_SECURITY_POLICY,
-                "sandbox; default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'",
+                "sandbox; default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'".to_owned(),
             ),
-            (header::CACHE_CONTROL, "no-store"),
+            (header::CACHE_CONTROL, "no-store".to_owned()),
+            (header::ACCEPT_RANGES, "bytes".to_owned()),
+            (header::CONTENT_LENGTH, length.to_string()),
         ],
-        bytes,
+        body,
     )
-        .into_response())
+        .into_response();
+    if let Some(content_range) = content_range
+        && let Ok(value) = content_range.parse()
+    {
+        response.headers_mut().insert(header::CONTENT_RANGE, value);
+    }
+    // The version of a file the reader can change, which a change to its bytes names (ADR 0107).
+    if let Some(version) = &file.version
+        && let Ok(value) = format!("\"{version}\"").parse()
+    {
+        response.headers_mut().insert(header::ETAG, value);
+    }
+    // The reader draws a PDF, a deck and a Word document itself; a browser sent to one saves it
+    // rather than show it as a page of this daemon, where its own viewer would read whatever the
+    // agent put in it.
+    if file.media_type == "application/pdf" || file.media_type.starts_with("application/vnd.") {
+        response.headers_mut().insert(
+            header::CONTENT_DISPOSITION,
+            header::HeaderValue::from_static("attachment"),
+        );
+    }
+    Ok(response)
+}
+
+/// `length` bytes of the file at `path` from byte `start`, read as they are sent, a piece at a time.
+async fn file_body(path: &Path, start: u64, length: u64) -> Result<axum::body::Body, ApiError> {
+    use tokio::io::{AsyncReadExt as _, AsyncSeekExt as _};
+    let failed = |error: io::Error| {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("failed to read it: {error}"),
+        )
+    };
+    let mut file = tokio::fs::File::open(path).await.map_err(failed)?;
+    if start > 0 {
+        file.seek(io::SeekFrom::Start(start))
+            .await
+            .map_err(failed)?;
+    }
+    // After a read fails, the stream ends: the player asks again for what it still needs.
+    let pieces = futures_util::stream::unfold(Some(file.take(length)), |reader| async move {
+        let mut reader = reader?;
+        let mut piece = vec![0; 64 * 1024];
+        match reader.read(&mut piece).await {
+            Ok(0) => None,
+            Ok(read) => {
+                piece.truncate(read);
+                Some((Ok::<_, io::Error>(piece), Some(reader)))
+            }
+            Err(error) => Some((Err(error), None)),
+        }
+    });
+    Ok(axum::body::Body::from_stream(pieces))
 }
 
 #[derive(Debug, Deserialize)]
@@ -581,9 +691,27 @@ async fn put_job(
             "job write lock unavailable".into(),
         )
     })?;
-    crate::jobs::save_job(&state.teams_root, &id, spec, create_only, expected_version)
-        .map(Json)
-        .map_err(job_error)
+    let previous = crate::jobs::job_bytes(&state.teams_root, &id)
+        .map(|bytes| crate::approvals::revision(&bytes));
+    let saved = crate::jobs::save_job(&state.teams_root, &id, spec, create_only, expected_version)
+        .map_err(job_error)?;
+    // An agent made here, or changed here from a file the operator approved, is theirs to run in
+    // every team (ADR 0094). Saving one that came from outside doesn't stand in for reviewing it,
+    // as with a team file (ADR 0048).
+    if let Some(approvals) = state.runs.approvals()
+        && previous
+            .as_deref()
+            .is_none_or(|revision| approvals.is_agent_approved(&id, revision))
+        && let Some(bytes) = crate::jobs::job_bytes(&state.teams_root, &id)
+        && let Err(error) = approvals.approve_agent(
+            &id,
+            &crate::approvals::revision(&bytes),
+            crate::approvals::Approval::Saved,
+        )
+    {
+        eprintln!("warning: could not record that agent {id} was saved in LoomWatch: {error}");
+    }
+    Ok(Json(saved))
 }
 
 /// Every version of one saved job, newest first, each with its fields.
@@ -600,6 +728,575 @@ async fn get_job_versions(
     Ok(Json(json!({ "versions": versions })))
 }
 
+/// Where the move onto My agents stands (ADR 0094), and every listed team with whether it may be
+/// moved: one that waits for the person's review (ADR 0048) isn't, so its agents never reach My
+/// agents unseen. Without a state folder (no approvals kept) there is nothing to move.
+async fn get_my_agents_move(State(state): State<ApiState>) -> Result<Json<Value>, ApiError> {
+    let Some((approvals, state_dir)) = approvals_and_state(&state) else {
+        return Ok(Json(json!({ "moved": true, "teams": [], "changed": {} })));
+    };
+    let record = crate::my_agents::moved(&state_dir, &state.teams_root);
+    let teams: Vec<Value> = discover_team_files(&state.teams_root)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|path| {
+            let approved = fs::read(state.teams_root.join(&path)).is_ok_and(|bytes| {
+                approvals.is_approved(&path, &crate::approvals::revision(&bytes))
+            });
+            json!({ "path": path, "approved": approved })
+        })
+        .collect();
+    Ok(Json(json!({
+        "moved": record.moved_at.is_some(),
+        "teams": teams,
+        "changed": record.changed,
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+struct MovedRequest {
+    /// What the move changed in each team, by the team's path: the lines its chat says once.
+    #[serde(default)]
+    changed: std::collections::BTreeMap<String, Vec<String>>,
+}
+
+/// One project as the app shows it: its file's fields, its id, and its teams' paths.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectView {
+    id: String,
+    #[serde(flatten)]
+    project: crate::projects::Project,
+    /// Each team that works in it, by its path relative to the teams root.
+    teams: Vec<String>,
+}
+
+/// Every project, with its teams, and the teams that work in none yet (ADR 0097).
+async fn get_projects(State(state): State<ApiState>) -> Result<Json<Value>, ApiError> {
+    let teams_root = state.teams_root.clone();
+    let (projects, mut teams, removed) = tokio::task::spawn_blocking(move || {
+        (
+            crate::projects::list(&teams_root),
+            crate::projects::teams_of(&teams_root),
+            crate::projects::removed_ids(&teams_root),
+        )
+    })
+    .await
+    .map_err(|error| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    let loose = teams.remove("").unwrap_or_default();
+    let projects: Vec<ProjectView> = projects
+        .into_iter()
+        .map(|(id, project)| ProjectView {
+            teams: teams.remove(&id).unwrap_or_default(),
+            id,
+            project,
+        })
+        .collect();
+    // A team that names a project with no file: listed apart, so it isn't lost.
+    let missing: Vec<String> = teams.into_values().flatten().collect();
+    // A deleted project's id, which a new project never takes (ADR 0100).
+    Ok(Json(
+        json!({ "projects": projects, "loose": loose, "missing": missing, "removed": removed }),
+    ))
+}
+
+/// Keep project `id` as the body says, whole: a new project, or a change to one.
+async fn put_project(
+    State(state): State<ApiState>,
+    AxumPath(id): AxumPath<String>,
+    Json(project): Json<crate::projects::Project>,
+) -> Result<Json<ProjectView>, ApiError> {
+    if !crate::projects::is_id(&id) {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            format!("“{id}” isn't a project's name: use lowercase letters, digits and hyphens."),
+        ));
+    }
+    let project = project
+        .checked()
+        .map_err(|message| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, message))?;
+    {
+        let _write = state.writes.lock().map_err(|_| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "team write lock unavailable".into(),
+            )
+        })?;
+        crate::projects::write(&state.teams_root, &id, &project).map_err(|error| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("LoomWatch could not keep the project: {error}"),
+            )
+        })?;
+    }
+    let teams = crate::projects::teams_of(&state.teams_root)
+        .remove(&id)
+        .unwrap_or_default();
+    Ok(Json(ProjectView { id, project, teams }))
+}
+
+/// Delete project `id` (ADR 0100): its teams stay where they are, in no project, and the app leaves
+/// them so. Every team's file loses its `project:` line before anything changes, or nothing does;
+/// a team the person approved stays approved, as this is `LoomWatch`'s own change. The project's
+/// file moves to `.projects/.removed/`.
+async fn delete_project(
+    State(state): State<ApiState>,
+    AxumPath(id): AxumPath<String>,
+) -> Result<Json<Value>, ApiError> {
+    let failed = |error: io::Error| {
+        eprintln!("warning: could not delete project {id}: {error}");
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "LoomWatch couldn’t delete the project. Check that your teams folder can be changed, \
+             then try again."
+                .into(),
+        )
+    };
+    if !crate::projects::is_id(&id) || !crate::projects::file_of(&state.teams_root, &id).is_file() {
+        return Err(ApiError::new(
+            StatusCode::NOT_FOUND,
+            "This project was already deleted.".into(),
+        ));
+    }
+    let _write = state.writes.lock().map_err(|_| {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "team write lock unavailable".into(),
+        )
+    })?;
+    let mut teams = crate::projects::teams_of(&state.teams_root)
+        .remove(&id)
+        .unwrap_or_default();
+    // A team that works in other projects too loses only its place in this one (ADR 0103): that
+    // file goes to the trash, as Delete team moves one. Checked before anything changes.
+    let elsewhere: Vec<String> = teams
+        .iter()
+        .filter(|team| works_elsewhere(&state.teams_root, team))
+        .cloned()
+        .collect();
+    for team in &elsewhere {
+        if state.runs.live_run_for(team).is_some() {
+            return Err(ApiError::new(
+                StatusCode::CONFLICT,
+                format!(
+                    "{} is working in this project right now. Wait for it to finish, then delete \
+                     the project.",
+                    summarize_team_file(&state.teams_root, team)
+                        .name
+                        .unwrap_or_else(|| team.clone())
+                ),
+            ));
+        }
+    }
+    teams.retain(|team| !elsewhere.contains(team));
+    let mut changes = Vec::with_capacity(teams.len());
+    for team in &teams {
+        let path = state.teams_root.join(team);
+        let before = fs::read_to_string(&path).map_err(failed)?;
+        let after = crate::projects::without_project(&before, &id).ok_or_else(|| {
+            // Called by its name, as the app shows it, not by its file.
+            let name = serde_yaml::from_str::<serde_yaml::Value>(&before)
+                .ok()
+                .and_then(|team| {
+                    team.get("name")
+                        .and_then(serde_yaml::Value::as_str)
+                        .map(str::to_owned)
+                })
+                .unwrap_or_else(|| team.clone());
+            ApiError::new(
+                StatusCode::CONFLICT,
+                format!(
+                    "{name}’s file was changed by hand, so LoomWatch can’t take it out of this \
+                     project. Move {name} to another project, then delete this one."
+                ),
+            )
+        })?;
+        changes.push((team, path, before, after));
+    }
+    // Kept first: a team in no project that isn't left out is moved into a project of its own the
+    // next time the app opens.
+    if let Some((_, state_dir)) = approvals_and_state(&state) {
+        crate::projects::leave_out(&state_dir, &state.teams_root, &teams).map_err(failed)?;
+    }
+    for (team, path, before, after) in &changes {
+        atomic_write(path, after.as_bytes(), false).map_err(failed)?;
+        if let Some(approvals) = state.runs.approvals()
+            && approvals.is_approved(team, &crate::approvals::revision(before.as_bytes()))
+            && let Err(error) = approvals.approve(
+                team,
+                &crate::approvals::revision(after.as_bytes()),
+                crate::approvals::Approval::Saved,
+            )
+        {
+            eprintln!("warning: could not keep {team} approved after its project went: {error}");
+        }
+    }
+    for team in &elsewhere {
+        trash_team_locked(&state, Path::new(team))?;
+    }
+    let moved = crate::projects::move_to_removed(&state.teams_root, &id).map_err(failed)?;
+    Ok(Json(json!({
+        "id": id,
+        "teams": teams,
+        "placesRemoved": elsewhere,
+        "movedTo": moved.strip_prefix(&state.teams_root).unwrap_or(&moved),
+    })))
+}
+
+/// What `POST /api/team/places` is sent: a team file, and the project to put the team in too.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct NewPlace {
+    path: PathBuf,
+    project: String,
+}
+
+/// Put a team into another project as well (ADR 0103): a new team file beside `path`, with the
+/// team's setup, the project's id, an `id` of its own and no schedule or delivery yet, so its
+/// chat, history and files are that project's. Both files name the same `shares:` id from then
+/// on, and the first one gains it in place (nothing else in it changes). The new place is approved
+/// when the team was, and takes the team's canvas layout. Refused (409) when the team works in
+/// that project already, and (404) for a project that is gone.
+async fn post_team_place(
+    State(state): State<ApiState>,
+    Json(request): Json<NewPlace>,
+) -> Result<Json<Value>, ApiError> {
+    let refuse = |message: String| ApiError::new(StatusCode::CONFLICT, message);
+    let server_error = |error: &dyn std::fmt::Display| {
+        ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, error.to_string())
+    };
+    // The paths the history files something under: a new place never takes one, as a rename doesn't.
+    let mut filed = state.runs.team_paths();
+    if let Some(db) = state.runs.database() {
+        filed.extend(
+            crate::team_rename::filed_team_paths(&db)
+                .await
+                .map_err(|error| server_error(&error))?,
+        );
+    }
+    let _write = state.writes.lock().map_err(|_| {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "team write lock unavailable".into(),
+        )
+    })?;
+    let team = resolve_existing_team_path(&state.teams_root, &request.path)?;
+    let relative = listed_team_path(&state.teams_root, &team).ok_or_else(|| {
+        ApiError::new(
+            StatusCode::NOT_FOUND,
+            format!("{} is not in your teams list.", request.path.display()),
+        )
+    })?;
+    let project = request.project.trim();
+    let Some(entry) = crate::projects::is_id(project)
+        .then(|| {
+            crate::projects::read(&state.teams_root, project)
+                .ok()
+                .flatten()
+        })
+        .flatten()
+    else {
+        return Err(ApiError::new(
+            StatusCode::NOT_FOUND,
+            "That project was deleted.".into(),
+        ));
+    };
+    let text = fs::read_to_string(&team).map_err(|error| server_error(&error))?;
+    let config = TeamConfig::parse_in(&text, &state.teams_root)
+        .map_err(|error| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, error.to_string()))?;
+    let shares = crate::team_places::shares_of(&text);
+    let places = shares.as_deref().map_or_else(
+        || vec![relative.clone()],
+        |shares| crate::team_places::places(&state.teams_root, shares),
+    );
+    let name = config.name.clone();
+    if places
+        .iter()
+        .any(|place| top_level(&state.teams_root, place, "project").as_deref() == Some(project))
+    {
+        return Err(refuse(format!("{name} works in {} already.", entry.name)));
+    }
+    let shares =
+        shares.unwrap_or_else(|| crate::team_places::free_shares(&state.teams_root, &config.id));
+    let (target, id) = place_file(&state, &team, project, &filed).ok_or_else(|| {
+        refuse("Too many teams already have this name. Rename the team, then try again.".to_owned())
+    })?;
+    let place = crate::team_places::new_place(&text, &id, project, &shares)
+        .map_err(|error| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, error))?;
+    TeamConfig::parse_in(&place, &state.teams_root)
+        .map_err(|error| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, error.to_string()))?;
+    let place_relative = normalized_relative_path(&state.teams_root, &target).ok_or_else(|| {
+        server_error(&format!("{} is outside the teams folder", target.display()))
+    })?;
+    // Read before the first place is written: an approval is kept for one text of a file.
+    let source_approved = state.runs.approvals().is_some_and(|approvals| {
+        approvals.is_approved(&relative, &crate::approvals::revision(text.as_bytes()))
+    });
+    if let Some(named) = crate::team_places::with_shares(&text, &shares) {
+        atomic_write(&team, named.as_bytes(), false).map_err(|error| server_error(&error))?;
+        keep_approved(&state, &relative, &text, &named);
+    }
+    atomic_write(&target, place.as_bytes(), true).map_err(|error| server_error(&error))?;
+    // Approved when the team it is a place of was: LoomWatch made it from that setup.
+    if let Some(approvals) = state.runs.approvals()
+        && source_approved
+        && let Err(error) = approvals.approve(
+            &place_relative,
+            &crate::approvals::revision(place.as_bytes()),
+            crate::approvals::Approval::Saved,
+        )
+    {
+        eprintln!("warning: could not record that {place_relative} was made in LoomWatch: {error}");
+    }
+    let layout = layout_path(&team);
+    if layout.is_file()
+        && let Err(error) = fs::copy(&layout, layout_path(&target))
+    {
+        eprintln!("warning: {place_relative} starts without the team's layout: {error}");
+    }
+    Ok(Json(json!({
+        "path": place_relative,
+        "shares": shares,
+        "yaml": place,
+    })))
+}
+
+/// A top-level string `key` of the team file `file` (relative to `teams_root`), when it has one.
+fn top_level(teams_root: &Path, file: &str, key: &str) -> Option<String> {
+    fs::read_to_string(teams_root.join(file))
+        .ok()
+        .and_then(|text| serde_yaml::from_str::<Value>(&text).ok())
+        .and_then(|team| team.get(key).and_then(Value::as_str).map(str::to_owned))
+}
+
+/// Where the team at `team` gets its place in `project`, and that place's `id`: `<file>-<project>`
+/// beside it, or the next free one after it. Free means no file, sidecar, deleted team or past run
+/// has the name, and no team has the id: its notes and chat are filed under it.
+fn place_file(
+    state: &ApiState,
+    team: &Path,
+    project: &str,
+    filed: &BTreeSet<String>,
+) -> Option<(PathBuf, String)> {
+    let taken: BTreeSet<String> = discover_team_files(&state.teams_root)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|file| top_level(&state.teams_root, file, "id"))
+        .collect();
+    let (folder, stem, extension) = (
+        team.parent()?,
+        team.file_stem()?.to_str()?,
+        team.extension()?.to_str()?,
+    );
+    let trashed: BTreeSet<String> = trashed_team_paths(&state.teams_root).into_iter().collect();
+    let base = format!("{stem}-{project}");
+    (1..=100)
+        .map(|attempt| {
+            if attempt == 1 {
+                base.clone()
+            } else {
+                format!("{base}-{attempt}")
+            }
+        })
+        .map(|stem| (folder.join(format!("{stem}.{extension}")), stem))
+        .find(|(candidate, stem)| {
+            !taken.contains(stem)
+                && is_free_team_file(&state.teams_root, candidate, &trashed, filed)
+        })
+}
+
+/// What `POST /api/team/take-out` is sent: one place of a team.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct TakeOut {
+    path: PathBuf,
+}
+
+/// Take a team out of the project one of its files works in (ADR 0103). A team with places in
+/// other projects loses only this one: the file goes to the trash, as Delete team moves one, and
+/// its history stays in the run history. A team's only place stays, in no project, as deleting its
+/// project leaves it (ADR 0100): its `project:` line goes, it stays approved, and Home leaves it
+/// in no project.
+async fn post_team_take_out(
+    State(state): State<ApiState>,
+    Json(request): Json<TakeOut>,
+) -> Result<Json<Value>, ApiError> {
+    let failed = |error: io::Error| {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("LoomWatch couldn’t take the team out of its project: {error}"),
+        )
+    };
+    let _write = state.writes.lock().map_err(|_| {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "team write lock unavailable".into(),
+        )
+    })?;
+    let team = resolve_existing_team_path(&state.teams_root, &request.path)?;
+    let relative = listed_team_path(&state.teams_root, &team).ok_or_else(|| {
+        ApiError::new(
+            StatusCode::NOT_FOUND,
+            format!("{} is not in your teams list.", request.path.display()),
+        )
+    })?;
+    if works_elsewhere(&state.teams_root, &relative) {
+        let trashed = trash_team_locked(&state, &request.path)?;
+        return Ok(Json(json!({ "path": relative, "trash": trashed.trash })));
+    }
+    let before = fs::read_to_string(&team).map_err(failed)?;
+    let Some(project) = serde_yaml::from_str::<Value>(&before)
+        .ok()
+        .and_then(|team| {
+            team.get("project")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+    else {
+        return Ok(Json(json!({ "path": relative, "project": Value::Null })));
+    };
+    let after = crate::projects::without_project(&before, &project).ok_or_else(|| {
+        ApiError::new(
+            StatusCode::CONFLICT,
+            "This team's file was changed by hand, so LoomWatch can't take it out of its project. \
+             Move it to another project instead."
+                .into(),
+        )
+    })?;
+    if let Some((_, state_dir)) = approvals_and_state(&state) {
+        crate::projects::leave_out(
+            &state_dir,
+            &state.teams_root,
+            std::slice::from_ref(&relative),
+        )
+        .map_err(failed)?;
+    }
+    atomic_write(&team, after.as_bytes(), false).map_err(failed)?;
+    keep_approved(&state, &relative, &before, &after);
+    Ok(Json(json!({ "path": relative, "project": Value::Null })))
+}
+
+/// Whether the team file `team` is one place of a team that has another place (ADR 0103).
+fn works_elsewhere(teams_root: &Path, team: &str) -> bool {
+    fs::read_to_string(teams_root.join(team))
+        .ok()
+        .and_then(|text| crate::team_places::shares_of(&text))
+        .is_some_and(|shares| {
+            crate::team_places::places(teams_root, &shares)
+                .iter()
+                .any(|place| place != team)
+        })
+}
+
+#[derive(Debug, Deserialize)]
+struct ProjectNoteRequest {
+    text: String,
+}
+
+/// Add the person's note to project `id`: every agent in it reads it from the next run.
+async fn post_project_note(
+    State(state): State<ApiState>,
+    AxumPath(id): AxumPath<String>,
+    Json(request): Json<ProjectNoteRequest>,
+) -> Result<Json<ProjectView>, ApiError> {
+    let project = {
+        let _write = state.writes.lock().map_err(|_| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "team write lock unavailable".into(),
+            )
+        })?;
+        crate::projects::add_note(
+            &state.teams_root,
+            &id,
+            crate::projects::ProjectNote {
+                text: request.text,
+                at: Some(chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)),
+                by: None,
+            },
+        )
+        .map_err(|message| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, message))?
+    };
+    let teams = crate::projects::teams_of(&state.teams_root)
+        .remove(&id)
+        .unwrap_or_default();
+    Ok(Json(ProjectView { id, project, teams }))
+}
+
+/// Where the move of every team into a project of its own stands (ADR 0097): whether the app has
+/// made it, and each team with no project yet, with whether it may be moved (one that waits for a
+/// review isn't).
+async fn get_projects_move(State(state): State<ApiState>) -> Result<Json<Value>, ApiError> {
+    let Some((approvals, state_dir)) = approvals_and_state(&state) else {
+        return Ok(Json(json!({ "moved": true, "teams": [] })));
+    };
+    // A team in no project, or in one whose file is gone: each moves into a project of its own,
+    // except one the person left in none by deleting its project (ADR 0100).
+    let known = crate::projects::list(&state.teams_root);
+    let left_out = crate::projects::left_out(&state_dir, &state.teams_root);
+    let loose: Vec<String> = crate::projects::teams_of(&state.teams_root)
+        .into_iter()
+        .filter(|(project, _)| project.is_empty() || !known.contains_key(project))
+        .flat_map(|(_, teams)| teams)
+        .filter(|team| !left_out.contains(team))
+        .collect();
+    let teams: Vec<Value> = loose
+        .into_iter()
+        .map(|path| {
+            let approved = fs::read(state.teams_root.join(&path)).is_ok_and(|bytes| {
+                approvals.is_approved(&path, &crate::approvals::revision(&bytes))
+            });
+            json!({ "path": path, "approved": approved })
+        })
+        .collect();
+    Ok(Json(json!({
+        "moved": crate::projects::moved(&state_dir, &state.teams_root),
+        "teams": teams,
+    })))
+}
+
+/// The app moved every team it could into a project of its own: keep that.
+async fn post_projects_moved(State(state): State<ApiState>) -> Result<StatusCode, ApiError> {
+    let Some((_, state_dir)) = approvals_and_state(&state) else {
+        return Ok(StatusCode::NO_CONTENT);
+    };
+    crate::projects::record_moved(&state_dir, &state.teams_root).map_err(|error| {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("LoomWatch could not keep that your teams moved into projects: {error}"),
+        )
+    })?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// The app moved every team it could onto My agents: keep that, and what it changed where.
+async fn post_my_agents_moved(
+    State(state): State<ApiState>,
+    Json(request): Json<MovedRequest>,
+) -> Result<StatusCode, ApiError> {
+    let Some((_, state_dir)) = approvals_and_state(&state) else {
+        return Ok(StatusCode::NO_CONTENT);
+    };
+    crate::my_agents::record_moved(&state_dir, &state.teams_root, request.changed).map_err(
+        |error| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("LoomWatch could not keep that your teams moved onto My agents: {error}"),
+            )
+        },
+    )?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// The approvals record and the state folder it is kept in, when this daemon keeps them.
+fn approvals_and_state(
+    state: &ApiState,
+) -> Option<(std::sync::Arc<crate::approvals::TeamApprovals>, PathBuf)> {
+    let approvals = state.runs.approvals()?;
+    let state_dir = approvals.path().parent()?.to_path_buf();
+    Some((approvals, state_dir))
+}
+
 /// The folder the agent builder writes its test teams to, made when missing. It is hidden, so the
 /// team list and the scheduler never pick its teams up.
 async fn post_bench(State(state): State<ApiState>) -> Result<Json<Value>, ApiError> {
@@ -613,7 +1310,8 @@ async fn post_bench(State(state): State<ApiState>) -> Result<Json<Value>, ApiErr
     Ok(Json(json!({ "folder": folder })))
 }
 
-/// Remove a saved job: its file moves to `.jobs/.removed/`. No team changes.
+/// Remove a saved job: its file moves to `.jobs/.removed/`. Refused (409) while a team uses it
+/// (ADR 0094): the team would have no agent to run, so it is taken off those teams first.
 async fn delete_job(
     State(state): State<ApiState>,
     AxumPath(id): AxumPath<String>,
@@ -624,6 +1322,18 @@ async fn delete_job(
             "job write lock unavailable".into(),
         )
     })?;
+    let using = crate::my_agents::teams_using(&state.teams_root, &id);
+    if !using.is_empty() {
+        let name = crate::jobs::read_job(&state.teams_root, &id).map_or(id.clone(), |job| job.name);
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            format!(
+                "{name} is still in {}. Remove it from its card in My agents, where it comes off \
+                 its teams too.",
+                crate::my_agents::listed(&using),
+            ),
+        ));
+    }
     let moved = crate::jobs::remove_job(&state.teams_root, &id).map_err(job_error)?;
     Ok(Json(json!({ "id": id, "movedTo": moved })))
 }
@@ -866,8 +1576,37 @@ async fn put_team(
     headers: HeaderMap,
     Json(team_file): Json<TeamFile>,
 ) -> Result<Response, ApiError> {
-    TeamConfig::parse(&team_file.yaml)
+    let team = TeamConfig::parse_in(&team_file.yaml, &state.teams_root)
         .map_err(|error| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, error.to_string()))?;
+    let (resolved_path, before) = write_team_file(&state, &headers, &team_file)?;
+    // A team's own agent that became one of My agents takes its lessons along (ADR 0094).
+    let became_mine = before
+        .as_deref()
+        .map(|before| crate::my_agents::became_mine(before, &team_file.yaml))
+        .unwrap_or_default();
+    if !became_mine.is_empty()
+        && let Some(lessons) = state.runs.lessons()
+    {
+        let scope = crate::memory::scope_id(&team.id, &resolved_path);
+        for (agent, mine) in became_mine {
+            if let Err(error) = lessons
+                .move_to(&format!("team:{scope}#{agent}"), &format!("agent:{mine}"))
+                .await
+            {
+                eprintln!("warning: {agent}'s lessons stayed with the team: {error}");
+            }
+        }
+    }
+    Ok(team_response(&team_file))
+}
+
+/// Write `team_file` under the write lock, approving it when it was built here or changed from an
+/// approved revision (ADR 0048). Returns where it went and the text it replaced, if any.
+fn write_team_file(
+    state: &ApiState,
+    headers: &HeaderMap,
+    team_file: &TeamFile,
+) -> Result<(PathBuf, Option<String>), ApiError> {
     // Serialize the precondition check and replacement across all API clients.
     let _write = state.writes.lock().map_err(|_| {
         ApiError::new(
@@ -876,10 +1615,18 @@ async fn put_team(
         )
     })?;
     let resolved_path = resolve_writable_team_path(&state.teams_root, &team_file.path)?;
-    let create = check_precondition(&headers, &resolved_path)?;
-    let previous = fs::read(&resolved_path)
-        .ok()
-        .map(|bytes| crate::approvals::revision(&bytes));
+    let create = check_precondition(headers, &resolved_path)?;
+    // A team in several projects (ADR 0103): its setup goes into every other place with this save.
+    // Worked out first, so a place that can't be read stops the save before anything is written.
+    let spread = normalized_relative_path(&state.teams_root, &resolved_path)
+        .map(|relative| {
+            crate::team_places::spread(&state.teams_root, &relative, &team_file.yaml)
+                .map_err(|message| cannot_spread(&message))
+        })
+        .transpose()?
+        .unwrap_or_default();
+    let before = fs::read(&resolved_path).ok();
+    let previous = before.as_deref().map(crate::approvals::revision);
     atomic_write(&resolved_path, team_file.yaml.as_bytes(), create).map_err(|error| {
         ApiError::new(
             if error.kind() == io::ErrorKind::AlreadyExists {
@@ -909,7 +1656,63 @@ async fn put_team(
     {
         eprintln!("warning: could not record that {relative} was saved in LoomWatch: {error}");
     }
-    Ok(team_response(&team_file))
+    write_spread(state, &spread)?;
+    Ok((
+        resolved_path,
+        before.map(|bytes| String::from_utf8_lossy(&bytes).into_owned()),
+    ))
+}
+
+/// A place of the team that can't be read stops a save that would change it (ADR 0103).
+fn cannot_spread(message: &str) -> ApiError {
+    ApiError::new(
+        StatusCode::CONFLICT,
+        format!(
+            "This team works in more than one project, and its file there can't be read, so \
+             LoomWatch can't change the team in both: {message}. Put that file right, or take the \
+             team out of that project, then save again."
+        ),
+    )
+}
+
+/// Write a saved team's setup into its other places (ADR 0103). A place that was approved stays
+/// approved: the change is `LoomWatch`'s own, as a project's deletion is (ADR 0100). Called with the
+/// write lock held.
+fn write_spread(state: &ApiState, spread: &[crate::team_places::Spread]) -> Result<(), ApiError> {
+    for change in spread {
+        atomic_write(
+            &state.teams_root.join(&change.path),
+            change.after.as_bytes(),
+            false,
+        )
+        .map_err(|error| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!(
+                    "Saved, but couldn't change the team's file {}: {error}",
+                    change.path
+                ),
+            )
+        })?;
+        keep_approved(state, &change.path, &change.before, &change.after);
+    }
+    Ok(())
+}
+
+/// `after`, written by `LoomWatch` over `before` at `relative`, is approved when `before` was.
+fn keep_approved(state: &ApiState, relative: &str, before: &str, after: &str) {
+    if let Some(approvals) = state.runs.approvals()
+        && approvals.is_approved(relative, &crate::approvals::revision(before.as_bytes()))
+        && let Err(error) = approvals.approve(
+            relative,
+            &crate::approvals::revision(after.as_bytes()),
+            crate::approvals::Approval::Saved,
+        )
+    {
+        eprintln!(
+            "warning: could not keep {relative} approved after LoomWatch changed it: {error}"
+        );
+    }
 }
 
 /// Where `DELETE /api/team` puts a team: a hidden folder under the teams root, so the team list,
@@ -950,7 +1753,6 @@ async fn delete_team(
     State(state): State<ApiState>,
     Query(query): Query<TeamPath>,
 ) -> Result<Json<DeletedTeam>, ApiError> {
-    let refuse = |message: String| ApiError::new(StatusCode::CONFLICT, message);
     // The same lock every team write takes, so no save can recreate a sidecar mid-move.
     let _write = state.writes.lock().map_err(|_| {
         ApiError::new(
@@ -958,6 +1760,17 @@ async fn delete_team(
             "team write lock unavailable".into(),
         )
     })?;
+    trash_team_locked(&state, &query.path).map(Json)
+}
+
+/// `DELETE /api/team`'s move of one team file to the trash, with the write lock held: also how a
+/// team's place in a project is taken out, and how deleting a project removes a place there of a
+/// team that works in others (ADR 0103).
+fn trash_team_locked(state: &ApiState, path: &Path) -> Result<DeletedTeam, ApiError> {
+    let refuse = |message: String| ApiError::new(StatusCode::CONFLICT, message);
+    let query = TeamPath {
+        path: path.to_path_buf(),
+    };
     let team = resolve_existing_team_path(&state.teams_root, &query.path)?;
     // A link's sidecars sit beside its target, which may be listed as a team of its own; moving
     // either half would leave the other dangling.
@@ -1017,7 +1830,375 @@ async fn delete_team(
             ),
         )
     })?;
-    Ok(Json(deleted))
+    Ok(deleted)
+}
+
+/// What `POST /api/team/rename` is sent.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct TeamRename {
+    /// The team file as the app opened it.
+    path: PathBuf,
+    /// The new name as a file name, without its extension (`kyoto-week`). The next free one after
+    /// it (`kyoto-week-2`) is used when it is taken.
+    stem: String,
+    /// The team file's text with its new name. Its `id` stays the one the team is filed under.
+    yaml: String,
+}
+
+/// Rename a team and its file to match (ADR 0099): `trip.yaml` renamed "Kyoto week" becomes
+/// `kyoto-week.yaml`, with its Brief, layout and added files moved beside it, their names in the
+/// file changed with them, and its run history, chat and approval filed under the new path
+/// (`team_rename.rs`). Sent with `If-Match` of the text that was renamed, like a save. A name
+/// whose file is the one the team already has is saved in place, as `PUT /api/team` would.
+///
+/// Refused (409) while a run of the team has not finished, or its routine waits to try a run
+/// again: both find the team by its path. Refused (422) when the text changes the team's `id`,
+/// which its notes, lessons and workspace are filed by.
+async fn post_team_rename(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Json(rename): Json<TeamRename>,
+) -> Result<Response, ApiError> {
+    let renamed = TeamConfig::parse_in(&rename.yaml, &state.teams_root)
+        .map_err(|error| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, error.to_string()))?;
+    if !is_file_stem(&rename.stem) {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            format!("“{}” can't be a team file's name.", rename.stem),
+        ));
+    }
+    // The paths the history already files something under: a renamed team never takes one.
+    let mut filed = state.runs.team_paths();
+    if let Some(db) = state.runs.database() {
+        filed.extend(
+            crate::team_rename::filed_team_paths(&db)
+                .await
+                .map_err(|error| {
+                    ApiError::new(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("couldn't read the run history: {error}"),
+                    )
+                })?,
+        );
+    }
+    let moved = {
+        let _write = state.writes.lock().map_err(|_| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "team write lock unavailable".into(),
+            )
+        })?;
+        move_team_file(&state, &headers, &rename, &renamed, &filed)?
+    };
+    let Some(moved) = moved else {
+        let team_file = TeamFile {
+            path: rename.path,
+            yaml: rename.yaml,
+        };
+        write_team_file(&state, &headers, &team_file)?;
+        return Ok(team_response(&team_file));
+    };
+    if let Some(db) = state.runs.database()
+        && let Err(error) = crate::team_rename::refile_history(&db, &moved.refile).await
+    {
+        let _write = state.writes.lock();
+        moved.undo();
+        return Err(ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("couldn't move the team's history, so its file stayed as it was: {error}"),
+        ));
+    }
+    state.runs.refile_team(&moved.refile);
+    if let Some(approvals) = state.runs.approvals()
+        && let Err(error) = approvals.move_team(
+            &moved.refile.from,
+            &moved.refile.to,
+            &moved.was,
+            &crate::approvals::revision(moved.yaml.as_bytes()),
+        )
+    {
+        // Safe as it fails: the team at its new path is not approved, and asks before it runs.
+        eprintln!(
+            "warning: {} moved to {}, but its approval did not: {error}",
+            moved.refile.from, moved.refile.to
+        );
+    }
+    // A team left in no project by deleting its project stays so under its new name (ADR 0100).
+    if let Some((_, state_dir)) = approvals_and_state(&state) {
+        let _write = state.writes.lock();
+        if let Err(error) = crate::projects::follow_rename(
+            &state_dir,
+            &state.teams_root,
+            &moved.refile.from,
+            &moved.refile.to,
+        ) {
+            eprintln!(
+                "warning: {} moved to {}, but may be put in a project of its own: {error}",
+                moved.refile.from, moved.refile.to
+            );
+        }
+    }
+    // A team in several projects takes its new name in each (ADR 0103); their files keep theirs.
+    {
+        let _write = state.writes.lock();
+        let renamed_elsewhere =
+            crate::team_places::spread(&state.teams_root, &moved.refile.to, &moved.yaml)
+                .map_err(|message| cannot_spread(&message))
+                .and_then(|spread| write_spread(&state, &spread));
+        if let Err(error) = renamed_elsewhere {
+            eprintln!(
+                "warning: {} was renamed, but not in its other projects: {}",
+                moved.refile.to, error.message
+            );
+        }
+    }
+    Ok(team_response(&TeamFile {
+        path: PathBuf::from(&moved.refile.to),
+        yaml: moved.yaml,
+    }))
+}
+
+/// A name a team file can take: letters, digits, `.`, `_` and `-`, starting with a letter or
+/// digit, and not a name Windows keeps for itself.
+fn is_file_stem(stem: &str) -> bool {
+    stem.len() <= 120
+        && stem
+            .chars()
+            .next()
+            .is_some_and(|first| first.is_ascii_alphanumeric())
+        && stem
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || "._-".contains(character))
+        && !crate::platform::is_reserved_name(stem)
+}
+
+/// A team file Rename moved, and how to put it back.
+struct MovedTeam {
+    refile: crate::team_rename::Refile,
+    /// The text now in the new file.
+    yaml: String,
+    /// The revision of the text it was renamed from.
+    was: String,
+    old_file: PathBuf,
+    old_bytes: Vec<u8>,
+    new_file: PathBuf,
+    /// The folders and layout moved with it, from and to.
+    sidecars: Vec<(PathBuf, PathBuf)>,
+}
+
+impl MovedTeam {
+    /// Put everything back where it was, as far as the disk lets it.
+    fn undo(&self) {
+        let _ = atomic_write(&self.old_file, &self.old_bytes, true);
+        let _ = fs::remove_file(&self.new_file);
+        undo_moves(&self.sidecars);
+    }
+}
+
+fn undo_moves(moved: &[(PathBuf, PathBuf)]) {
+    for (from, to) in moved.iter().rev() {
+        let _ = fs::rename(to, from);
+    }
+}
+
+/// The file part of `POST /api/team/rename`, under the write lock: check it may move, pick the
+/// new name, and move the file with what is kept beside it. `None` when the new name's file is
+/// the one the team already has.
+fn move_team_file(
+    state: &ApiState,
+    headers: &HeaderMap,
+    rename: &TeamRename,
+    renamed: &TeamConfig,
+    filed: &BTreeSet<String>,
+) -> Result<Option<MovedTeam>, ApiError> {
+    let refuse = |message: String| ApiError::new(StatusCode::CONFLICT, message);
+    let server_error = |message: String| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, message);
+    let team = resolve_existing_team_path(&state.teams_root, &rename.path)?;
+    let requested = rooted_candidate(&state.teams_root, &rename.path);
+    if fs::symlink_metadata(&requested).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
+        return Err(refuse(format!(
+            "{} is a link to another file, so LoomWatch can't move it. Rename the link in your \
+             teams folder instead.",
+            rename.path.display()
+        )));
+    }
+    let relative = listed_team_path(&state.teams_root, &team).ok_or_else(|| {
+        ApiError::new(
+            StatusCode::NOT_FOUND,
+            format!("{} is not in your teams list.", rename.path.display()),
+        )
+    })?;
+    check_precondition(headers, &team)?;
+    let old_bytes = fs::read(&team).map_err(|error| server_error(error.to_string()))?;
+    let before = TeamConfig::parse_in(&String::from_utf8_lossy(&old_bytes), &state.teams_root)
+        .map_err(|error| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, error.to_string()))?;
+    // Notes, lessons, the workspace and the teams that read this one's memory find it by this.
+    let filed_as = crate::memory::scope_id(&before.id, &team);
+    if renamed.id != filed_as {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!(
+                "A rename keeps the team's id, {filed_as}: its notes and lessons are kept under it."
+            ),
+        ));
+    }
+    refuse_while_in_use(&state.runs, &relative, &team).map_err(refuse)?;
+    let (Some(folder), Some(old_stem), Some(extension)) = (
+        team.parent(),
+        team.file_stem().and_then(|stem| stem.to_str()),
+        team.extension().and_then(|extension| extension.to_str()),
+    ) else {
+        return Err(server_error(format!("{} has no file name", team.display())));
+    };
+    let trashed: BTreeSet<String> = trashed_team_paths(&state.teams_root).into_iter().collect();
+    let target = (1..=100)
+        .map(|attempt| {
+            let stem = if attempt == 1 {
+                rename.stem.clone()
+            } else {
+                format!("{}-{attempt}", rename.stem)
+            };
+            folder.join(format!("{stem}.{extension}"))
+        })
+        .find(|candidate| {
+            is_same_file_name(candidate, &team)
+                || is_free_team_file(&state.teams_root, candidate, &trashed, filed)
+        })
+        .ok_or_else(|| refuse("Too many teams already have this name. Try another.".to_owned()))?;
+    if is_same_file_name(&target, &team) {
+        return Ok(None);
+    }
+    let (Some(new_stem), Some(to)) = (
+        target.file_stem().and_then(|stem| stem.to_str()),
+        normalized_relative_path(&state.teams_root, &target),
+    ) else {
+        return Err(server_error(format!(
+            "{} has no file name",
+            target.display()
+        )));
+    };
+    let yaml = crate::team_rename::rename_own_folders(&rename.yaml, folder, old_stem, new_stem);
+    let sidecars = move_files(&team, &target, &yaml)
+        .map_err(|error| server_error(format!("{error}; nothing was moved")))?;
+    Ok(Some(MovedTeam {
+        refile: crate::team_rename::Refile {
+            key: renamed.chat_key(&to),
+            from: relative,
+            to,
+            files_from: crate::chosen_knowledge::files_folder(&team),
+            files_to: crate::chosen_knowledge::files_folder(&target),
+        },
+        yaml,
+        was: crate::approvals::revision(&old_bytes),
+        old_file: team,
+        old_bytes,
+        new_file: target,
+        sidecars,
+    }))
+}
+
+/// Why the team at `relative` can't move now, if it can't: a run or a schedule's next try that
+/// finds it by its path, or a file of the same name beside it that shares its folders.
+fn refuse_while_in_use(
+    runs: &crate::runs::RunRegistry,
+    relative: &str,
+    team: &Path,
+) -> Result<(), String> {
+    if runs.live_run_for(relative).is_some() {
+        return Err(
+            "This team is working right now. Stop the work or wait for it to finish, \
+                    then rename the team."
+                .to_owned(),
+        );
+    }
+    if runs.waits_to_try_again(relative) {
+        return Err(
+            "This team is trying its last work again soon. Rename it after that.".to_owned(),
+        );
+    }
+    // `trip.yaml` and `trip.yml` side by side share `trip.brief/` and the rest.
+    match ["yaml", "yml"]
+        .iter()
+        .map(|extension| team.with_extension(extension))
+        .find(|sibling| sibling != team && sibling.is_file())
+    {
+        Some(sibling) => Err(format!(
+            "{}, another team file with the same name, shares this team's files. Delete one of \
+             the two teams, then rename the other.",
+            sibling.file_name().unwrap_or_default().to_string_lossy()
+        )),
+        None => Ok(()),
+    }
+}
+
+/// Move the team file at `team` to `target` with the text `yaml`, its Brief, layout and added
+/// files with it, by renaming only, as the trash does. Returns what moved beside the file; when
+/// one move fails, the ones made are undone.
+fn move_files(team: &Path, target: &Path, yaml: &str) -> Result<Vec<(PathBuf, PathBuf)>, String> {
+    let mut sidecars = Vec::new();
+    for (from, to) in [
+        (team.with_extension("brief"), target.with_extension("brief")),
+        (layout_path(team), layout_path(target)),
+        (
+            crate::chosen_knowledge::files_folder(team),
+            crate::chosen_knowledge::files_folder(target),
+        ),
+    ] {
+        if fs::symlink_metadata(&from).is_err() {
+            continue;
+        }
+        if let Err(error) = fs::rename(&from, &to) {
+            undo_moves(&sidecars);
+            return Err(format!("couldn't move {}: {error}", from.display()));
+        }
+        sidecars.push((from, to));
+    }
+    if let Err(error) = atomic_write(target, yaml.as_bytes(), true) {
+        undo_moves(&sidecars);
+        return Err(format!("couldn't write {}: {error}", target.display()));
+    }
+    if let Err(error) = fs::remove_file(team) {
+        let _ = fs::remove_file(target);
+        undo_moves(&sidecars);
+        return Err(format!("couldn't move {}: {error}", team.display()));
+    }
+    Ok(sidecars)
+}
+
+/// Whether `candidate` names the file `team` is, as a disk that ignores case sees it.
+fn is_same_file_name(candidate: &Path, team: &Path) -> bool {
+    candidate.parent() == team.parent()
+        && candidate
+            .file_name()
+            .and_then(|name| name.to_str())
+            .zip(team.file_name().and_then(|name| name.to_str()))
+            .is_some_and(|(candidate, team)| candidate.eq_ignore_ascii_case(team))
+}
+
+/// Whether a team may move to `candidate`: nothing is there or beside it under its name, it is
+/// not a deleted team's name, and no history is filed under it. Each would give the moved team
+/// another team's files, or another team's past.
+fn is_free_team_file(
+    teams_root: &Path,
+    candidate: &Path,
+    trashed: &BTreeSet<String>,
+    filed: &BTreeSet<String>,
+) -> bool {
+    let beside = [
+        candidate.with_extension("yaml"),
+        candidate.with_extension("yml"),
+        candidate.with_extension("brief"),
+        layout_path(candidate),
+        crate::chosen_knowledge::files_folder(candidate),
+    ];
+    !beside.iter().any(|path| fs::symlink_metadata(path).is_ok())
+        && ["yaml", "yml"]
+            .iter()
+            .filter_map(|extension| {
+                normalized_relative_path(teams_root, &candidate.with_extension(extension))
+            })
+            .all(|path| !trashed.contains(&path) && !filed.contains(&path))
 }
 
 /// `team` (canonical) as `GET /api/teams` lists it, or `None` when the list never would: not a
@@ -1046,7 +2227,7 @@ fn listed_team_path(teams_root: &Path, team: &Path) -> Option<String> {
 fn teams_inheriting(teams_root: &Path, team: &Path, relative: &str) -> io::Result<Vec<String>> {
     let Some(config) = fs::read_to_string(team)
         .ok()
-        .and_then(|source| TeamConfig::parse(&source).ok())
+        .and_then(|source| TeamConfig::parse_in(&source, teams_root).ok())
     else {
         // A file that does not load is not in the memory index, so nothing can inherit it.
         return Ok(Vec::new());
@@ -1064,7 +2245,7 @@ fn teams_inheriting(teams_root: &Path, team: &Path, relative: &str) -> io::Resul
         .filter(|file| {
             fs::read_to_string(teams_root.join(file))
                 .ok()
-                .and_then(|source| TeamConfig::parse(&source).ok())
+                .and_then(|source| TeamConfig::parse_in(&source, teams_root).ok())
                 .and_then(|other| other.memory)
                 .is_some_and(|memory| {
                     memory.enabled
@@ -1251,6 +2432,10 @@ pub struct MemoryView {
     pub inherited_teams: Vec<String>,
     /// Whether agents on this team get the four memory tools.
     pub notebook_enabled: bool,
+    /// The About and notes of the project the team works in (ADR 0097), which every agent reads
+    /// first. Changed in the project, never here.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub project: Vec<MemoryEntryView>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -1275,7 +2460,7 @@ async fn get_memory(
     Query(query): Query<TeamPath>,
 ) -> Result<Json<MemoryView>, ApiError> {
     let resolved = resolve_existing_team_path(&state.teams_root, &query.path)?;
-    let team = TeamConfig::load(&resolved).map_err(|error| {
+    let team = TeamConfig::load_in(&resolved, &state.teams_root).map_err(|error| {
         ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             format!(
@@ -1287,7 +2472,7 @@ async fn get_memory(
     // A Brief file that cannot be read is the operator's problem to fix and would refuse a run,
     // so the panel must say so rather than showing a short list that looks complete.
     let roots = crate::memory::MemoryRoots::for_team(&resolved, Some(&state.teams_root));
-    let memory = crate::memory::TeamMemory::load(&roots, &resolved, team.memory.as_ref())
+    let memory = crate::memory::TeamMemory::load_for(&roots, &resolved, &team)
         .map_err(|error| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, error.message))?;
     let view = |entry: &crate::memory::BriefEntry| MemoryEntryView {
         path: entry.path.clone(),
@@ -1317,6 +2502,7 @@ async fn get_memory(
         inherited,
         inherited_teams: memory.inherited_teams.clone(),
         notebook_enabled: memory.notebook_enabled,
+        project: memory.project.iter().map(view).collect(),
     }))
 }
 
@@ -1649,7 +2835,7 @@ fn ensure_under_teams_root(
 /// The temporary file lives beside the destination so the final rename stays on one
 /// filesystem and is atomic. Syncing it before the rename also prevents a successful
 /// response from referring to bytes that are still only in userspace buffers.
-fn atomic_write(path: &Path, contents: &[u8], create: bool) -> io::Result<()> {
+pub(crate) fn atomic_write(path: &Path, contents: &[u8], create: bool) -> io::Result<()> {
     let parent = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -1929,6 +3115,117 @@ mod tests {
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
     }
 
+    /// **A PDF or a deck is answered for the reader to draw, and for a browser to save (ADR 0091).**
+    /// Sent to it directly, a browser saves it rather than show it as a page of this daemon.
+    #[tokio::test]
+    async fn raw_answers_a_pdf_to_be_saved_never_shown_as_a_page_here() {
+        let root = TempDirectory::new();
+        let workspace = root.0.join(".loomwatch").join("team").join("writer");
+        fs::create_dir_all(&workspace).expect("create workspace");
+        fs::write(workspace.join("report.pdf"), b"%PDF-1.7\n").expect("write pdf");
+        fs::write(workspace.join("talk.mp4"), b"mp4").expect("write recording");
+        fs::write(workspace.join("deck.pptx"), b"PK").expect("write deck");
+        let canonical = crate::platform::canonicalize(&root.0).expect("canonical root");
+        let ask = |name: &str| {
+            let request = Request::builder()
+                .uri(format!(
+                    "/api/files/raw?path={}",
+                    canonical
+                        .join(".loomwatch/team/writer")
+                        .join(name)
+                        .display()
+                ))
+                .header(header::HOST, "localhost")
+                .body(Body::empty())
+                .expect("request");
+            test_router(&root.0).oneshot(request)
+        };
+        let pdf = ask("report.pdf").await.expect("response");
+        assert_eq!(pdf.status(), StatusCode::OK);
+        assert_eq!(pdf.headers()[header::CONTENT_TYPE], "application/pdf");
+        assert_eq!(pdf.headers()[header::CONTENT_DISPOSITION], "attachment");
+        assert_eq!(pdf.headers()[header::ACCEPT_RANGES], "bytes");
+        // A deck the reader draws too.
+        let deck = ask("deck.pptx").await.expect("response");
+        assert_eq!(deck.status(), StatusCode::OK);
+        assert_eq!(deck.headers()[header::CONTENT_DISPOSITION], "attachment");
+        // With the version a change to it names (ADR 0107): the SHA-256 of `PK`.
+        assert_eq!(
+            deck.headers()[header::ETAG],
+            format!("\"sha256:{:x}\"", Sha256::digest(b"PK")).as_str()
+        );
+        let clip = ask("talk.mp4").await.expect("response");
+        assert!(clip.headers().get(header::CONTENT_DISPOSITION).is_none());
+        // A recording or a PDF is never changed in the reader, so it has no version to name.
+        assert!(clip.headers().get(header::ETAG).is_none());
+        assert!(pdf.headers().get(header::ETAG).is_none());
+    }
+
+    /// **A recording is answered a part at a time (ADR 0091).** Safari plays only what it can ask
+    /// for by byte range; every answer keeps the sandbox, and says the file can be asked so.
+    #[tokio::test]
+    async fn raw_answers_the_bytes_a_player_asks_for() {
+        let root = TempDirectory::new();
+        let workspace = root.0.join(".loomwatch").join("team").join("writer");
+        fs::create_dir_all(&workspace).expect("create workspace");
+        let bytes: Vec<u8> = (0..200_000u32)
+            .map(|at| u8::try_from(at % 251).unwrap_or(0))
+            .collect();
+        fs::write(workspace.join("talk.mp4"), &bytes).expect("write recording");
+        let canonical = crate::platform::canonicalize(&root.0).expect("canonical root");
+        let clip = canonical.join(".loomwatch/team/writer/talk.mp4");
+        let ask = |range: Option<&str>| {
+            let mut request = Request::builder()
+                .uri(format!("/api/files/raw?path={}", clip.display()))
+                .header(header::HOST, "localhost");
+            if let Some(range) = range {
+                request = request.header(header::RANGE, range);
+            }
+            test_router(&root.0).oneshot(request.body(Body::empty()).expect("request"))
+        };
+        let body = |response: Response| async move {
+            response
+                .into_body()
+                .collect()
+                .await
+                .expect("collect response body")
+                .to_bytes()
+                .to_vec()
+        };
+
+        let whole = ask(None).await.expect("response");
+        assert_eq!(whole.status(), StatusCode::OK);
+        assert_eq!(whole.headers()[header::CONTENT_TYPE], "video/mp4");
+        assert_eq!(whole.headers()[header::ACCEPT_RANGES], "bytes");
+        assert_eq!(whole.headers()[header::CONTENT_LENGTH], "200000");
+        assert!(
+            whole.headers()[header::CONTENT_SECURITY_POLICY]
+                .to_str()
+                .expect("policy")
+                .starts_with("sandbox")
+        );
+        assert_eq!(body(whole).await, bytes, "read whole, past one piece");
+
+        let middle = ask(Some("bytes=70000-150000")).await.expect("response");
+        assert_eq!(middle.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(
+            middle.headers()[header::CONTENT_RANGE],
+            "bytes 70000-150000/200000"
+        );
+        assert_eq!(middle.headers()[header::CONTENT_LENGTH], "80001");
+        assert_eq!(middle.headers()[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
+        assert_eq!(body(middle).await, &bytes[70_000..=150_000]);
+
+        let end = ask(Some("bytes=-10")).await.expect("response");
+        assert_eq!(end.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(body(end).await, &bytes[199_990..]);
+
+        let past = ask(Some("bytes=200000-")).await.expect("response");
+        assert_eq!(past.status(), StatusCode::RANGE_NOT_SATISFIABLE);
+        assert_eq!(past.headers()[header::CONTENT_RANGE], "bytes */200000");
+        assert!(body(past).await.is_empty());
+    }
+
     /// A file read inside `LoomWatch`: its text as JSON, and a picture as it is — sandboxed, so an
     /// SVG opened on its own never runs as this daemon's page.
     #[tokio::test]
@@ -2072,6 +3369,524 @@ mod tests {
         );
     }
 
+    /// ADR 0097: a project is kept through the API, a note is added to it, and the list names each
+    /// project's teams and the teams in none yet. The project's file never shows as a team, and a
+    /// team's Memory names what it reads from its project.
+    #[tokio::test]
+    async fn projects_are_kept_listed_with_their_teams_and_read_by_their_teams() {
+        let root = TempDirectory::new();
+        let send = |method: &str, uri: &str, body: &str| {
+            Request::builder()
+                .method(method)
+                .uri(uri)
+                .header(header::HOST, "localhost")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_owned()))
+                .expect("request")
+        };
+        let response = test_router(&root.0)
+            .oneshot(send(
+                "PUT",
+                "/api/projects/sutd",
+                r#"{"name":" SUTD final project ","about":"Colin's gate.","folders":[{"name":"","path":"~/SUTD"}]}"#,
+            ))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let kept = response_json(response).await;
+        assert_eq!(kept["name"], "SUTD final project");
+        assert_eq!(kept["folders"][0]["name"], "SUTD");
+        let refused = test_router(&root.0)
+            .oneshot(send("PUT", "/api/projects/Bad%20id", r#"{"name":"X"}"#))
+            .await
+            .expect("response");
+        assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
+        let refused = test_router(&root.0)
+            .oneshot(send(
+                "PUT",
+                "/api/projects/x",
+                r#"{"name":"X","folders":[{"name":"N","path":"notes"}]}"#,
+            ))
+            .await
+            .expect("response");
+        assert_eq!(refused.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+        let noted = response_json(
+            test_router(&root.0)
+                .oneshot(send(
+                    "POST",
+                    "/api/projects/sutd/notes",
+                    r#"{"text":"Colin picked B."}"#,
+                ))
+                .await
+                .expect("response"),
+        )
+        .await;
+        assert_eq!(noted["notes"][0]["text"], "Colin picked B.");
+        assert!(noted["notes"][0]["at"].is_string());
+
+        fs::write(
+            root.0.join("gate.yaml"),
+            "schemaVersion: 1\nid: gate\nname: Gate\nproject: sutd\nentrypoint: a\nagents:\n  - id: a\n    model: fake/offline\n    role: Research.\nedges: []\n",
+        )
+        .unwrap();
+        fs::write(
+            root.0.join("blog.yaml"),
+            "schemaVersion: 1\nid: blog\nname: Blog\nentrypoint: a\nagents:\n  - id: a\n    model: fake/offline\n    role: Write.\nedges: []\n",
+        )
+        .unwrap();
+        let list = response_json(
+            test_router(&root.0)
+                .oneshot(send("GET", "/api/projects", ""))
+                .await
+                .expect("response"),
+        )
+        .await;
+        assert_eq!(list["projects"][0]["id"], "sutd");
+        assert_eq!(list["projects"][0]["teams"], json!(["gate.yaml"]));
+        assert_eq!(list["loose"], json!(["blog.yaml"]));
+        let teams = response_json(
+            test_router(&root.0)
+                .oneshot(send("GET", "/api/teams", ""))
+                .await
+                .expect("response"),
+        )
+        .await;
+        assert_eq!(
+            teams["files"],
+            json!(["blog.yaml", "gate.yaml"]),
+            "a project is never a team"
+        );
+
+        let memory = response_json(
+            test_router(&root.0)
+                .oneshot(send("GET", "/api/memory?path=gate.yaml", ""))
+                .await
+                .expect("response"),
+        )
+        .await;
+        assert_eq!(memory["project"][0]["title"], "About SUTD final project");
+        assert_eq!(memory["project"][1]["body"], "- Colin picked B.");
+    }
+
+    /// ADR 0100: deleting a project leaves its teams, in no project, each file changed only by its
+    /// `project:` line; the project's file moves to `.projects/.removed/`. A team that names it some
+    /// other way stops the delete before anything changes.
+    #[tokio::test]
+    async fn deleting_a_project_leaves_its_teams_in_no_project() {
+        let root = TempDirectory::new();
+        let send = |method: &str, uri: &str, body: &str| {
+            Request::builder()
+                .method(method)
+                .uri(uri)
+                .header(header::HOST, "localhost")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_owned()))
+                .expect("request")
+        };
+        let team = |project: &str| {
+            format!(
+                "schemaVersion: 1\n# Mine.\nid: gate\nname: Gate\n{project}entrypoint: a\nagents:\n  - id: a\n    model: fake/offline\n    role: Research.\nedges: []\n"
+            )
+        };
+        for (id, name) in [("sutd", "SUTD"), ("blog", "Blog")] {
+            let response = test_router(&root.0)
+                .oneshot(send(
+                    "PUT",
+                    &format!("/api/projects/{id}"),
+                    &format!(r#"{{"name":"{name}"}}"#),
+                ))
+                .await
+                .expect("response");
+            assert_eq!(response.status(), StatusCode::OK);
+        }
+        fs::write(root.0.join("gate.yaml"), team("project: sutd\n")).unwrap();
+        fs::write(root.0.join("post.yaml"), team("project: blog\n")).unwrap();
+        fs::write(root.0.join("zodd.yaml"), team("project: >-\n  blog\n")).unwrap();
+
+        let refused = test_router(&root.0)
+            .oneshot(send("DELETE", "/api/projects/blog", ""))
+            .await
+            .expect("response");
+        assert_eq!(refused.status(), StatusCode::CONFLICT);
+        let body = response_json(refused).await;
+        assert!(
+            body["error"]
+                .as_str()
+                .unwrap()
+                .contains("Gate’s file was changed by hand"),
+            "{body}"
+        );
+        assert_eq!(
+            fs::read_to_string(root.0.join("post.yaml")).unwrap(),
+            team("project: blog\n"),
+            "nothing changes unless every team can"
+        );
+        assert!(root.0.join(".projects/blog.yaml").is_file());
+
+        let deleted = test_router(&root.0)
+            .oneshot(send("DELETE", "/api/projects/sutd", ""))
+            .await
+            .expect("response");
+        assert_eq!(deleted.status(), StatusCode::OK);
+        let body = response_json(deleted).await;
+        assert_eq!(body["teams"], json!(["gate.yaml"]));
+        assert_eq!(
+            fs::read_to_string(root.0.join("gate.yaml")).unwrap(),
+            team(""),
+            "only the project line goes"
+        );
+        assert!(root.0.join(".projects/.removed/sutd.yaml").is_file());
+        let list = response_json(
+            test_router(&root.0)
+                .oneshot(send("GET", "/api/projects", ""))
+                .await
+                .expect("response"),
+        )
+        .await;
+        assert_eq!(list["projects"].as_array().map(Vec::len), Some(1));
+        assert_eq!(list["projects"][0]["id"], "blog");
+        assert_eq!(list["loose"], json!(["gate.yaml"]));
+        assert_eq!(list["removed"], json!(["sutd"]), "its id stays taken");
+
+        let gone = test_router(&root.0)
+            .oneshot(send("DELETE", "/api/projects/sutd", ""))
+            .await
+            .expect("response");
+        assert_eq!(gone.status(), StatusCode::NOT_FOUND);
+    }
+
+    /// ADR 0103: one team in two projects. Adding it to another project makes a place of its own
+    /// there (its own id, that project, no schedule) and names the team on both; a save in one place
+    /// writes the setup into the other and keeps it approved, but leaves its own id, project and
+    /// schedule; a rename reaches both; taking a place out moves only it to the trash; deleting a
+    /// project removes only the place there, and a team's last place stays, in no project.
+    #[tokio::test]
+    #[allow(clippy::too_many_lines)]
+    async fn one_team_works_in_two_projects_each_in_a_place_of_its_own() {
+        let root = TempDirectory::new();
+        let state_dir = TempDirectory::new();
+        for (id, name) in [
+            ("coffee", "Coffee shop"),
+            ("bikes", "Bike rental"),
+            ("site", "Website"),
+        ] {
+            crate::projects::write(
+                &root.0,
+                id,
+                &crate::projects::Project {
+                    name: name.into(),
+                    ..crate::projects::Project::default()
+                },
+            )
+            .unwrap();
+        }
+        let first = "schemaVersion: 1\nid: research\n# Ours.\nname: Research\nproject: coffee\nentrypoint: a\nagents:\n  - id: a\n    model: fake/offline\n    role: Research.\nedges: []\nschedule:\n  cron: \"0 8 * * 1\"\n  prompt: Weekly prices\n";
+        fs::write(root.0.join("research.yaml"), first).unwrap();
+        fs::write(root.0.join("research.layout.json"), "{}").unwrap();
+        let runs = crate::runs::RunRegistry::default();
+        let approvals = std::sync::Arc::new(
+            crate::approvals::TeamApprovals::open(&state_dir.0, &root.0).expect("approvals"),
+        );
+        runs.set_approvals(approvals.clone());
+        let send = |method: &str, uri: &str, body: String| {
+            Request::builder()
+                .method(method)
+                .uri(uri)
+                .header(header::HOST, "localhost")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body))
+                .expect("request")
+        };
+        let read = |path: &str| fs::read_to_string(root.0.join(path)).unwrap();
+        let yaml = |path: &str| serde_yaml::from_str::<Value>(&read(path)).unwrap();
+        let approved = |path: &str| {
+            approvals.is_approved(path, &crate::approvals::revision(read(path).as_bytes()))
+        };
+
+        // Add it to Bike rental: a place of its own, beside it.
+        let added = router_with_runs(&root.0, runs.clone())
+            .oneshot(send(
+                "POST",
+                "/api/team/places",
+                json!({ "path": "research.yaml", "project": "bikes" }).to_string(),
+            ))
+            .await
+            .expect("response");
+        assert_eq!(added.status(), StatusCode::OK);
+        let added = response_json(added).await;
+        assert_eq!(added["path"], "research-bikes.yaml");
+        assert_eq!(added["shares"], "research");
+        let place = yaml("research-bikes.yaml");
+        assert_eq!(
+            place["id"], "research-bikes",
+            "its own id: its own chat and notes"
+        );
+        assert_eq!(place["project"], "bikes");
+        assert_eq!(place["shares"], "research");
+        assert_eq!(place["name"], "Research");
+        assert!(
+            place.get("schedule").is_none(),
+            "a schedule is the project's own"
+        );
+        assert_eq!(
+            read("research.yaml"),
+            first.replace("id: research\n", "id: research\nshares: research\n"),
+            "the first place only gains its shares line"
+        );
+        assert!(approved("research.yaml"), "the first place stays approved");
+        assert!(
+            approved("research-bikes.yaml"),
+            "a place made from an approved team is approved"
+        );
+        assert!(root.0.join("research-bikes.layout.json").is_file());
+        let projects = response_json(
+            router_with_runs(&root.0, runs.clone())
+                .oneshot(send("GET", "/api/projects", String::new()))
+                .await
+                .expect("response"),
+        )
+        .await;
+        let teams_of = |id: &str| {
+            projects["projects"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|project| project["id"] == id)
+                .map(|project| project["teams"].clone())
+                .unwrap()
+        };
+        assert_eq!(teams_of("coffee"), json!(["research.yaml"]));
+        assert_eq!(teams_of("bikes"), json!(["research-bikes.yaml"]));
+        // Once in a project is enough.
+        let twice = router_with_runs(&root.0, runs.clone())
+            .oneshot(send(
+                "POST",
+                "/api/team/places",
+                json!({ "path": "research-bikes.yaml", "project": "coffee" }).to_string(),
+            ))
+            .await
+            .expect("response");
+        assert_eq!(twice.status(), StatusCode::CONFLICT);
+        assert!(
+            response_json(twice).await["error"]
+                .as_str()
+                .unwrap()
+                .contains("Research works in Coffee shop already.")
+        );
+
+        // A save in Bike rental reaches Coffee shop's place, which keeps its own.
+        let saved =
+            read("research-bikes.yaml").replace("role: Research.", "role: Research prices.");
+        let response = router_with_runs(&root.0, runs.clone())
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/api/team")
+                    .header(header::HOST, "localhost")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header(
+                        header::IF_MATCH,
+                        format!(
+                            "\"{}\"",
+                            crate::approvals::revision(read("research-bikes.yaml").as_bytes())
+                        ),
+                    )
+                    .body(Body::from(
+                        json!({ "path": "research-bikes.yaml", "yaml": saved }).to_string(),
+                    ))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "{}",
+            response_json(response).await
+        );
+        let coffee = yaml("research.yaml");
+        assert_eq!(coffee["agents"][0]["role"], "Research prices.");
+        assert_eq!(coffee["id"], "research");
+        assert_eq!(coffee["project"], "coffee");
+        assert_eq!(coffee["schedule"]["prompt"], "Weekly prices");
+        assert!(
+            approved("research.yaml"),
+            "LoomWatch's own change keeps it approved"
+        );
+
+        // Renamed in one, renamed in both; each file keeps its name.
+        let renamed = read("research-bikes.yaml").replace("name: Research", "name: Prices");
+        let response = router_with_runs(&root.0, runs.clone())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/team/rename")
+                    .header(header::HOST, "localhost")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header(
+                        header::IF_MATCH,
+                        format!(
+                            "\"{}\"",
+                            crate::approvals::revision(read("research-bikes.yaml").as_bytes())
+                        ),
+                    )
+                    .body(Body::from(
+                        json!({ "path": "research-bikes.yaml", "stem": "prices", "yaml": renamed })
+                            .to_string(),
+                    ))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(yaml("research.yaml")["name"], "Prices");
+        assert_eq!(yaml("prices.yaml")["project"], "bikes");
+
+        // Deleting Coffee shop removes only its place; the team works on in Bike rental.
+        let deleted = router_with_runs(&root.0, runs.clone())
+            .oneshot(send("DELETE", "/api/projects/coffee", String::new()))
+            .await
+            .expect("response");
+        assert_eq!(deleted.status(), StatusCode::OK);
+        let deleted = response_json(deleted).await;
+        assert_eq!(deleted["placesRemoved"], json!(["research.yaml"]));
+        assert_eq!(deleted["teams"], json!([]));
+        assert!(!root.0.join("research.yaml").exists());
+        assert!(
+            root.0.join(".trash").read_dir().unwrap().next().is_some(),
+            "to the trash, not erased"
+        );
+        assert_eq!(yaml("prices.yaml")["project"], "bikes");
+
+        // Its last place taken out of Bike rental stays, in no project, approved.
+        let out = router_with_runs(&root.0, runs.clone())
+            .oneshot(send(
+                "POST",
+                "/api/team/take-out",
+                json!({ "path": "prices.yaml" }).to_string(),
+            ))
+            .await
+            .expect("response");
+        assert_eq!(out.status(), StatusCode::OK);
+        assert!(yaml("prices.yaml").get("project").is_none());
+        assert!(approved("prices.yaml"));
+        // And Home never puts it into a project of its own.
+        let status = response_json(
+            router_with_runs(&root.0, runs.clone())
+                .oneshot(send("GET", "/api/move-into-projects", String::new()))
+                .await
+                .expect("response"),
+        )
+        .await;
+        assert_eq!(status["teams"], json!([]), "{status}");
+
+        // With two places again, taking one out moves only that one to the trash.
+        let again = response_json(
+            router_with_runs(&root.0, runs.clone())
+                .oneshot(send(
+                    "POST",
+                    "/api/team/places",
+                    json!({ "path": "prices.yaml", "project": "site" }).to_string(),
+                ))
+                .await
+                .expect("response"),
+        )
+        .await;
+        let site = again["path"].as_str().unwrap().to_owned();
+        let out = router_with_runs(&root.0, runs)
+            .oneshot(send(
+                "POST",
+                "/api/team/take-out",
+                json!({ "path": site }).to_string(),
+            ))
+            .await
+            .expect("response");
+        assert_eq!(out.status(), StatusCode::OK);
+        assert!(!root.0.join(&site).exists());
+        assert!(root.0.join("prices.yaml").is_file());
+    }
+
+    /// ADR 0100: a team left in no project by deleting its project stays approved, and the app is
+    /// never asked to move it into a project of its own, as it is a team found in none.
+    #[tokio::test]
+    async fn a_deleted_projects_team_stays_approved_and_out_of_the_move() {
+        let root = TempDirectory::new();
+        let state_dir = TempDirectory::new();
+        let team = |project: &str| {
+            format!(
+                "schemaVersion: 1\nid: t\nname: T\n{project}entrypoint: a\nagents:\n  - id: a\n    model: fake/offline\n    role: Research.\nedges: []\n"
+            )
+        };
+        crate::projects::write(
+            &root.0,
+            "sutd",
+            &crate::projects::Project {
+                name: "SUTD".into(),
+                ..crate::projects::Project::default()
+            },
+        )
+        .unwrap();
+        fs::write(root.0.join("gate.yaml"), team("project: sutd\n")).unwrap();
+        let runs = crate::runs::RunRegistry::default();
+        // Opened with the team already there: it is approved as it is.
+        let approvals = std::sync::Arc::new(
+            crate::approvals::TeamApprovals::open(&state_dir.0, &root.0).expect("approvals"),
+        );
+        runs.set_approvals(approvals.clone());
+        crate::projects::record_moved(&state_dir.0, &root.0).unwrap();
+        // Added after LoomWatch first opened the folder, and never reviewed.
+        fs::write(root.0.join("held.yaml"), team("project: sutd\n")).unwrap();
+        fs::write(root.0.join("loose.yaml"), team("")).unwrap();
+        approvals
+            .approve(
+                "loose.yaml",
+                &crate::approvals::revision(team("").as_bytes()),
+                crate::approvals::Approval::Saved,
+            )
+            .unwrap();
+        let send = |method: &str, uri: &str| {
+            Request::builder()
+                .method(method)
+                .uri(uri)
+                .header(header::HOST, "localhost")
+                .body(Body::empty())
+                .expect("request")
+        };
+
+        let deleted = router_with_runs(&root.0, runs.clone())
+            .oneshot(send("DELETE", "/api/projects/sutd"))
+            .await
+            .expect("response");
+        assert_eq!(deleted.status(), StatusCode::OK);
+        assert!(
+            approvals.is_approved(
+                "gate.yaml",
+                &crate::approvals::revision(&fs::read(root.0.join("gate.yaml")).unwrap())
+            ),
+            "LoomWatch's own change keeps the team approved"
+        );
+        assert!(
+            !approvals.is_approved(
+                "held.yaml",
+                &crate::approvals::revision(&fs::read(root.0.join("held.yaml")).unwrap())
+            ),
+            "and never approves one nobody approved"
+        );
+        let status = response_json(
+            router_with_runs(&root.0, runs)
+                .oneshot(send("GET", "/api/move-into-projects"))
+                .await
+                .expect("response"),
+        )
+        .await;
+        assert_eq!(
+            status["teams"],
+            json!([{"path": "loose.yaml", "approved": true}]),
+            "a team found in no project still moves; the one left there doesn't"
+        );
+    }
+
     /// A saved job round-trips through the API: created once, refused a second create so the UI
     /// can ask before replacing it, listed, removed, and kept out of the team list throughout.
     // One test on purpose: each step reads the state the previous one left on disk.
@@ -2155,6 +3970,29 @@ mod tests {
                 .body(Body::empty())
                 .expect("request")
         };
+        // ADR 0094: a team that has it on would have no agent to run, so it is refused, naming the team.
+        fs::write(
+            root.0.join("launch.yaml"),
+            "schemaVersion: 1\nname: Launch notes\nentrypoint: notes\nagents:\n  - id: notes\n    from:\n      agent: release-notes\nedges: []\n",
+        )
+        .expect("a team that uses it");
+        let response = test_router(&root.0)
+            .oneshot(delete())
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let refused = response_json(response).await;
+        assert!(
+            refused["error"]
+                .as_str()
+                .is_some_and(|error| error.contains(
+                    "Release notes is still in Launch notes. Remove it from its card in My \
+                     agents, where it comes off its teams too."
+                )),
+            "{refused}"
+        );
+        assert!(root.0.join(".jobs/release-notes.yaml").is_file());
+        fs::remove_file(root.0.join("launch.yaml")).expect("the team goes");
         let response = test_router(&root.0)
             .oneshot(delete())
             .await
@@ -3063,6 +4901,55 @@ mod tests {
         assert_eq!(response_json(response).await["yaml"], VALID_TEAM);
     }
 
+    /// ADR 0094: a save that makes a team's own agent one of My agents takes its lessons from the
+    /// team's list to the agent's own, so what it learned in the team goes with it.
+    #[tokio::test]
+    async fn a_save_that_makes_a_teams_own_agent_one_of_my_agents_takes_its_lessons_along() {
+        let root = TempDirectory::new();
+        let db = crate::db::Db::temp().await;
+        let lessons = crate::lessons::Lessons::new(db.clone());
+        let runs = crate::runs::RunRegistry::durable(crate::runs::RunStore::new(db));
+        let own = "schemaVersion: 1\nid: blog\nname: Blog\nentrypoint: writer\nagents:\n  - id: writer\n    name: Writer\n    role: Write.\n    model: fake/offline\nedges: []\n";
+        fs::write(root.0.join("team.yaml"), own).expect("the team as it was");
+        let learned = crate::lessons::LearnedFrom {
+            scope: "team:blog#writer".to_owned(),
+            agent_id: "writer".to_owned(),
+            source: crate::lessons::LessonSource::You,
+            feedback: "Shorter.".to_owned(),
+            run_id: None,
+        };
+        lessons
+            .apply(
+                &learned,
+                &[],
+                &[crate::lessons::Edit::Add {
+                    text: "Keep it short.".to_owned(),
+                    about_you: false,
+                }],
+            )
+            .await
+            .expect("a lesson learned in the team");
+        fs::create_dir(root.0.join(".jobs")).expect("My agents");
+        fs::write(
+            root.0.join(".jobs/writer.yaml"),
+            "name: Writer\ninstructions: Write.\nmodel: fake/offline\n",
+        )
+        .expect("the agent it became");
+        let pointer = "schemaVersion: 1\nid: blog\nname: Blog\nentrypoint: writer\nagents:\n  - id: writer\n    from:\n      agent: writer\nedges: []\n";
+        let condition = format!("\"{}\"", revision(own.as_bytes()));
+        let response = save_request(
+            router_with_runs(&root.0, runs),
+            Some(("if-match", &condition)),
+            pointer,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(lessons.active("team:blog#writer").await.unwrap().is_empty());
+        let mine = lessons.active("agent:writer").await.unwrap();
+        assert_eq!(mine.len(), 1);
+        assert_eq!(mine[0].text, "Keep it short.");
+    }
+
     async fn save_request(router: Router, condition: Option<(&str, &str)>, yaml: &str) -> Response {
         let mut request = Request::builder()
             .method("PUT")
@@ -3761,5 +5648,773 @@ mod tests {
             ]
         );
         assert_eq!(trashed_team_paths(&root), ["trip.yaml"]);
+    }
+
+    // ADR 0099: Rename moves the team's file.
+
+    /// Trip planner with a Brief note and a file added to its lead, both named by its file's name.
+    const TRIP_WITH_FOLDERS: &str = "schemaVersion: 1\nid: trip\nname: Trip planner\nentrypoint: a\nmemory:\n  brief:\n    - path: trip.brief/style.md\nagents:\n  - id: a\n    role: Plan the trip. The map is in trip.files/map.pdf.\n    spawn:\n      cmd: opencode\n      cwd: .\n    model: test/model\n";
+
+    async fn rename_request(
+        router: Router,
+        path: &str,
+        stem: &str,
+        yaml: &str,
+        renamed_from: Option<&str>,
+    ) -> Response {
+        let mut request = Request::builder()
+            .method("POST")
+            .uri("/api/team/rename")
+            .header(header::HOST, "localhost")
+            .header(header::CONTENT_TYPE, "application/json");
+        if let Some(text) = renamed_from {
+            request = request.header(
+                header::IF_MATCH,
+                format!("\"{}\"", revision(text.as_bytes())),
+            );
+        }
+        router
+            .oneshot(
+                request
+                    .body(Body::from(
+                        serde_json::to_vec(&json!({ "path": path, "stem": stem, "yaml": yaml }))
+                            .expect("JSON"),
+                    ))
+                    .expect("request"),
+            )
+            .await
+            .expect("response")
+    }
+
+    /// A registry with a database of its own, and approvals that take every team now in `root` as
+    /// approved, as the first start does.
+    async fn durable_runs(
+        root: &Path,
+        state: &Path,
+    ) -> (
+        crate::runs::RunRegistry,
+        crate::db::Db,
+        Arc<crate::approvals::TeamApprovals>,
+    ) {
+        let db = crate::db::Db::temp().await;
+        let runs = crate::runs::RunRegistry::durable(crate::runs::RunStore::new(db.clone()));
+        let approvals = Arc::new(
+            crate::approvals::TeamApprovals::open(
+                state,
+                &crate::platform::canonicalize(root).expect("root"),
+            )
+            .expect("approvals"),
+        );
+        runs.set_approvals(approvals.clone());
+        (runs, db, approvals)
+    }
+
+    async fn finished_run(runs: &crate::runs::RunRegistry, path: &str, yaml: &str) -> String {
+        finished_run_that_made(runs, path, yaml, None).await
+    }
+
+    async fn finished_run_that_made(
+        runs: &crate::runs::RunRegistry,
+        path: &str,
+        yaml: &str,
+        made: Option<Vec<String>>,
+    ) -> String {
+        let team = TeamConfig::parse(yaml).expect("team parses");
+        let mut record = crate::runs::RunRecord::queued(
+            path.to_owned(),
+            "Plan a week in Kyoto".to_owned(),
+            &team,
+            crate::runs::RunTrigger::Manual,
+        )
+        .expect("run record");
+        record.status = crate::runs::RunStatus::Succeeded;
+        record.made = made;
+        let run_id = record.run_id.clone();
+        runs.insert(record);
+        runs.persist(&run_id).await.expect("run kept");
+        run_id
+    }
+
+    async fn rows(db: &crate::db::Db, sql: &str) -> Vec<(String, String)> {
+        sqlx::query_as(sql)
+            .fetch_all(db.reader())
+            .await
+            .expect("rows")
+    }
+
+    /// The file takes the new name, and everything the team keeps beside it or files under its
+    /// path goes with it: its Brief, layout and added files, their names inside the file, its run
+    /// history, chat, the chat's search and the files sent in it, the changes left on its files,
+    /// and its approval. Other teams stay as they are.
+    #[tokio::test]
+    #[allow(clippy::too_many_lines)]
+    async fn rename_moves_the_team_with_everything_kept_beside_it_and_filed_under_it() {
+        let root = TempDirectory::new();
+        let state = TempDirectory::new();
+        fs::write(root.0.join("trip.yaml"), TRIP_WITH_FOLDERS).expect("write team");
+        fs::write(root.0.join("trip.layout.json"), "{}").expect("write layout");
+        fs::create_dir(root.0.join("trip.brief")).expect("Brief folder");
+        fs::write(root.0.join("trip.brief/style.md"), "# Style\n").expect("Brief note");
+        fs::create_dir_all(root.0.join("trip.files/chat")).expect("files folder");
+        fs::write(root.0.join("trip.files/chat/photo.png"), "png").expect("chat file");
+        fs::write(root.0.join("other.yaml"), VALID_TEAM).expect("write other team");
+        let (runs, db, approvals) = durable_runs(&root.0, &state.0).await;
+        let canonical = crate::platform::canonicalize(&root.0).expect("root");
+        let photo = canonical.join("trip.files").join("chat").join("photo.png");
+        let elsewhere = canonical.join("notes.md").to_string_lossy().into_owned();
+        let trip_run = finished_run_that_made(
+            &runs,
+            "trip.yaml",
+            TRIP_WITH_FOLDERS,
+            Some(vec![
+                photo.to_string_lossy().into_owned(),
+                elsewhere.clone(),
+            ]),
+        )
+        .await;
+        let other_run = finished_run(&runs, "other.yaml", VALID_TEAM).await;
+        let sent = json!([{ "name": "photo.png", "path": photo, "bytes": 3, "picture": true }]);
+        sqlx::query(
+            "INSERT INTO chat_messages (id, team_key, team_path, text, created_at, route, files)
+             VALUES ('m1', 'trip', 'trip.yaml', 'Use this photo', '2026-10-29T00:00:00Z', 'team', $1),
+                    ('m2', 'path:other.yaml', 'other.yaml', 'Hello', '2026-10-29T00:00:00Z', 'team_note', NULL)",
+        )
+        .bind(sent.to_string())
+        .execute(db.writer())
+        .await
+        .expect("chat rows");
+        sqlx::query(
+            "INSERT INTO work_passages (piece, kind, team_key, team_path, piece_at, target, who, said_at, part, text)
+             VALUES ('m1', 'note', 'trip', 'trip.yaml', '2026-10-29T00:00:00Z', 'request', NULL, '2026-10-29T00:00:00Z', 0, 'Use this photo')",
+        )
+        .execute(db.writer())
+        .await
+        .expect("search row");
+        // A change left on a file for one of its agents, with a picture of its part (ADR 0107).
+        sqlx::query(
+            "INSERT INTO file_changes (id, team_key, team_path, file, agent_id, words, part, files, created_at)
+             VALUES ('c1', 'trip', 'trip.yaml', $1, 'planner', 'Shorter', '{}', $2, '2026-10-29T00:00:00Z')",
+        )
+        .bind(&elsewhere)
+        .bind(json!([{ "path": photo }]).to_string())
+        .execute(db.writer())
+        .await
+        .expect("change row");
+
+        let renamed = TRIP_WITH_FOLDERS.replace("name: Trip planner", "name: Kyoto week");
+        let response = rename_request(
+            router_with_runs(&root.0, runs.clone()),
+            "trip.yaml",
+            "kyoto-week",
+            &renamed,
+            Some(TRIP_WITH_FOLDERS),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
+        let written = renamed
+            .replace("trip.brief/style.md", "kyoto-week.brief/style.md")
+            .replace("trip.files/map.pdf", "kyoto-week.files/map.pdf");
+        assert_eq!(body["path"], "kyoto-week.yaml");
+        assert_eq!(body["yaml"], written);
+        assert_eq!(body["revision"], revision(written.as_bytes()));
+
+        assert_eq!(
+            fs::read_to_string(root.0.join("kyoto-week.yaml")).expect("moved team"),
+            written
+        );
+        assert_eq!(
+            fs::read_to_string(root.0.join("kyoto-week.brief/style.md")).expect("moved Brief"),
+            "# Style\n"
+        );
+        assert!(root.0.join("kyoto-week.layout.json").is_file());
+        assert!(root.0.join("kyoto-week.files/chat/photo.png").is_file());
+        for gone in ["trip.yaml", "trip.layout.json", "trip.brief", "trip.files"] {
+            assert!(
+                fs::symlink_metadata(root.0.join(gone)).is_err(),
+                "{gone} is still there"
+            );
+        }
+        assert_eq!(
+            fs::read_to_string(root.0.join("other.yaml")).expect("other team"),
+            VALID_TEAM
+        );
+
+        assert_eq!(
+            rows(&db, "SELECT run_id, team_path FROM runs ORDER BY team_path").await,
+            [
+                (trip_run.clone(), "kyoto-week.yaml".to_owned()),
+                (other_run.clone(), "other.yaml".to_owned())
+            ]
+        );
+        assert_eq!(
+            runs.get(&trip_run).expect("held run").team_path,
+            "kyoto-week.yaml"
+        );
+        assert_eq!(
+            runs.get(&other_run).expect("held run").team_path,
+            "other.yaml"
+        );
+        assert_eq!(
+            rows(&db, "SELECT id, team_path FROM chat_messages ORDER BY id").await,
+            [
+                ("m1".to_owned(), "kyoto-week.yaml".to_owned()),
+                ("m2".to_owned(), "other.yaml".to_owned())
+            ]
+        );
+        let (files,): (String,) = sqlx::query_as("SELECT files FROM chat_messages WHERE id = 'm1'")
+            .fetch_one(db.reader())
+            .await
+            .expect("files");
+        let files: Value = serde_json::from_str(&files).expect("files JSON");
+        let moved_photo = canonical
+            .join("kyoto-week.files")
+            .join("chat")
+            .join("photo.png");
+        assert_eq!(files[0]["path"], json!(moved_photo));
+        assert!(moved_photo.is_file());
+        // A file a run made in the team's folder is named where it is now, in the history and in
+        // the record held for it; one made elsewhere stays as it was.
+        let made = vec![moved_photo.to_string_lossy().into_owned(), elsewhere];
+        let (stored,): (String,) = sqlx::query_as("SELECT made FROM runs WHERE run_id = $1")
+            .bind(&trip_run)
+            .fetch_one(db.reader())
+            .await
+            .expect("made");
+        assert_eq!(
+            serde_json::from_str::<Vec<String>>(&stored).expect("made JSON"),
+            made
+        );
+        assert_eq!(runs.get(&trip_run).expect("held run").made, Some(made));
+        assert_eq!(
+            rows(&db, "SELECT piece, team_path FROM work_passages").await,
+            [("m1".to_owned(), "kyoto-week.yaml".to_owned())]
+        );
+        assert_eq!(
+            rows(&db, "SELECT id, team_path FROM file_changes").await,
+            [("c1".to_owned(), "kyoto-week.yaml".to_owned())]
+        );
+        let (files,): (String,) = sqlx::query_as("SELECT files FROM file_changes WHERE id = 'c1'")
+            .fetch_one(db.reader())
+            .await
+            .expect("files");
+        assert_eq!(
+            serde_json::from_str::<Value>(&files).expect("files JSON"),
+            json!([{ "path": moved_photo }])
+        );
+
+        assert!(approvals.is_approved("kyoto-week.yaml", &revision(written.as_bytes())));
+        assert!(!approvals.is_approved("trip.yaml", &revision(TRIP_WITH_FOLDERS.as_bytes())));
+        let listing = test_router(&root.0)
+            .oneshot(
+                Request::builder()
+                    .uri("/api/teams")
+                    .header(header::HOST, "localhost")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(
+            response_json(listing).await["files"],
+            json!(["kyoto-week.yaml", "other.yaml"])
+        );
+    }
+
+    /// A move never approves a team: one that came from outside and was never reviewed is still
+    /// waiting for its review at its new name.
+    #[tokio::test]
+    async fn rename_leaves_a_team_nobody_approved_unapproved() {
+        let root = TempDirectory::new();
+        let state = TempDirectory::new();
+        let (runs, _db, approvals) = durable_runs(&root.0, &state.0).await;
+        fs::write(root.0.join("trip.yaml"), TRIP_TEAM).expect("a team that came from outside");
+        let renamed = TRIP_TEAM.replace("name: Trip planner", "name: Kyoto week");
+        let response = rename_request(
+            router_with_runs(&root.0, runs),
+            "trip.yaml",
+            "kyoto-week",
+            &renamed,
+            Some(TRIP_TEAM),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(root.0.join("kyoto-week.yaml").is_file());
+        assert!(!approvals.is_approved("kyoto-week.yaml", &revision(renamed.as_bytes())));
+    }
+
+    /// ADR 0100: a team left in no project by deleting its project stays so after a rename, and is
+    /// never moved into a project of its own under its new name.
+    #[tokio::test]
+    async fn rename_keeps_a_team_left_in_no_project_out_of_the_move() {
+        let root = TempDirectory::new();
+        let state = TempDirectory::new();
+        crate::projects::write(
+            &root.0,
+            "sutd",
+            &crate::projects::Project {
+                name: "SUTD".into(),
+                ..crate::projects::Project::default()
+            },
+        )
+        .unwrap();
+        let team = TRIP_TEAM.replace("entrypoint: a\n", "project: sutd\nentrypoint: a\n");
+        fs::write(root.0.join("trip.yaml"), &team).expect("write team");
+        let (runs, _db, _approvals) = durable_runs(&root.0, &state.0).await;
+        crate::projects::record_moved(&state.0, &root.0).unwrap();
+        let deleted = router_with_runs(&root.0, runs.clone())
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/api/projects/sutd")
+                    .header(header::HOST, "localhost")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(deleted.status(), StatusCode::OK);
+        let now = fs::read_to_string(root.0.join("trip.yaml")).expect("read team");
+        let renamed = now.replace("name: Trip planner", "name: Kyoto week");
+        let response = rename_request(
+            router_with_runs(&root.0, runs.clone()),
+            "trip.yaml",
+            "kyoto-week",
+            &renamed,
+            Some(&now),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let status = response_json(
+            router_with_runs(&root.0, runs)
+                .oneshot(
+                    Request::builder()
+                        .uri("/api/move-into-projects")
+                        .header(header::HOST, "localhost")
+                        .body(Body::empty())
+                        .expect("request"),
+                )
+                .await
+                .expect("response"),
+        )
+        .await;
+        assert_eq!(status["teams"], json!([]), "{status}");
+    }
+
+    /// The run and the schedule's next try find the team by its path, so the file stays where it
+    /// is while either still needs it.
+    #[tokio::test]
+    async fn rename_waits_while_the_team_works_or_its_schedule_will_try_again() {
+        let root = TempDirectory::new();
+        fs::write(root.0.join("trip.yaml"), TRIP_TEAM).expect("write team");
+        let team = TeamConfig::parse(TRIP_TEAM).expect("team parses");
+        let renamed = TRIP_TEAM.replace("name: Trip planner", "name: Kyoto week");
+        let runs = crate::runs::RunRegistry::default();
+        let live = crate::runs::RunRecord::queued(
+            "trip.yaml".to_owned(),
+            "Plan a week in Kyoto".to_owned(),
+            &team,
+            crate::runs::RunTrigger::Manual,
+        )
+        .expect("run record");
+        runs.insert(live.clone());
+        let refused = rename_request(
+            router_with_runs(&root.0, runs.clone()),
+            "trip.yaml",
+            "kyoto-week",
+            &renamed,
+            Some(TRIP_TEAM),
+        )
+        .await;
+        assert_eq!(refused.status(), StatusCode::CONFLICT);
+        assert!(error_text(refused).await.contains("working right now"));
+        assert!(root.0.join("trip.yaml").is_file());
+
+        assert!(matches!(
+            runs.cancel(&live.run_id),
+            crate::runs::CancelOutcome::Cancelled(_)
+        ));
+        assert!(runs.set_next_try(&live.run_id, Some("2026-10-29T10:00:00Z".to_owned())));
+        let refused = rename_request(
+            router_with_runs(&root.0, runs.clone()),
+            "trip.yaml",
+            "kyoto-week",
+            &renamed,
+            Some(TRIP_TEAM),
+        )
+        .await;
+        assert_eq!(refused.status(), StatusCode::CONFLICT);
+        assert!(
+            error_text(refused)
+                .await
+                .contains("trying its last work again")
+        );
+        assert!(root.0.join("trip.yaml").is_file());
+
+        assert!(runs.set_next_try(&live.run_id, None));
+        // Another team's schedule waiting to try again holds only that team.
+        let mut elsewhere = crate::runs::RunRecord::queued(
+            "other.yaml".to_owned(),
+            "Write the weekly post".to_owned(),
+            &team,
+            crate::runs::RunTrigger::Schedule,
+        )
+        .expect("run record");
+        elsewhere.status = crate::runs::RunStatus::Failed;
+        elsewhere.next_try_at = Some("2026-10-29T10:00:00Z".to_owned());
+        runs.insert(elsewhere);
+        let response = rename_request(
+            router_with_runs(&root.0, runs),
+            "trip.yaml",
+            "kyoto-week",
+            &renamed,
+            Some(TRIP_TEAM),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(root.0.join("kyoto-week.yaml").is_file());
+    }
+
+    /// A taken name gets the next number. Taken means a team's file with either ending, a Brief,
+    /// layout or files left under the name, a deleted team's name, or history filed under it, held
+    /// by the daemon, kept in the database, or only a chat message: each would hand the team
+    /// another's files or past.
+    #[tokio::test]
+    async fn rename_takes_the_next_name_nothing_else_has() {
+        let root = TempDirectory::new();
+        let state = TempDirectory::new();
+        fs::write(root.0.join("trip.yaml"), TRIP_TEAM).expect("write team");
+        fs::write(root.0.join("kyoto-week.yaml"), VALID_TEAM).expect("a team with the name");
+        fs::create_dir(root.0.join("kyoto-week-2.files")).expect("files left under a name");
+        fs::write(root.0.join("kyoto-week-3.yml"), VALID_TEAM).expect("a team, the other ending");
+        fs::create_dir(root.0.join("kyoto-week-4.brief")).expect("a Brief left under a name");
+        fs::write(root.0.join("kyoto-week-5.layout.json"), "{}").expect("a layout left");
+        fs::write(root.0.join("kyoto-week-6.yaml"), VALID_TEAM).expect("a team to delete");
+        let deleted = delete_request(test_router(&root.0), "kyoto-week-6.yaml").await;
+        assert_eq!(deleted.status(), StatusCode::OK);
+        let (runs, db, _approvals) = durable_runs(&root.0, &state.0).await;
+        let team = TeamConfig::parse(VALID_TEAM).expect("team parses");
+        let held = crate::runs::RunRecord::queued(
+            "kyoto-week-7.yaml".to_owned(),
+            "Plan".to_owned(),
+            &team,
+            crate::runs::RunTrigger::Manual,
+        )
+        .expect("run record");
+        runs.insert(held);
+        let other_daemon =
+            crate::runs::RunRegistry::durable(crate::runs::RunStore::new(db.clone()));
+        finished_run(&other_daemon, "kyoto-week-8.yaml", VALID_TEAM).await;
+        sqlx::query(
+            "INSERT INTO chat_messages (id, team_key, team_path, text, created_at, route)
+             VALUES ('m9', 'path:kyoto-week-9.yaml', 'kyoto-week-9.yaml', 'Hello', '2026-10-29T00:00:00Z', 'team_note')",
+        )
+        .execute(db.writer())
+        .await
+        .expect("a chat with no work");
+
+        let renamed = TRIP_TEAM.replace("name: Trip planner", "name: Kyoto week");
+        let response = rename_request(
+            router_with_runs(&root.0, runs),
+            "trip.yaml",
+            "kyoto-week",
+            &renamed,
+            Some(TRIP_TEAM),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response_json(response).await["path"], "kyoto-week-10.yaml");
+        assert_eq!(
+            fs::read_to_string(root.0.join("kyoto-week-10.yaml")).expect("moved team"),
+            renamed
+        );
+        assert_eq!(
+            fs::read_to_string(root.0.join("kyoto-week.yaml")).expect("other team"),
+            VALID_TEAM
+        );
+    }
+
+    /// A name that differs only in capitals is the same file on a Mac: it is saved in place, on
+    /// every computer.
+    #[tokio::test]
+    async fn rename_to_the_same_name_in_other_capitals_saves_in_place() {
+        let root = TempDirectory::new();
+        fs::write(root.0.join("Trip.yaml"), TRIP_TEAM).expect("write team");
+        let renamed = TRIP_TEAM.replace("name: Trip planner", "name: Trip");
+        let response = rename_request(
+            test_router(&root.0),
+            "Trip.yaml",
+            "trip",
+            &renamed,
+            Some(TRIP_TEAM),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response_json(response).await["path"], "Trip.yaml");
+        assert_eq!(
+            fs::read_to_string(root.0.join("Trip.yaml")).expect("team"),
+            renamed
+        );
+    }
+
+    /// A team approved before its file was changed outside `LoomWatch` is not approved as it is
+    /// now: the rename carries the approval only of the text that was approved.
+    #[tokio::test]
+    async fn rename_does_not_approve_a_file_changed_since_it_was_approved() {
+        let root = TempDirectory::new();
+        let state = TempDirectory::new();
+        fs::write(root.0.join("trip.yaml"), TRIP_TEAM).expect("the team as approved");
+        let (runs, _db, approvals) = durable_runs(&root.0, &state.0).await;
+        assert!(approvals.is_approved("trip.yaml", &revision(TRIP_TEAM.as_bytes())));
+        let changed = TRIP_TEAM.replace("limitUsd: 1", "limitUsd: 50");
+        fs::write(root.0.join("trip.yaml"), &changed).expect("changed outside LoomWatch");
+        let renamed = changed.replace("name: Trip planner", "name: Kyoto week");
+        let response = rename_request(
+            router_with_runs(&root.0, runs),
+            "trip.yaml",
+            "kyoto-week",
+            &renamed,
+            Some(&changed),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(root.0.join("kyoto-week.yaml").is_file());
+        assert!(!approvals.is_approved("kyoto-week.yaml", &revision(renamed.as_bytes())));
+    }
+
+    /// When the new name's file is the one the team has, the name is saved in place.
+    #[tokio::test]
+    async fn rename_to_the_name_the_file_already_has_saves_in_place() {
+        let root = TempDirectory::new();
+        fs::write(root.0.join("trip.yaml"), TRIP_TEAM).expect("write team");
+        let renamed = TRIP_TEAM.replace("name: Trip planner", "name: Trip");
+        let response = rename_request(
+            test_router(&root.0),
+            "trip.yaml",
+            "trip",
+            &renamed,
+            Some(TRIP_TEAM),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response_json(response).await["path"], "trip.yaml");
+        assert_eq!(
+            fs::read_to_string(root.0.join("trip.yaml")).expect("team"),
+            renamed
+        );
+    }
+
+    /// The team's notes, lessons and workspace are filed by its id, so a rename that changes it is
+    /// refused, as is one of a file that changed since it was read. Nothing moves either way.
+    #[tokio::test]
+    async fn rename_refuses_a_new_id_or_a_file_that_changed() {
+        let root = TempDirectory::new();
+        fs::write(root.0.join("trip.yaml"), TRIP_TEAM).expect("write team");
+        let new_id = TRIP_TEAM
+            .replace("name: Trip planner", "name: Kyoto week")
+            .replace("id: trip", "id: kyoto-week");
+        let refused = rename_request(
+            test_router(&root.0),
+            "trip.yaml",
+            "kyoto-week",
+            &new_id,
+            Some(TRIP_TEAM),
+        )
+        .await;
+        assert_eq!(refused.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(error_text(refused).await.contains("keeps the team's id"));
+
+        let renamed = TRIP_TEAM.replace("name: Trip planner", "name: Kyoto week");
+        let stale = rename_request(
+            test_router(&root.0),
+            "trip.yaml",
+            "kyoto-week",
+            &renamed,
+            Some(VALID_TEAM),
+        )
+        .await;
+        assert_eq!(stale.status(), StatusCode::PRECONDITION_FAILED);
+        assert_eq!(
+            fs::read_to_string(root.0.join("trip.yaml")).expect("team"),
+            TRIP_TEAM
+        );
+        assert!(!root.0.join("kyoto-week.yaml").exists());
+    }
+
+    /// A team file with no `id` is filed by its file name. Rename writes that name in as its id,
+    /// and its chat, filed by its path until now, is found by the id.
+    #[tokio::test]
+    async fn rename_gives_a_team_without_an_id_the_one_it_was_filed_under() {
+        let root = TempDirectory::new();
+        let state = TempDirectory::new();
+        let plain = "schemaVersion: 1\nname: Notes\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: opencode\n      cwd: .\n    model: test/model\n";
+        fs::write(root.0.join("notes.yaml"), plain).expect("write team");
+        let (runs, db, _approvals) = durable_runs(&root.0, &state.0).await;
+        let run = finished_run(&runs, "notes.yaml", plain).await;
+        // Runs from before the key was kept: an empty key held and stored, and one stored as NULL.
+        let team = TeamConfig::parse(plain).expect("team parses");
+        let mut keyless = crate::runs::RunRecord::queued(
+            "notes.yaml".to_owned(),
+            "Sum up the meeting".to_owned(),
+            &team,
+            crate::runs::RunTrigger::Manual,
+        )
+        .expect("run record");
+        keyless.status = crate::runs::RunStatus::Succeeded;
+        keyless.team_key = String::new();
+        let keyless_run = keyless.run_id.clone();
+        runs.insert(keyless);
+        runs.persist(&keyless_run).await.expect("run kept");
+        let other_daemon =
+            crate::runs::RunRegistry::durable(crate::runs::RunStore::new(db.clone()));
+        let stored_run = finished_run(&other_daemon, "notes.yaml", plain).await;
+        sqlx::query("UPDATE runs SET team_key = NULL WHERE run_id = $1")
+            .bind(&stored_run)
+            .execute(db.writer())
+            .await
+            .expect("a run stored with no key");
+        sqlx::query(
+            "INSERT INTO chat_messages (id, team_key, team_path, text, created_at, route)
+             VALUES ('m1', 'path:notes.yaml', 'notes.yaml', 'Hello', '2026-10-29T00:00:00Z', 'team_note')",
+        )
+        .execute(db.writer())
+        .await
+        .expect("chat row");
+        sqlx::query(
+            "INSERT INTO work_passages (piece, kind, team_key, team_path, piece_at, target, who, said_at, part, text)
+             VALUES ('m1', 'note', 'path:notes.yaml', 'notes.yaml', '2026-10-29T00:00:00Z', 'request', NULL, '2026-10-29T00:00:00Z', 0, 'Hello')",
+        )
+        .execute(db.writer())
+        .await
+        .expect("search row");
+        sqlx::query(
+            "INSERT INTO chat_reactions (team_key, anchor, target, face, created_at)
+             VALUES ('path:notes.yaml', 'r1', 'answer', 'thumbs-up', '2026-10-29T00:00:00Z')",
+        )
+        .execute(db.writer())
+        .await
+        .expect("reaction");
+
+        let without = plain.replace("name: Notes", "name: Meeting notes");
+        let refused = rename_request(
+            router_with_runs(&root.0, runs.clone()),
+            "notes.yaml",
+            "meeting-notes",
+            &without,
+            Some(plain),
+        )
+        .await;
+        assert_eq!(refused.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+        let with_id = without.replace("schemaVersion: 1\n", "schemaVersion: 1\nid: notes\n");
+        let response = rename_request(
+            router_with_runs(&root.0, runs.clone()),
+            "notes.yaml",
+            "meeting-notes",
+            &with_id,
+            Some(plain),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            rows(&db, "SELECT team_key, team_path FROM chat_messages").await,
+            [("notes".to_owned(), "meeting-notes.yaml".to_owned())]
+        );
+        assert_eq!(
+            rows(&db, "SELECT DISTINCT team_key, team_path FROM runs").await,
+            [("notes".to_owned(), "meeting-notes.yaml".to_owned())]
+        );
+        assert_eq!(runs.get(&run).expect("held run").team_key, "notes");
+        assert_eq!(runs.get(&keyless_run).expect("held run").team_key, "notes");
+        assert_eq!(
+            rows(&db, "SELECT team_key, team_path FROM work_passages").await,
+            [("notes".to_owned(), "meeting-notes.yaml".to_owned())]
+        );
+        assert_eq!(
+            rows(&db, "SELECT team_key, anchor FROM chat_reactions").await,
+            [("notes".to_owned(), "r1".to_owned())]
+        );
+    }
+
+    /// `trip.yaml` and `trip.yml` side by side share `trip.brief/` and the rest, so one can't take
+    /// them to a new name without the other.
+    #[tokio::test]
+    async fn rename_leaves_a_team_whose_folders_another_file_shares() {
+        let root = TempDirectory::new();
+        fs::write(root.0.join("trip.yaml"), TRIP_TEAM).expect("write team");
+        fs::write(root.0.join("trip.yml"), VALID_TEAM).expect("write its namesake");
+        let renamed = TRIP_TEAM.replace("name: Trip planner", "name: Kyoto week");
+        let refused = rename_request(
+            test_router(&root.0),
+            "trip.yaml",
+            "kyoto-week",
+            &renamed,
+            Some(TRIP_TEAM),
+        )
+        .await;
+        assert_eq!(refused.status(), StatusCode::CONFLICT);
+        assert!(error_text(refused).await.contains("trip.yml"));
+        assert_eq!(
+            fs::read_to_string(root.0.join("trip.yaml")).expect("team"),
+            TRIP_TEAM
+        );
+        assert!(!root.0.join("kyoto-week.yaml").exists());
+
+        let other = VALID_TEAM.replace(
+            "schemaVersion: 1\n",
+            "schemaVersion: 1\nid: trip\nname: Other\n",
+        );
+        fs::write(root.0.join("trip.yml"), &other).expect("rewrite its namesake");
+        let refused = rename_request(
+            test_router(&root.0),
+            "trip.yml",
+            "kyoto-week",
+            &other.replace("name: Other", "name: Kyoto week"),
+            Some(&other),
+        )
+        .await;
+        assert_eq!(refused.status(), StatusCode::CONFLICT);
+        assert!(error_text(refused).await.contains("trip.yaml"));
+        assert!(root.0.join("trip.yml").is_file());
+    }
+
+    /// When the history cannot be filed under the new name, the files go back where they were, so
+    /// the team never ends up with its file in one place and its past in another.
+    #[tokio::test]
+    async fn rename_puts_the_files_back_when_the_history_cannot_move() {
+        let root = TempDirectory::new();
+        let state = TempDirectory::new();
+        fs::write(root.0.join("trip.yaml"), TRIP_WITH_FOLDERS).expect("write team");
+        fs::create_dir(root.0.join("trip.brief")).expect("Brief folder");
+        fs::write(root.0.join("trip.brief/style.md"), "# Style\n").expect("Brief note");
+        let (runs, db, _approvals) = durable_runs(&root.0, &state.0).await;
+        let run = finished_run(&runs, "trip.yaml", TRIP_WITH_FOLDERS).await;
+        sqlx::query("DROP TABLE chat_reactions")
+            .execute(db.writer())
+            .await
+            .expect("break the history");
+
+        let renamed = TRIP_WITH_FOLDERS.replace("name: Trip planner", "name: Kyoto week");
+        let response = rename_request(
+            router_with_runs(&root.0, runs.clone()),
+            "trip.yaml",
+            "kyoto-week",
+            &renamed,
+            Some(TRIP_WITH_FOLDERS),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            fs::read_to_string(root.0.join("trip.yaml")).expect("team back"),
+            TRIP_WITH_FOLDERS
+        );
+        assert!(root.0.join("trip.brief/style.md").is_file());
+        assert!(!root.0.join("kyoto-week.yaml").exists());
+        assert!(!root.0.join("kyoto-week.brief").exists());
+        assert_eq!(
+            rows(&db, "SELECT run_id, team_path FROM runs").await,
+            [(run.clone(), "trip.yaml".to_owned())]
+        );
+        assert_eq!(runs.get(&run).expect("held run").team_path, "trip.yaml");
     }
 }

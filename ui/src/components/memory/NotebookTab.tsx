@@ -1,6 +1,7 @@
 import { useState } from 'react'
 
 import { NOTE_KINDS, OPERATOR_ACTOR, type Note, type NoteKind, type NotebookView } from '../../lib/memory/client'
+import { InlineMarkdown } from '../ui/Markdown'
 
 /**
  * The Memory panel's Notebook tab (docs/TEAM_MEMORY.md → "The Memory panel · During a run").
@@ -149,11 +150,12 @@ function NoteRow({
     >
       <span style={{ display: 'flex', width: '100%', gap: 'var(--sp-3)', alignItems: 'baseline' }}>
         <span className="t-micro" style={{ color: 'var(--color-ink-3)', textTransform: 'uppercase' }}>{note.kind}</span>
-        <b className="t-body-m" style={{ color: 'var(--color-ink)', flex: 1, minWidth: 0 }}>{note.title}</b>
+        <b className="t-body-m" style={{ color: 'var(--color-ink)', flex: 1, minWidth: 0 }}><InlineMarkdown>{note.title}</InlineMarkdown></b>
         {note.state === 'kept' && <span className="t-micro" style={{ color: 'var(--color-ink-2)' }}>Kept</span>}
       </span>
       <span className="t-mono-sm" style={{ color: 'var(--color-ink-3)' }}>{metaLine(note)}</span>
-      <span className="t-meta" style={{ color: 'var(--color-ink-2)' }}>{preview(note.body)}</span>
+      {/* Its first line, whole and with its Markdown: two lines at most, cut here. */}
+      <span className="t-meta" style={{ color: 'var(--color-ink-2)', display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2, overflow: 'hidden' }}><InlineMarkdown>{preview(note.body)}</InlineMarkdown></span>
 
       <span style={{ display: 'flex', gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
         {canKeep && !inherited && note.state === 'active' && (
@@ -202,7 +204,7 @@ function NoteRow({
           {history === null && <span className="t-mono-sm" style={{ color: 'var(--color-ink-3)' }}>Reading the history…</span>}
           {history?.map((revision) => (
             <span key={revision.id} className="t-mono-sm" style={{ color: 'var(--color-ink-3)' }}>
-              revision {revision.revision} · {revision.state} · {revision.revisedBy} · {time(revision.createdAt)} · {revision.title}
+              revision {revision.revision} · {revision.state} · {revision.revisedBy} · {time(revision.createdAt)} · <InlineMarkdown>{revision.title}</InlineMarkdown>
             </span>
           ))}
           {history?.length === 0 && <span className="t-mono-sm" style={{ color: 'var(--color-ink-3)' }}>No history was returned.</span>}
@@ -234,9 +236,9 @@ function metaLine(note: Note): string {
   return parts.join(' · ')
 }
 
+/** A note's first line, whole: shown with its Markdown, and its line cuts it. */
 function preview(body: string): string {
-  const flat = body.replace(/\s+/g, ' ').trim()
-  return flat.length > 160 ? `${flat.slice(0, 160)}…` : flat
+  return body.split('\n').map((line) => line.trim()).find(Boolean) ?? ''
 }
 
 function time(iso: string): string {

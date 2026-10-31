@@ -1,7 +1,9 @@
-import { ArrowLeft } from 'lucide-react'
+import { YouTabs } from './you/YouTabs'
 
 import { ConnectedTools } from './connections/ConnectedTools'
+import { Devices } from './connections/Devices'
 import { Sources } from './connections/Sources'
+import { SectionHead } from './ui/SectionHead'
 
 // Connections is a settings surface, so it is a reading column rather than a canvas:
 // same tokens, e1 sections, no second visual language. The `lw-settings-*` classes in
@@ -11,13 +13,13 @@ export default function Connections() {
   return (
     <main className="lw-settings">
       <div className="lw-settings-column">
-        <a href="/" className="link lw-settings-back"><ArrowLeft size={14} aria-hidden="true" /> Back to the canvas</a>
+        <YouTabs />
         <div className="lw-settings-head">
-          <h1 className="t-display">Connections</h1>
-          <p className="t-body">Choose how your agents’ models are paid, connect your tools, and choose where your work belongs.</p>
+          <SectionHead page as="h1" className="t-display" title="Connections" explain="Choose how your agents’ models are paid, connect your tools and your other devices, and choose where your work belongs." />
         </div>
         <Sources />
         <ConnectedTools />
+        <Devices />
       </div>
     </main>
   )

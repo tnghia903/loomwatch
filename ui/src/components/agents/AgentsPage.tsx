@@ -1,35 +1,27 @@
-import { useMemo, useRef, useState, type ReactNode } from 'react'
-import { Moon, Plus, Sun, UserRound } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { MoreHorizontal, Plus, UserRound } from '../ui/icon'
 
 import { modelNameFromId } from '../../lib/ai/modelIds'
 import type { DetectedCapability } from '../../lib/library/client'
 import { draftFromJob } from '../../lib/library/draft'
 import { figureFor } from '../../lib/library/figures'
-import { useSavedJobs, versionOf } from '../../lib/library/jobs'
+import { useSavedJobs, type SavedJob } from '../../lib/library/jobs'
 import { usePinnedAgent } from '../../lib/library/pinned'
 import { modelForPreset, ROLE_PRESETS } from '../../lib/library/roles'
-import { teamAgentHref, useAgentUses } from '../../lib/library/uses'
-import { agentPresence } from '../../lib/rail/presence'
-import type { RunRecord } from '../../lib/runs/client'
-import type { LoomMarkState } from '../../lib/story/loomMark'
-import { useTheme } from '../../lib/theme'
-import { CrewRail, type LeaveGuard } from '../rail/CrewRail'
-import { LoomMark, LoomWordmark } from '../ui/glyphs'
+import { useAgentUses, type AgentUse } from '../../lib/library/uses'
+import { useRunRecords } from '../../lib/story/useNeedsYou'
 import { KnowYou } from '../you/KnowYou'
-import { AgentBadge } from './AgentBadge'
+import { AgentTile } from './AgentTile'
 import { AgentBuilder } from './AgentBuilder'
 import { AgentChip } from './AgentChip'
 import { AgentFrame, type AgentBarSlots } from './AgentFrame'
-import { FigureStill } from './FigureStill'
-import { navigate, useAgentsRoute, type AgentsRoute } from './route'
+import { RemoveAgentDialog } from './RemoveAgentDialog'
+import { navigate, useAgentsRoute } from './route'
+import { SectionHead } from '../ui/SectionHead'
 
 export interface AgentsPageProps {
   skills: DetectedCapability[]
   skillsLoading: boolean
-  /** What the header's mark says, from the needs-you poll. */
-  mark?: LoomMarkState
-  /** Every run the daemon knows, from the same poll: what each agent in the rail is doing. */
-  records?: readonly RunRecord[]
   /** The bell in an agent's header, as a team's has it: what waits on you. */
   tray?: ReactNode
 }
@@ -41,22 +33,18 @@ export interface AgentsPageProps {
  */
 export function AgentsPage(props: AgentsPageProps) {
   const route = useAgentsRoute()
-  const { resolved, toggle } = useTheme()
-  const { records = NO_RUNS, tray, mark, ...builder } = props
-  // What leaving the agent on screen would lose, kept by its builder and read by the rail.
-  const leave = useRef<LeaveGuard | null>(null)
+  const { tray, ...builder } = props
   // Where the agent on screen puts its name chip and tabs in the header.
   const [slots, setSlots] = useState<AgentBarSlots>(NO_SLOTS)
   if (route.kind !== 'list') {
-    // An agent's page, or a new one's, in a team page's frame: the rail, the header, then the page.
-    // The frame stays as you move between agents; only the agent in it changes.
+    // An agent's page, or a new one's: the header, then the page, beside the dock.
     const starting = route.kind === 'new' && !route.from
     return (
-      <AgentFrame mark={mark} tray={tray} rail={<AgentRail route={route} records={records} leave={() => leave.current} />} chip={starting ? <AgentChip name="New agent" state="new" detail="Start from a job" /> : undefined} onSlots={setSlots}>
+      <AgentFrame tray={tray} chip={starting ? <AgentChip name="New agent" state="new" detail="Start from a job" /> : undefined} onSlots={setSlots}>
         <main className="home-main agents-main">
           {starting
             ? <AgentTemplates team={route.team} />
-            : <AgentBuilder key={route.kind === 'agent' ? route.id : `new-${route.from ?? ''}`} id={route.kind === 'agent' ? route.id : null} startFrom={route.kind === 'new' ? route.from : null} cameFrom={route.team} view={route.view} leaveRef={leave} bar={slots} {...builder} />}
+            : <AgentBuilder key={route.kind === 'agent' ? route.id : `new-${route.from ?? ''}`} id={route.kind === 'agent' ? route.id : null} startFrom={route.kind === 'new' ? route.from : null} cameFrom={route.team} view={route.view} run={route.kind === 'agent' ? route.run : null} bar={slots} {...builder} />}
         </main>
       </AgentFrame>
     )
@@ -64,40 +52,13 @@ export function AgentsPage(props: AgentsPageProps) {
   return (
     <div className="lw-home lw-agents" data-tour="agents">
       <div className="ground" aria-hidden="true" />
-      <header className="home-top">
-        <a className="home-brand" href="/" aria-label="LoomWatch home"><LoomMark size={28} state={mark} /><LoomWordmark height={19} /></a>
-        <span className="home-top-acts">
-          <a className="btn" href="/" data-tour="your-teams">My team</a>
-          <button type="button" className="iconbtn" onClick={toggle} aria-label={resolved === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}>{resolved === 'dark' ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />}</button>
-        </span>
-      </header>
       <main className="home-main agents-main"><AgentsList /></main>
     </div>
   )
 }
 
-const NO_RUNS: readonly RunRecord[] = []
 const NO_SLOTS: AgentBarSlots = { chip: null, tabs: null }
 
-/**
- * My agents down the side of an agent's page: one click is another agent, on the same tab, so
- * moving between agents never goes back through the list. Each glows what it is doing in its own
- * chat, so one finishing, or waiting for you, is seen while you work with another.
- */
-function AgentRail({ route, records, leave }: { route: Exclude<AgentsRoute, { kind: 'list' }>; records: readonly RunRecord[]; leave: () => LeaveGuard | null }) {
-  const { jobs } = useSavedJobs()
-  const tab = route.view === 'chat' ? '?view=chat' : ''
-  const items = jobs.map((job) => ({
-    key: job.id,
-    href: `/agents/${encodeURIComponent(job.id)}${tab}`,
-    name: job.name,
-    detail: job.does || undefined,
-    presence: agentPresence(records, job.id),
-    current: route.kind === 'agent' && route.id === job.id,
-    art: <FigureStill className="crew-rail-figure" figure={figureFor(job.id, job.figure)} alt="" width={46} height={46} decoding="async" />,
-  }))
-  return <CrewRail label="My agents" items={items} find="Find an agent" none="No agents yet." add={{ label: 'New agent', href: '/agents/new', current: route.kind === 'new' }} go={(href) => navigate(href)} leave={leave} />
-}
 
 /**
  * Where building an agent starts: a job to start from, with working instructions on the model its
@@ -109,9 +70,8 @@ function AgentTemplates({ team }: { team: string | null }) {
   return (
     <>
       <section className="home-hero agents-hero">
-        <h1 className="t-display">Build an agent</h1>
-        <p>Start from a job: it comes with working instructions, on the model its kind of work suits, and you can change all of it. Or start blank and write your own.</p>
-        {team && <a className="link agent-back" href={`/?path=${encodeURIComponent(team)}&view=agents`}>Back to the team</a>}
+        <SectionHead page as="h1" className="t-display" title="Build an agent" explain="Start from a job: it comes with working instructions, on the model its kind of work suits, and you can change all of it. Or start blank and write your own." />
+        {team && <a className="link agent-back" href={`/?path=${encodeURIComponent(team)}`}>Back to the team</a>}
       </section>
       <section className="agents-start" aria-labelledby="agents-start-title" data-tour="agent-start">
         <h2 id="agents-start-title">Start from a job</h2>
@@ -128,27 +88,27 @@ function AgentTemplates({ team }: { team: string | null }) {
 
 function AgentsList() {
   const { jobs, problems, available, loaded, error } = useSavedJobs()
-  const { uses, own } = useAgentUses()
+  const { uses } = useAgentUses()
   const { pinned } = usePinnedAgent()
+  // The one shared poll (round 3): what each agent is doing in its own chat lights its figure.
+  const { records } = useRunRecords()
   const usage = useMemo(() => {
-    const byAgent = new Map<string, { teams: number; scheduled: number; behind: number }>()
-    for (const job of jobs) byAgent.set(job.id, { teams: 0, scheduled: 0, behind: 0 })
+    const byAgent = new Map<string, { teams: number; scheduled: number }>()
+    for (const job of jobs) byAgent.set(job.id, { teams: 0, scheduled: 0 })
     for (const use of uses ?? []) {
       const entry = byAgent.get(use.agent)
-      const job = jobs.find((candidate) => candidate.id === use.agent)
-      if (!entry || !job) continue
+      if (!entry) continue
       entry.teams += 1
       if (use.scheduled) entry.scheduled += 1
-      if (use.version < versionOf(job)) entry.behind += 1
     }
     return byAgent
   }, [jobs, uses])
   const open = (to: string) => navigate(to)
+  const [removing, setRemoving] = useState<SavedJob | null>(null)
   return (
     <>
       <section className="home-hero agents-hero">
-        <h1 className="t-display">My agents</h1>
-        <p>Build an agent once and work with it in its own chat. Then add it to any team: each team keeps the copy it was given until you update it there.</p>
+        <SectionHead page as="h1" className="t-display" title="My agents" explain="Build an agent once and work with it in its own chat. Then add it to any team: it is the same agent in every team it’s in. Under each agent, a mark with a check is something it may do without asking; a dashed one, it asks you first." />
         <KnowYou />
         <div className="home-hero-acts">
           <button type="button" className="btn btn-primary btn-lg" onClick={() => open('/agents/new')} data-tour="new-agent"><Plus size={16} aria-hidden="true" />New agent</button>
@@ -161,36 +121,51 @@ function AgentsList() {
         {!available && <p role="alert" className="home-empty alert">This LoomWatch server is older than My agents. Restart it to use them.</p>}
         {error && <p role="alert" className="home-empty alert">Couldn’t list your agents. {error}</p>}
         {available && !loaded && <p role="status" className="home-empty">Loading your agents…</p>}
-        {available && loaded && jobs.length === 0 && own !== null && (
-          own.length > 0
-            ? <div className="home-empty"><UserRound size={20} aria-hidden="true" /><span>None kept here yet. Press <b>New agent</b> to start from a job, or keep one of the agents in your teams below.</span></div>
-            : <div className="home-empty"><UserRound size={20} aria-hidden="true" /><span>No agents yet. Press <b>New agent</b> to start from a job such as Researcher or Writer, or from a blank page.</span></div>
+        {available && loaded && jobs.length === 0 && (
+          <div className="home-empty"><UserRound size={20} aria-hidden="true" /><span>No agents yet. Press <b>New agent</b> to start from a job such as Researcher or Writer, or from a blank page.</span></div>
         )}
         {jobs.length > 0 && (
           <ul className="home-grid agents-grid">
             {jobs.map((job) => (
-              <li key={job.id}>
-                <button type="button" className="home-card agent-card" onClick={() => open(`/agents/${encodeURIComponent(job.id)}`)}>
-                  <AgentBadge compact markId={job.id} figure={figureFor(job.id, job.figure)} draft={draftFromJob(job)} usedIn={usage.get(job.id)} pinned={pinned === job.id} />
+              <li key={job.id} className="agent-card-box">
+                <button type="button" className="home-card agent-card" title={job.model ? `${job.name} · on ${modelNameFromId(job.model)}` : job.name} onClick={() => open(`/agents/${encodeURIComponent(job.id)}`)}>
+                  <AgentTile id={job.id} figure={figureFor(job.id, job.figure)} draft={draftFromJob(job)} teams={usage.get(job.id)?.teams ?? 0} runs={records} pinned={pinned === job.id} />
                 </button>
+                {/* Beside the tile's button, never inside it: a button holds no other control. */}
+                <AgentCardMenu name={job.name} chat={`/agents/${encodeURIComponent(job.id)}?view=chat`} onRemove={() => setRemoving(job)} />
               </li>
             ))}
           </ul>
         )}
         {problems.map((problem) => <p key={problem.file} className="home-empty alert" title={problem.message}>Can’t read {problem.file}: {problem.message}</p>)}
       </section>
-
-      {own && own.length > 0 && (
-        <section className="home-teams" aria-labelledby="agents-in-teams-title">
-          <div className="home-teams-head"><h2 id="agents-in-teams-title">In your teams<span className="home-section-says">Each works in its own team</span></h2></div>
-          <p className="agents-in-teams-note">These agents were made inside a team, so each one is changed there.</p>
-          <ul className="home-agents-row">
-            {own.map((agent) => (
-              <li key={`${agent.teamPath}#${agent.agentId}`}><a className="home-agent-chip" href={teamAgentHref(agent)} title={`Open ${agent.agentName} in ${agent.teamName}`}><FigureStill className="home-agent-figure" figure={figureFor(agent.agentId)} headOnly alt="" width={30} height={30} loading="lazy" decoding="async" /><b>{agent.agentName}</b><span className="home-agent-team">in {agent.teamName}</span></a></li>
-            ))}
-          </ul>
-        </section>
-      )}
+      {removing && <RemoveAgentDialog agent={removing} uses={uses === null ? null : uses.filter((use: AgentUse) => use.agent === removing.id)} onRemoved={() => setRemoving(null)} onClose={() => setRemoving(null)} />}
     </>
+  )
+}
+
+/** An agent's "…" on its card in My agents (ADR 0100): chat with it, or remove it, without opening it first. */
+function AgentCardMenu({ name, chat, onRemove }: { name: string; chat: string; onRemove: () => void }) {
+  const [open, setOpen] = useState(false)
+  const box = useRef<HTMLSpanElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const away = (event: PointerEvent) => { if (!box.current?.contains(event.target as Node)) setOpen(false) }
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false) }
+    window.addEventListener('pointerdown', away)
+    window.addEventListener('keydown', escape)
+    return () => { window.removeEventListener('pointerdown', away); window.removeEventListener('keydown', escape) }
+  }, [open])
+  return (
+    <span className="agent-card-menu" ref={box}>
+      <button type="button" className="iconbtn" aria-label={`More for ${name}`} title="More" aria-expanded={open} aria-haspopup="menu" onClick={() => setOpen((value) => !value)}><MoreHorizontal size={16} aria-hidden="true" /></button>
+      {open && (
+        <span className="idle-agent-menu" role="menu" aria-label={name}>
+          <a role="menuitem" href={chat} onClick={(event) => { event.preventDefault(); setOpen(false); navigate(chat) }}>Chat</a>
+          <span className="menu-rule" role="separator" />
+          <button type="button" role="menuitem" className="menu-alert" onClick={() => { setOpen(false); onRemove() }}>Remove from My agents…</button>
+        </span>
+      )}
+    </span>
   )
 }

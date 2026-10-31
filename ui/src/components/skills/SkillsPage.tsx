@@ -1,19 +1,16 @@
-import { Moon, Sun } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import {
   displayName, errorText, fetchSkills, inspectInstall, installedKeys, publisherOf, removeSkill, resultKey, searchEverywhere, skillCount,
   type FoundSkills, type Publisher, type SearchResult, type SkillRecord, type SkillSource, type SkillsFolder,
 } from '../../lib/library/skillStore'
-import type { LoomMarkState } from '../../lib/story/loomMark'
-import { useTheme } from '../../lib/theme'
-import { LoomMark, LoomWordmark } from '../ui/glyphs'
 import { AddSheet, type Adding } from './AddSheet'
 import { BringInSheet } from './BringInSheet'
 import { Finder, Topics } from './Finder'
 import { Results, type ResultState } from './Results'
 import { Shelf } from './Shelf'
 import { Toast } from './Toast'
+import { SectionHead } from '../ui/SectionHead'
 
 type Search = { query: string; loading: boolean; found: FoundSkills | null; error: string }
 type ToastState = { text: string; action?: string; onAction?: () => void }
@@ -21,22 +18,13 @@ type ToastState = { text: string; action?: string; onAction?: () => void }
 const FRESH_FOR = 4000
 
 /**
- * Skills (`/skills`): teach every agent a kind of work. One of the Home pages (Your agents,
- * Quests), so it wears their header and ground around the store (SkillsStore).
+ * Skills (`/skills`): teach every agent a kind of work. It wears the ground the Agents and Quests
+ * pages have, around the store (SkillsStore).
  */
-export function SkillsPage({ mark }: { mark?: LoomMarkState } = {}) {
-  const { resolved, toggle } = useTheme()
+export function SkillsPage() {
   return (
     <div className="lw-home lw-skills">
       <div className="ground" aria-hidden="true" />
-      <header className="home-top">
-        <a className="home-brand" href="/" aria-label="LoomWatch home"><LoomMark size={28} state={mark} /><LoomWordmark height={19} /></a>
-        <span className="home-top-acts">
-          <a className="btn" href="/agents">My agents</a>
-          <a className="btn lw-skills-teams-link" href="/">My team</a>
-          <button type="button" className="iconbtn" onClick={toggle} aria-label={resolved === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}>{resolved === 'dark' ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />}</button>
-        </span>
-      </header>
       <SkillsStore heading="Skills" intro="Skills teach your agents a kind of work, like filling in PDF forms or writing in your house style. Add a skill here and every agent can use it." />
     </div>
   )
@@ -168,8 +156,9 @@ export function SkillsStore({ heading, intro, initialQuery = '', onAdded, onFold
     <>
       <main className="home-main lw-skills-main">
         <section className="home-hero lw-skills-hero">
-          <h1 className="t-display">{heading}</h1>
-          <p>{intro}</p>
+          {typeof heading === 'string'
+            ? <SectionHead page as="h1" className="t-display" title={heading} explain={intro} />
+            : <><h1 className="t-display">{heading}</h1><p>{intro}</p></>}
         </section>
         <div className="lw-skills-layout">
           <div className="lw-skills-browse">

@@ -9,20 +9,28 @@ const run = (overrides: Partial<RunRecord>): RunRecord => ({
   finishedAt: '2026-10-06T02:04:00.000Z', error: null, exitCode: 0, eventCount: 1, reply: '## Digest\nChips lead.', ...overrides,
 })
 
+/** A preview's line as it reads: the app's words, then the request's or answer's. */
+const said = (preview: ReturnType<typeof chatPreview>) => (preview ? preview.lead + preview.words : null)
+
 describe('chatPreview', () => {
+  it('keeps the words whole, Markdown and all, for the card’s line to cut', () => {
+    const long = `Add up the **Q4** sales by region from \`sales.csv\` and ${'say why each one moved '.repeat(6)}`
+    expect(chatPreview([run({ status: 'running', finishedAt: null, reply: null, prompt: long })], 'news.yaml')).toMatchObject({ lead: 'Working on: ', words: long.trim() })
+  })
+
   it('says the newest thing in the chat in one line', () => {
-    expect(chatPreview([run({})], 'news.yaml')).toEqual({ at: '2026-10-06T02:04:00.000Z', line: 'Digest', live: false })
-    expect(chatPreview([run({ status: 'running', finishedAt: null, reply: null })], 'news.yaml')?.line).toBe('Working on: today’s digest')
-    expect(chatPreview([run({ status: 'running', finishedAt: null, waitingOn: { node: 'x', name: 'x', kind: 'question', since: '', question: '', park: 'none', parkNote: '', sendBackAvailable: false } })], 'news.yaml')?.line).toBe('Waiting for you')
-    expect(chatPreview([run({ status: 'failed', reply: null })], 'news.yaml')?.line).toBe('Stopped: today’s digest')
-    expect(chatPreview([run({ status: 'failed', reply: null, nextTryAt: '2026-10-06T02:05:00.000Z' })], 'news.yaml')?.line).toBe('Trying again soon: today’s digest')
+    expect(chatPreview([run({})], 'news.yaml')).toEqual({ at: '2026-10-06T02:04:00.000Z', lead: '', words: 'Digest', live: false })
+    expect(said(chatPreview([run({ status: 'running', finishedAt: null, reply: null })], 'news.yaml'))).toBe('Working on: today’s digest')
+    expect(said(chatPreview([run({ status: 'running', finishedAt: null, waitingOn: { node: 'x', name: 'x', kind: 'question', since: '', question: '', park: 'none', parkNote: '', sendBackAvailable: false } })], 'news.yaml'))).toBe('Waiting for you')
+    expect(said(chatPreview([run({ status: 'failed', reply: null })], 'news.yaml'))).toBe('Stopped: today’s digest')
+    expect(said(chatPreview([run({ status: 'failed', reply: null, nextTryAt: '2026-10-06T02:05:00.000Z' })], 'news.yaml'))).toBe('Trying again soon: today’s digest')
     expect(chatPreview([run({})], 'other.yaml')).toBeNull()
   })
 
   it('picks the newest piece, by when it last changed', () => {
     const older = run({ runId: 'old', reply: 'Old answer', finishedAt: '2026-10-05T02:00:00.000Z' })
     const newer = run({ runId: 'new', reply: 'New answer' })
-    expect(chatPreview([newer, older], 'news.yaml')?.line).toBe('New answer')
+    expect(said(chatPreview([newer, older], 'news.yaml'))).toBe('New answer')
   })
 })
 

@@ -2,14 +2,15 @@ import { useCallback, useEffect, useState } from 'react'
 import { parse } from 'yaml'
 
 import { fetchTeamFile, fetchTeamsDiscovery, teamDisplayName, teamPathUnderRoot, teamSummaries } from '../team-file/client'
+import { TeamFileModel } from '../team-file/document'
+import { takeAgentOff } from '../team-file/takeOff'
 import type { AgentConfig, TeamDocument } from '../team-file/types'
 import { JOBS_CHANGED_EVENT } from './jobs'
 import type { LibrarySource } from './types'
 
-/** One team agent placed from one of Your agents. */
+/** One team agent that is one of My agents (ADR 0094). */
 export interface AgentUse {
   agent: string
-  version: number
   teamPath: string
   teamName: string
   /** The agent's id and name in that team. */
@@ -17,6 +18,20 @@ export interface AgentUse {
   agentName: string
   /** The team runs on a schedule, where anything it would ask you is declined. */
   scheduled: boolean
+  /** What taking it off this team does beyond closing its place in the line (ADR 0100): only an
+      agent that starts the team changes more. */
+  takeOff?: { startsInstead?: TeamCard; withoutCheck?: boolean; empty?: boolean; chooseStart?: TeamCard[] }
+  /** The team's other places, in other projects (ADR 0103): one team, listed once, whose setup a
+      save at `teamPath` writes into each of these too. */
+  places?: string[]
+}
+
+/** An agent card in a team, as a person is told about it: its name in the team file, or the one of
+    My agents it is (`agent`), whose name is in My agents. */
+export interface TeamCard {
+  id: string
+  name: string
+  agent?: string
 }
 
 /**
@@ -49,10 +64,11 @@ export function teamAgentSource(agent: AgentConfig): LibrarySource {
     ...(agent.doneWhen?.length ? { doneWhen: [...agent.doneWhen] } : {}),
     ...(agent.allow ? { allow: { ...agent.allow } } : {}),
     ...(agent.allowRecruiting === false ? { helpers: false as const } : {}),
+    ...(agent.allowMyAgents === false ? { bringsIn: false as const } : {}),
   }
 }
 
-/** Where a team's own agent is worked on: that team, on its Agents tab, with this agent open. */
+/** Where a team's own agent is worked on: that team, with this agent's workbench open over its Team tab. */
 export function teamAgentHref(agent: Pick<TeamOwnAgent, 'teamPath' | 'agentId'>): string {
   return `/?${new URLSearchParams({ path: agent.teamPath, view: 'agents', agent: agent.agentId })}`
 }
@@ -69,6 +85,8 @@ export async function findTeamAgents(): Promise<{ uses: AgentUse[]; own: TeamOwn
   const files = await Promise.allSettled(teams.map(async (team) => ({ team, file: await fetchTeamFile(team.path) })))
   const uses: AgentUse[] = []
   const own: TeamOwnAgent[] = []
+  // A team in several projects is one team (ADR 0103): its agents are listed once, at its first place.
+  const shared = new Map<string, AgentUse[]>()
   for (const result of files) {
     if (result.status !== 'fulfilled') continue
     const { team, file } = result.value
@@ -76,14 +94,29 @@ export async function findTeamAgents(): Promise<{ uses: AgentUse[]; own: TeamOwn
     try { doc = parse(file.yaml) as Partial<TeamDocument> } catch { continue }
     const scheduled = Boolean(doc?.schedule?.cron) && doc?.schedule?.enabled !== false
     const teamName = doc?.name?.trim() || teamDisplayName(team)
+    const cardsById = new Map((doc?.agents ?? []).map((agent) => [agent?.id, agent]))
+    const shares = typeof doc?.shares === 'string' && doc.shares.trim() ? doc.shares.trim() : null
+    const first = shares ? shared.get(shares) : undefined
+    if (first) {
+      for (const use of first) use.places = [...(use.places ?? []), team.path]
+      continue
+    }
+    const before = uses.length
     for (const agent of doc?.agents ?? []) {
       if (!agent?.id || agent.kind === 'operator') continue
-      if (agent.from?.agent && typeof agent.from.version === 'number') {
-        uses.push({ agent: agent.from.agent, version: agent.from.version, teamPath: team.path, teamName, agentId: agent.id, agentName: agent.name, scheduled })
+      if (agent.from?.agent) {
+        let takeOff: AgentUse['takeOff']
+        if (doc?.entrypoint === agent.id) {
+          const outcome = takeAgentOff(TeamFileModel.parse(file.yaml), [agent.id])
+          const card = (id: string): TeamCard => { const found = cardsById.get(id); return { id, name: found?.name?.trim() || id, ...(found?.from?.agent ? { agent: found.from.agent } : {}) } }
+          takeOff = { ...(outcome.startsInstead ? { startsInstead: card(outcome.startsInstead) } : {}), ...(outcome.stopsGone.length ? { withoutCheck: true } : {}), ...(outcome.empty ? { empty: true } : {}), ...(outcome.chooseStart ? { chooseStart: outcome.chooseStart.map(card) } : {}) }
+        }
+        uses.push({ agent: agent.from.agent, teamPath: team.path, teamName, agentId: agent.id, agentName: agent.name?.trim() || agent.from.agent, scheduled, ...(takeOff ? { takeOff } : {}) })
       } else {
         own.push({ teamPath: team.path, teamName, agentId: agent.id, agentName: agent.name?.trim() || agent.id, agent })
       }
     }
+    if (shares) shared.set(shares, uses.slice(before))
   }
   const byTeam = (a: { teamName: string }, b: { teamName: string }) => a.teamName.localeCompare(b.teamName)
   return { uses: uses.sort(byTeam), own: own.sort(byTeam), root: discovery.root }

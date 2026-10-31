@@ -1,4 +1,4 @@
-import { Check, Clock3, Lightbulb, Play, X } from 'lucide-react'
+import { Check, Clock3, Lightbulb, Play, X } from '../ui/icon'
 import { useEffect, useRef, useState } from 'react'
 
 import type { CheckupFinding } from '../../lib/team-file/checkup'
@@ -74,7 +74,7 @@ export function BuildHeading({ agentCount, isValid, checking, saveState, appProb
         </div>
         <div className="build-workspace-actions">
           <button className="btn" disabled={proposal.applying} onClick={proposal.onDiscard}>Discard</button>
-          <button className="btn btn-primary" disabled={proposal.applying} onClick={proposal.onApply}><Check size={15} />{proposal.applying ? 'Applying…' : 'Apply'}</button>
+          <button className="btn btn-primary" data-tour="apply-proposal" disabled={proposal.applying} onClick={proposal.onApply}><Check size={15} />{proposal.applying ? 'Applying…' : 'Apply'}</button>
         </div>
       </header>
     )

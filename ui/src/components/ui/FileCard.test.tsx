@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
 
 import { FileOriginContext, FileReaderContext } from '../../lib/files/reader'
+import { cascaded, goldFilled, isGoldFill } from '../../test/cascade'
 import MarkdownRenderer from './MarkdownRenderer'
 import { FileCard } from './FileCard'
 
@@ -96,6 +97,39 @@ describe('files named in a reply', () => {
     for (let count = 0; count < 3; count += 1) rerender(<MarkdownRenderer>{reply}</MarkdownRenderer>)
     expect(screen.getByRole('status')).toHaveTextContent('Opened')
     expect(fetchMock.mock.calls.filter(([url]) => url.startsWith('/api/files/stat'))).toHaveLength(1)
+  })
+
+  it('draws each file’s kind as a line, so an answer naming several files leaves the one gold fill to what is to be done', async () => {
+    render(
+      <>
+        <MarkdownRenderer>{`Wrote \`${REPORT}\` and the [slides](/teams/out/deck.pptx).`}</MarkdownRenderer>
+        <button type="button" className="btn btn-primary">Review</button>
+      </>,
+    )
+    await screen.findByRole('button', { name: /design-report\.docx/ })
+    const tags = [...document.querySelectorAll('.file-chip-ext')]
+    expect(tags.map((tag) => tag.textContent)).toEqual(['DOCX', 'PPTX'])
+    for (const tag of tags) expect(isGoldFill(tag), tag.textContent ?? '').toBe(false)
+    expect(goldFilled()).toEqual(['Review'])
+    // Its kind is still drawn: a 1 px line, in ink rather than gold.
+    expect(cascaded(tags[0], 'box-shadow')).toMatch(/inset 0 0 0 1px/)
+    expect(cascaded(tags[0], 'color')).toBe('var(--color-ink-2)')
+  })
+
+  it('labels each card’s sheet with its kind on paper, so the cards under an answer leave the one gold fill too', async () => {
+    render(
+      <>
+        <div className="tc-files"><FileCard path={REPORT} compact /><FileCard path="/teams/out/deck.pptx" compact /></div>
+        <button type="button" className="btn btn-primary">Review</button>
+      </>,
+    )
+    await screen.findByRole('button', { name: 'Open deck.pptx' })
+    const labels = [...document.querySelectorAll('.file-sheet-ext')]
+    expect(labels.map((label) => label.textContent)).toEqual(['DOCX', 'PPTX'])
+    for (const label of labels) expect(isGoldFill(label), label.textContent ?? '').toBe(false)
+    expect(cascaded(labels[0], 'background')).toBe('var(--color-paper)')
+    // Nor does either card's Open: in the chat it is a line.
+    expect(goldFilled()).toEqual(['Review'])
   })
 
   it('shows a file LoomWatch will not open in its folder instead', async () => {

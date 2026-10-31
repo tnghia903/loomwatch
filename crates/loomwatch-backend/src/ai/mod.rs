@@ -194,6 +194,12 @@ impl Ai {
         self
     }
 
+    /// Count the calls `LoomWatch` makes here for itself (choosing models) in `archive`, with
+    /// every other model call, from now on.
+    pub fn count_calls_in(&self, archive: crate::archive::EventArchive) {
+        self.inner.reader.count_in(archive);
+    }
+
     /// What was last said about the sign-in with `ChatGPT`. Never reads a token.
     #[must_use]
     pub fn chatgpt_status(&self) -> ChatGptStatus {

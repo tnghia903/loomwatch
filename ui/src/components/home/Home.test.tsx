@@ -1,19 +1,14 @@
-import { readFileSync } from 'node:fs'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { parse } from 'yaml'
 
-import { DEFAULT_MODEL } from '../../lib/ai/modelIds'
-import { FEEDBACK_EVENT } from '../../lib/feedback/report'
 import { forgetKeyStatus } from '../../lib/ai/useKeyStatus'
 import { resetFirstRunForTests } from '../../lib/firstrun/store'
-import { readTourState, resetTourForTests, startTour } from '../../lib/tour/store'
+import { readTourState, resetTourForTests } from '../../lib/tour/store'
 import { forgetYou } from '../../lib/you/client'
-import { cascaded, goldFilled, isGoldFill } from '../../test/cascade'
-import type { TeamDocument } from '../../lib/team-file/types'
+import type { RunRecord } from '../../lib/runs/client'
+import { APPROVAL_TEXT } from '../../lib/story/needsYou'
+import { cascaded, DESKTOP, goldFilled, isGoldFill, PHONE } from '../../test/cascade'
+import { figureFor, figureStill } from '../../lib/library/figures'
 import { Home } from './Home'
 
 let assign: ReturnType<typeof vi.fn>
@@ -31,191 +26,577 @@ beforeEach(() => {
   forgetKeyStatus()
   forgetYou()
 })
-afterEach(() => { cleanup(); vi.unstubAllGlobals() })
+// A failed List test must not leave the rest of the file looking at the list.
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); localStorage.removeItem('loomwatch:studio-view') })
 
 function renderHome() {
   render(<Home onPalette={vi.fn()} />)
 }
 
-/** The daemon with no teams and the OpenRouter key as `key` says. */
+/** The daemon with no projects or teams and the OpenRouter key as `key` says. */
 const keyed = (key: Record<string, unknown>) => (url: string) => respond(url === '/api/ai' ? { openrouter: key } : { root: '/teams', files: [], teams: [] })
 
-describe('Home', () => {
-  it('lists teams by name, newest first, and opens one with a single click', async () => {
-    fetchMock.mockImplementation(() => respond({
-      root: '/teams',
-      files: ['old.yaml', 'new.yaml'],
-      teams: [
-        { path: 'old.yaml', name: 'Old desk', agentCount: 1, modifiedAt: '2026-01-01T00:00:00Z' },
-        { path: 'new.yaml', name: 'Research desk', agentCount: 3, modifiedAt: '2026-09-30T00:00:00Z' },
-      ],
-    }))
-    renderHome()
-    const cards = await screen.findAllByRole('button', { name: /desk/ })
-    expect(cards.map((card) => within(card).getByText(/desk$/).textContent)).toEqual(['Research desk', 'Old desk'])
-    expect(cards[0]).toHaveTextContent('3 steps')
-    // A team that never ran says so in plain words, not in the loom's.
-    expect(within(cards[0]).getByText('No runs yet.')).toBeInTheDocument()
-    expect(screen.queryByText(/cloth/)).toBeNull()
-    fireEvent.click(cards[0])
-    expect(assign).toHaveBeenCalledWith('/?path=new.yaml')
-  })
+const GATE = `schemaVersion: 1
+id: gate
+name: Research and design
+project: sutd
+entrypoint: researcher
+agents:
+  - id: researcher
+    from: {agent: researcher}
+  - id: review
+    kind: operator
+    role: Pick one.
+  - id: designer
+    from: {agent: designer}
+edges:
+  - {from: researcher, to: review, layer: configured, kind: sequence, ts: "2026-10-28T00:00:00Z"}
+  - {from: review, to: designer, layer: configured, kind: sequence, ts: "2026-10-28T00:00:00Z"}
+`
+const BLOG = 'schemaVersion: 1\nid: blog\nname: Blog\nproject: blog\nentrypoint: writer\nagents:\n  - id: writer\n    from: {agent: writer}\nedges: []\n'
+const JOBS = [
+  { id: 'researcher', file: '.jobs/researcher.yaml', name: 'Researcher', instructions: 'Research.', version: 1 },
+  { id: 'designer', file: '.jobs/designer.yaml', name: 'Designer', instructions: 'Design.', version: 1 },
+  { id: 'writer', file: '.jobs/writer.yaml', name: 'Writer', instructions: 'Write.', version: 1 },
+  { id: 'translator', file: '.jobs/translator.yaml', name: 'Translator', instructions: 'Translate.', version: 1 },
+]
 
-  // The app follows the landing page: Home opens on its headline, word for word, with the same words in gold.
-  it('opens on the landing page’s headline', async () => {
+/** The daemon with two projects, their teams and My agents. */
+function studio(url: string) {
+  if (url === '/api/projects') {
+    return respond({
+      projects: [
+        { id: 'blog', name: 'Blog', teams: ['blog.yaml'] },
+        { id: 'sutd', name: 'SUTD final project', mark: 'sky', teams: ['sutd/gate.yaml'] },
+      ],
+      loose: [],
+      missing: [],
+    })
+  }
+  if (url === '/api/jobs') return respond({ folder: '/teams/.jobs', jobs: JOBS, problems: [] })
+  if (url.startsWith('/api/team?')) {
+    const path = new URLSearchParams(url.split('?')[1]).get('path')
+    return respond({ path, yaml: path === 'blog.yaml' ? BLOG : GATE, revision: 'r' })
+  }
+  return respond({ root: '/teams', files: ['blog.yaml', 'sutd/gate.yaml'], teams: [{ path: 'blog.yaml', name: 'Blog', agentCount: 1 }, { path: 'sutd/gate.yaml', name: 'Research and design', agentCount: 3 }] })
+}
+
+function run(teamPath: string, extra: Partial<RunRecord> = {}): RunRecord {
+  return {
+    runId: `run-${teamPath}`, sessionId: 's', teamPath, prompt: 'p', status: 'running', mode: 'pipeline', entrypoint: 'researcher', responder: 'designer',
+    agentIds: [], createdAt: '2026-10-28T09:00:00Z', startedAt: '2026-10-28T09:00:00Z', finishedAt: null, error: null, exitCode: null, eventCount: null, reply: null,
+    ...extra,
+  } as RunRecord
+}
+
+const waitingOnTheResearcher = run('sutd/gate.yaml', {
+  waitingOn: { node: 'review', name: 'You', kind: 'review_stop', since: '2026-10-28T09:05:00Z', question: 'Pick one.', handoverFrom: 'researcher', park: 'none', parkNote: '', sendBackAvailable: true },
+})
+
+describe('Home, the studio (ADR 0097)', () => {
+  it('asks what you are working on before there is any project, and Set up project asks Ask with your words', async () => {
     fetchMock.mockImplementation(() => respond({ root: '/teams', files: [], teams: [] }))
-    renderHome()
-    const heading = await screen.findByRole('heading', { level: 1 })
-    const landing = readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../site/index.html'), 'utf8').match(/<h1 id="hero-h">(.*?)<\/h1>/s)![1]
-    const words = (text: string) => text.replace(/<[^>]+>/g, '').replace(/&nbsp;|\s+/g, ' ').trim()
-    expect(words(heading.textContent!)).toBe(words(landing))
-    expect(words(heading.querySelector('em')!.textContent!)).toBe(words(landing.match(/<em>(.*?)<\/em>/s)![1]))
-  })
-
-  // A newcomer coming back to use their agent landed on Build and had to look for Chat.
-  it('opens a saved agent from Home on its chat', async () => {
-    const helper = { id: 'reply-helper', file: 'reply-helper.yaml', name: 'Review reply helper', role: 'Reply to reviews.', version: 1 }
-    fetchMock.mockImplementation((url: string) => respond(url === '/api/jobs'
-      ? { folder: '/teams/.jobs', jobs: [helper], problems: [] }
-      : { root: '/teams', files: [], teams: [] }))
-    renderHome()
-    const chip = await screen.findByRole('link', { name: /Review reply helper/ })
-    expect(chip).toHaveAttribute('href', '/agents/reply-helper?view=chat')
-  })
-
-  // Home's About you card went with the first run (ADR 0075), which left Home no way to About you.
-  it('says beside your agents what they know about you, and links to About you', async () => {
-    let you: Record<string, unknown> = { skipped: false }
-    fetchMock.mockImplementation((url: string) => respond(
-      url === '/api/you' ? you
-        : url === '/api/jobs' ? { folder: '/teams/.jobs', jobs: [], problems: [] }
-          : { root: '/teams', files: [], teams: [] }))
-    renderHome()
-    const shelf = () => screen.getByRole('heading', { name: /My agents/ }).closest('section')!
-    expect(await screen.findByText(/Your agents don’t know you yet\./)).toBeInTheDocument()
-    expect(within(shelf()).getByRole('link', { name: 'Tell them about you' })).toHaveAttribute('href', '/you')
-
+    const onAsk = vi.fn()
+    render(<Home onPalette={vi.fn()} ask={{ unavailable: null, onAsk }} />)
+    expect(await screen.findByRole('heading', { name: 'What are you working on?' })).toBeInTheDocument()
+    expect(screen.getByText('You see the team before anything runs.')).toBeInTheDocument()
+    const setUp = screen.getByRole('button', { name: 'Set up project' })
+    // The getting-started guide points here to put your first agent to work (lib/tour/steps.ts).
+    expect(setUp.closest('[data-tour="set-up-project"]')).toContainElement(screen.getByRole('textbox', { name: 'What you are working on' }))
+    // With nothing said, it puts you where to say it, and asks nothing.
+    fireEvent.click(setUp)
+    expect(onAsk).not.toHaveBeenCalled()
+    expect(screen.getByRole('textbox', { name: 'What you are working on' })).toHaveFocus()
+    fireEvent.click(screen.getByRole('button', { name: 'My thesis' }))
+    expect(screen.getByRole('textbox', { name: 'What you are working on' })).toHaveValue('My thesis')
+    fireEvent.change(screen.getByRole('textbox', { name: 'What you are working on' }), { target: { value: 'My final-year project at SUTD' } })
+    fireEvent.click(setUp)
+    expect(onAsk).toHaveBeenCalledWith('Set up a project for this: My final-year project at SUTD')
+    // And a way to chat with one agent outside any project.
+    expect(screen.getByRole('button', { name: 'Chat with one agent' })).toBeInTheDocument()
     cleanup()
-    forgetYou()
-    you = { name: 'Mai', about: 'I teach English.', skipped: false }
-    renderHome()
-    expect(await screen.findByText('Mai')).toBeInTheDocument()
-    expect(shelf().querySelector('.agents-know-you')).toHaveTextContent('Your agents know you as Mai. Edit')
-    expect(within(shelf()).getByRole('link', { name: 'Edit' })).toHaveAttribute('href', '/you')
+
+    render(<Home onPalette={vi.fn()} ask={{ unavailable: 'Ask runs on your OpenRouter key. Add it to start.', onAsk }} />)
+    expect(await screen.findByText('Ask runs on your OpenRouter key. Add it to start.')).toBeInTheDocument()
   })
 
-  // A newcomer whose teams were made first saw "Build your first agent" over teams full of agents.
-  it('lists the agents written into a team with their team, and opens each one there', async () => {
-    const yaml = [
-      'schemaVersion: 1', 'id: rag', 'name: Enterprise RAG research', 'entrypoint: researcher', 'agents:',
-      '  - id: researcher', '    name: RAG researcher', '    role: Research.',
-      '  - id: review', '    kind: operator', '    name: You', '    role: Approve it.',
-    ].join('\n')
-    fetchMock.mockImplementation((url: string) => respond(
-      url === '/api/jobs' ? { folder: '/teams/.jobs', jobs: [], problems: [] }
-        : url.startsWith('/api/team?') ? { path: 'research/rag.yaml', yaml, revision: 'r1' }
-          : { root: '/teams', files: ['research/rag.yaml'], teams: [{ path: 'research/rag.yaml', name: 'Enterprise RAG research', agentCount: 2 }] }))
-    renderHome()
-    const chip = await screen.findByRole('link', { name: /RAG researcher/ })
-    expect(chip).toHaveTextContent('in Enterprise RAG research')
-    expect(chip).toHaveAttribute('href', '/?path=research%2Frag.yaml&view=agents&agent=researcher')
-    // The operator's stop is a step of the workflow, not an agent.
-    expect(screen.queryByRole('link', { name: /^You/ })).toBeNull()
-    expect(screen.queryByText(/Start here/)).toBeNull()
-    expect(screen.getByRole('link', { name: /All agents/ })).toHaveAttribute('href', '/agents')
+  it('shows each project as a room, the one waiting for you first, its agents at their desks, and opens it', async () => {
+    fetchMock.mockImplementation(studio)
+    render(<Home onPalette={vi.fn()} runs={[waitingOnTheResearcher]} />)
+    const rooms = await screen.findAllByRole('article')
+    await waitFor(() => expect(rooms[0]).toHaveTextContent('Researcher is waiting for you'))
+    expect(rooms.map((room) => within(room).getByRole('heading').textContent)).toEqual(['SUTD final project', 'Blog'])
+    // The guide's "Open a project" points at the rooms, New project with them.
+    expect(rooms[0].closest('[data-tour="projects"]')).toContainElement(screen.getByRole('button', { name: 'New project' }))
+    // The Researcher waits for you at its own desk, lit, saying so.
+    expect(within(rooms[0]).getByTitle('Researcher is waiting for you')).toBeInTheDocument()
+    expect(within(rooms[0]).getByRole('group', { name: /Research and design: Researcher is waiting for you, then You check, then Designer/ })).toBeInTheDocument()
+    expect(rooms[1]).toHaveTextContent('Ready')
+    fireEvent.click(within(rooms[0]).getByRole('button', { name: 'SUTD final project' }))
+    expect(assign).toHaveBeenCalledWith('/projects/sutd')
   })
 
-  // The work in the order it is done: build agents, put them in a team's workflow, then chat with it.
-  it('starts with building an agent, lists your agents before your teams, and opens each team where it left off', async () => {
-    fetchMock.mockImplementation((url: string) => respond(url === '/api/jobs'
-      ? { folder: '/teams/.jobs', jobs: [], problems: [] }
-      : { root: '/teams', files: ['empty.yaml', 'ready.yaml'], teams: [
-        { path: 'empty.yaml', name: 'Empty desk', agentCount: 0, modifiedAt: '2026-09-30T00:00:00Z' },
-        { path: 'ready.yaml', name: 'Ready desk', agentCount: 2, modifiedAt: '2026-09-29T00:00:00Z' },
-      ] }))
-    renderHome()
-    const build = screen.getByRole('link', { name: 'Build an agent' })
-    expect(build).toHaveAttribute('href', '/agents/new')
-    expect(build).toHaveClass('btn-primary')
-    expect(screen.getByRole('button', { name: 'New team' })).not.toHaveClass('btn-primary')
-    const steps = within(screen.getByRole('list', { name: 'How it works' })).getAllByRole('listitem')
-    expect(steps.map((step) => step.querySelector('strong')?.textContent)).toEqual(['Agents.', 'Workflow.', 'Chat.'])
-    const agents = await screen.findByRole('heading', { name: /My agents/ })
-    const teams = screen.getByRole('heading', { name: /My team/ })
-    expect(agents.compareDocumentPosition(teams) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    // A team with no agents opens on its agents, the first thing to set up; one with agents, on its workflow.
-    fireEvent.click(await screen.findByRole('button', { name: /Empty desk/ }))
-    expect(assign).toHaveBeenLastCalledWith('/?path=empty.yaml&view=agents')
-    fireEvent.click(screen.getByRole('button', { name: /Ready desk/ }))
-    expect(assign).toHaveBeenLastCalledWith('/?path=ready.yaml')
+  it('puts whoever waits for you first on Your desk, with Approve one press and the work one press away', async () => {
+    const answered: unknown[] = []
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === '/api/runs?preview=true') return respond(answered.length ? [] : [waitingOnTheResearcher])
+      if (url === `/api/runs/${encodeURIComponent(waitingOnTheResearcher.runId)}/answers` && init?.method === 'POST') {
+        answered.push(JSON.parse(String(init.body)))
+        return respond({ ...waitingOnTheResearcher, waitingOn: null })
+      }
+      return studio(url)
+    })
+    const opened = vi.fn()
+    window.addEventListener('loomwatch:open-needs-you', opened)
+    render(<Home onPalette={vi.fn()} runs={[waitingOnTheResearcher]} />)
+    const desk = await screen.findByRole('group', { name: 'Your desk' })
+    const needs = await within(desk).findByRole('region', { name: 'Needs you · 1' })
+    expect(within(needs).getByText('Researcher brought work for you to check')).toBeInTheDocument()
+    expect(within(needs).getByText('Research and design')).toBeInTheDocument()
+    // Reading it first opens the bell's tray at that item, where Send back is.
+    fireEvent.click(within(needs).getByRole('button', { name: 'Read Researcher’s work first' }))
+    expect((opened.mock.calls[0][0] as CustomEvent<string>).detail).toBe(waitingOnTheResearcher.runId)
+    // One gold fill on the screen: Approve. The box beside it gives work with a plain Send meanwhile,
+    // even with words in it (an empty box's Send is off, and off is never gold).
+    fireEvent.change(within(screen.getByRole('form', { name: 'Give work' })).getByRole('textbox'), { target: { value: 'Draw the gate.' } })
+    expect(goldFilled()).toEqual(['Approve'])
+    // Approve answers the review the run waits on, with the words the tray's Approve sends.
+    fireEvent.click(within(needs).getByRole('button', { name: 'Approve: Researcher brought work for you to check' }))
+    expect(await screen.findByText('Approved. Research and design carries on.')).toBeInTheDocument()
+    expect(answered).toEqual([{ node: 'review', text: APPROVAL_TEXT }])
+    expect(opened).toHaveBeenCalledTimes(1)
+    window.removeEventListener('loomwatch:open-needs-you', opened)
   })
 
-  // ADR 0051: teams are listed as chats — the newest work first, a line of it, and a mark for
-  // what came in since you last looked; a team with history opens in its chat.
-  it('lists teams as chats: newest work first, its last line, an unread mark, and opens the chat', async () => {
+  // The quiet desk (ADR 0101): the box first, then what needs you across the row, its first item
+  // stepped up and drawn big. A room keeps its four tiles side by side.
+  it('leads with the box, and steps up the first thing that needs you across the row', async () => {
+    fetchMock.mockImplementation(studio)
+    render(<Home onPalette={vi.fn()} runs={[waitingOnTheResearcher]} />)
+    const desk = await screen.findByRole('group', { name: 'Your desk' })
+    const box = screen.getByRole('form', { name: 'Give work' })
+    expect(box.compareDocumentPosition(desk) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const needs = await within(desk).findByRole('region', { name: 'Needs you · 1' })
+    expect(cascaded(needs, 'grid-column')).toBe('1 / -1')
+    const first = within(needs).getAllByRole('listitem')[0]
+    expect(first).toHaveClass('glance-up')
+    expect(first.querySelector('.desk-figure img')).toHaveAttribute('width', '88')
+    expect(cascaded(desk, 'grid-template-columns', PHONE)).toBe('repeat(2, minmax(0, 1fr))')
+    // Its own class names only: a shared name once gave it a room card's desk width of 78 px.
+    expect(cascaded(desk, ['width', 'flex'])).toBeNull()
+  })
+
+  it('gives any team work from Home, its teams under their projects', async () => {
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => (url === '/api/chat/messages' && init?.method === 'POST' ? respond({ route: 'team', message: { id: 'm1' }, run: null }) : studio(url)))
+    renderHome()
+    const box = await screen.findByRole('form', { name: 'Give work' })
+    const to = within(box).getByRole('combobox', { name: 'To' })
+    expect([...to.querySelectorAll('optgroup')].map((group) => [group.label, [...group.querySelectorAll('option')].map((option) => option.textContent)])).toEqual([
+      ['Blog', ['Blog']],
+      ['SUTD final project', ['Research and design']],
+    ])
+    fireEvent.change(to, { target: { value: 'sutd/gate.yaml' } })
+    fireEvent.change(within(box).getByRole('textbox'), { target: { value: 'Find three gate designs.' } })
+    // Nothing waits for you: Send is the one gold fill.
+    expect(goldFilled()).toEqual(['Start'])
+    fireEvent.click(within(box).getByRole('button', { name: 'Start' }))
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/chat/messages')).toBe(true))
+    const [, init] = fetchMock.mock.calls.find(([url]) => url === '/api/chat/messages') as [string, RequestInit]
+    expect(JSON.parse(String(init.body))).toMatchObject({ teamPath: 'sutd/gate.yaml', text: 'Find three gate designs.', work: true, to: { kind: 'team' } })
+    localStorage.removeItem('loomwatch:work-box-team')
+  })
+
+  it('counts this month from the runs when the usage report can’t be read as one', async () => {
+    // An older daemon, or anything that isn't a usage report: Home still draws, from the runs.
+    fetchMock.mockImplementation((url: string) => (url.startsWith('/api/usage') ? respond({ root: '/teams', files: [], teams: [] }) : studio(url)))
+    render(<Home onPalette={vi.fn()} runs={[run('blog.yaml', { runId: 'u1', status: 'succeeded', finishedAt: new Date().toISOString(), createdAt: new Date().toISOString(), spend: { spentUsd: 0.25 } }), run('blog.yaml', { runId: 'u2', status: 'succeeded', finishedAt: new Date().toISOString(), createdAt: new Date().toISOString() })]} />)
+    const month = await screen.findByRole('region', { name: 'This month' })
+    expect(month).toHaveTextContent('at least $0.25')
+    expect(month).toHaveTextContent('2 pieces of work')
+  })
+
+  it('draws who did what on Your desk: the last work’s agent, the agents ready, today’s work by who did it, and whose the month’s dollars were', async () => {
+    const tally = (source: string, costUsd: number, calls = 1, costEstimated = false) => ({ source, calls, inputTokens: 0, cachedTokens: 0, outputTokens: 0, costUsd, costEstimated })
+    const usage = {
+      since: '2026-10-01',
+      days: [],
+      sources: [{ source: 'openrouter', total: tally('openrouter', 1.3) }, { source: 'anthropic', total: tally('anthropic', 0.2, 1, true) }, { source: 'chatgpt', total: tally('chatgpt', 0, 4) }],
+      agents: [
+        { ...tally('openrouter', 1), team: 'Blog', ask: false, agentId: 'writer', agentName: 'Writer', runs: 2 },
+        { ...tally('openrouter', 0.25), team: 'Research and design', ask: false, agentId: 'designer', agentName: 'Designer', runs: 1 },
+        { ...tally('anthropic', 0.2, 1, true), team: 'Research and design', ask: false, agentId: 'designer', agentName: 'Designer', runs: 1 },
+        { ...tally('openrouter', 0.05), ask: true, agentId: 'ask', runs: 1 },
+        { ...tally('chatgpt', 0, 4), team: 'Research and design', ask: false, agentId: 'researcher', agentName: 'Researcher', runs: 1 },
+      ],
+    }
+    fetchMock.mockImplementation((url: string) => (url.startsWith('/api/usage') ? respond(usage) : studio(url)))
+    const today = (hour: number) => new Date(new Date().setHours(hour, 0, 0, 0)).toISOString()
+    render(<Home onPalette={vi.fn()} runs={[
+      run('sutd/gate.yaml', { runId: 'gates', status: 'succeeded', prompt: 'Draw three gates.', responder: 'designer', createdAt: today(0), finishedAt: today(0) }),
+      run('blog.yaml', { runId: 'when', status: 'succeeded', prompt: 'When is the mid-term presentation?', responder: 'writer', createdAt: today(0), finishedAt: new Date().toISOString() }),
+    ]} />)
+    const desk = await screen.findByRole('group', { name: 'Your desk' })
+
+    // The last work: what it was asked, which opens it, and who did it, where.
+    const last = within(desk).getByRole('region', { name: /^Last finished/ })
+    expect(last).toHaveTextContent('Writer answered · Blog')
+    // Drawn as itself: the figure the writer wears.
+    expect(last.querySelector('img')).toHaveAttribute('src', figureStill(figureFor('writer', undefined)))
+    fireEvent.click(within(last).getByRole('button', { name: 'Open Writer’s work: When is the mid-term presentation?' }))
+    expect(assign).toHaveBeenLastCalledWith('/?path=blog.yaml&run=when')
+
+    // Nobody works: the agents of every team, each once, lit as each is, and how many are free.
+    const working = within(desk).getByRole('region', { name: 'Working now' })
+    await waitFor(() => expect(within(working).getAllByRole('img').map((img) => img.getAttribute('alt'))).toEqual(['Writer', 'Researcher', 'Designer']))
+    expect(working).toHaveTextContent('Nobody is working · all 3 ready')
+    // The words before the figures: figures lit under "Working now" would read as agents at work.
+    const words = within(working).getByText(/Nobody is working/)
+    expect(words.compareDocumentPosition(within(working).getByRole('list', { name: 'Agents' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+    // Today's work, each piece as the agent who answered it, newest first, each one press from it.
+    const finished = within(desk).getByRole('region', { name: 'Finished today' })
+    expect(within(finished).getByRole('list', { name: 'Today’s finished work' })).toBeInTheDocument()
+    const pieces = within(finished).getAllByRole('button')
+    expect(pieces.map((piece) => piece.getAttribute('aria-label'))).toEqual(['Open Writer’s work: When is the mid-term presentation?', 'Open Designer’s work: Draw three gates.'])
+    fireEvent.click(pieces[1])
+    expect(assign).toHaveBeenLastCalledWith('/?path=sutd%2Fgate.yaml&run=gates')
+
+    // This month: the dollars, the plan on a line of its own, and whose they were, costliest first.
+    // Ask's calls are nobody's, and work the plan paid for is no one's dollars.
+    const month = within(desk).getByRole('region', { name: 'This month' })
+    await waitFor(() => expect(within(month).getByText('≈ $1.50')).toBeInTheDocument())
+    expect(within(month).getByText('+ ChatGPT plan')).toBeInTheDocument()
+    const spent = within(month).getByRole('list', { name: 'Who spent it' })
+    // The rest (here Ask's) is everything else, not other agents.
+    expect(within(spent).getAllByRole('listitem').map((part) => part.textContent)).toEqual(['$1.00', '≈ $0.45', 'Everything else $0.05'])
+    expect(within(spent).getAllByRole('img').map((img) => img.getAttribute('alt'))).toEqual(['Writer', 'Designer'])
+    // The bar is split in shares of the whole, so it is always full, never a limit half used.
+    const parts = [...month.querySelectorAll<HTMLElement>('.glance-split span')]
+    expect(parts.reduce((sum, part) => sum + Number(part.style.flexGrow), 0)).toBeCloseTo(1)
+    expect(parts.at(-1)).toHaveAttribute('title', 'Everything else · $0.05')
+  })
+
+  it('says what each agent at work was given, the longest at it drawn first, with its team and how long', async () => {
+    fetchMock.mockImplementation(studio)
+    // Half a minute clear of the minute's turn: the shared clock may read up to a second behind.
+    const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString()
+    render(<Home onPalette={vi.fn()} runs={[
+      run('sutd/gate.yaml', { runId: 'gates', prompt: 'Find three gate designs.', working: ['researcher'], startedAt: ago(1.5) }),
+      run('blog.yaml', { runId: 'post', prompt: 'Write the launch post.', responder: 'writer', working: ['writer'], startedAt: ago(4.5) }),
+    ]} />)
+    const working = await screen.findByRole('region', { name: 'Working now · 2' })
+    const buttons = within(working).getAllByRole('button')
+    expect(buttons).toHaveLength(2)
+    const [lead, next] = buttons
+    expect(lead).toHaveAccessibleName('Writer is working on “Write the launch post.”, in Blog. Open it')
+    expect(lead).toHaveTextContent('Write the launch post.')
+    // When it began, never a bare "4 min", which could be read as the time left.
+    expect(lead).toHaveTextContent('Writer · Blog · started 4 min ago')
+    expect(next).toHaveTextContent('Researcher · Research and design · started 1 min ago')
+    // While someone works, the tile is about them: the agents standing ready aren't drawn.
+    expect(working.querySelectorAll('img')).toHaveLength(2)
+    expect(within(working).queryByRole('list')).toBeNull()
+    fireEvent.click(next)
+    expect(assign).toHaveBeenLastCalledWith('/?path=sutd%2Fgate.yaml&run=gates')
+  })
+
+  it('never says nobody works while an agent works in a run that waits for you, and draws each as it is', async () => {
+    fetchMock.mockImplementation(studio)
+    render(<Home onPalette={vi.fn()} runs={[{ ...waitingOnTheResearcher, working: ['designer'] }]} />)
+    const working = await screen.findByRole('region', { name: 'Working now' })
+    const crew = await within(working).findByRole('list', { name: 'Agents' })
+    const drawn = () => within(crew).getAllByRole('img').map((img) => `${img.getAttribute('alt')}: ${img.closest('.desk-figure')?.getAttribute('data-glow')}`).sort()
+    await waitFor(() => expect(drawn()).toEqual(['Designer is working: working', 'Researcher is waiting for you: waiting', 'Writer: ready']))
+    // Named, and drawn first with whoever waits for you.
+    expect(working).toHaveTextContent('Designer is working · 1 ready')
+    expect(working).not.toHaveTextContent('Nobody is working')
+    expect(within(crew).getAllByRole('img').map((img) => img.getAttribute('alt'))).toEqual(['Researcher is waiting for you', 'Designer is working', 'Writer'])
+  })
+
+  it('leaves the agents of a project hidden from Home out of who is ready', async () => {
+    fetchMock.mockImplementation((url: string) => studio(url).then(async (response) => {
+      if (url !== '/api/projects') return response
+      const body = (await response.json()) as { projects: { id: string }[] }
+      return respond({ ...body, projects: body.projects.map((entry) => (entry.id === 'sutd' ? { ...entry, putAway: true } : entry)) })
+    }))
+    renderHome()
+    const working = await screen.findByRole('region', { name: 'Working now' })
+    await waitFor(() => expect(within(working).getAllByRole('img').map((img) => img.getAttribute('alt'))).toEqual(['Writer']))
+  })
+
+  it('lists each team in its room with what it is doing, and opens its chat from its name', async () => {
+    fetchMock.mockImplementation(studio)
+    render(<Home onPalette={vi.fn()} runs={[waitingOnTheResearcher, run('blog.yaml', { runId: 'b1', status: 'succeeded', finishedAt: new Date().toISOString(), made: ['/teams/post.md'], spend: { spentUsd: 0.25 }, createdAt: new Date().toISOString() })]} />)
+    const [sutd, blog] = await screen.findAllByRole('article')
+    const teams = within(sutd).getByRole('list', { name: 'SUTD final project’s teams' })
+    expect(within(teams).getByRole('link', { name: /^Research and design/ })).toHaveAttribute('href', '/?path=sutd%2Fgate.yaml&view=chat')
+    expect(teams).toHaveTextContent('Researcher is waiting for you')
+    // The newest thing made here, one press from being read, and what this month cost; each card
+    // its own project's.
+    expect(within(blog).getByRole('button', { name: /post\.md/ })).toBeInTheDocument()
+    expect(within(blog).getByText('$0.25 this month')).toBeInTheDocument()
+    expect(within(sutd).queryByRole('button', { name: /post\.md/ })).toBeNull()
+    expect(sutd).not.toHaveTextContent('$0.25')
+  })
+
+  it('stands your agents in no project apart, each with Chat and Add to a project, and links to About you', async () => {
+    fetchMock.mockImplementation((url: string) => (url === '/api/you' ? respond({ skipped: false }) : studio(url)))
+    renderHome()
+    const row = (await screen.findByRole('heading', { name: 'Not in a project' })).closest('section') as HTMLElement
+    const translator = await within(row).findByRole('button', { name: /Translator/ })
+    expect(within(row).queryByRole('button', { name: /Writer/ })).toBeNull()
+    fireEvent.click(translator)
+    expect(within(row).getByRole('menuitem', { name: 'Chat' })).toHaveAttribute('href', '/agents/translator?view=chat')
+    fireEvent.click(within(row).getByRole('menuitem', { name: 'Add to a project' }))
+    expect(within(row).getByRole('menuitem', { name: 'SUTD final project' })).toHaveAttribute('href', '/projects/sutd?add=translator')
+    expect(within(row).getByRole('link', { name: 'All my agents (4)' })).toHaveAttribute('href', '/agents')
+    expect(await within(row).findByRole('link', { name: 'Tell them about you' })).toHaveAttribute('href', '/you')
+  })
+
+  it('opens a chat with one of your agents, under where you left off once there is something to pick up', async () => {
+    fetchMock.mockImplementation(studio)
+    renderHome()
+    // Nothing made and no chat yet: the way to chat stands alone, under no heading.
+    fireEvent.click(await screen.findByRole('button', { name: 'Chat with one agent' }))
+    expect(await screen.findByRole('menuitem', { name: /Researcher/ })).toHaveAttribute('href', '/agents/researcher?view=chat')
+    expect(screen.queryByRole('region', { name: 'Pick up where you left off' })).toBeNull()
+    cleanup()
+    render(<Home onPalette={vi.fn()} runs={[run('.jobs/.bench/writer.yaml', { runId: 'c1', status: 'succeeded', finishedAt: new Date().toISOString(), made: ['/teams/notes.md'] })]} />)
+    const row = await screen.findByRole('region', { name: 'Pick up where you left off' })
+    expect(within(row).getByRole('link', { name: /Writer/ })).toHaveAttribute('href', '/agents/writer?view=chat')
+    expect(within(row).getByRole('button', { name: /notes\.md/ })).toBeInTheDocument()
+  })
+
+  it('starts a new project from New project, and from New team, since every team works in one', async () => {
+    fetchMock.mockImplementation(studio)
+    renderHome()
+    await screen.findAllByRole('article')
+    fireEvent.click(screen.getByRole('button', { name: 'New project' }))
+    expect(screen.getByRole('dialog', { name: 'What are you working on?' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    window.dispatchEvent(new Event('loomwatch:new-team'))
+    expect(await screen.findByRole('dialog', { name: 'What are you working on?' })).toBeInTheDocument()
+  })
+
+  it('lists the projects too, for a screen reader or anyone who prefers it', async () => {
+    fetchMock.mockImplementation(studio)
+    render(<Home onPalette={vi.fn()} runs={[waitingOnTheResearcher]} />)
+    await screen.findAllByRole('article')
+    fireEvent.click(screen.getByRole('button', { name: 'List' }))
+    const list = screen.getByRole('list', { name: 'Projects' })
+    expect(within(list).getAllByRole('button').map((button) => button.textContent || button.getAttribute('aria-label'))).toEqual([
+      'SUTD final projectResearcher is waiting for youResearch and design',
+      'Project settings for SUTD final project',
+      'BlogReadyBlog',
+      'Project settings for Blog',
+      'New project',
+    ])
+    fireEvent.click(screen.getByRole('button', { name: 'Rooms' }))
+    localStorage.removeItem('loomwatch:studio-view')
+  })
+
+  // ADR 0100: a project's "…" on its card deletes it without opening it; its team stays, in no project.
+  it('deletes a project from its card’s menu, after saying its team stays', async () => {
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => (init?.method === 'DELETE' ? respond({ id: 'blog', teams: ['blog.yaml'] }) : studio(url)))
+    render(<Home onPalette={vi.fn()} runs={[waitingOnTheResearcher]} />)
+    const blog = (await screen.findAllByRole('article')).find((room) => within(room).queryByRole('heading', { name: 'Blog' }))
+    fireEvent.click(within(blog as HTMLElement).getByRole('button', { name: 'Project settings for Blog' }))
+    fireEvent.click(within(screen.getByRole('menu', { name: 'Project settings for Blog' })).getByRole('menuitem', { name: 'Delete project…' }))
+    const dialog = screen.getByRole('alertdialog', { name: 'Delete the project “Blog”?' })
+    expect(dialog).toHaveTextContent('Its team, Blog, stays on Home, under Not in a project.')
+    expect(fetchMock.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === 'DELETE')).toBe(false)
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete project' }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    expect(fetchMock).toHaveBeenCalledWith('/api/projects/blog', expect.objectContaining({ method: 'DELETE' }))
+    expect(assign).not.toHaveBeenCalled()
+  })
+
+  it('renames and hides a project from its card’s menu, without opening it', async () => {
+    const puts: { url: string; body: Record<string, unknown> }[] = []
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (init?.method === 'PUT') { puts.push({ url, body: JSON.parse(String(init.body)) as Record<string, unknown> }); return respond({ id: 'blog', name: 'Blog', teams: ['blog.yaml'] }) }
+      return studio(url)
+    })
+    render(<Home onPalette={vi.fn()} runs={[]} />)
+    const blog = (await screen.findAllByRole('article')).find((room) => within(room).queryByRole('heading', { name: 'Blog' })) as HTMLElement
+    fireEvent.click(within(blog).getByRole('button', { name: 'Project settings for Blog' }))
+    fireEvent.click(within(screen.getByRole('menu', { name: 'Project settings for Blog' })).getByRole('menuitem', { name: 'Rename…' }))
+    const rename = screen.getByRole('dialog', { name: 'Rename project' })
+    // A finger-sized field on a phone, with text big enough that Safari doesn't zoom in on it.
+    expect(cascaded(within(rename).getByRole('textbox', { name: 'Project name' }), 'font-size', PHONE)).toBe('16px')
+    expect(cascaded(within(rename).getByRole('textbox', { name: 'Project name' }), 'height', PHONE)).toBe('44px')
+    fireEvent.change(within(rename).getByRole('textbox', { name: 'Project name' }), { target: { value: 'Blog posts' } })
+    fireEvent.click(within(rename).getByRole('button', { name: 'Rename' }))
+    await waitFor(() => expect(puts).toEqual([{ url: '/api/projects/blog', body: { name: 'Blog posts' } }]))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Rename project' })).toBeNull())
+    fireEvent.click(within(blog).getByRole('button', { name: 'Project settings for Blog' }))
+    fireEvent.click(within(screen.getByRole('menu', { name: 'Project settings for Blog' })).getByRole('menuitem', { name: 'Hide from Home' }))
+    await waitFor(() => expect(puts[1]).toEqual({ url: '/api/projects/blog', body: { name: 'Blog', putAway: true } }))
+  })
+
+  it('puts the same "…" on the small tiles Home folds quiet projects into', async () => {
+    const many = Array.from({ length: 7 }, (_, at) => ({ id: `p${at + 1}`, name: `Project ${at + 1}`, teams: [] }))
+    fetchMock.mockImplementation((url: string) => (url === '/api/projects' ? respond({ projects: many, loose: [], missing: [], removed: [] }) : studio(url)))
+    render(<Home onPalette={vi.fn()} runs={[]} />)
+    expect(await screen.findAllByRole('article')).toHaveLength(1)
+    for (const project of many) expect(screen.getByRole('button', { name: `Project settings for ${project.name}` })).toBeInTheDocument()
+  })
+
+  // ADR 0100: a team in no project is listed under "Not in a project", not among the projects: one
+  // pick moves it into a project, and its "…" deletes it.
+  it('lists a team in no project under Not in a project, moves it into a project in one pick, and deletes it from its "…"', async () => {
+    const calls: string[] = []
+    let saved = ''
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (init?.method && init.method !== 'GET') calls.push(`${init.method} ${url}`)
+      if (url === '/api/projects') return respond({ projects: [{ id: 'sutd', name: 'SUTD final project', teams: ['sutd/gate.yaml'] }], loose: ['blog.yaml'], missing: [], removed: ['blog'] })
+      if (url === '/api/team' && init?.method === 'PUT') { saved = (JSON.parse(String(init.body)) as { yaml: string }).yaml; return respond({ path: 'blog.yaml', yaml: saved, revision: 'r2' }) }
+      if (url === '/api/runs') return respond([])
+      if (url.startsWith('/api/team?') && init?.method === 'DELETE') return respond({ path: 'blog.yaml', trash: '.trash/blog', moved: ['blog.yaml'] })
+      // Its name, not its file's.
+      if (url === '/api/teams') return respond({ root: '/teams', files: ['blog.yaml', 'sutd/gate.yaml'], teams: [{ path: 'blog.yaml', name: 'Weekly posts', agentCount: 1 }, { path: 'sutd/gate.yaml', name: 'Research and design', agentCount: 3 }] })
+      return studio(url)
+    })
+    render(<Home onPalette={vi.fn()} runs={[]} />)
+    const teams = await screen.findByRole('list', { name: 'Teams in no project' })
+    expect(teams.closest('section')).toBe(screen.getByRole('heading', { name: 'Not in a project' }).closest('section'))
+    const row = within(teams).getByRole('button', { name: 'More for Weekly posts' }).closest('li') as HTMLElement
+    // Its line opens its chat, as a team's line on a project's card does.
+    expect(within(row).getByRole('link')).toHaveAttribute('href', '/?path=blog.yaml&view=chat')
+    // Not a project: no room of its own among the projects, in either view.
+    expect(screen.getAllByRole('article').map((room) => room.getAttribute('aria-labelledby'))).toEqual(['room-sutd'])
+    expect(screen.queryByRole('button', { name: /Project settings for Weekly posts/ })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'List' }))
+    expect(within(screen.getByRole('list', { name: 'Projects' })).queryByText('Weekly posts')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Rooms' }))
+    localStorage.removeItem('loomwatch:studio-view')
+    // One pick: the button opens your projects, and the one picked takes the team.
+    fireEvent.click(within(row).getByRole('button', { name: 'Add to a project: Weekly posts' }))
+    // In a narrow window the list hangs under the whole row, so a long name never runs off the left.
+    const list = screen.getByRole('menu', { name: 'Add to a project: Weekly posts' })
+    expect(cascaded(list, 'left', PHONE)).toBe('0')
+    expect(cascaded(list, 'right', PHONE)).toBe('0')
+    expect(cascaded(list, 'width', PHONE)).toBe('auto')
+    expect(cascaded(list, 'width', DESKTOP)).toBe('max-content')
+    fireEvent.click(within(screen.getByRole('menu', { name: 'Add to a project: Weekly posts' })).getByRole('menuitem', { name: 'SUTD final project' }))
+    await waitFor(() => expect(calls).toEqual(['PUT /api/team']))
+    expect(saved).toContain('project: sutd')
+    expect(await screen.findByText(/works in/)).toHaveTextContent('Weekly posts works in SUTD final project now.')
+    fireEvent.click(within(row).getByRole('button', { name: 'More for Weekly posts' }))
+    fireEvent.click(within(screen.getByRole('menu', { name: 'More for Weekly posts' })).getByRole('menuitem', { name: 'Delete team…' }))
+    fireEvent.click(within(screen.getByRole('alertdialog', { name: 'Delete “Weekly posts”?' })).getByRole('button', { name: 'Delete team' }))
+    await waitFor(() => expect(calls).toEqual(['PUT /api/team', 'DELETE /api/team?path=blog.yaml']))
+  })
+
+  it('says a team changed just now when a move finds it changed, in words for Home, not for a save', async () => {
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === '/api/projects') return respond({ projects: [{ id: 'sutd', name: 'SUTD final project', teams: ['sutd/gate.yaml'] }], loose: ['blog.yaml'], missing: [], removed: [] })
+      if (url === '/api/team' && init?.method === 'PUT') return respond({ error: 'The team file changed or the destination already exists. Reload before saving.' }, 412)
+      if (url === '/api/runs') return respond([])
+      if (url === '/api/teams') return respond({ root: '/teams', files: ['blog.yaml', 'sutd/gate.yaml'], teams: [{ path: 'blog.yaml', name: 'Weekly posts', agentCount: 1 }, { path: 'sutd/gate.yaml', name: 'Research and design', agentCount: 3 }] })
+      return studio(url)
+    })
+    render(<Home onPalette={vi.fn()} runs={[]} />)
+    const teams = await screen.findByRole('list', { name: 'Teams in no project' })
+    fireEvent.click(within(teams).getByRole('button', { name: 'Add to a project: Weekly posts' }))
+    fireEvent.click(within(screen.getByRole('menu', { name: 'Add to a project: Weekly posts' })).getByRole('menuitem', { name: 'SUTD final project' }))
+    const said = await screen.findByText(/Couldn’t move/)
+    expect(said).toHaveTextContent('Couldn’t move Weekly posts. It changed just now. Reload the page and try again.')
+    expect(said.closest('section')).toBe(teams.closest('section'))
+  })
+
+  // ADR 0103: one team set up once works in two projects, each with a place of its own.
+  it('says on each project’s card where else a team works, and that deleting one project leaves it working in the other', async () => {
+    const place = (id: string, project: string) => `schemaVersion: 1\nid: ${id}\nshares: prices\nname: Prices\nproject: ${project}\nentrypoint: a\nagents:\n  - {id: a, name: Writer, model: fake/offline, role: Write.}\nedges: []\n`
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === '/api/projects') return respond({ projects: [{ id: 'coffee', name: 'Coffee shop', teams: ['coffee.yaml'] }, { id: 'bikes', name: 'Bike rental', teams: ['bikes.yaml'] }], loose: [], missing: [], removed: [] })
+      if (url === '/api/runs') return respond([])
+      if (url === '/api/teams') return respond({ root: '/teams', files: ['bikes.yaml', 'coffee.yaml'], teams: [{ path: 'bikes.yaml', name: 'Prices', agentCount: 1 }, { path: 'coffee.yaml', name: 'Prices', agentCount: 1 }] })
+      if (url === '/api/team?path=coffee.yaml') return respond({ path: 'coffee.yaml', yaml: place('prices', 'coffee'), revision: 'c' })
+      if (url === '/api/team?path=bikes.yaml') return respond({ path: 'bikes.yaml', yaml: place('prices-bikes', 'bikes'), revision: 'b' })
+      if (init?.method === 'DELETE') return respond({ id: 'coffee', teams: [], placesRemoved: ['coffee.yaml'] })
+      return studio(url)
+    })
+    render(<Home onPalette={vi.fn()} runs={[]} />)
+    const card = (name: string) => screen.getAllByRole('article').find((room) => within(room).queryByRole('heading', { name })) as HTMLElement
+    await waitFor(() => expect(card('Coffee shop')).toHaveTextContent('Also in Bike rental'))
+    expect(card('Bike rental')).toHaveTextContent('Also in Coffee shop')
+    fireEvent.click(within(card('Coffee shop')).getByRole('button', { name: 'Project settings for Coffee shop' }))
+    fireEvent.click(within(screen.getByRole('menu', { name: 'Project settings for Coffee shop' })).getByRole('menuitem', { name: 'Delete project…' }))
+    const dialog = screen.getByRole('alertdialog', { name: 'Delete the project “Coffee shop”?' })
+    expect(dialog).toHaveTextContent('Prices keeps working in Bike rental. Its chat and work here go with the project.')
+    expect(dialog).not.toHaveTextContent('Not in a project')
+  })
+
+  it('offers no move for a team in no project while there is no project to move it to', async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (url === '/api/projects') return respond({ projects: [], loose: ['blog.yaml'], missing: [], removed: [] })
+      if (url === '/api/runs') return respond([])
+      if (url === '/api/teams') return respond({ root: '/teams', files: ['blog.yaml'], teams: [{ path: 'blog.yaml', name: 'Weekly posts', agentCount: 1 }] })
+      return studio(url)
+    })
+    render(<Home onPalette={vi.fn()} runs={[]} />)
+    const teams = await screen.findByRole('list', { name: 'Teams in no project' })
+    expect(within(teams).queryByRole('button', { name: /Add to a project/ })).toBeNull()
+    expect(within(teams).getByRole('button', { name: 'More for Weekly posts' })).toBeInTheDocument()
+    // The desk still shows: a team in no project is a team like any other.
+    expect(screen.getByRole('button', { name: 'New project' })).toBeInTheDocument()
+  })
+
+  it('says a file cannot be opened, so none goes missing from Home', async () => {
     fetchMock.mockImplementation(() => respond({
       root: '/teams',
-      files: ['quiet.yaml', 'news.yaml'],
-      teams: [
-        { path: 'quiet.yaml', name: 'Quiet desk', agentCount: 1, modifiedAt: '2026-10-05T00:00:00Z' },
-        { path: 'news.yaml', name: 'News desk', agentCount: 2, modifiedAt: '2026-01-01T00:00:00Z' },
-      ],
+      files: ['broken.yaml', 'notes.yaml'],
+      teams: [{ path: 'broken.yaml', agentCount: 0, problem: 'unreadable' }, { path: 'notes.yaml', agentCount: 0, problem: 'not_a_team' }],
     }))
-    window.localStorage.setItem('lw-chat-seen', JSON.stringify({ 'news.yaml': '2026-10-06T01:00:00.000Z' }))
-    const runs = [{
-      runId: 'r1', sessionId: 'r1', teamPath: 'news.yaml', prompt: 'today’s digest', status: 'succeeded' as const, mode: 'pipeline' as const,
-      entrypoint: 'a', responder: 'b', agentIds: ['a', 'b'], createdAt: '2026-10-06T02:00:00.000Z', startedAt: '2026-10-06T02:00:00.000Z',
-      finishedAt: '2026-10-06T02:04:00.000Z', error: null, exitCode: 0, eventCount: 3, reply: '# Today’s AI digest\nChips lead.',
-    }]
-    render(<Home onPalette={vi.fn()} runs={runs} />)
-    const cards = await screen.findAllByRole('button', { name: /desk/ })
-    expect(cards.map((card) => within(card).getByText(/desk$/).textContent)).toEqual(['News desk', 'Quiet desk'])
-    expect(within(cards[0]).getByText('Today’s AI digest')).toBeInTheDocument()
-    expect(within(cards[0]).getByLabelText('New since you looked')).toBeInTheDocument()
-    expect(within(cards[1]).queryByLabelText('New since you looked')).not.toBeInTheDocument()
-    fireEvent.click(cards[0])
-    expect(assign).toHaveBeenCalledWith('/?path=news.yaml&view=chat')
-    fireEvent.click(cards[1])
-    expect(assign).toHaveBeenLastCalledWith('/?path=quiet.yaml')
-    window.localStorage.removeItem('lw-chat-seen')
-  })
-
-  it('falls back to file names when an older daemon sends no summaries', async () => {
-    fetchMock.mockImplementation(() => respond({ root: '/teams', files: ['nested/research-team.yaml'] }))
     renderHome()
-    expect(await screen.findByRole('button', { name: /research-team/ })).toBeInTheDocument()
+    const problems = await screen.findByRole('list', { name: 'Files that can’t be opened' })
+    expect(problems).toHaveTextContent('broken can’t be opened: the file has a mistake in it')
+    expect(problems).toHaveTextContent('notes can’t be opened: not a team file')
   })
 
-  it('says how to start when there are no teams, and asks how models are paid until one is connected', async () => {
+  it('says plainly when the server is down, and brings the projects back when it returns', async () => {
+    let up = false
+    fetchMock.mockImplementation((url: string) => (up ? studio(url) : Promise.reject(new TypeError('Failed to fetch'))))
+    renderHome()
+    const alert = await screen.findByText(/Couldn’t list your projects/)
+    expect(alert).toHaveTextContent('Can’t reach the LoomWatch server')
+    expect(alert).not.toHaveTextContent('Failed to fetch')
+    up = true
+    fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }))
+    expect(await screen.findByRole('button', { name: 'SUTD final project' })).toBeInTheDocument()
+  })
+
+  it('asks how models are paid until one is connected', async () => {
     fetchMock.mockImplementation(keyed({ connected: false }))
     renderHome()
-    expect(await screen.findByText(/No teams yet/)).toBeInTheDocument()
     // The ways to pay side by side, with the same weight (ADR 0073).
     expect(await screen.findByRole('region', { name: 'First, choose how your agents’ models are paid' })).toBeInTheDocument()
     expect(screen.getByRole('region', { name: 'Your Claude API credit' })).toBeInTheDocument()
     expect(screen.getByRole('region', { name: 'OpenRouter (pay per use)' })).toBeInTheDocument()
     expect(screen.getByText('Connect your ChatGPT plan, your Claude API credit or an OpenRouter key so your agents can run.')).toBeInTheDocument()
-    // The OpenRouter card asks for the key's state itself, so its field comes once that answer does.
     expect(await screen.findByLabelText('OpenRouter key')).toHaveAttribute('type', 'password')
     expect(screen.getByLabelText('Claude API key')).toHaveAttribute('type', 'password')
   })
 
-  // One gold fill per screen (DESIGN_LANGUAGE §8): Build an agent. Until a way to pay is connected,
+  // One gold fill per screen (DESIGN_LANGUAGE §8): Set up project. Until a way to pay is connected,
   // the three cards' buttons are gold rings, with the same weight (ADR 0073), even with a key typed.
-  it('fills only Build an agent while the ways to pay wait, their buttons as rings', async () => {
+  it('fills only Set up project while the ways to pay wait, their buttons as rings', async () => {
     fetchMock.mockImplementation((url: string) => {
       if (url === '/api/ai') return respond({ openrouter: { connected: false }, anthropic: { connected: false }, chatgpt: { available: true, connected: false, planUse: false } })
       if (url === '/api/ai/chatgpt/sign-in') return respond({ url: 'https://auth.openai.com/oauth/authorize?state=s' })
       return respond({ root: '/teams', files: [], teams: [] })
     })
-    renderHome()
+    render(<Home onPalette={vi.fn()} ask={{ unavailable: null, onAsk: vi.fn() }} />)
     const go = await screen.findByRole('link', { name: /Continue with ChatGPT/ })
     fireEvent.change(await screen.findByLabelText('OpenRouter key'), { target: { value: 'sk-or-v1-typed' } })
     fireEvent.change(screen.getByLabelText('Claude API key'), { target: { value: 'sk-ant-api03-typed' } })
     const saves = screen.getAllByRole('button', { name: 'Save key' })
     expect(saves).toHaveLength(2)
     for (const save of saves) expect(save).toBeEnabled()
-    expect(goldFilled()).toEqual(['Build an agent'])
+    await screen.findByRole('button', { name: 'Set up project' })
+    expect(goldFilled()).toEqual(['Set up project'])
     for (const ring of [go, ...saves]) {
       expect(isGoldFill(ring)).toBe(false)
       expect(cascaded(ring, 'border-color')).toBe('var(--color-accent)')
@@ -233,39 +614,23 @@ describe('Home', () => {
     renderHome()
     expect(await screen.findByText('Agents can run on OpenRouter')).toBeInTheDocument()
     expect(screen.queryByRole('region', { name: 'First, choose how your agents’ models are paid' })).toBeNull()
-    expect(screen.getByRole('link', { name: 'Manage' })).toHaveAttribute('href', '/connections')
+    expect(screen.getByRole('link', { name: 'Connections' })).toHaveAttribute('href', '/connections')
     expect(screen.getByRole('link', { name: 'Usage' })).toHaveAttribute('href', '/usage')
   })
 
   // Home wears the header a team's and an agent's page have, the bell beside the menu. Skills and
   // Quests are Home's own, so they stand in the header as links, once: the menu doesn't repeat them.
-  it('has Skills and Quests in its header, and the menu a team’s page has, with the theme and feedback in it', async () => {
+  // Round 3: the places are the dock's, and the look, the guide and feedback are in You. Home's
+  // corner keeps the bell and search; no brand, pills or menu come back beside them.
+  it('keeps only the bell and search in its corner', async () => {
     fetchMock.mockImplementation((url: string) => respond(url === '/api/wardrobe' ? { items: {} } : { root: '/teams', files: [], teams: [] }))
-    const sent = vi.fn()
-    window.addEventListener(FEEDBACK_EVENT, sent)
-    render(<Home onPalette={vi.fn()} topActions={<button type="button">1 needs you</button>} />)
+    const palette = vi.fn()
+    render(<Home onPalette={palette} topActions={<button type="button">1 needs you</button>} />)
     const header = screen.getByRole('banner')
-    expect(within(header).getAllByRole('button').map((button) => button.getAttribute('aria-label') ?? button.textContent)).toEqual(['Open the command palette', '1 needs you', 'Menu'])
-    expect(within(header).getAllByRole('link').map((link) => link.getAttribute('href'))).toEqual(['/skills', '/quests'])
-    // The word alone names each, at every width: no stock icon has to carry it on a phone.
-    const skills = within(header).getByRole('link', { name: 'Skills' })
-    const quests = await within(header).findByRole('link', { name: 'Quests 0 of 13 earned' })
-    for (const pill of [skills, quests]) expect(pill.querySelector('svg')).toBeNull()
-    const menu = within(header).getByRole('button', { name: 'Menu' })
-    fireEvent.click(menu)
-    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
-      'My agents…', 'About you…', 'Connections…', 'Usage…', expect.stringMatching(/^Switch to (light|dark) theme$/), 'Getting started guide', 'Send feedback…',
-    ])
-    fireEvent.click(menu)
-    const before = document.documentElement.dataset.theme
-    fireEvent.click(menu)
-    fireEvent.click(screen.getByRole('menuitem', { name: /^Switch to (light|dark) theme$/ }))
-    expect(document.documentElement.dataset.theme).not.toBe(before)
-    fireEvent.click(menu)
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Send feedback…' }))
-    expect(sent.mock.calls.map(([event]) => (event as CustomEvent).detail)).toEqual([{ screen: 'home' }])
-    window.removeEventListener(FEEDBACK_EVENT, sent)
-    localStorage.removeItem('loomwatch:theme')
+    expect(within(header).getAllByRole('button').map((button) => button.getAttribute('aria-label') ?? button.textContent)).toEqual(['1 needs you', 'Open the command palette'])
+    expect(within(header).queryAllByRole('link')).toEqual([])
+    fireEvent.click(within(header).getByRole('button', { name: 'Open the command palette' }))
+    expect(palette).toHaveBeenCalledOnce()
   })
 
   it('says when the account has no credits yet, or OpenRouter refused the key', async () => {
@@ -278,111 +643,6 @@ describe('Home', () => {
     renderHome()
     expect(await screen.findByText('OpenRouter: OpenRouter refused the key.')).toBeInTheDocument()
   })
-
-  it('creates a ready-to-run team from a template and opens it', async () => {
-    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
-      if (url === '/api/teams') return respond({ root: '/teams', files: ['blog-writer.yaml'], teams: [{ path: 'blog-writer.yaml', name: 'Blog writer', agentCount: 1 }] })
-      if (url === '/api/team' && init?.method === 'PUT') return respond({ path: 'blog-writer-2.yaml', yaml: '', revision: 'r1' })
-      return respond({ error: 'unexpected' }, 404)
-    })
-    renderHome()
-    await screen.findByRole('button', { name: /Blog writer/ })
-    fireEvent.click(screen.getByRole('button', { name: 'New team' }))
-    const dialog = screen.getByRole('dialog', { name: 'Create a team' })
-    expect(within(dialog).getByRole('radio', { name: /One assistant/ })).toBeChecked()
-    fireEvent.change(within(dialog).getByLabelText('Team name'), { target: { value: 'Blog writer' } })
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Create team' }))
-
-    await waitFor(() => expect(assign).toHaveBeenCalledWith('/?path=blog-writer-2.yaml'))
-    const put = fetchMock.mock.calls.find(([url, init]) => url === '/api/team' && init?.method === 'PUT')
-    expect(put?.[1]?.headers).toMatchObject({ 'If-None-Match': '*' })
-    const body = JSON.parse(String(put?.[1]?.body)) as { path: string; yaml: string }
-    // The existing file is never overwritten, and the assistant runs on the default model.
-    expect(body.path).toBe('blog-writer-2.yaml')
-    expect(body.yaml).toContain(`model: ${DEFAULT_MODEL}`)
-    expect(body.yaml).not.toContain('spawn')
-    expect(body.yaml).toContain('name: Blog writer')
-    // Same name, own id: the Notebook is filed by id, so sharing one shared the first team's notes.
-    expect(body.yaml).toContain('id: blog-writer-2')
-  })
-
-  it('says a file cannot be opened instead of calling it a team that needs setup', async () => {
-    fetchMock.mockImplementation(() => respond({
-      root: '/teams',
-      files: ['broken.yaml', 'notes.yaml', 'draft.yaml'],
-      teams: [
-        { path: 'broken.yaml', agentCount: 0, problem: 'unreadable' },
-        { path: 'notes.yaml', agentCount: 0, problem: 'not_a_team' },
-        { path: 'draft.yaml', name: 'Draft', agentCount: 0 },
-      ],
-    }))
-    renderHome()
-    expect(await screen.findByRole('button', { name: /broken/ })).toHaveTextContent('Can’t be opened: not valid YAML')
-    expect(screen.getByRole('button', { name: /notes/ })).toHaveTextContent('Can’t be opened: not a team file')
-    expect(screen.getByRole('button', { name: /Draft/ })).toHaveTextContent('Needs setup')
-  })
-
-  it('says plainly when the server is down, and brings the teams back when it returns', async () => {
-    let up = false
-    fetchMock.mockImplementation(() => up
-      ? respond({ root: '/teams', files: ['a.yaml'], teams: [{ path: 'a.yaml', name: 'Research desk', agentCount: 1 }] })
-      : Promise.reject(new TypeError('Failed to fetch')))
-    renderHome()
-    const alert = await screen.findByRole('alert')
-    expect(alert).toHaveTextContent('Can’t reach the LoomWatch server')
-    expect(alert).not.toHaveTextContent('Failed to fetch')
-    up = true
-    fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }))
-    expect(await screen.findByRole('button', { name: /Research desk/ })).toBeInTheDocument()
-  })
-
-  // A team always starts with agents: the ones you built, or a template's. There is no empty team.
-  it('starts a team with the agents you tick, linked to the versions you saved, and never with none', async () => {
-    const reader = { id: 'reader', file: 'reader.yaml', name: 'Reader', instructions: 'Read the sources.', version: 2 }
-    const writer = { id: 'writer', file: 'writer.yaml', name: 'Writer', instructions: 'Write the brief.', version: 1 }
-    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
-      if (url === '/api/jobs') return respond({ folder: '/teams/.jobs', jobs: [reader, writer], problems: [] })
-      if (url === '/api/team' && init?.method === 'PUT') return respond({ path: 'digest.yaml', yaml: '', revision: 'r1' })
-      return respond({ root: '/teams', files: [], teams: [] })
-    })
-    renderHome()
-    await screen.findByText(/No teams yet/)
-    fireEvent.click(screen.getByRole('button', { name: 'New team' }))
-    const dialog = screen.getByRole('dialog', { name: 'Create a team' })
-    expect(await within(dialog).findByRole('radio', { name: /My agents/ })).toBeChecked()
-    expect(within(dialog).queryByRole('radio', { name: /Empty team/ })).toBeNull()
-    fireEvent.change(within(dialog).getByLabelText('Team name'), { target: { value: 'Digest' } })
-    // Two agents, none ticked yet: nothing to start with, so nothing is created.
-    const create = within(dialog).getByRole('button', { name: 'Create team' })
-    expect(create).toBeDisabled()
-    expect(within(dialog).getByText('Tick at least one agent.')).toBeInTheDocument()
-    const agents = within(dialog).getByRole('group', { name: 'Agents to start with' })
-    fireEvent.click(within(agents).getByRole('checkbox', { name: /Writer/ }))
-    fireEvent.click(within(agents).getByRole('checkbox', { name: /Reader/ }))
-    fireEvent.click(create)
-
-    await waitFor(() => expect(assign).toHaveBeenCalledWith('/?path=digest.yaml'))
-    const put = fetchMock.mock.calls.find(([url, init]) => url === '/api/team' && init?.method === 'PUT')
-    const doc = parse(JSON.parse(String(put?.[1]?.body)).yaml as string) as TeamDocument
-    // In the order they are listed in Your agents, each a copy of the version saved.
-    expect(doc.agents.map((agent) => [agent.id, agent.role, agent.from])).toEqual([
-      ['reader', 'Read the sources.', { agent: 'reader', version: 2 }],
-      ['writer', 'Write the brief.', { agent: 'writer', version: 1 }],
-    ])
-    expect(doc.entrypoint).toBe('reader')
-  })
-
-  it('offers a template, and a way to build an agent, to someone who has none', async () => {
-    fetchMock.mockImplementation((url: string) => respond(url === '/api/jobs' ? { folder: '/teams/.jobs', jobs: [], problems: [] } : { root: '/teams', files: [], teams: [] }))
-    renderHome()
-    await screen.findByText(/No teams yet/)
-    fireEvent.click(screen.getByRole('button', { name: 'New team' }))
-    const dialog = screen.getByRole('dialog', { name: 'Create a team' })
-    expect(await within(dialog).findByRole('link', { name: /Build your first agent/ })).toHaveAttribute('href', '/agents/new')
-    expect(within(dialog).getByRole('radio', { name: /My agents/ })).toBeDisabled()
-    expect(within(dialog).getByRole('radio', { name: /One assistant/ })).toBeChecked()
-  })
-
 })
 
 describe('Home, the first run and the getting-started guide', () => {
@@ -396,25 +656,23 @@ describe('Home, the first run and the getting-started guide', () => {
     url === '/api/runs?preview=true' ? runs
       : url === '/api/jobs' ? { folder: '/teams/.jobs', jobs: agents, problems: [] }
         : { root: '/teams', files: teams.map((team) => team.path), teams })
-  const homeHeading = () => screen.findByRole('heading', { name: /Put AI agents to work/ })
+  const homeHeading = () => screen.findByRole('heading', { name: 'What are you working on?' })
 
   // ADR 0075: a newcomer makes something first. The guide no longer opens by itself over it.
   // LoomWatch removed and installed again keeps its address, so this browser still holds what an
   // earlier copy stored there; only what this copy has made decides.
   it('opens on the first run when nothing was ever made here, whatever this browser kept from an earlier LoomWatch', async () => {
     localStorage.setItem('loomwatch:first-run', 'done')
-    startTour()
     fetchMock.mockImplementation(daemon())
     renderHome()
     expect(await screen.findByText('What shall we make first?')).toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: /Put AI agents to work/ })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Just look around' }))
-    expect(await screen.findByText(/No teams yet/)).toBeInTheDocument()
+    expect(await homeHeading()).toBeInTheDocument()
 
     // Looking around holds for the visit: back on Home, it stays Home.
     cleanup()
     renderHome()
-    expect(await screen.findByText(/No teams yet/)).toBeInTheDocument()
+    expect(await homeHeading()).toBeInTheDocument()
     expect(screen.queryByText('What shall we make first?')).toBeNull()
   })
 
@@ -451,32 +709,14 @@ describe('Home, the first run and the getting-started guide', () => {
     await expect(screen.findByText('What shall we make first?', {}, { timeout: 300 })).rejects.toThrow()
   })
 
-  it('leaves someone who has run a team on Home, and lets them start the guide', async () => {
+  it('leaves someone who has run a team on Home, where the guide’s first step still points', async () => {
     fetchMock.mockImplementation(daemon({ runs: [ran], teams: [desk] }))
     renderHome()
-    await screen.findByText('Research desk')
+    await homeHeading()
     await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/runs?preview=true')).toBe(true))
     expect(screen.queryByText('What shall we make first?')).toBeNull()
     expect(readTourState()).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: /Take the 3-minute guide/ }))
-    expect(readTourState()).toMatchObject({ status: 'active', step: 'welcome' })
-  })
-
-  it('takes the job in plain words for Ask LoomWatch, and says why when it cannot', async () => {
-    fetchMock.mockImplementation(() => respond({ root: '/teams', files: [], teams: [] }))
-    const onAsk = vi.fn()
-    const { unmount } = render(<Home onPalette={vi.fn()} ask={{ unavailable: null, onAsk }} />)
-    const box = screen.getByRole('textbox', { name: /Or describe the job/ })
-    fireEvent.change(box, { target: { value: '  Brief me on chip news every weekday  ' } })
-    fireEvent.keyDown(box, { key: 'Enter' })
-    expect(onAsk).toHaveBeenCalledWith('Brief me on chip news every weekday')
-    expect(box).toHaveValue('')
-    // Build an agent stays the one gold button.
-    expect(screen.getByRole('button', { name: 'Ask' })).not.toHaveClass('btn-primary')
-    unmount()
-
-    render(<Home onPalette={vi.fn()} ask={{ unavailable: 'Ask runs on your OpenRouter key. Add it to start.', onAsk }} />)
-    expect(screen.getByRole('textbox', { name: /Or describe the job/ })).toBeDisabled()
-    expect(screen.getByText(/Ask runs on your OpenRouter key/)).toBeInTheDocument()
+    // The guide's first step points at building an agent, which Home keeps.
+    expect(document.querySelector('[data-tour="build-agent"]')).toHaveAttribute('href', '/agents/new')
   })
 })

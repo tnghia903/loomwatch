@@ -1,3 +1,4 @@
+import { benchChatOwner } from '../library/jobs'
 import type { AgentStatus } from '../team-file/types'
 import { legacyOperatorPrompt, type SessionSummary } from '../watch/events'
 import type { RunRecord } from './client'
@@ -68,8 +69,15 @@ export function mergeHistory(records: readonly RunRecord[], sessions: readonly S
   return [...byId.values()].sort((a, b) => Date.parse(b.when) - Date.parse(a.when))
 }
 
-/** Open a recorded run with the team file it actually executed, never the canvas already open. */
+/**
+ * Open a recorded run with the team file it actually executed, never the canvas already open. A run
+ * of an agent's own chat (`.jobs/.bench/<id>.yaml`) opens that agent's chat in My agents, its
+ * Details over the bench, where you work with it; the Mac app's menu (`run_link`) and the daemon's
+ * links (`Control::run_url`) say the same.
+ */
 export function historyRunUrl(entry: Pick<HistoryEntry, 'id' | 'teamPath'>): string {
+  const agent = benchChatOwner(entry.teamPath)
+  if (agent) return `/agents/${encodeURIComponent(agent)}?${new URLSearchParams({ view: 'chat', run: entry.id })}`
   const params = new URLSearchParams()
   if (entry.teamPath) params.set('path', entry.teamPath)
   params.set('run', entry.id)

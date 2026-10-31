@@ -291,6 +291,11 @@ pub struct RunRecord {
     /// and stored, so a finished run still shows it. `None` for runs recorded before it was kept.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spend: Option<crate::spend::RunSpend>,
+    /// The files the run's agents made (`made.rs`), worked out from the archive once the run
+    /// ends and stored, so a page listing many runs shows what they made without replaying each.
+    /// `None` until then, and for a run from before it was kept until the daemon fills it in.
+    #[serde(default, skip_serializing_if = "crate::made::none_made")]
+    pub made: Option<Vec<String>>,
     /// Spend stops waiting for the operator: the run, or one agent, used what it may spend (ADR
     /// 0068). Live only, like `permission_requests`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -458,6 +463,7 @@ impl RunRecord {
             team_name: team_name(team),
             agent_names: agent_names(team),
             spend: Some(crate::spend::RunSpend::for_team(team)),
+            made: None,
             spend_stops: Vec::new(),
             next_try_at: None,
             try_again_after: None,
@@ -539,6 +545,9 @@ struct RegistryInner {
     /// The other half of each open spend stop (ADR 0068), keyed by stop id: every agent waiting at
     /// the stop watches it, and `POST /api/runs/{id}/spend` sends the operator's answer down it.
     spending: BTreeMap<String, tokio::sync::watch::Sender<Option<crate::spend::SpendAnswer>>>,
+    /// What each running run's message said done looks like (ADR 0098), keyed by run: where
+    /// `POST /api/runs/{id}/done-when` takes an item off the check or puts it back.
+    asked: BTreeMap<String, crate::message_done::MessageDone>,
 }
 
 /// One run parked on the operator.
@@ -615,15 +624,20 @@ impl RunStore {
             .spend
             .as_ref()
             .and_then(|spend| serde_json::to_value(spend).ok());
+        let made = record
+            .made
+            .as_ref()
+            .and_then(|made| serde_json::to_value(made).ok());
         sqlx::query(
             "INSERT INTO runs
              (run_id, session_id, team_path, prompt, status, mode, entrypoint, responder,
               agent_ids, created_at, started_at, finished_at, error, exit_code, error_code,
               stop_reason, event_count, reply, trigger, delivery, follows_run_id, start_at,
               retry_of_run_id, waiting_on, start_key, start_fingerprint, team_key, only_agent,
-              team_revision, team_name, agent_names, spend)
+              team_revision, team_name, agent_names, spend, made)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
-                     $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32)
+                     $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32,
+                     $33)
              ON CONFLICT (run_id) DO UPDATE SET
                status = EXCLUDED.status,
                started_at = EXCLUDED.started_at,
@@ -640,6 +654,8 @@ impl RunStore {
                retry_of_run_id = EXCLUDED.retry_of_run_id,
                waiting_on = EXCLUDED.waiting_on,
                spend = EXCLUDED.spend,
+               -- Worked out once, from the archive: a write from before it was must not undo it.
+               made = COALESCE(EXCLUDED.made, runs.made),
                -- Never cleared by a later write: the key binds for the lifetime of the run, and a
                -- transition that carries no key must not unbind it.
                start_key = COALESCE(EXCLUDED.start_key, runs.start_key),
@@ -685,6 +701,7 @@ impl RunStore {
         .bind(&record.team_name)
         .bind(&agent_names)
         .bind(&spend)
+        .bind(&made)
         .execute(self.db.writer())
         .await?;
         Ok(())
@@ -794,6 +811,9 @@ pub(crate) fn decode_run(row: &sqlx::sqlite::SqliteRow) -> Result<StoredRun, sql
             spend: row
                 .try_get::<Option<Value>, _>("spend")?
                 .and_then(|spend| serde_json::from_value(spend).ok()),
+            made: row
+                .try_get::<Option<Value>, _>("made")?
+                .and_then(|made| serde_json::from_value(made).ok()),
             spend_stops: Vec::new(),
             next_try_at: None,
             try_again_after: None,
@@ -826,6 +846,10 @@ pub struct RunRegistry {
     /// The model agents learn with (ADR 0078), set by a test. Unset, the daemon learns on the fast
     /// tier's model once model settings are installed, and a registry without them learns nothing.
     learner_model: Arc<OnceLock<String>>,
+    /// The models a message's Done when is read with and `LoomWatch` checks an answer on (ADR
+    /// 0098), set by a test. Unset, the read is the fast tier's and the check the Checker job's,
+    /// once model settings are installed; a registry without them reads nothing.
+    done_when_models: Arc<OnceLock<(String, String)>>,
 }
 
 /// Opaque: the records are the API's to report, and the REST router's state only needs to be
@@ -850,6 +874,7 @@ impl RunRegistry {
             publisher: Arc::default(),
             approvals: Arc::default(),
             learner_model: Arc::default(),
+            done_when_models: Arc::default(),
         }
     }
 
@@ -857,6 +882,102 @@ impl RunRegistry {
     /// wins.
     pub fn set_learner_model(&self, model: String) {
         let _first = self.learner_model.set(model);
+    }
+
+    /// Read what messages say done looks like with `reader`, and check answers on `checker` (ADR
+    /// 0098), instead of the fast tier's and the Checker job's: a test's stand-ins. The first call
+    /// wins.
+    pub fn set_done_when_models(&self, reader: String, checker: String) {
+        let _first = self.done_when_models.set((reader, checker));
+    }
+
+    /// A read of the message that starts a run of `team` (ADR 0098), not yet started: `None` when
+    /// nothing reads it. A team can turn it off; a team on stand-in models never calls a real
+    /// model, so neither does the read of its messages; and a routine's message is the same every
+    /// time it fires, so it isn't read on every fire, unseen.
+    pub(crate) fn message_done(
+        &self,
+        team: &TeamConfig,
+        trigger: RunTrigger,
+    ) -> Option<crate::message_done::MessageDone> {
+        let set = self.done_when_models.get();
+        reads_message(
+            team,
+            trigger,
+            set.is_some(),
+            crate::ai::installed().is_some(),
+        )
+        .then(|| {
+            crate::message_done::MessageDone::reading()
+                .checked_on(set.map(|(_, checker)| checker.clone()))
+        })
+    }
+
+    /// The model a message's Done when is read with.
+    fn reader_model(&self) -> String {
+        self.done_when_models.get().map_or_else(
+            || crate::control::tier_model("fast"),
+            |(reader, _)| reader.clone(),
+        )
+    }
+
+    /// Start reading `run_id`'s message beside its work, and keep what it reads where the API can
+    /// change it until the run ends ([`Self::forget_message`]).
+    fn read_message(
+        &self,
+        run_id: &str,
+        asked: &crate::message_done::MessageDone,
+        archive: &EventArchive,
+        teams_root: &Path,
+        prompt: &str,
+        conversation: Option<&str>,
+    ) {
+        self.inner
+            .write()
+            .unwrap_or_else(PoisonError::into_inner)
+            .asked
+            .insert(run_id.to_owned(), asked.clone());
+        let (asked, archive, teams_root, prompt, conversation, model) = (
+            asked.clone(),
+            archive.clone(),
+            teams_root.to_path_buf(),
+            prompt.to_owned(),
+            conversation.map(str::to_owned),
+            self.reader_model(),
+        );
+        tokio::spawn(async move {
+            let reading = crate::message_done::read(
+                &archive,
+                &teams_root,
+                &prompt,
+                conversation.as_deref(),
+                &model,
+            )
+            .await;
+            asked.finish(reading);
+        });
+    }
+
+    /// What `run_id`'s message said done looks like, while the run runs.
+    pub(crate) fn message(&self, run_id: &str) -> Option<crate::message_done::MessageDone> {
+        self.inner
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .asked
+            .get(run_id)
+            .cloned()
+    }
+
+    fn forget_message(&self, run_id: &str) {
+        let asked = self
+            .inner
+            .write()
+            .unwrap_or_else(PoisonError::into_inner)
+            .asked
+            .remove(run_id);
+        if let Some(asked) = asked {
+            asked.end();
+        }
     }
 
     /// What learning from feedback needs (ADR 0078), or `None` where nothing can learn: a registry
@@ -979,7 +1100,10 @@ impl RunRegistry {
         for run_id in &interrupted {
             record_abandoned_checkpoints(archive, run_id, &crate::RunLineage::default()).await;
             forget_parked_agents(archive, run_id).await;
+            note_files_made(self, archive, run_id).await;
+            persist_or_log(self, run_id).await;
         }
+        self.fill_in_made(archive);
         // From here on the chat's search keeps up with what is written (ADR 0081), starting with
         // whatever an older version left unindexed.
         if let Some(index) = self.work_index() {
@@ -1144,6 +1268,41 @@ impl RunRegistry {
         inner.runs.get(run_id).map(|entry| entry.record.clone())
     }
 
+    /// Keep the files a finished run made ([`RunRecord::made`]). Unlike a transition this writes
+    /// to a finished record, since it is worked out from the archive once the run is over. A run
+    /// still going is left alone: it may make more.
+    pub(crate) fn set_made(&self, run_id: &str, made: Vec<String>) -> bool {
+        let mut inner = self.inner.write().unwrap_or_else(PoisonError::into_inner);
+        match inner.runs.get_mut(run_id) {
+            Some(entry) if entry.record.status.is_terminal() => {
+                entry.record.made = Some(made);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Fill in what older runs made, once each: a run recorded before runs kept it has none
+    /// stored. In the background and one run at a time, so the daemon answers while it reads.
+    fn fill_in_made(&self, archive: &EventArchive) {
+        let missing: Vec<String> = self
+            .list()
+            .into_iter()
+            .filter(|run| run.status.is_terminal() && run.made.is_none())
+            .map(|run| run.run_id)
+            .collect();
+        if missing.is_empty() {
+            return;
+        }
+        let (registry, archive) = (self.clone(), archive.clone());
+        tokio::spawn(async move {
+            for run_id in missing {
+                note_files_made(&registry, &archive, &run_id).await;
+                persist_or_log(&registry, &run_id).await;
+            }
+        });
+    }
+
     /// Every run, newest first.
     #[must_use]
     pub fn list(&self) -> Vec<RunRecord> {
@@ -1170,6 +1329,55 @@ impl RunRegistry {
             .filter_map(|run_id| inner.runs.get(run_id))
             .find(|entry| entry.record.team_path == team_path && !entry.record.status.is_terminal())
             .map(|entry| entry.record.clone())
+    }
+
+    /// Whether a routine of the team at `team_path` waits to try one of its runs again
+    /// (`next_try_at`). The schedule finds that try by the team's path.
+    #[must_use]
+    pub fn waits_to_try_again(&self, team_path: &str) -> bool {
+        let inner = self.inner.read().unwrap_or_else(PoisonError::into_inner);
+        inner
+            .runs
+            .values()
+            .any(|entry| entry.record.team_path == team_path && entry.record.next_try_at.is_some())
+    }
+
+    /// Every team path the records held here name.
+    pub(crate) fn team_paths(&self) -> BTreeSet<String> {
+        let inner = self.inner.read().unwrap_or_else(PoisonError::into_inner);
+        inner
+            .runs
+            .values()
+            .map(|entry| entry.record.team_path.clone())
+            .collect()
+    }
+
+    /// File the records held here for the team Rename moved under its new path, as
+    /// [`crate::team_rename::refile_history`] files the rows.
+    pub(crate) fn refile_team(&self, refile: &crate::team_rename::Refile) {
+        let mut inner = self.inner.write().unwrap_or_else(PoisonError::into_inner);
+        for entry in inner.runs.values_mut() {
+            let record = &mut entry.record;
+            if record.team_path != refile.from {
+                continue;
+            }
+            record.team_path.clone_from(&refile.to);
+            if record.team_key.is_empty() || record.team_key == refile.path_key() {
+                record.team_key.clone_from(&refile.key);
+            }
+            if let Some(made) = &mut record.made {
+                for path in made.iter_mut() {
+                    if let Some(moved) = refile.moved_file(path) {
+                        *path = moved;
+                    }
+                }
+            }
+        }
+    }
+
+    /// The database the records are kept in, when this registry is durable.
+    pub(crate) fn database(&self) -> Option<crate::db::Db> {
+        self.store.as_ref().map(|store| store.db.clone())
     }
 
     /// `queued → starting`; stamps `started_at`. `false` when the run was cancelled first.
@@ -1541,9 +1749,19 @@ impl RunRegistry {
             });
         }
         let record = entry.record.clone();
+        // A yes to the web gives the agent the web until its work in the run ends (ADR 0104), so
+        // it is one for the rest of the run from any client: a card, the tray, the notch or a
+        // phone. A later piece of the same agent's work in the run doesn't ask again.
+        let web = request.switch.as_deref() == Some("web");
+        let decision = if web && decision == PermissionDecision::AllowOnce {
+            PermissionDecision::AllowRun
+        } else {
+            decision
+        };
         let grantee = match decision {
-            crate::permissions::PermissionDecision::AllowRun => Some(grantee_of(&request.agent)),
-            crate::permissions::PermissionDecision::AllowTeam => Some(WHOLE_TEAM),
+            PermissionDecision::AllowRun => Some(grantee_of(&request.agent)),
+            PermissionDecision::Edit if web => Some(grantee_of(&request.agent)),
+            PermissionDecision::AllowTeam => Some(WHOLE_TEAM),
             _ => None,
         };
         if let Some(grantee) = grantee {
@@ -2008,6 +2226,7 @@ pub fn router(archive: Option<EventArchive>, teams_root: PathBuf, registry: RunR
         .route("/api/runs/{id}/deliver", post(deliver_run))
         .route("/api/runs/{id}/permissions", post(answer_permission))
         .route("/api/runs/{id}/spend", post(answer_spend))
+        .route("/api/runs/{id}/done-when", post(set_done_when))
         .route("/api/team/approve", post(approve_team))
         .route_layer(middleware::from_fn(local_evidence))
         .with_state(RunsState {
@@ -2062,6 +2281,11 @@ pub(crate) struct StartRunRequest {
     /// they are, and the agent the run reaches first is shown the pictures. Only the chat sets it.
     #[serde(skip)]
     files: Vec<crate::chat_files::ChatFile>,
+    /// The links the operator wrote in the message (ADR 0104), which the run's agents may read.
+    /// Set from the prompt where the prompt is the operator's own words, and never for a request
+    /// another team's agent made.
+    #[serde(skip)]
+    links: Vec<String>,
 }
 
 impl StartRunRequest {
@@ -2098,6 +2322,13 @@ impl StartRunRequest {
     #[must_use]
     pub(crate) fn giving(mut self, files: Vec<crate::chat_files::ChatFile>) -> Self {
         self.files = files;
+        self
+    }
+
+    /// The operator wrote `words` (ADR 0104): the run's agents may read the links in them.
+    #[must_use]
+    pub(crate) fn written_by_the_operator(mut self, words: &str) -> Self {
+        self.links = crate::agent::tools::links_written_in(words);
         self
     }
 
@@ -2151,8 +2382,8 @@ impl LaunchError {
             Self::NeedsReview(review) => ApiError::new(
                 StatusCode::CONFLICT,
                 format!(
-                    "{} was added or changed outside LoomWatch, so it doesn't run until you've \
-                     checked what it runs. Open it in LoomWatch and run it once to review it.",
+                    "{0}, or one of its agents, changed outside LoomWatch. Open {0} and press Run \
+                     team: you’ll see what it will do before anything runs.",
                     review.team_name
                 ),
             ),
@@ -2170,6 +2401,9 @@ async fn start_run(
             format!("invalid run request: {}", rejection.body_text()),
         )
     })?;
+    // Typed in the app's Run box, so the operator's own words.
+    let prompt = request.prompt.clone();
+    let request = request.written_by_the_operator(&prompt);
     let outcome = launch_manual(
         &state.registry,
         state.archive.clone(),
@@ -2219,8 +2453,8 @@ pub(crate) async fn start_response(
         Err(LaunchError::NeedsReview(review)) => {
             let mut body = serde_json::to_value(&*review).unwrap_or_else(|_| json!({}));
             body["error"] = json!(
-                "This team came from outside LoomWatch, or changed there. Open it and press Run to \
-                 check what it runs before it starts."
+                "This team, or one of its agents, changed outside LoomWatch. Press Run team: \
+                 you’ll see what it will do before anything runs."
             );
             body["code"] = json!(TEAM_NEEDS_REVIEW);
             Ok((StatusCode::CONFLICT, Json(body)).into_response())
@@ -2280,14 +2514,23 @@ async fn approve_team(
             .into_response());
     }
     if let Some(approvals) = state.registry.approvals() {
+        let kept = |error: std::io::Error| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("LoomWatch could not keep your approval: {error}"),
+            )
+        };
         approvals
             .approve(&relative, &current, Approval::Reviewed)
-            .map_err(|error| {
-                ApiError::new(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("LoomWatch could not keep your approval: {error}"),
-                )
-            })?;
+            .map_err(kept)?;
+        // The review showed its agents from My agents as their files say now (ADR 0094).
+        for (agent, revision) in
+            agents_approval(&state.teams_root, &String::from_utf8_lossy(&bytes))
+        {
+            approvals
+                .approve_agent(&agent, &revision, Approval::Reviewed)
+                .map_err(kept)?;
+        }
     }
     Ok((
         StatusCode::OK,
@@ -2363,6 +2606,7 @@ pub(crate) async fn launch_manual(
     }
     prepared.lineage.reply.clone_from(&request.reply);
     prepared.lineage.files.clone_from(&request.files);
+    prepared.lineage.links.clone_from(&request.links);
     // Retry lineage is a column, not a `Map` in the browser: a reloaded page still says
     // "Retry of Run 07". Written after `resolve_continuation` so an explicit `retryOfRunId` wins
     // over the one a checkpoint continuation derives, which is the more specific claim.
@@ -3026,9 +3270,16 @@ fn prepare_run(
             format!("team file {} is not UTF-8: {error}", resolved.display()),
         )
     })?;
-    let team = TeamConfig::parse(source)
+    let team = TeamConfig::parse_in(source, teams_root)
         .map_err(|error| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("{error:#}")))?;
-    check_approved(approvals, &relative, &current_revision, &team, &resolved)?;
+    check_approved(
+        approvals,
+        &relative,
+        &current_revision,
+        &team,
+        &resolved,
+        &agents_approval(teams_root, source),
+    )?;
     let Some(archive) = archive else {
         return Err(ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -3087,17 +3338,36 @@ fn prepare_run(
     })
 }
 
+/// The agents of My agents a team's text is filled in from, each with the revision of its file
+/// now (ADR 0094). An agent whose file is gone has none: reading the team already refused it.
+fn agents_approval(teams_root: &Path, source: &str) -> Vec<(String, String)> {
+    crate::my_agents::filled_from(source)
+        .into_iter()
+        .filter_map(|agent| {
+            let bytes = crate::jobs::job_bytes(teams_root, &agent)?;
+            Some((agent, crate::approvals::revision(&bytes)))
+        })
+        .collect()
+}
+
 /// A team file nobody approved here starts nothing, scheduled or not (ADR 0048): it came from
-/// outside `LoomWatch`, or changed there, and the operator has not seen what it runs.
+/// outside `LoomWatch`, or changed there, and the operator has not seen what it runs. Nor does a
+/// team one of whose agents in My agents did (ADR 0094): the team runs what that file says.
 fn check_approved(
     approvals: Option<&TeamApprovals>,
     relative: &str,
     revision: &str,
     team: &TeamConfig,
     resolved: &Path,
+    agents: &[(String, String)],
 ) -> Result<(), LaunchError> {
     match approvals {
-        Some(approvals) if !approvals.is_approved(relative, revision) => {
+        Some(approvals)
+            if !approvals.is_approved(relative, revision)
+                || agents
+                    .iter()
+                    .any(|(agent, revision)| !approvals.is_agent_approved(agent, revision)) =>
+        {
             Err(LaunchError::NeedsReview(Box::new(NeedsReview {
                 team_name: team_display_name(team, resolved),
                 team_path: relative.to_owned(),
@@ -3124,6 +3394,9 @@ fn spawn_prepared(registry: &RunRegistry, prepared: PreparedRun, run_id: &str) {
     // A check step that finds work short and sees it fixed teaches the agent that did it (ADR
     // 0078). The CLI's run has no learner: nobody would see what it learned.
     lineage.learner = registry.learner(&prepared.teams_root);
+    // What the message says done looks like is read once the run has its conversation, beside the
+    // work (ADR 0098).
+    lineage.asked = registry.message_done(&prepared.team, prepared.record.trigger);
     let handle = tokio::spawn(execute(
         registry.clone(),
         prepared.archive,
@@ -3134,6 +3407,29 @@ fn spawn_prepared(registry: &RunRegistry, prepared: PreparedRun, run_id: &str) {
         Arc::new(lineage),
     ));
     registry.attach(run_id, handle);
+}
+
+/// Whether the message that starts a run of `team` is read for what it says done looks like (ADR
+/// 0098). Never when the team turned it off, and never for a routine, whose message is the same on
+/// every fire. Else when a test set the models to read and check with (`models_set`), or, with model
+/// settings `installed`, when some agent of the team runs on a real model: a team on stand-ins never
+/// calls one, so neither does the read of its messages.
+fn reads_message(
+    team: &TeamConfig,
+    trigger: RunTrigger,
+    models_set: bool,
+    installed: bool,
+) -> bool {
+    if !team.conversation.check.from_message.read || trigger == RunTrigger::Schedule {
+        return false;
+    }
+    models_set
+        || (installed
+            && team
+                .agents
+                .iter()
+                .filter(|agent| !agent.is_operator())
+                .any(|agent| !crate::intent::stand_in(&agent.model)))
 }
 
 fn team_revision(bytes: &[u8]) -> String {
@@ -3335,7 +3631,7 @@ async fn deliver_run(
 fn default_delivery_title(teams_root: &Path, team_path: &str) -> String {
     let path = teams_root.join(team_path);
     let now = Utc::now();
-    if let Ok(team) = TeamConfig::load(&path) {
+    if let Ok(team) = TeamConfig::load_in(&path, teams_root) {
         let name = team_display_name(&team, &path);
         return team
             .notion_delivery_title(false, &name, now)
@@ -3388,6 +3684,17 @@ async fn execute(
         conversation: crate::chat::conversation(&registry, &archive, &team_path, &run_id).await,
         ..(*lineage).clone()
     });
+    // ADR 0098: read with the conversation, so "again, but shorter" is read for what it means.
+    if let Some(asked) = &lineage.asked {
+        registry.read_message(
+            &run_id,
+            asked,
+            &archive,
+            &teams_root,
+            &prompt,
+            lineage.conversation.as_deref(),
+        );
+    }
     let run = crate::run_team_session_with_session_id(
         &team_path,
         Some(&teams_root),
@@ -3427,6 +3734,7 @@ async fn execute(
     // The run is over, however it ended. An agent it still has parked (a run that failed while a
     // stage waited behind a stop leaves one) has nothing left to reopen it.
     forget_parked_agents(&archive, &run_id).await;
+    registry.forget_message(&run_id);
     let responder = registry.get(&run_id).map(|record| record.responder);
     let _applied = match result {
         // CONTRACT §4: a normal turn with no response is `failed`
@@ -3477,7 +3785,20 @@ async fn execute(
             )
         }
     };
+    // Boxed: `execute` is already near clippy's future-size limit on Windows.
+    Box::pin(note_files_made(&registry, &archive, &run_id)).await;
     persist_or_log(&registry, &run_id).await;
+}
+
+/// Work out and keep the files a finished run made, from its archive. Logged, never propagated:
+/// how a run ended must not change because this could not be read.
+async fn note_files_made(registry: &RunRegistry, archive: &EventArchive, run_id: &str) {
+    match crate::made::files_made(archive, run_id).await {
+        Ok(made) => {
+            registry.set_made(run_id, made);
+        }
+        Err(error) => eprintln!("warning: could not list the files run {run_id} made: {error:#}"),
+    }
 }
 
 /// End a run that stopped at its spool (ADR 0068). Its checkpoints are kept either way, so it can
@@ -4037,12 +4358,6 @@ async fn answer_run(
             format!("invalid answer: {}", rejection.body_text()),
         )
     })?;
-    if request.text.trim().is_empty() {
-        return Err(ApiError::new(
-            StatusCode::BAD_REQUEST,
-            "An answer must say something. Type what the team should do.".to_owned(),
-        ));
-    }
     let desk = state.registry.operator_desk(state.archive.as_ref());
     let waiting = desk.waiting(&run_id).ok_or_else(|| {
         ApiError::new(
@@ -4050,6 +4365,15 @@ async fn answer_run(
             format!("Run {run_id} is not waiting for an answer."),
         )
     })?;
+    // Work sent back from a check's stop needs no note: the checks still open say what is wrong
+    // (ADR 0098). Every other answer has to say something.
+    let sent_back_from_checks = request.send_back.is_some() && waiting.check.is_some();
+    if request.text.trim().is_empty() && !sent_back_from_checks {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "An answer must say something. Type what the team should do.".to_owned(),
+        ));
+    }
     if waiting.node != request.node {
         return Err(ApiError::new(
             StatusCode::CONFLICT,
@@ -4094,6 +4418,41 @@ async fn answer_run(
     .map_err(operator_status)
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DoneWhenRequest {
+    /// The item's place in what was read from the message.
+    item: usize,
+    /// Check it, or take it off the check.
+    checked: bool,
+}
+
+/// `POST /api/runs/{id}/done-when` — take an item of what the run's message said done looks like
+/// off the check, or put it back (ADR 0098). Refused once the check has ended: the marks are gone
+/// from the chat by then.
+async fn set_done_when(
+    State(state): State<RunsState>,
+    RoutePath(run_id): RoutePath<String>,
+    body: Result<Json<DoneWhenRequest>, JsonRejection>,
+) -> Result<Response, ApiError> {
+    let Json(request) = body.map_err(|rejection| {
+        ApiError::new(
+            StatusCode::BAD_REQUEST,
+            format!("invalid Done when change: {}", rejection.body_text()),
+        )
+    })?;
+    let asked = state.registry.message(&run_id).ok_or_else(|| {
+        ApiError::new(
+            StatusCode::CONFLICT,
+            format!("Run {run_id} is not checking what its message asks."),
+        )
+    })?;
+    let now = asked
+        .set_checked(request.item, request.checked)
+        .map_err(|why| ApiError::new(StatusCode::CONFLICT, why.to_owned()))?;
+    Ok(Json(crate::message_done::payload(&now)).into_response())
+}
+
 /// What the person says at a review stop is about the work it reviews, so the stage that did it
 /// learns from it (ADR 0078), in the background: "Send back: the sources are blogs, use the
 /// official pages" teaches the Researcher. An answer to an agent's question is not feedback on
@@ -4117,7 +4476,7 @@ fn learn_from_review(
         return;
     };
     let path = state.teams_root.join(&record.team_path);
-    let Ok(team) = TeamConfig::load(&path) else {
+    let Ok(team) = TeamConfig::load_in(&path, &state.teams_root) else {
         return;
     };
     let Some(agent) = team
@@ -4149,6 +4508,7 @@ fn learn_from_review(
             request: record.prompt.clone(),
             work: waiting.context.clone().unwrap_or_default(),
             said: text.trim().to_owned(),
+            project: crate::lessons::project_of(&team, &path),
             ..crate::lessons::Learning::default()
         },
     });
@@ -4356,6 +4716,9 @@ async fn cancel_run(
 
 /// What follows a cancel: the record written through, and the run's checkpoints.
 async fn settle_cancelled(registry: &RunRegistry, archive: Option<&EventArchive>, run_id: &str) {
+    if let Some(archive) = archive {
+        note_files_made(registry, archive, run_id).await;
+    }
     persist_or_log(registry, run_id).await;
     // A cancelled run used to leave nothing to continue from. `cancel` aborts the run task, so
     // `execute` never reaches its abnormal-end sweep — the sweep has to be run from here instead.
@@ -4586,6 +4949,42 @@ pub(crate) mod tests {
             assert!(!registry.allowed_for_run(&run_id, who, "fetch"), "{who}");
         }
         assert!(!registry.allowed_for_run(&run_id, "a~1", "execute"));
+    }
+
+    /// ADR 0104: Allow on a request for the web, from any client, gives the agent the web for the
+    /// rest of the run, as the session's yes does; Allow on a command is still for that one.
+    #[tokio::test]
+    async fn allowing_the_web_once_is_for_the_rest_of_the_run() {
+        use crate::permissions::PermissionDecision;
+        let team = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: x\n      cwd: .\n    model: m\n",
+        )
+        .unwrap();
+        let registry = RunRegistry::default();
+        let run =
+            RunRecord::queued("t.yaml".into(), "go".into(), &team, RunTrigger::Manual).unwrap();
+        let run_id = run.run_id.clone();
+        registry.insert(run);
+        let web = registry
+            .open_permission_request(&run_id, permission_request("w1", "fetch"))
+            .expect("open");
+        registry
+            .answer_permission(&run_id, "w1", PermissionDecision::AllowOnce, None)
+            .expect("open");
+        assert_eq!(web.await.unwrap().decision, PermissionDecision::AllowRun);
+        assert!(registry.allowed_for_run(&run_id, "a", "fetch"));
+
+        let command = registry
+            .open_permission_request(&run_id, permission_request("c1", "execute"))
+            .expect("open");
+        registry
+            .answer_permission(&run_id, "c1", PermissionDecision::AllowOnce, None)
+            .expect("open");
+        assert_eq!(
+            command.await.unwrap().decision,
+            PermissionDecision::AllowOnce
+        );
+        assert!(!registry.allowed_for_run(&run_id, "a", "execute"));
     }
 
     /// ADR 0040: a live run can be asked, a routine's too since ADR 0090; an answer reaches the
@@ -4848,8 +5247,9 @@ pub(crate) mod tests {
             RunRecord::queued("t.yaml".into(), "go".into(), &team, RunTrigger::Manual).unwrap();
         let run_id = record.run_id.clone();
         registry.insert(record);
+        // A command's: a yes to the web is always for the rest of the run (ADR 0104).
         let waiting = registry
-            .open_permission_request(&run_id, permission_request("p1", "fetch"))
+            .open_permission_request(&run_id, permission_request("p1", "execute"))
             .expect("open");
         let app = router(None, dir.0.clone(), registry.clone());
         let answer = |body: Value| {
@@ -6267,6 +6667,77 @@ pub(crate) mod tests {
         assert_eq!(json_body(changed).await["code"], TEAM_NEEDS_REVIEW);
     }
 
+    /// ADR 0094: a team runs its agents from My agents as their files say, so an agent file
+    /// changed outside `LoomWatch` holds every team that uses it until the operator has looked, as
+    /// a changed team file does. Approving the team approves the agent as it was shown.
+    #[tokio::test]
+    async fn an_agent_changed_outside_loomwatch_holds_its_teams_until_reviewed() {
+        let dir = TeamsDir::new();
+        let approvals_home = TeamsDir::new();
+        let harness = completing();
+        fs::create_dir(dir.0.join(".jobs")).unwrap();
+        let agent = dir.0.join(".jobs/solo.yaml");
+        fs::write(
+            &agent,
+            format!("name: Solo\ninstructions: answer directly\nmodel: {harness}\n"),
+        )
+        .unwrap();
+        let team_path = dir.0.join("mine.yaml");
+        fs::write(
+            &team_path,
+            "schemaVersion: 1\nid: fake\nname: Fake harness team\nentrypoint: solo\nagents:\n  - id: solo\n    from:\n      agent: solo\n",
+        )
+        .unwrap();
+        let registry = RunRegistry::default();
+        registry.set_approvals(Arc::new(
+            TeamApprovals::open(&approvals_home.0, &dir.0).expect("open approvals"),
+        ));
+        let app = router(None, dir.0.clone(), registry.clone());
+        let start = json!({"teamPath": "mine.yaml", "prompt": "hello"});
+
+        // Both were there when the folder was opened.
+        let runs = app
+            .clone()
+            .oneshot(post_json("/api/runs", &start))
+            .await
+            .unwrap();
+        assert_eq!(runs.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+        fs::write(
+            &agent,
+            format!("name: Solo\ninstructions: answer directly\nmodel: {harness}\nallow:\n  commands: true\n"),
+        )
+        .unwrap();
+        let held = app
+            .clone()
+            .oneshot(post_json("/api/runs", &start))
+            .await
+            .unwrap();
+        assert_eq!(held.status(), StatusCode::CONFLICT);
+        let body = json_body(held).await;
+        assert_eq!(body["code"], TEAM_NEEDS_REVIEW);
+        assert!(
+            body["review"].as_array().unwrap().iter().any(
+                |line| line["text"] == "Solo may run commands on this computer without asking."
+            ),
+            "the review shows what the agent's file says now: {body}"
+        );
+
+        let approve = json!({"teamPath": "mine.yaml", "teamRevision": body["teamRevision"]});
+        let approved = app
+            .clone()
+            .oneshot(post_json("/api/team/approve", &approve))
+            .await
+            .unwrap();
+        assert_eq!(approved.status(), StatusCode::OK);
+        let runs = app.oneshot(post_json("/api/runs", &start)).await.unwrap();
+        assert_eq!(
+            runs.status(),
+            StatusCode::SERVICE_UNAVAILABLE,
+            "past the review, the run only lacks a database"
+        );
+    }
+
     /// Teams already in the folder when `LoomWatch` first opened it keep running unreviewed, and
     /// the scheduler's and Control's path (`launch`) refuses an unapproved team with words.
     #[tokio::test]
@@ -6778,6 +7249,8 @@ pub(crate) mod tests {
                     outputs: BTreeMap::new(),
                     usage: crate::agent::Usage::default(),
                     messages_written: 0,
+                    links: Vec::new(),
+                    web: false,
                 },
             )
             .await
@@ -7298,6 +7771,287 @@ pub(crate) mod tests {
                     && event.payload["phase"] == "turn_purpose"
                     && event.payload["purpose"] == "checkpoint")
         );
+    }
+
+    /// A run keeps the files its agents made (`made.rs`) when it ends, and the run list sends them,
+    /// so a page listing many runs shows them without replaying each.
+    #[tokio::test]
+    async fn a_finished_run_keeps_the_files_its_agents_made() {
+        use crate::agent::ToolCall;
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        let writes = demo_model(Demo::scripted(vec![
+            Completion::calls(
+                "I'll write it.",
+                vec![ToolCall {
+                    id: "c1".into(),
+                    name: "write_file".into(),
+                    arguments: r##"{"path":"out/report.md","content":"# Report\n"}"##.into(),
+                }],
+            ),
+            Completion::text("Done: out/report.md is written."),
+        ]));
+        dir.write_team("team.yaml", &writes);
+        let archive = EventArchive::new(pool);
+        let registry = RunRegistry::durable(archive.run_store());
+        let app = router(Some(archive.clone()), dir.0.clone(), registry.clone());
+
+        let run = start(&app, "team.yaml").await;
+        // Writing a file asks first, as in a real run.
+        let asking = wait_for(&registry, &run.run_id, |r| {
+            !r.permission_requests.is_empty()
+        })
+        .await;
+        registry
+            .answer_permission(
+                &run.run_id,
+                &asking.permission_requests[0].id,
+                crate::permissions::PermissionDecision::AllowOnce,
+                None,
+            )
+            .expect("answered");
+        let done = wait_for(&registry, &run.run_id, |r| r.made.is_some()).await;
+        assert_eq!(done.status, RunStatus::Succeeded, "{done:?}");
+        let made = done.made.clone().unwrap_or_default();
+        assert_eq!(made.len(), 1, "{made:?}");
+        assert!(
+            std::path::Path::new(&made[0]).ends_with(std::path::Path::new("out").join("report.md")),
+            "{made:?}"
+        );
+
+        // Listed as `made`, and stored: the boot after reads it without the archive.
+        let listed = json_body(
+            app.clone()
+                .oneshot(get_local("/api/runs?preview=true"))
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(listed[0]["made"], json!(made));
+        let next = RunRegistry::durable(archive.run_store());
+        next.reload().await.expect("reload");
+        assert_eq!(next.get(&run.run_id).and_then(|r| r.made), Some(made));
+    }
+
+    /// A cancelled run keeps the files its agents made before it was stopped: `cancel` aborts the
+    /// run's task, so its end is settled where the cancel is.
+    #[tokio::test]
+    async fn a_cancelled_run_keeps_the_files_its_agents_made_before() {
+        use crate::agent::ToolCall;
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        // Writes a file, then holds on its next request until it is stopped.
+        let (demo, _hold) = Demo::responder_holding(
+            |_| {
+                Some(Completion::calls(
+                    "Writing.",
+                    vec![ToolCall {
+                        id: "c1".into(),
+                        name: "write_file".into(),
+                        arguments: r##"{"path":"draft.md","content":"# Draft\n"}"##.into(),
+                    }],
+                ))
+            },
+            crate::agent::SeenRequest::after_tool,
+            "",
+        );
+        dir.write_team("team.yaml", &demo_model(demo));
+        let archive = EventArchive::new(pool);
+        let registry = RunRegistry::durable(archive.run_store());
+        let app = router(Some(archive.clone()), dir.0.clone(), registry.clone());
+
+        let run = start(&app, "team.yaml").await;
+        let asking = wait_for(&registry, &run.run_id, |r| {
+            !r.permission_requests.is_empty()
+        })
+        .await;
+        registry
+            .answer_permission(
+                &run.run_id,
+                &asking.permission_requests[0].id,
+                crate::permissions::PermissionDecision::AllowOnce,
+                None,
+            )
+            .expect("answered");
+        // The file is written once its call is done; the next request then holds.
+        tokio::time::timeout(Duration::from_secs(15), async {
+            while !dir.0.join(".loomwatch").exists()
+                || archive
+                    .tool_events(&run.run_id)
+                    .await
+                    .unwrap_or_default()
+                    .iter()
+                    .all(|(_, kind, payload)| {
+                        kind != "tool_update" || payload["status"] != "completed"
+                    })
+            {
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        })
+        .await
+        .expect("the file was written");
+        let response = app
+            .clone()
+            .oneshot(post_json(
+                &format!("/api/runs/{}/cancel", run.run_id),
+                &json!({}),
+            ))
+            .await
+            .unwrap();
+        assert!(response.status().is_success(), "{}", response.status());
+        let done = wait_for(&registry, &run.run_id, |r| r.made.is_some()).await;
+        assert_eq!(done.status, RunStatus::Cancelled);
+        let made = done.made.unwrap_or_default();
+        assert_eq!(made.len(), 1, "{made:?}");
+        assert!(
+            std::path::Path::new(&made[0]).ends_with("draft.md"),
+            "{made:?}"
+        );
+    }
+
+    /// What a run made is kept only once it has ended, sent only when there is something, and never
+    /// undone by a write from a record that hasn't worked it out.
+    #[tokio::test]
+    async fn what_a_run_made_is_kept_once_it_ends_and_sent_only_when_there_is_something() {
+        let pool = crate::db::Db::temp().await;
+        let team = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: x\n      cwd: .\n    model: m\n",
+        )
+        .expect("a valid team");
+        let archive = EventArchive::new(pool);
+        let registry = RunRegistry::durable(archive.run_store());
+        let record = RunRecord::queued("t.yaml".into(), "go".into(), &team, RunTrigger::Manual)
+            .expect("queued");
+        let id = record.run_id.clone();
+        registry.insert(record);
+        assert!(registry.mark_starting(&id));
+        // Still going: it may make more, so nothing is kept yet.
+        assert!(!registry.set_made(&id, vec!["/w/early.md".into()]));
+        assert_eq!(registry.get(&id).and_then(|r| r.made), None);
+
+        assert!(registry.mark_succeeded(
+            &id,
+            &SessionOutcome {
+                session_id: id.clone(),
+                event_count: 1,
+                exit_code: 0,
+                reply: "answer".into(),
+            },
+            None,
+        ));
+        assert!(registry.set_made(&id, Vec::new()));
+        let nothing = registry.get(&id).expect("the run");
+        assert_eq!(nothing.made, Some(Vec::new()));
+        // Worked out, and nothing made: the list leaves it out.
+        assert!(
+            serde_json::to_value(&nothing)
+                .unwrap()
+                .get("made")
+                .is_none()
+        );
+
+        let made = vec!["/w/brief.md".to_owned()];
+        assert!(registry.set_made(&id, made.clone()));
+        let kept = registry.get(&id).expect("the run");
+        assert_eq!(serde_json::to_value(&kept).unwrap()["made"], json!(made));
+        let store = archive.run_store();
+        store.upsert(&kept, None, None).await.expect("stored");
+        // A write from a record that hasn't worked it out (one read before it was) keeps it.
+        let stale = RunRecord { made: None, ..kept };
+        store.upsert(&stale, None, None).await.expect("stored");
+        let stored = store.recent().await.expect("read back");
+        assert_eq!(stored[0].record.made, Some(made));
+    }
+
+    /// A run a restart cut off keeps the files its agents made before, worked out as the daemon
+    /// comes back; and a finished run recorded before runs kept them gets them filled in.
+    #[tokio::test]
+    async fn a_restart_works_out_what_cut_off_and_older_runs_made() {
+        let pool = crate::db::Db::temp().await;
+        let team = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: x\n      cwd: .\n    model: m\n",
+        )
+        .expect("a valid team");
+        let archive = EventArchive::new(pool);
+        let first = RunRegistry::durable(archive.run_store());
+        let report = std::env::temp_dir()
+            .join("report.md")
+            .to_string_lossy()
+            .into_owned();
+        let older = std::env::temp_dir()
+            .join("older.md")
+            .to_string_lossy()
+            .into_owned();
+
+        let cut_off = RunRecord::queued("t.yaml".into(), "go".into(), &team, RunTrigger::Manual)
+            .expect("queued");
+        let cut_off_id = cut_off.run_id.clone();
+        first.insert(cut_off);
+        assert!(first.mark_starting(&cut_off_id));
+        assert!(first.mark_running(&cut_off_id));
+        first.persist(&cut_off_id).await.expect("persist");
+
+        let finished = RunRecord::queued("t.yaml".into(), "go".into(), &team, RunTrigger::Manual)
+            .expect("queued");
+        let finished_id = finished.run_id.clone();
+        first.insert(finished);
+        assert!(first.mark_starting(&finished_id));
+        assert!(first.mark_succeeded(
+            &finished_id,
+            &SessionOutcome {
+                session_id: finished_id.clone(),
+                event_count: 1,
+                exit_code: 0,
+                reply: "answer".into(),
+            },
+            None,
+        ));
+        first.persist(&finished_id).await.expect("persist");
+
+        for (run_id, path) in [(&cut_off_id, &report), (&finished_id, &older)] {
+            archive
+                .append(&crate::RunEvent {
+                    id: format!("{run_id}:0"),
+                    session_id: run_id.clone(),
+                    agent_id: "a".into(),
+                    seq: 0,
+                    ts: now(),
+                    kind: EventKind::ToolCall,
+                    payload: json!({ "callId": "c1", "title": "Write", "toolKind": "edit", "status": "completed", "locations": [{ "path": path }] }),
+                    raw: None,
+                })
+                .await
+                .expect("append");
+        }
+
+        let next = RunRegistry::durable(archive.run_store());
+        next.recover(&archive).await.expect("recover");
+        let recovered = next.get(&cut_off_id).expect("recovered");
+        assert_eq!(recovered.status, RunStatus::Failed);
+        assert_eq!(recovered.made, Some(vec![report.clone()]));
+        // The older run's comes in the background, once.
+        let filled = wait_for(&next, &finished_id, |r| r.made.is_some()).await;
+        assert_eq!(filled.made, Some(vec![older.clone()]));
+
+        // Both stored, so the boot after neither reads the archive nor loses them.
+        let third = RunRegistry::durable(archive.run_store());
+        third.reload().await.expect("reload");
+        assert_eq!(
+            third.get(&cut_off_id).and_then(|r| r.made),
+            Some(vec![report])
+        );
+        tokio::time::timeout(Duration::from_secs(15), async {
+            loop {
+                let fresh = RunRegistry::durable(archive.run_store());
+                fresh.reload().await.expect("reload");
+                if fresh.get(&finished_id).and_then(|r| r.made).is_some() {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        })
+        .await
+        .expect("the filled-in files were stored");
     }
 
     /// A model that plans twice and then answers `done`, each call costing `cost`: three calls in
@@ -7886,5 +8640,202 @@ pub(crate) mod tests {
         assert_eq!(spend.limit_usd, Some(2.5));
         assert_eq!(spend.agents["a"].limit_usd, Some(0.3));
         assert!((spend.agents["a"].spent_usd - 0.25).abs() < 1e-9);
+    }
+
+    /// ADR 0098: a run's message is read only when something can read it: not when the team turned it
+    /// off, not on every fire of a routine, and not with no model to read it with.
+    #[test]
+    fn a_message_is_read_only_when_something_can_read_it() {
+        let dir = TeamsDir::new();
+        dir.write_team("team.yaml", &completing());
+        let team = TeamConfig::load(&dir.0.join("team.yaml")).unwrap();
+        let registry = RunRegistry::default();
+        assert!(
+            registry.message_done(&team, RunTrigger::Manual).is_none(),
+            "no model settings: nothing reads it"
+        );
+        registry.set_done_when_models("reader".into(), "checker".into());
+        assert!(registry.message_done(&team, RunTrigger::Manual).is_some());
+        assert!(
+            registry.message_done(&team, RunTrigger::Schedule).is_none(),
+            "a routine is not read on every fire"
+        );
+        let mut off = team.clone();
+        off.conversation.check.from_message.read = false;
+        assert!(registry.message_done(&off, RunTrigger::Manual).is_none());
+
+        // Each gate on its own: a team on a real model is read once model settings are installed,
+        // never without them, and a team all on stand-ins never.
+        let mut real = team.clone();
+        real.agents[0].model = "anthropic/claude-sonnet-5.5".into();
+        assert!(reads_message(&real, RunTrigger::Manual, false, true));
+        assert!(
+            !reads_message(&real, RunTrigger::Manual, false, false),
+            "no model settings"
+        );
+        assert!(
+            !reads_message(&team, RunTrigger::Manual, false, true),
+            "a team on stand-ins calls no model"
+        );
+        assert!(!reads_message(&real, RunTrigger::Schedule, false, true));
+    }
+
+    /// ADR 0098: work sent back from a check's stop needs no note, since the checks say what is wrong,
+    /// while any other answer still has to say something; and an item of what the message said done
+    /// looks like comes off the check and goes back on through `POST /api/runs/{id}/done-when` until
+    /// the check ends.
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn a_check_stop_takes_a_bare_send_back_and_done_when_items_come_off() {
+        use crate::message_done::{CHECKER_ID, MessageDone};
+        use crate::operator::{CheckWait, ParkTier, StopKind, WaitingOn};
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        dir.write_team("team.yaml", &completing());
+        let team = TeamConfig::load(&dir.0.join("team.yaml")).unwrap();
+        let archive = EventArchive::new(pool);
+        let registry = RunRegistry::durable(archive.run_store());
+        let record =
+            RunRecord::queued("team.yaml".into(), "go".into(), &team, RunTrigger::Manual).unwrap();
+        let run_id = record.run_id.clone();
+        registry.insert(record);
+        assert!(registry.mark_starting(&run_id));
+        assert!(registry.mark_running(&run_id));
+        let desk = registry.operator_desk(Some(&archive));
+        let stop = desk
+            .park(
+                &run_id,
+                WaitingOn {
+                    node: CHECKER_ID.into(),
+                    name: "LoomWatch".into(),
+                    kind: StopKind::ReviewStop,
+                    since: now(),
+                    question: "Solo's work still misses 1 check after 2 tries.".into(),
+                    context: Some("the draft".into()),
+                    handover_from: Some("solo".into()),
+                    park: ParkTier::Reloadable,
+                    park_note: "Solo is waiting for your answer".into(),
+                    send_back_available: true,
+                    question_id: None,
+                    check: Some(CheckWait {
+                        checked: "solo".into(),
+                        rounds: 1,
+                        reason: "rounds".into(),
+                        items: Vec::new(),
+                        met: 0,
+                        problems: String::new(),
+                        tries: true,
+                    }),
+                },
+            )
+            .await
+            .unwrap();
+        let app = router(Some(archive.clone()), dir.0.clone(), registry.clone());
+        let answers = format!("/api/runs/{run_id}/answers");
+        let post = |endpoint: &str, body: serde_json::Value| {
+            let (app, endpoint) = (app.clone(), endpoint.to_owned());
+            async move { app.oneshot(post_json(&endpoint, &body)).await.unwrap() }
+        };
+        assert_eq!(
+            post(&answers, json!({"node": CHECKER_ID, "text": ""}))
+                .await
+                .status(),
+            StatusCode::BAD_REQUEST,
+            "approving still says something"
+        );
+        assert_eq!(
+            post(
+                &answers,
+                json!({"node": CHECKER_ID, "text": "", "sendBack": "solo"})
+            )
+            .await
+            .status(),
+            StatusCode::ACCEPTED
+        );
+        let answered = stop.answer().await.unwrap();
+        assert_eq!(answered.send_back.as_deref(), Some("solo"));
+        assert_eq!(answered.text, "");
+
+        let done_when = format!("/api/runs/{run_id}/done-when");
+        assert_eq!(
+            post(&done_when, json!({"item": 0, "checked": false}))
+                .await
+                .status(),
+            StatusCode::CONFLICT,
+            "this run is not checking what its message asks"
+        );
+        let asked = MessageDone::found(&["At most 250 words", "Three sections"], None);
+        registry
+            .inner
+            .write()
+            .unwrap()
+            .asked
+            .insert(run_id.clone(), asked.clone());
+        let response = post(&done_when, json!({"item": 0, "checked": false})).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let shown = json_body(response).await;
+        assert_eq!(shown["items"][0]["checked"], false);
+        assert_eq!(asked.checked_items(), ["Three sections"]);
+        assert_eq!(
+            post(&done_when, json!({"item": 5, "checked": false}))
+                .await
+                .status(),
+            StatusCode::CONFLICT
+        );
+        let back = post(&done_when, json!({"item": 0, "checked": true})).await;
+        assert_eq!(back.status(), StatusCode::OK);
+        assert_eq!(json_body(back).await["items"][0]["checked"], true);
+        assert_eq!(
+            asked.checked_items(),
+            ["At most 250 words", "Three sections"],
+            "the same mark puts it back"
+        );
+        assert_eq!(
+            post(&done_when, json!({"item": 0, "checked": false}))
+                .await
+                .status(),
+            StatusCode::OK
+        );
+        asked.end();
+        assert_eq!(
+            post(&done_when, json!({"item": 0, "checked": true}))
+                .await
+                .status(),
+            StatusCode::CONFLICT,
+            "once the check has ended nothing changes"
+        );
+        assert_eq!(asked.checked_items(), ["Three sections"]);
+
+        // A plain review stop still needs words, even to send the work back.
+        let review = desk
+            .park(
+                &run_id,
+                WaitingOn {
+                    node: "review".into(),
+                    name: "You".into(),
+                    kind: StopKind::ReviewStop,
+                    since: now(),
+                    question: "Approve the draft?".into(),
+                    context: Some("the draft".into()),
+                    handover_from: Some("solo".into()),
+                    park: ParkTier::Reloadable,
+                    park_note: "Solo is waiting for your answer".into(),
+                    send_back_available: true,
+                    question_id: None,
+                    check: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            post(
+                &answers,
+                json!({"node": "review", "text": "", "sendBack": "solo"})
+            )
+            .await
+            .status(),
+            StatusCode::BAD_REQUEST
+        );
+        drop(review);
     }
 }

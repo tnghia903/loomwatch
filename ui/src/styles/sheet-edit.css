@@ -1,0 +1,25 @@
+/* ---------- A cell of a sheet changed in place (ADR 0107, SheetView.tsx) ----------
+   A cell reached from the keyboard or by a press carries the focus ring, inside its own edges so it
+   never covers the cells beside it. The cell being typed in is a box over the cell, edged in the
+   accent line with the cell's own ground and no tint: the gold says where you are typing, the
+   caret that you are. It sits over any range drawn on the sheet, under the sticky column names
+   only when it is one of them. */
+.rd-grid.editable td { cursor: cell; }
+.rd-grid.editable :is(td, thead th)[tabindex]:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; border-radius: 3px; }
+/* A press puts the focus on a cell too; while cells can't be marked, nothing else shows which. */
+.rd-grid.editable:not(.askable) td[tabindex]:focus { outline: 2px solid var(--color-accent); outline-offset: -2px; border-radius: 3px; }
+.rd-grid .rd-table td.rd-cell-editing { position: relative; z-index: 4; }
+.rd-grid .rd-table thead th.rd-cell-editing { z-index: 5; }
+.rd-cell-input {
+  position: absolute; inset: 0; box-sizing: border-box; width: 100%; height: 100%; min-height: 0; margin: 0;
+  padding: 7px 12px; border: 0; border-radius: var(--r-xs);
+  outline: 2px solid var(--color-accent); outline-offset: -2px;
+  background: var(--color-panel-solid); color: var(--color-ink);
+  font: inherit; font-weight: inherit; letter-spacing: inherit; text-align: inherit;
+  white-space: pre-wrap; overflow: hidden; resize: none; cursor: text;
+  -webkit-user-select: text; user-select: text;
+}
+.rd-cell-input:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; border-radius: var(--r-xs); }
+/* At 16px a phone doesn't zoom in on the cell it opens. */
+@media (pointer: coarse), (max-width: 767px) { .rd-cell-input { font-size: 16px; } }
+thead .rd-cell-input { background: var(--color-panel); }

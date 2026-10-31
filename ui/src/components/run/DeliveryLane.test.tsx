@@ -7,7 +7,6 @@ import {
 } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DeliveryLane, type DeliveryLaneProps } from './DeliveryLane'
-import { CanvasActionsContext } from '../canvas/CanvasActionsContext'
 import { createElement, type ComponentType, type ReactNode } from 'react'
 import { StatusGlyph } from '../ui/glyphs'
 
@@ -25,15 +24,6 @@ import type { AgentRuntime } from '../../lib/runs/graph'
 import { appRules, background, cascaded, px, topLevel } from '../../test/cascade'
 import { apcaLc, THEMES, tokenColour, wcagRatio, type Theme } from '../../test/contrast'
 const setup = (overrides: Partial<DeliveryLaneProps> = {}) => {
-  const actions = {
-    renameAgent: vi.fn(),
-    touchField: vi.fn(),
-    mode: 'pipeline' as const,
-    stepById: new Map(),
-    nodeNames: new Map(),
-    toggleProvenance: vi.fn(),
-    focusComposer: vi.fn(),
-  }
   const props: DeliveryLaneProps = {
     prompt: 'Research LoomWatch',
     attempt: 15,
@@ -61,18 +51,15 @@ const setup = (overrides: Partial<DeliveryLaneProps> = {}) => {
     projection: projectRun([]),
     onInspectEvidence: vi.fn(),
     onSelectAgent: vi.fn(),
+    onShowRecorded: vi.fn(),
     output: {
       text: '# Market report\n\n| Finding | Impact |\n|---|---|\n| Clear results | Faster review |',
       producer: 'designer',
     },
     ...overrides,
   }
-  const view = render(
-    <CanvasActionsContext.Provider value={actions}>
-      <DeliveryLane {...props} />
-    </CanvasActionsContext.Provider>,
-  )
-  return { ...view, props, actions }
+  const view = render(<DeliveryLane {...props} />)
+  return { ...view, props }
 }
 afterEach(cleanup)
 describe('Delivery Lane', () => {
@@ -379,12 +366,12 @@ describe('Delivery Lane', () => {
       expect(cascaded(status, 'color')).toBe('var(--color-accent)')
     })
 
-    // "Stopped with a problem" was red words, which on the dark card pass 5.6:1 but read muddy (APCA
+    // "Didn’t finish" was red words, which on the dark card pass 5.6:1 but read muddy (APCA
     // Lc 43). The words are ink; the red is the pill's edge and the failed mark before them, so the
     // status is never told by colour alone.
     it('says a stage stopped with a problem in words that read in both themes, marked in red', () => {
       const { container } = setup({ phase: 'failed', agents: agents('failed') })
-      const words = within(stage('writer')).getByText('Stopped with a problem')
+      const words = within(stage('writer')).getByText('Didn’t finish')
       // What the words sit on: the nearest box with a fill of its own, the card.
       const fill = (element: Element) => { const value = background(element); return value && !/^(none|transparent)$/.test(value) ? value : null }
       let under: Element | null = words

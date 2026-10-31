@@ -73,6 +73,16 @@ describe('scheduleParts', () => {
     expect(scheduleParts('*/15 * * * *')).toEqual({ frequency: 'manual', time: '08:00' })
   })
 
+  it('says on the canvas which days a weekly schedule runs', () => {
+    expect(summarizeSchedule({ cron: '0 8 * * *' })).toMatch(/^Daily at 8:00/)
+    expect(summarizeSchedule({ cron: '0 8 * * 1-5' })).toMatch(/^Weekdays at 8:00/)
+    expect(summarizeSchedule({ cron: '0 9 * * 1' })).toMatch(/^Mondays at 9:00/)
+    expect(summarizeSchedule({ cron: '0 9 * * tue,fri' })).toMatch(/^Tuesdays and Fridays at 9:00/)
+    expect(summarizeSchedule({ cron: '0 9 15 * *' })).toMatch(/^Monthly on the 15th at 9:00/)
+    // The editor still reads only daily and weekdays; a weekly cron stays its own.
+    expect(scheduleParts('0 9 * * 1').frequency).toBe('manual')
+  })
+
   it('survives a schedule block with no cron at all', () => {
     expect(scheduleParts(undefined)).toEqual({ frequency: 'manual', time: '08:00' })
     expect(summarizeSchedule({})).toBe('Choose a time')

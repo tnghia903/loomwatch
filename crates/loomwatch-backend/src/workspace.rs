@@ -356,9 +356,11 @@ fn deliver_knowledge_and_tools(
 /// [`prepare_root`] deletes inside this folder, so it must never be anywhere but under
 /// `.loomwatch/`: an agent id of `../../../..` would otherwise make it the home folder.
 fn workspace_root(team_path: &Path, team_id: &str, agent_id: &str) -> Result<PathBuf, String> {
-    if !crate::config::is_identifier(agent_id)
-        || !(team_id.is_empty() || crate::config::is_identifier(team_id))
-    {
+    // One of the person's agents brought in from My agents works under `mine+<id>` (ADR 0092),
+    // which no team-file agent can be: a plain name after a `+`, never a path.
+    let plain = crate::config::is_identifier(agent_id)
+        || crate::bring_in::agent_of(agent_id).is_some_and(crate::config::is_identifier);
+    if !plain || !(team_id.is_empty() || crate::config::is_identifier(team_id)) {
         return Err(format!(
             "team id {team_id:?} or agent id {agent_id:?} is not a plain name, so LoomWatch will \
              not make a folder for it"
@@ -593,12 +595,20 @@ mod tests {
             workspace_root(team_file, "", "writer").expect("a team file without an id"),
             Path::new("/home/me/LoomWatch/teams/.loomwatch/writer")
         );
+        // One of My agents brought in (ADR 0092) has a folder of its own, by its plain id.
+        assert_eq!(
+            workspace_root(team_file, "team", "mine+researcher").expect("a guest"),
+            Path::new("/home/me/LoomWatch/teams/.loomwatch/team/mine+researcher")
+        );
         for (team_id, agent_id) in [
             ("team", "../../../.."),
             ("team", ".."),
             ("team", "a/b"),
             ("team", "/abs"),
             ("../..", "writer"),
+            ("team", "mine+../.."),
+            ("team", "mine+a/b"),
+            ("team", "mine+"),
         ] {
             let error = workspace_root(team_file, team_id, agent_id)
                 .expect_err(&format!("{team_id:?}/{agent_id:?}"));
@@ -644,11 +654,13 @@ mod tests {
             model: "default".to_owned(),
             thinking_effort: None,
             allow_recruiting: true,
+            allow_my_agents: true,
             capabilities,
             memory: None,
             allow: crate::config::AgentAllow::default(),
             turned_off: Vec::new(),
             done_when: Vec::new(),
+            part: None,
             checks: None,
             send_back: None,
             spend: crate::spend::SpendConfig::default(),

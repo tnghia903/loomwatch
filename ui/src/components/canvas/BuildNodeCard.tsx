@@ -1,6 +1,6 @@
 import { useStore, type NodeProps } from '@xyflow/react'
 import { createElement } from 'react'
-import { Bot, Box, Circle, FileText, Folder, NotebookText, Puzzle, Wrench } from 'lucide-react'
+import { Bot, Box, Circle, FileText, Folder, NotebookText, Puzzle, Wrench } from '../ui/icon'
 import { KIND_LABEL } from '../../lib/composer-layout/types'
 import { chosenIsFile } from '../../lib/knowledge/chosen'
 import { middleTruncate } from '../../lib/format'
@@ -18,7 +18,9 @@ import { depthForZoom, storyLine } from '../../lib/story/depth'
 import { effortWord } from '../../lib/ai/efforts'
 import { FigureStill } from '../agents/FigureStill'
 import { useAgentFigure } from '../agents/figureContext'
+import { plainWords } from '../../lib/chat/findWords'
 import { AgentMark } from '../ui/AgentMark'
+import { InlineMarkdown } from '../ui/Markdown'
 
 /** The model and its thinking effort, for the trace depth's facts: "sonnet · high effort". */
 function modelLine(agent: Pick<AgentConfig, 'model' | 'thinkingEffort'>): string {
@@ -64,7 +66,7 @@ export function BuildAgentCard({ id, data, selected }: NodeProps<AgentNode>) {
             <div>
               <span className="node-kind">You</span>
               <strong className="node-name">{agent.name !== 'You' ? `You · ${agent.name}` : agent.name}</strong>
-              <small title={agent.role}>{agent.role}</small>
+              <small title={plainWords(agent.role)}><InlineMarkdown clickable={false}>{agent.role}</InlineMarkdown></small>
               {depth === 'story' && <p className="depth-story-line">{storyLine(agent)}</p>}
             </div>
           </div>
@@ -85,13 +87,13 @@ export function BuildAgentCard({ id, data, selected }: NodeProps<AgentNode>) {
   return (
     <article
       className={cx('build-node kind-harness', selected && 'selected', dropTargetId === id && 'drop-target')}
-      aria-label={[agent.name, model, agent.role, data.instructionNote].filter(Boolean).join(', ')}
+      aria-label={[agent.name, model, plainWords(agent.role), data.instructionNote].filter(Boolean).join(', ')}
     >
       {step && <span className="step" aria-hidden="true">{step.step}</span>}
       <div className="build-node-body">
         <div className="build-node-row">
           <span className="build-node-icon figure-holder"><FigureStill className="build-node-figure" figure={figure} alt="" draggable={false} /><span className="mark-badge" aria-hidden="true">{createElement(named === Circle ? Bot : named, { size: 9 })}</span></span>
-          <div><span className="node-kind">{model}</span><strong className="node-name">{agent.name}</strong><small title={agent.role}>{agent.role || 'Select to set a role'}</small>{depth === 'story' && <p className="depth-story-line">{storyLine(agent)}</p>}</div>
+          <div><span className="node-kind">{model}</span><strong className="node-name">{agent.name}</strong><small title={plainWords(agent.role)}>{agent.role ? <InlineMarkdown clickable={false}>{agent.role}</InlineMarkdown> : 'Select to set a role'}</small>{depth === 'story' && <p className="depth-story-line">{storyLine(agent)}</p>}</div>
         </div>
         {/* LoomWatch changed these instructions, or could not, after a removal (ADR 0059). */}
         {data.instructionNote && <p className="build-node-instruction-note">{data.instructionNote}</p>}

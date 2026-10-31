@@ -45,4 +45,8 @@ export const ISLAND_WAITS = {
   dropSettle: 1_500,
   /** How often the island reads what the teams are doing. */
   poll: 2_000,
+  /** While the next steps from an answer are being written, how long before asking for them again,
+      and how many times at most for one opening of the box. */
+  suggestionReread: 1_500,
+  suggestionRereads: 8,
 } as const

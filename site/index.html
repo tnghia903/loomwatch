@@ -156,13 +156,13 @@
       <div>
         <p class="ch-body">Give it a job, pick the model it thinks with, and choose what it may do without asking. Try it on a real request before any team relies on it. On the bench below, each key is a permission: drag it onto a hook to allow it, or keep it, and the agent asks you first.</p>
         <dl class="fine fine-row">
-          <div><dt>Versions, never surprises</dt><dd>Change its job and it becomes v2. A team keeps its version until you choose Update.</dd></div>
+          <div><dt>One agent, every team</dt><dd>It's kept once, in My agents. Save a change, and every team it's in uses it from that team's next run.</dd></div>
           <div><dt>Your plan, or one key</dt><dd>Your ChatGPT or Claude plan, or any model with one OpenRouter key. Every run's receipt shows what it cost.</dd></div>
         </dl>
       </div>
     </div>
     <div class="win win-agent" id="agent">
-      <div class="win-bar"><svg aria-hidden="true"><use href="#mark"/></svg><span class="win-title"><b>Your agents</b><span class="mono" id="ag-version">New agent</span></span><span class="badge" id="ag-badge">Not saved yet</span></div>
+      <div class="win-bar"><svg aria-hidden="true"><use href="#mark"/></svg><span class="win-title"><b>My agents</b><span class="mono" id="ag-name-saved">New agent</span></span><span class="badge" id="ag-badge">Not saved yet</span></div>
       <div class="win-body ag">
         <div class="ag-stage">
           <div class="bench" id="bench" data-mood="still">
@@ -188,11 +188,11 @@
           <p class="ag-says" id="ag-says" aria-live="polite"></p>
           <div class="ag-acts">
             <button class="btn btn-primary" type="button" id="ag-try">Try it</button>
-            <button class="btn" type="button" id="ag-save">Save to Your agents</button>
+            <button class="btn" type="button" id="ag-save">Save to My agents</button>
           </div>
         </div>
       </div>
-      <div class="ag-shelf" id="ag-shelf" hidden><span class="micro">Your agents</span><ul id="ag-shelf-list"></ul><p class="ag-shelf-note" id="ag-shelf-note"></p></div>
+      <div class="ag-shelf" id="ag-shelf" hidden><span class="micro">My agents</span><ul id="ag-shelf-list"></ul><p class="ag-shelf-note" id="ag-shelf-note"></p></div>
     </div>
     <p class="sim-note">Try it plays a recorded run in your browser. Nothing calls a model, and nothing you type leaves this page.</p>
   </section>
@@ -207,6 +207,7 @@
       <dl class="fine">
         <div><dt>Or just describe it</dt><dd>Describe the job, and <b>Ask LoomWatch</b> proposes a team on the canvas. Nothing changes until you press Apply.</dd></div>
         <div><dt>Step by step, or with a lead</dt><dd>A pipeline runs its steps in order, with stops where you want them. Or a lead hands out work and asks its teammates questions.</dd></div>
+        <div><dt>In a project</dt><dd>Every team works in a project. What you write about it, its folders and its notes reach every agent in it.</dd></div>
       </dl>
     </div>
     <div class="ch-panel">
@@ -214,7 +215,7 @@
         <div class="win-bar"><svg aria-hidden="true"><use href="#mark"/></svg><span class="win-title"><b>Research and write</b></span>
           <div class="win-tabs" role="tablist" aria-label="Workflow">
             <button type="button" role="tab" id="flowtab-team" data-flow="team" aria-controls="flow-team" aria-selected="true">The team</button>
-            <button type="button" role="tab" id="flowtab-give" data-flow="give" aria-controls="flow-give" aria-selected="false" tabindex="-1">What each is given <span class="tab-n" id="give-count">3 threads</span></button>
+            <button type="button" role="tab" id="flowtab-give" data-flow="give" aria-controls="flow-give" aria-selected="false" tabindex="-1">What each is given <span class="tab-n" id="give-count">3</span></button>
           </div>
         </div>
         <div class="flow-panel" role="tabpanel" id="flow-team" aria-labelledby="flowtab-team">
@@ -259,6 +260,8 @@
       <dl class="fine">
         <div><dt>Talk while it works</dt><dd>A note reaches the agent at work in its next turn; Send now hands it over at once.</dd></div>
         <div><dt>Every step on a timeline</dt><dd><span class="say-live">Blue</span> while an agent works, <span class="say-gold">gold</span> where it worked. Drag back to replay any moment.</dd></div>
+        <div><dt>Ask about any part</dt><dd>In anything an agent made, mark some words, part of a picture, some cells, a slide, a page or a moment in a video, and ask an agent about just that.</dd></div>
+        <div><dt>From any app, on a Mac</dt><dd>LoomWatch waits in a black notch at the top middle of your screen. Point at it to see who is working, or press Control-Option-Space to message an agent.</dd></div>
       </dl>
     </div>
     <div class="ch-panel">
@@ -356,7 +359,7 @@
     <div class="ch-copy">
       <span class="act-tag"><b>Then</b>It improves</span>
       <h2 id="learn-h">Each agent improves itself. <em>You see what it learned.</em></h2>
-      <p class="ch-body">When a checker in the team sends work back and the fix passes, the agent can keep a one-line lesson. What you say about its answers, and answers you love, teach it too. Keep it in Your agents, and its lessons go with it to every team.</p>
+      <p class="ch-body">When a checker in the team sends work back and the fix passes, the agent can keep a one-line lesson. What you say about its answers, and answers you love, teach it too. Its lessons are kept in My agents and go with it to every team.</p>
       <dl class="fine">
         <div><dt>Only real feedback teaches it</dt><dd>Work a checker sent back, what you say about an answer, or an answer you love. It doesn't grade itself.</dd></div>
         <div><dt>Take a lesson back</dt><dd>Each one says where it came from. Undo it in the chat, or Forget it on the agent.</dd></div>
@@ -423,8 +426,9 @@
       <section class="can-col" aria-labelledby="can-agents-h">
         <header class="can-col-head"><img src="assets/figures/yarn-clay.webp" width="64" height="64" alt=""><div><span class="micro">Step 1</span><h3 id="can-agents-h">Agents</h3></div></header>
         <ul class="can-list">
-          <li><b>Build an agent once</b><span>Its job, its model and what it may do.</span></li>
+          <li><b>Build an agent once</b><span>Every team uses it as you last saved it.</span></li>
           <li><b>A face you pick</b><span>Six figures, seven colours.</span></li>
+          <li><b>Makes real files</b><span>Slides, Word, Excel, charts and dashboards. PDFs and videos need a program it names.</span></li>
           <li><b>Try it on its own</b><span>A real run before a team relies on it.</span></li>
           <li><b>Asks before it acts</b><span>Web, files and commands wait for your OK.</span></li>
         </ul>
@@ -437,6 +441,8 @@
           <li><b>Stops where you decide</b><span>You review before the work goes on.</span></li>
           <li><b>Give each agent what it needs</b><span>Folders, files, skills and Notion pages.</span></li>
           <li><b>On a schedule</b><span>Runs by itself while LoomWatch is open.</span></li>
+          <li><b>Set up a project</b><span>Ask LoomWatch proposes it with its first team.</span></li>
+          <li><b>A room for each project</b><span>Home shows who works where, and who waits for you.</span></li>
         </ul>
       </section>
 
@@ -447,6 +453,7 @@
           <li><b>Talk while it works</b><span>It says what it's doing; your notes reach it.</span></li>
           <li><b>Approve, or send it back</b><span>Your note travels with the work.</span></li>
           <li><b>Answers with receipts</b><span>Files, sources and every step it took.</span></li>
+          <li><b>Ask about any part</b><span>Words, pictures, cells, slides, pages or a moment in a video.</span></li>
         </ul>
       </section>
 
@@ -455,7 +462,7 @@
         <ul class="can-list">
           <li><b>Learns from a checker</b><span>Work a checker sends back, once fixed, can become a lesson.</span></li>
           <li><b>Learns from you</b><span>What you say about its answers, and answers you love.</span></li>
-          <li><b>Takes lessons to every team</b><span>When you keep it in Your agents.</span></li>
+          <li><b>Takes lessons to every team</b><span>It's the same agent in each one.</span></li>
           <li><b>Undo any lesson</b><span>Each one says where it came from.</span></li>
         </ul>
       </section>
@@ -542,7 +549,7 @@
       <a href="https://github.com/tnghia903/loomwatch/issues/new/choose">Report a problem</a>
       <a href="https://github.com/tnghia903/loomwatch/discussions">Questions</a>
     </nav>
-    <p class="foot-line">Woven with Rust and React. Watch every thread.</p>
+    <p class="foot-line">Built with Rust and React. See every step.</p>
     <p class="foot-legal">An independent open-source project, not affiliated with or endorsed by Anthropic, OpenAI, Google or OpenRouter. Product names are their owners' trademarks.</p>
   </div>
 </footer>

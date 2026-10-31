@@ -1,0 +1,379 @@
+import { Plus, Search } from '../ui/icon'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+
+import { FileReaderContext, type FileToRead } from '../../lib/files/reader'
+import { figureFor, type FigureChoice } from '../../lib/library/figures'
+import type { SavedJob } from '../../lib/library/jobs'
+import { projectFile, projectsChanged, saveProject, useProjects, type Project, type ProjectEntry } from '../../lib/projects/client'
+import { costWords, doneByOf, crewOf, finishedToday, lastFinished, madeHere, monthCost, monthSpend, monthSpenders, needsYou, workingNow } from '../../lib/projects/glance'
+import { moveTeam } from '../../lib/projects/move'
+import { looseProjects, roomsOf, studioLayout, type Room } from '../../lib/projects/studio'
+import { useMonthUsage } from '../../lib/projects/useMonthUsage'
+import { approveRun, loadDismissed } from '../../lib/story/useNeedsYou'
+import { useTeamShapes } from '../../lib/projects/useTeamShapes'
+import { benchChatId } from '../../lib/rail/presence'
+import { historyRunUrl } from '../../lib/runs/history'
+import type { RunRecord } from '../../lib/runs/client'
+import { TeamFileApiError, teamDisplayName, type TeamSummary } from '../../lib/team-file/client'
+import { teamHref } from '../../lib/team-file/teamHref'
+import { openTeam, useTeamList } from '../../lib/team-file/useTeamList'
+import { formatCost } from '../../lib/watch/usage'
+import { KnowYou } from '../you/KnowYou'
+import { relativeTime } from '../../lib/format'
+import { FigureStill } from '../agents/FigureStill'
+import { goToRun } from '../agents/route'
+import { defaultFigureOf, openNeedsYou, roomHref, type FigureOf } from '../../lib/projects/studioUi'
+import { DeleteTeamDialog } from '../home/DeleteTeamDialog'
+import { DeleteProjectDialog } from './DeleteProjectDialog'
+import { GlanceTiles } from './GlanceTiles'
+import { PickUp } from './PickUp'
+import { MoveToProject, ProjectCardMenu, RenameProjectDialog, TeamCardMenu } from './ProjectCardMenu'
+import { ReaderSheet } from './ReaderSheet'
+import { RoomCard, RoomWords, ProjectMark, TeamLine } from './RoomCard'
+import { SetUpProject, type ProjectStart } from './SetUpProject'
+import { WorkBox, type BoxTeam } from './WorkBox'
+
+const VIEW_KEY = 'loomwatch:studio-view'
+
+function readView(): 'rooms' | 'list' {
+  try { return window.localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'rooms' } catch { return 'rooms' }
+}
+
+const PROBLEM_LABEL: Record<NonNullable<TeamSummary['problem']>, string> = {
+  unreadable: 'the file has a mistake in it',
+  not_a_team: 'not a team file',
+}
+
+/** Files in the teams folder that can't be opened as teams, so none goes missing from Home. */
+function CantBeOpened({ teams }: { teams: readonly TeamSummary[] }) {
+  if (teams.length === 0) return null
+  return (
+    <ul className="studio-problems" aria-label="Files that can’t be opened">
+      {teams.map((team) => (
+        <li key={team.path}><button type="button" className="link" onClick={() => openTeam(team.path)}>{teamDisplayName(team)}</button> can’t be opened: {team.problem ? PROBLEM_LABEL[team.problem] : 'not a team file'}</li>
+      ))}
+    </ul>
+  )
+}
+
+/** A room that is a team in no project, not a project. */
+const isLoose = (room: Room) => room.id.startsWith('team:')
+
+/** What a team in no project can be done to from Home: moved into a project, or deleted. */
+interface LooseTeamActions {
+  onMove: (room: Room, project: string) => void
+  onDelete: (room: Room) => void
+}
+
+/**
+ * Under "Not in a project": each team in none, on its line with a button that moves it into a project
+ * in one pick and its "…"; then your agents in no team of any project.
+ */
+function NotInAProject({ jobs, rooms, used, figureOf, said = null, onMove, onDelete }: { jobs: readonly SavedJob[]; rooms: readonly Room[]; used: ReadonlySet<string>; figureOf: FigureOf; said?: ReactNode } & LooseTeamActions) {
+  const [open, setOpen] = useState<string | null>(null)
+  const [adding, setAdding] = useState(false)
+  const box = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const away = (event: PointerEvent) => { if (!box.current?.contains(event.target as Node)) { setOpen(null); setAdding(false) } }
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') { setOpen(null); setAdding(false) } }
+    window.addEventListener('pointerdown', away)
+    window.addEventListener('keydown', escape)
+    return () => { window.removeEventListener('pointerdown', away); window.removeEventListener('keydown', escape) }
+  }, [open])
+  const idle = jobs.filter((job) => !used.has(job.id))
+  const projects = rooms.filter((room) => !isLoose(room) && !room.putAway)
+  const loose = rooms.filter(isLoose)
+  return (
+    <section className="not-in-project" aria-labelledby="not-in-project-title">
+      <h2 id="not-in-project-title" className="studio-head">Not in a project</h2>
+      {said}
+      {loose.length > 0 && (
+        <ul className="loose-teams" aria-label="Teams in no project">
+          {loose.map((room) => (
+            <li key={room.id} className="loose-team">
+              {room.teams[0]
+                ? <TeamLine team={room.teams[0]} figureOf={figureOf} />
+                : <a className="room-card-team" href={teamHref(room.id.slice('team:'.length), 'chat')}><span className="room-card-team-words"><b>{room.name}</b></span></a>}
+              {/* With no project yet there is nowhere to move it: New project is beside the projects. */}
+              {projects.length > 0 && <MoveToProject name={room.name} projects={projects} onMove={(project) => onMove(room, project)} />}
+              <TeamCardMenu name={room.name} onDelete={() => onDelete(room)} />
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="idle-agents" ref={box}>
+        {idle.map((job) => (
+          <span key={job.id} className="idle-agent">
+            <button type="button" className="idle-agent-chip" aria-expanded={open === job.id} aria-haspopup="menu" onClick={() => { setOpen(open === job.id ? null : job.id); setAdding(false) }}>
+              <FigureStill figure={figureFor(job.id, job.figure)} alt="" width={30} height={30} decoding="async" />
+              {job.name}
+            </button>
+            {open === job.id && (
+              <span className="idle-agent-menu" role="menu" aria-label={job.name}>
+                {!adding && <a role="menuitem" href={`/agents/${encodeURIComponent(job.id)}?view=chat`}>Chat</a>}
+                {!adding && <button type="button" role="menuitem" onClick={() => setAdding(true)} disabled={projects.length === 0} title={projects.length === 0 ? 'Set up a project first' : undefined}>Add to a project</button>}
+                {adding && projects.map((room) => (
+                  <a key={room.id} role="menuitem" href={`${roomHref(room.id)}?add=${encodeURIComponent(job.id)}`}><ProjectMark id={room.id} mark={room.mark} />{room.name}</a>
+                ))}
+              </span>
+            )}
+          </span>
+        ))}
+        {idle.length === 0 && jobs.length > 0 && <span className="studio-quiet">Every agent is in a team.</span>}
+        <a className="link" href={jobs.length > 0 ? '/agents' : '/agents/new'} data-tour="build-agent">{jobs.length > 0 ? `All my agents (${jobs.length})` : 'Build an agent'}</a>
+      </div>
+      {/* Home's way to About you since the first run took its card (ADR 0075). */}
+      <KnowYou />
+    </section>
+  )
+}
+
+/**
+ * Home is a studio of rooms (ADR 0097). Your desk comes first, with whoever waits for you; then each
+ * project as a room, its agents at their desks in team order, waiting rooms first; then your agents
+ * in no project. With no project yet it asks what you are working on.
+ */
+export function Studio({ runs, onSetUp, setUpUnavailable, asking = false, part = 'all' }: {
+  runs: readonly RunRecord[]
+  /** Home shows everything; Projects (the dock's place) shows only the projects and agents in none. */
+  part?: 'all' | 'projects'
+  onSetUp: (start: ProjectStart) => void
+  setUpUnavailable: string | null
+  /** Ask's panel is open: Set up project says Ask is already at work beside it. */
+  asking?: boolean
+}) {
+  const { list, error, reload } = useProjects()
+  const { teams: summaries } = useTeamList()
+  const problems = (summaries ?? []).filter((team) => team.problem)
+  const { root, shapes, jobs } = useTeamShapes(list)
+  const [view, setView] = useState<'rooms' | 'list'>(readView)
+  const [query, setQuery] = useState('')
+  const [creating, setCreating] = useState(false)
+  const [showPutAway, setShowPutAway] = useState(false)
+  // A project's "…" on Home (ADR 0100): the one being renamed or deleted, and what a change hit.
+  const [renaming, setRenaming] = useState<ProjectEntry | null>(null)
+  const [deleting, setDeleting] = useState<{ project: ProjectEntry; teams: string[]; working: { name: string; in: string[] }[] } | null>(null)
+  const [deletingTeam, setDeletingTeam] = useState<{ path: string; name: string } | null>(null)
+  const [problem, setProblem] = useState<string | null>(null)
+  // A team just moved out of "Not in a project": where it went, or why it couldn't, said there.
+  const [moved, setMoved] = useState<{ team: string; to: ProjectEntry | undefined; failed?: string } | null>(null)
+  const figures = useMemo(() => new Map<string, FigureChoice | undefined>(jobs.map((job) => [job.id, job.figure])), [jobs])
+  const figureOf = useMemo(() => defaultFigureOf(figures), [figures])
+  const rooms = useMemo(
+    () => (list && shapes ? roomsOf([...list.projects, ...looseProjects(list.loose, summaries ?? [])], shapes, runs, root) : null),
+    [list, shapes, runs, root, summaries],
+  )
+  const teamShapes = useMemo(() => shapes ?? [], [shapes])
+  // At a glance, across every project: what needs you, who works, what finished today, this month.
+  // By the bell's rules, so the two always count alike: the failures dismissed there left out.
+  const needs = useMemo(() => needsYou(runs, teamShapes, root, null, loadDismissed()), [runs, teamShapes, root])
+  const working = useMemo(() => workingNow(runs, teamShapes, root), [runs, teamShapes, root])
+  const doneBy = useMemo(() => doneByOf(teamShapes, root), [teamShapes, root])
+  // The agents in the projects Home shows, each once, as each is now.
+  const crew = useMemo(() => crewOf((rooms ?? []).filter((room) => !room.putAway).flatMap((room) => room.teams)), [rooms])
+  const made = useMemo(() => madeHere(runs, root), [runs, root])
+  const usage = useMonthUsage()
+  const [reading, setReading] = useState<FileToRead | null>(null)
+  const read = useCallback((file: FileToRead) => setReading(file), [])
+  const names = useMemo(() => new Map(teamShapes.flatMap((shape) => shape.seats.map((seat) => [seat.id, seat.name] as const))), [teamShapes])
+  const nameOf = useCallback((agent: string) => names.get(agent) ?? agent, [names])
+  // Your agents' own chats, newest first.
+  const chats = useMemo(() => [...runs].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map((run) => benchChatId(run.teamPath)).filter((id): id is string => Boolean(id)), [runs])
+  const used = useMemo(() => new Set((shapes ?? []).flatMap((shape) => shape.seats.flatMap((seat) => (seat.agent ? [seat.agent] : [])))), [shapes])
+  // Every team the box can give work to, under its project.
+  const boxTeams = useMemo((): BoxTeam[] => (rooms ?? []).filter((room) => !room.putAway).flatMap((room) => room.teams.map((team) => ({
+    path: team.path,
+    name: team.name,
+    ...(room.id.startsWith('team:') ? {} : { project: { id: room.id, name: room.name } }),
+  }))), [rooms])
+
+  // ⌘N and the palette's New team reach Home through this event: a new team starts as a project.
+  useEffect(() => {
+    const open = () => setCreating(true)
+    window.addEventListener('loomwatch:new-project', open)
+    return () => window.removeEventListener('loomwatch:new-project', open)
+  }, [])
+
+  const choose = (next: 'rooms' | 'list') => {
+    setView(next)
+    try { window.localStorage.setItem(VIEW_KEY, next) } catch { /* the choice lasts this visit */ }
+  }
+  const openRoom = (room: Room) => {
+    if (room.id.startsWith('team:')) openTeam(room.id.slice('team:'.length))
+    else window.location.assign(roomHref(room.id))
+  }
+  const openRun = (run: Pick<RunRecord, 'runId' | 'teamPath'>) => goToRun(historyRunUrl({ id: run.runId, teamPath: run.teamPath }))
+  const keep = async (project: ProjectEntry, change: Partial<Project>) => {
+    setProblem(null)
+    await saveProject(project.id, { ...projectFile(project), ...change })
+    reload()
+  }
+  const menuFor = (room: Room) => {
+    const project = list?.projects.find((candidate) => candidate.id === room.id)
+    if (!project) return null
+    return (
+      <ProjectCardMenu
+        name={project.name}
+        putAway={project.putAway}
+        onRename={() => setRenaming(project)}
+        onHide={() => void keep(project, { putAway: !project.putAway }).catch((caught: unknown) => setProblem(`Couldn’t change ${project.name}. ${caught instanceof Error ? caught.message : String(caught)}`))}
+        onDelete={() => setDeleting({
+          project,
+          // A team in other projects too keeps working there (ADR 0103); the rest stay in none.
+          teams: room.teams.filter((team) => !team.alsoIn?.length).map((team) => team.name),
+          working: room.teams.flatMap((team) => (team.alsoIn?.length ? [{ name: team.name, in: team.alsoIn.map((other) => other.name) }] : [])),
+        })}
+      />
+    )
+  }
+  const loose: LooseTeamActions = {
+    onMove: (room, id) => {
+      const to = list?.projects.find((candidate) => candidate.id === id)
+      setMoved(null)
+      moveTeam(room.id.slice('team:'.length), id).then(
+        () => setMoved({ team: room.name, to }),
+        // Changed since Home read it (412): the daemon's words are about saving a file, which Home has no button for.
+        (caught: unknown) => setMoved({ team: room.name, to, failed: caught instanceof TeamFileApiError && caught.status === 412 ? 'It changed just now. Reload the page and try again.' : caught instanceof Error ? caught.message : String(caught) }),
+      )
+    },
+    onDelete: (room) => setDeletingTeam({ path: room.id.slice('team:'.length), name: room.name }),
+  }
+  const movedSaid = moved && (moved.failed
+    ? <p role="alert" className="home-empty alert">Couldn’t move {moved.team}. {moved.failed}</p>
+    : moved.to && <p role="status" className="studio-quiet loose-moved">{moved.team} works in <a className="link" href={roomHref(moved.to.id)}>{moved.to.name}</a> now.</p>)
+  // Where to ask about a file read here: the chat of the work that made it. A file opened from a
+  // chip comes with no run, so the run is the one that made it.
+  const chatOf = (file: FileToRead) => {
+    const maker = made.find((candidate) => candidate.path === file.path) ?? runs.find((candidate) => candidate.runId === file.runId)
+    return maker ? historyRunUrl({ id: maker.runId, teamPath: maker.teamPath }) : null
+  }
+
+  if (error) return <p role="alert" className="home-empty alert">Couldn’t list your projects. {error} <button type="button" className="link" onClick={reload}>Try again</button></p>
+  if (!rooms) return <p role="status" className="home-empty">Loading your projects…</p>
+
+  const setUp = (start: ProjectStart) => { setCreating(false); onSetUp(start) }
+  const pickUp = <PickUp files={made} chats={chats} jobs={jobs} figures={figures} />
+  const reader = reading && <ReaderSheet file={reading} name={nameOf} chat={chatOf(reading)} onClose={() => setReading(null)} />
+  if (rooms.length === 0) {
+    return (
+      <FileReaderContext.Provider value={read}>
+      <div className="studio studio-empty">
+        <SetUpProject onSetUp={setUp} unavailable={setUpUnavailable} asking={asking} />
+        {part === 'all' && pickUp}
+        <CantBeOpened teams={problems} />
+        <NotInAProject jobs={jobs} rooms={rooms} used={used} figureOf={figureOf} {...loose} />
+      </div>
+      {reader}
+      </FileReaderContext.Provider>
+    )
+  }
+
+  const needle = query.trim().toLowerCase()
+  const projectRooms = rooms.filter((room) => !isLoose(room))
+  const found = needle ? projectRooms.filter((room) => room.name.toLowerCase().includes(needle)) : projectRooms
+  const { open, quiet, putAway } = studioLayout(found)
+  const shown = showPutAway ? [...open, ...quiet, ...putAway] : [...open, ...quiet]
+  // What each room shows of its own: the newest thing made there, and what this month cost, by
+  // where it was paid when the usage report could be read.
+  const roomFacts = (room: Room) => {
+    const scope = room.teams.map((team) => team.path)
+    const spend = monthSpend(runs, root, scope)
+    const cost = monthCost(usage, room.teams.map((team) => team.name))
+    const words = cost ? (cost.usd > 0 || cost.plan ? costWords(cost) : null) : spend.runs > 0 ? `${spend.atLeast ? 'at least ' : ''}${formatCost(spend.usd)}` : null
+    return {
+      newest: madeHere(runs, root, scope, 1)[0]?.path ?? null,
+      spend: words ? `${words} this month` : null,
+    }
+  }
+  return (
+    <FileReaderContext.Provider value={read}>
+    <div className="studio">
+      {part === 'all' && <div id="your-desk" className="studio-desk">
+        {/* The quiet desk (ADR 0101): the box first, then what needs you, stepped up. */}
+        {boxTeams.length > 0 && <WorkBox teams={boxTeams} primary={needs.length === 0} />}
+        <GlanceTiles
+          stepUp
+          label="Your desk"
+          needs={needs}
+          last={lastFinished(runs, root)}
+          working={working}
+          crew={crew}
+          finishedToday={finishedToday(runs, root)}
+          spend={monthSpend(runs, root)}
+          cost={monthCost(usage, null)}
+          spenders={monthSpenders(usage, null, teamShapes, jobs)}
+          doneBy={doneBy}
+          figureOf={figureOf}
+          // Approve is one press here; reading the work first opens the bell's tray at that item,
+          // where each thing waiting is answered in turn (ADR 0043); "Show N more" opens it at the first.
+          onApprove={(item) => approveRun(item.runId).then((done) => { if (!done) openNeedsYou(item.runId); return done })}
+          onReview={(item) => openNeedsYou(item.runId)}
+          onOpenRun={openRun}
+          onMore={() => openNeedsYou()}
+        />
+      </div>}
+      {part === 'all' && pickUp}
+      <section className="studio-projects" aria-labelledby="studio-projects-title" data-tour="projects">
+        <div className="studio-projects-head">
+          <h2 id="studio-projects-title" className="studio-head">Projects</h2>
+          {projectRooms.length > 6 && (
+            <label className="home-filter"><Search size={14} aria-hidden="true" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find a project" aria-label="Find a project" /></label>
+          )}
+          <span className="studio-view" role="group" aria-label="Show projects as">
+            <button type="button" aria-pressed={view === 'rooms'} onClick={() => choose('rooms')}>Rooms</button>
+            <button type="button" aria-pressed={view === 'list'} onClick={() => choose('list')}>List</button>
+          </span>
+        </div>
+        {view === 'rooms' ? (
+          <div className="room-grid">
+            {open.map((room) => <RoomCard key={room.id} room={room} figureOf={figureOf} onOpen={() => openRoom(room)} menu={menuFor(room)} {...roomFacts(room)} />)}
+            {quiet.map((room) => (
+              <div key={room.id} className="room-tile-box">
+                <button type="button" className="room-tile" onClick={() => openRoom(room)}>
+                  <span className="room-tile-name"><ProjectMark id={room.id} mark={room.mark} />{room.name}</span>
+                  <span className="room-tile-when">{room.line !== 'Ready' ? room.line : room.lastWorked ? `Worked ${relativeTime(new Date(room.lastWorked))}` : 'Not working now'}</span>
+                </button>
+                {menuFor(room)}
+              </div>
+            ))}
+            {putAway.length > 0 && (
+              <div className="room-tile put-away">
+                <button type="button" className="room-tile-name" aria-expanded={showPutAway} onClick={() => setShowPutAway((value) => !value)}>{putAway.length} hidden from Home</button>
+                {showPutAway && putAway.map((room) => (
+                  <button key={room.id} type="button" className="link room-tile-when" onClick={() => openRoom(room)}>{room.name}</button>
+                ))}
+              </div>
+            )}
+            <button type="button" className="room-new" onClick={() => setCreating(true)}><Plus size={20} aria-hidden="true" />New project</button>
+          </div>
+        ) : (
+          <ul className="room-list" aria-label="Projects">
+            {shown.map((room) => (
+              <li key={room.id}>
+                <button type="button" onClick={() => openRoom(room)}>
+                  <span className="room-tile-name"><ProjectMark id={room.id} mark={room.mark} />{room.name}</span>
+                  <span className={`room-line ${room.state}`}><RoomWords room={room} count={false} /></span>
+                  <span className="room-list-teams">{room.teams.map((team) => team.name).join(', ') || 'No team yet'}</span>
+                </button>
+                {menuFor(room)}
+              </li>
+            ))}
+            {putAway.length > 0 && !showPutAway && <li><button type="button" className="link" onClick={() => setShowPutAway(true)}>{putAway.length} hidden from Home</button></li>}
+            <li><button type="button" className="btn" onClick={() => setCreating(true)}><Plus size={14} aria-hidden="true" />New project</button></li>
+          </ul>
+        )}
+        {needle && found.length === 0 && <p className="home-empty">No project matches “{query}”.</p>}
+        {problem && <p role="alert" className="home-empty alert">{problem}</p>}
+        <CantBeOpened teams={problems} />
+      </section>
+      <NotInAProject jobs={jobs} rooms={rooms} used={used} figureOf={figureOf} said={movedSaid} {...loose} />
+      {creating && <SetUpProject onSetUp={setUp} unavailable={setUpUnavailable} asking={asking} onClose={() => setCreating(false)} />}
+      {renaming && <RenameProjectDialog name={renaming.name} onSave={(name) => keep(renaming, { name }).then(() => setRenaming(null))} onClose={() => setRenaming(null)} />}
+      {deleting && <DeleteProjectDialog project={deleting.project} teams={deleting.teams} working={deleting.working} onDeleted={() => setDeleting(null)} onClose={() => setDeleting(null)} />}
+      {deletingTeam && <DeleteTeamDialog path={deletingTeam.path} name={deletingTeam.name} onDeleted={() => { setDeletingTeam(null); projectsChanged() }} onClose={() => setDeletingTeam(null)} />}
+    </div>
+    {reader}
+    </FileReaderContext.Provider>
+  )
+}

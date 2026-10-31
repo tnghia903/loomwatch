@@ -33,7 +33,7 @@ agents:
       web: true
 ```
 
-- **How it is paid.** You connect each way on Home or in **Connections…** (ADR 0073): **Continue
+- **How it is paid.** You connect each way on Home or in **Connections** (under **You**) (ADR 0073): **Continue
   with ChatGPT** for a ChatGPT Plus or Pro plan, a Claude API key from the Console organization
   linked to a Claude Max or Team plan, or an OpenRouter key. LoomWatch checks each with its company
   and keeps it only if it is accepted. On a Mac the OpenRouter key is kept in the Keychain as
@@ -58,7 +58,9 @@ agents:
   is the offline demo model: it answers with fixed text and calls no model, so it needs no key.
 - **`followsSuggestion: true`** says the agent's `model` follows the model LoomWatch suggests for
   it (ADR 0072). An agent added in the app starts that way. When its configuration changes there,
-  LoomWatch moves `model` to the new suggestion and shows what it was, with Undo. Picking any other
+  LoomWatch moves `model` to the new suggestion and shows what it was, with Undo. Its
+  `thinkingEffort` moves too, to the one suggested for that kind of work, unless you set it by
+  hand. Picking any other
   model in its model list takes the line out, and the model stays as picked. A run always uses
   `model`, so a file edited elsewhere keeps its model until the agent is next changed in the app.
 - **`thinkingEffort`** says how hard the model reasons: `none`, `minimal`, `low`, `medium`, `high`,
@@ -85,6 +87,55 @@ agents:
 
   An agent may still start in a folder LoomWatch prepares for it instead. See
   [Where an agent starts](#where-an-agent-starts).
+
+### One of My agents
+
+Every agent the app saves in a team is one of My agents (ADR 0094), kept as
+`<teams root>/.jobs/<agent>.yaml`. The team file points at it with `from` and holds only what is
+the team's:
+
+```yaml
+agents:
+  - id: researcher
+    from: { agent: researcher }
+    part:                            # what this team needs from it (ADR 0097)
+      text: Find two or three options for the campus gate, with their trade-offs.
+      doneWhen: [Names the option each source supports]
+    spawn: { cwd: ../my-project }   # where it works in this team
+    capabilities:                    # what this team connects to it beyond its own
+      - { kind: knowledge, name: Notes, path: notes }
+      - { kind: skill, name: slides }
+    turnedOff:                       # its own, off in this team (ADR 0060)
+      - { kind: tool, name: Gmail }
+```
+
+- **Filled in when the team is read.** An entry with `from` and no `role` of its own is filled in
+  from the agent's file each time the daemon or the app reads the team: its `name`, `role` (the
+  file's `instructions`), `model` and `thinkingEffort` when the agent names a model, its skills,
+  its tools with their `alwaysAllow` calls, what it reads (as `knowledge`, labelled apart from the
+  team's), `doneWhen`, `allow` and `allowRecruiting`. A skill or tool the entry turns off is left
+  out. A change saved to the agent reaches every team that uses it from that team's next run; a
+  run's record keeps the agent as it ran.
+- **The team's own.** `part`, `spawn`, knowledge, skills and tools the team connects beyond the
+  agent's own, `memory`, `turnedOff`, `checks`, `sendBack`, `spend` and `learns` stay in the entry, and so does
+  `model` (with `followsSuggestion`) when the agent names none. In the app, a skill or tool wired on
+  a team's canvas is given in that team only, and taking one of the agent's own off it turns it off
+  there; the agent's own skills and tools change on its workbench. Taking one of the agent's own
+  reads off a team's canvas takes it off the agent, as knowledge isn't turned off for one team.
+- **Written out in full.** An entry that writes its own `role` runs as it is written, which is how
+  `examples/` and hand-written files work; `from` then only names whose lessons it reads. The app
+  makes it one of My agents the next time it saves the team: an agent with exactly the same setup
+  is joined, and one whose name is taken gets the team's name after it (`Writer · Market brief`).
+  The folders, files and pages the team connected to it, and its `part`, stay in the team: an
+  agent reads something of its own only when its builder gives it, so it fits any team (ADR 0097).
+  `from.version`, which an earlier LoomWatch wrote, is read and ignored.
+- **Read in its teams folder.** A pointer needs its teams folder: `loomwatchd run team.yaml` uses the
+  nearest folder that holds `.jobs`, from the file's own folder upward, or the file's own folder
+  when none does. An agent file that is missing stops the team with a message that names the
+  agent.
+- **Reviewed like a team file.** An agent file that appears or changes outside LoomWatch holds every
+  team that uses it until the operator reviews it, as a team file does (ADR 0048).
+  `DELETE /api/jobs/{id}` refuses an agent that a team still uses, naming the teams.
 
 ### Older team files
 
@@ -178,12 +229,19 @@ depend on the document as a whole:
   checks its result against them before it replies, fixes what it can, and lists any it could not
   meet under `## Not met`. A later stage and any check step read it with the work. No second turn
   is taken on the agent's own say-so: a check step with `sendBack` is what sends work back.
+- Optional `Agent.part` says what this team needs from the agent (ADR 0097): `text`, a line or two
+  (at most 1,000 characters), and `doneWhen`, up to five items of its own. It is the team's, never
+  the agent's: one of My agents keeps instructions and a Done when for its kind of work, and each
+  team says here what it needs from it. The agent reads `text` under `## Your part in this team`,
+  after what the team knows and before anything the run hands it, and the part's items come first
+  in its `## Done when`, so a check step checks them too. An item in both lists is stated once.
 - Optional `Agent.learns: false` stops an agent learning from the operator's feedback on its work
   (ADR 0078, [How agents learn](LEARNING.md)). It is on when absent: the operator's words about a
   finished answer, and a check step's item that was not met and then met after the send-back,
   become short lessons in the agent's standing instructions, each shown in the chat with Undo.
-  With `false` it learns nothing new and is given none of its lessons. `from: {agent}` is also read
-  now: one of My agents keeps one list of lessons in every team that places it.
+  With `false` it learns nothing new and is given none of its lessons. One of My agents keeps one
+  list of lessons in every team that uses it (`from: {agent}`); when a team's own agent becomes one
+  of My agents, its lessons go with it.
 - **Notes set aside from the answer.** Some sections an agent ends its reply with are for the
   operator, not the answer's reader:
   - `## Not met`: the `doneWhen` items it could not meet.
@@ -302,9 +360,58 @@ depend on the document as a whole:
     - The editor sets the check step's effort from one table keyed by the checked agent's job:
       high for every job, for now.
   - **Verdict words.** A verdict word is read as a whole word, so "Metrics …" is not "Met".
+  - **A number is measured.** Met on an item with a number in digits ("At most 250 words") is
+    Not sure unless its evidence gives a number too; the check step is told to count, or to run what
+    measures it. A count in words ("names the three tools") is left to the check: naming them
+    meets it. An item that does not apply needs only its reason.
   - Operator nodes may not set either field.
+- `conversation.check.fromMessage` (ADR 0098) is what a person's message says done looks like:
+  "in a few lines", "at most 250 words", "exactly three sections", "stop after 5 tries".
+
+  ```yaml
+  conversation:
+    check:
+      fromMessage:
+        read: true             # false: a message's words are never turned into checks
+        rounds: 2              # send-backs when the message names no number of tries
+        maxRounds: 5           # the most a message may ask for (1–10)
+        whenStillNotMet: ask   # or answer
+  ```
+
+  - **The read.** When a run starts from a message a person wrote, one turn of the fast model, with
+    no tools, reads it with the conversation so far and lists the conditions it states, at most 5
+    of at most 160 characters, and how many tries it gives the work. It runs beside the work, so it
+    adds no wait and the working agent's prompt is unchanged. An item is kept only when its numbers
+    and most of its words are the message's own; a number of tries only when the message names it.
+    A routine's message, a team on stand-in models, and a daemon with no model settings are not
+    read. A read that fails or is slow checks nothing.
+  - **What it is checked by.** When a check step checks the agent whose reply is the answer, the
+    message's items come first in its items, then that agent's Done when, "Does what the request
+    asked" and the contradiction item, and the check step sends the work back as the message's
+    tries allow, even when it sets no `sendBack` of its own. Anywhere else (one agent, a team with
+    no fixed order, a pipeline whose last stage is not checked), LoomWatch checks the reply itself
+    against the message's items and "Does what the request asked": the built-in Checker job, at
+    its effort, on the `check` tier's model, or the `strong` tier's when that is another maker
+    than the checked agent's. It works in the checked agent's folder, so it finds the files the
+    work made and used, and has the work in an `answer.md` of its own, outside that folder, to
+    count and measure. It changes no file there: it runs commands that only read, and every
+    other command is declined without asking. What is not met goes back into the answering agent's still-open session, as a
+    check step sends it back. A pipeline that ends on a review stop is the person's own check, and
+    gets none.
+  - **Tries.** A try is the first work or one revision: "5 tries" is 4 send-backs, never more than
+    `maxRounds`. With no number, the work goes back `rounds` times. The stop and the chat count
+    tries when the message named them (`tries: true` on `check_stopped` and on the stop's `check`).
+  - **What is recorded.** Each change is a `done_when` event under the id `loomwatch:check`: the
+    items with whether each is still checked, the tries, the send-backs the check will allow, the
+    checker's model and whether its maker is the checked agent's, and whether the check has ended.
+    LoomWatch's own check records its rounds under the same id.
+  - **Taking an item off.** `POST /api/runs/{id}/done-when` with `{"item": 0, "checked": false}`
+    takes an item off the check from the next round on; `"checked": true` puts it back. Refused
+    once the check has ended.
 - `spend.perRun` (team level) is what one run may spend on model calls, in US dollars. Absent
-  means no limit; new teams and the starter teams are written with `1.00`. Every agent of the run draws on it: stages, the lead, Team Bus helpers,
+  means no limit; new teams and the starter teams are written with `1.00`, and so is a new team Ask
+LoomWatch proposes, or `2.00` when it has three or more agents or a check step that sends work
+back. Every agent of the run draws on it: stages, the lead, Team Bus helpers,
   summaries, checkpoints and handovers. The daemon adds up each call's dollars: the exact cost
   OpenRouter reports, or for a call on the Claude credit its cost at Claude's list prices. A call on
   the ChatGPT plan costs no dollars and counts against the plan's limits instead. Before each call, an agent whose run has used its figure waits, and the run shows a
@@ -372,6 +479,28 @@ depend on the document as a whole:
     told, and does that part itself.
   - `POST /api/runs/{id}/agents/{helper}/stop` stops one helper; "Allow for this run" given to the
     agent or any of its helpers covers all of them.
+- **One of My agents brought in (ADR 0092).** In a team with no connections, the `entrypoint`,
+  which is also an agent working alone in its own chat, may bring in another of the person's
+  agents from My agents for a part no one on the team does. It lists them with the Team Bus tool
+  `my_agents` and starts one with `dispatch`, by the id the list gives (`mine+<id>`, which no
+  team-file id can be). Nobody else is offered it: not its teammates, not a stage, a helper, an
+  agent answering a question, or an agent brought in this way.
+  - `guards.myAgents` is how many of the person's agents the list holds, most recently saved
+    first, with a count of the rest. It defaults to `0`, which turns bringing in off, until the
+    bench shows it helps. `Agent.allowMyAgents: false`, filled in from the agent's own
+    `bringsIn: false` in My agents, turns it off for that agent.
+  - The list leaves out the agents the team already points at (`from.agent`: the team's own
+    comes first), an agent whose file waits for the person's review (ADR 0048), and one whose
+    model's source isn't connected. A name a team agent has resolves to that agent.
+  - The agent brought in works as it is saved in My agents, filled in as a team's pointer is,
+    on the lead's model when it names none. It has a folder of its own in the team's workspace
+    (`.loomwatch/<team>/mine+<id>`), reads its own reads and what the whole team is given (not
+    what the team gave particular agents), learns into its one list (`agent:<id>`), and is kept
+    open for more work like a teammate. It counts against `maxConcurrentDispatches` and
+    `maxDispatchDepth`, and the run's `spend.perRun` covers it.
+  - The `dispatch` answer and its `delegated_result` carry its `name` and `from: {agent}`, so the
+    chat names it and says once who brought it in. "Always allow" given to it turns on its own
+    switch in My agents, for every team.
 - `handoff` starts the target as a background task and marks the caller's roster status as
   `stopped`, but it does not end the caller's current turn. The caller must return after a
   successful handoff; its model calls go on until that turn ends.
@@ -507,7 +636,7 @@ each skill came from, the fingerprint of the delivered file, how it was delivere
 once the prompt is sent. This verifies delivery, not whether every instruction was followed.
 
 **Tools** (`kind: tool`) name a tool connected in LoomWatch (Connections → Tools, or the agent's
-Tools block; see [Give agents tools](TOOLS.md)), ignoring case. The agent is offered that tool's
+Tools it can use row; see [Give agents tools](TOOLS.md)), ignoring case. The agent is offered that tool's
 actions, and asks you before each one unless the entry's `alwaysAllow` names it (by the tool's own
 name for the action):
 
@@ -549,7 +678,8 @@ the agent's permissions.
 Every agent in a run works with LoomWatch's own tools:
 
 - **Files** in its work folder: `list_files`, `read_file`, `search_files`, `write_file` and
-  `edit_file`.
+  `edit_file`. After writing a Word, Excel, PowerPoint, PDF, CSV or JSON file, the agent is told
+  whether it opens.
 - **Commands**: `run_command` runs a shell command in the agent's work folder (with `cmd.exe` on
   Windows) and stops it, and everything it started, after two minutes, or up to ten if the agent
   asks. The command's environment has every provider key and
@@ -570,9 +700,22 @@ Every agent in a run works with LoomWatch's own tools:
   file you can, so asking before each one is the only check. For an agent allowed the web, a Python
   script's page requests go out as `LoomWatch/<version> (+https://loomwatch.github.io/)` rather
   than Python's own name, which some sites refuse; a name the script sets itself still wins.
-- **The web**, only for an agent with `allow.web: true`: OpenRouter's web search and page fetch.
-  OpenRouter runs them, and the run shows each search and each page read. An agent without the
-  switch has no web tools.
+- **The web**, for an agent with `allow.web: true`: OpenRouter's web search and page fetch.
+  OpenRouter runs them, and the run shows each search and each page read.
+- **The web, asked for**, for an agent without `allow.web` (ADR 0104): `search_web` and
+  `read_page`, as edits and commands still have their tools when their switch is off. The agent is
+  told they ask first, so it reaches for them rather than for a command. Each asks you ("Research
+  lead wants to use the web", with the search or the address), and your yes gives that agent the
+  web search and page fetch above, and its commands the network, until the run ends: one search is
+  rarely enough, so a web request has one **Allow**, and an Allow from the tray, the notch or a
+  phone counts the same. **Always allow** turns `allow.web` on. `read_page` reads a link you wrote in your message, or in
+  a note while the run works, without asking: LoomWatch fetches it, as a web page's words, a PDF's
+  text or plain text. A link in a file, a page, a teammate's brief or another team's request is
+  not yours, so it asks, and an agent can't send what it read anywhere without your yes. A redirect
+  from a site on the internet to one on your computer or network isn't followed, and an address of
+  the agent's own on your computer or network is never read. A page that builds its words with
+  script reads as empty. On a Mac, a command that reaches for the network while the web is off is
+  answered with why it couldn't, even when it printed nothing.
 - **Its plan**: `update_plan`, plus `read_tool_output` for reading the rest of a long output that
   was set aside.
 - **Tools you connected and gave it** (`kind: tool`): each action named `<tool>__<action>`, such as
@@ -603,9 +746,9 @@ allow:
   commands: false # run commands
 ```
 
-Every switch defaults to `false`, and an absent block means all off. `web` decides whether the
-agent has web tools at all. `edits` and `commands` decide whether a file change or a command runs
-without asking. An agent whose `spawn.cwd` holds its own team file (`cwd: .`) works in its
+Every switch defaults to `false`, and an absent block means all off. A switch decides whether a
+search or page read, a file change or a command runs without asking; off, the agent still has the
+tool, is told it asks first, and you answer each time (ADR 0104). An agent whose `spawn.cwd` holds its own team file (`cwd: .`) works in its
 prepared folder, so neither an edit nor a command reaches the team files. An operator node takes no
 `allow:`.
 
@@ -701,6 +844,77 @@ round, and every question that was refused and why, shows in the team's chat.
 Every field is optional and the defaults above apply. Lower `asWrittenUpTo` for a long pipeline on
 a model without prompt caching; the cost of raising the other bounds is paid by every stage
 downstream.
+
+## Project
+
+`project` names the one project the team works in (ADR 0097), a file of its own in the teams
+folder, `<teams root>/.projects/<id>.yaml`:
+
+```yaml
+# .projects/sutd-final-project.yaml
+name: SUTD final project
+about: |                 # what it is, who it is for, the person's requirements and decisions
+  Colin's final project: a gate for the campus library, in two parts, ekis-gate and ekis-kb.
+folders:                 # every agent in the project may read these without asking
+  - { name: SUTD, path: /Users/colin/Documents/SUTD }
+notes:                   # kept from earlier work: the person's, and lessons about the project
+  - { text: Colin picked option B., at: 2026-10-27T09:00:00Z }
+  - { text: The course staff read every report., by: Researcher }
+mark: sky                # the colour of the small mark beside its name
+putAway: true            # optional: shown on Home with the others put away
+```
+
+```yaml
+# the team file
+project: sutd-final-project
+```
+
+- **Read with the team.** When a team is read in its teams folder, its project file is read too,
+  each time, so a change reaches every team of the project from its next run. Every agent of the
+  team is given the project's folders as a folder connected to it is (their listing, and reading
+  anything in them without asking), and reads the project's About and notes first under
+  `## What the team knows`, before the team's own Brief. A review stop reads nothing.
+- **One Notebook for the project.** The notes a team's agents keep are the project's: every team
+  in it reads them. Notes a team kept before it joined the project stay readable.
+- **Lessons about the project.** When the person's feedback teaches an agent something about the
+  project rather than about its kind of work, the learner keeps it as one of the project's notes,
+  by that agent, never in the agent's own lessons, which go with it to other work (ADR 0078).
+- **A project that is gone** stops the team with a message saying to choose its project again.
+- **Deleting a project** (ADR 0100, Delete project… in its "…") leaves its teams in no project:
+  each file loses only its `project:` line, and LoomWatch doesn't move them into a project of
+  their own. The project's file moves to `.projects/.removed/`, and a new project never takes its
+  id.
+  A team read on its own (`loomwatchd run team.yaml` with no teams folder) runs without it.
+- **Every team works in one.** The app moves each team that names no project into a project of its
+  own, named after it, the first time it opens after projects arrived (and any later team it
+  finds without one): the team's Brief becomes the About (one for some agents only stays the
+  team's), and every folder or file connected to its agents becomes one of the project's folders,
+  while the agents keep their own. The daemon keeps a copy of every team file in
+  `<state dir>/backups/<date>-before-projects-<key>/` before the first move.
+- **One team in several projects** (ADR 0103). A team set up once can work in more than one
+  project, each with a place of its own: a team file of its own in each, all naming the same
+  `shares:` id.
+
+  ```yaml
+  # coffee.yaml                      # coffee-bikes.yaml
+  id: market-research                id: market-research-bikes
+  shares: market-research            shares: market-research
+  project: coffee                    project: bikes
+  name: Market research              name: Market research
+  # …the same agents and edges…      # …the same agents and edges…
+  ```
+
+  Each place keeps its own `id`, `project`, `schedule`, `deliver` and `memory` (the Brief beside
+  its file), so its chat, run history, files and Notebook are that project's. Everything else is
+  the team's setup: saving any place in LoomWatch writes it into the others, from their next run,
+  and keeps each approved. In a room, a team's ⋯ has **Add to another project** (a new place beside
+  its file, with no schedule or delivery yet), **Take out of** the project (that place goes to the
+  trash when the team works elsewhere; a last place stays, in no project) and **Delete team…**
+  (every place). **Add a team** in a room lists your teams that aren't there yet. Deleting a project
+  removes only the places there of teams that work elsewhere. Edit a place's file by hand and the
+  others keep their setup until the next save in LoomWatch.
+- **Limits.** A name of at most 80 characters, an About of at most 4,000, each note at most 500
+  and 40 notes (the oldest goes first); folders by full path or from `~/`.
 
 ## Memory
 
@@ -813,7 +1027,7 @@ the frame it was recorded from.
 
 A pipeline agent may declare `kind: operator` with `role` as its question and optional `name`
 (default `You`). It must omit `spawn`, `model`, `followsSuggestion`, `thinkingEffort`, `allow`, `turnedOff`,
-`doneWhen`, `checks`, `sendBack` and `sendBackOnce`. Operator nodes cannot be the entrypoint or appear in team
+`doneWhen`, `part`, `checks`, `sendBack` and `sendBackOnce`. Operator nodes cannot be the entrypoint or appear in team
 mode; consecutive stops are allowed. A pipeline with stops must be started from the app, so that
 someone can answer: `loomwatchd run` on the command line has nobody to ask, so its run fails when
 it reaches a stop.

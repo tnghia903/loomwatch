@@ -1,5 +1,5 @@
 import { useState, type ComponentProps } from 'react'
-import { Trash2, X } from 'lucide-react'
+import { Trash2, X } from '../ui/icon'
 import { CapabilityInspector } from './CapabilityInspector'
 
 export function BuildResourceInspector(props: ComponentProps<typeof CapabilityInspector> & { onRemove?: () => void }) {

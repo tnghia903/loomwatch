@@ -1,13 +1,14 @@
-import { ArrowUpRight, BellDot, Check, CornerDownLeft, X } from 'lucide-react'
+import { ArrowUpRight, BellDot, Check, CornerDownLeft, X } from '../ui/icon'
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react'
 
 import { plainWords } from '../../lib/chat/findWords'
 import type { PermissionDecision, SpendDecision } from '../../lib/runs/client'
-import { PERMISSION_SAID } from '../../lib/runs/permissionRequests'
+import { permissionSaid } from '../../lib/runs/permissionRequests'
 import { historyRunUrl } from '../../lib/runs/history'
 import { ago, APPROVAL_TEXT, type Ticket } from '../../lib/story/needsYou'
-import { goToTeam } from '../../lib/team-file/teamPage'
+import { goToRun } from '../agents/route'
 import { InlineMarkdown } from '../ui/Markdown'
+import { stateLabel } from '../../lib/state/words'
 
 interface NeedsYouTrayProps {
   tickets: readonly Ticket[]
@@ -24,7 +25,7 @@ interface NeedsYouTrayProps {
   className?: string
 }
 
-const TAG: Record<Ticket['kind'], string> = { review: 'Review step', question: 'Question', permission: 'Permission', spend: 'Spending', failed: 'Stopped' }
+const TAG: Record<Ticket['kind'], string> = { review: 'Review step', question: 'Question', permission: 'Permission', spend: 'Spending', failed: stateLabel('failed') }
 /** A review's or a question's context is what an agent wrote, in Markdown; a permission's command is shown as it is. */
 const agentWrote = (ticket: Ticket) => ticket.kind === 'review' || ticket.kind === 'question'
 
@@ -69,6 +70,21 @@ export function NeedsYouTray({ tickets, working, onAnswer, onPermission, onSpend
   const current = tickets[shown]
   // One gold fill per screen: only the active ticket's main action is filled; J and K move it.
   const main = (index: number) => (index === shown ? 'btn btn-primary' : 'btn')
+
+  // A Review or Answer on Home opens this tray at its own item, "Show N more" at the first (ADR
+  // 0097): one control answers them all.
+  const ticketsNow = useRef(tickets)
+  useEffect(() => { ticketsNow.current = tickets })
+  useEffect(() => {
+    const show = (event: Event) => {
+      const runId = (event as CustomEvent<string | undefined>).detail
+      setOpen(true)
+      setActive(Math.max(0, runId ? ticketsNow.current.findIndex((ticket) => ticket.runId === runId) : 0))
+      setSaid('')
+    }
+    window.addEventListener('loomwatch:open-needs-you', show)
+    return () => window.removeEventListener('loomwatch:open-needs-you', show)
+  }, [])
 
   // The bell rings when something new needs you, then rests: ringing for as long as a ticket waits
   // runs past WCAG 2.2.2's five seconds. A count that only goes down never rings. The ring is the
@@ -134,7 +150,7 @@ export function NeedsYouTray({ tickets, working, onAnswer, onPermission, onSpend
     setError(null)
     try {
       await onPermission(ticket, decision)
-      setSaid(`${ticket.asker}: ${PERMISSION_SAID[decision]}`)
+      setSaid(`${ticket.asker}: ${permissionSaid(decision, ticket.switch)}`)
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught))
     } finally {
@@ -154,7 +170,7 @@ export function NeedsYouTray({ tickets, working, onAnswer, onPermission, onSpend
       setBusy(null)
     }
   }
-  const openRun = (ticket: Ticket) => goToTeam(historyRunUrl({ id: ticket.runId, teamPath: ticket.teamPath }))
+  const openRun = (ticket: Ticket) => goToRun(historyRunUrl({ id: ticket.runId, teamPath: ticket.teamPath }))
   const startReply = (ticket: Ticket) => { setReplying(ticket.id); setDraft('') }
 
   // The run on screen already asks with its own answer box and permission card, so its ticket
@@ -209,7 +225,7 @@ export function NeedsYouTray({ tickets, working, onAnswer, onPermission, onSpend
                   <span className="ticket-where">{ticket.teamName} · {ago(ticket.since)}</span>
                 </div>
                 <p className="ticket-text">
-                  {ticket.kind === 'question' ? <><b>{ticket.asker}</b> asks: “{ticket.text}”</> : ticket.kind === 'permission' ? <>{ticket.text}. It is paused until you answer.</> : ticket.kind === 'spend' ? <>{ticket.text}</> : ticket.kind === 'review' ? <>{ticket.text || `${ticket.asker} is waiting for your approval.`}</> : <>{ticket.text}</>}
+                  {ticket.kind === 'question' ? <><b>{ticket.asker}</b> asks: “<InlineMarkdown clickable={false}>{ticket.text}</InlineMarkdown>”</> : ticket.kind === 'permission' ? <>{ticket.text}. It is paused until you answer.</> : ticket.kind === 'spend' ? <>{ticket.text}</> : ticket.kind === 'review' ? <>{ticket.text ? <InlineMarkdown clickable={false}>{ticket.text}</InlineMarkdown> : `${ticket.asker} is waiting for your approval.`}</> : <>{ticket.text}</>}
                 </p>
                 {ticket.context && <blockquote className="ticket-context" title={agentWrote(ticket) ? plainWords(ticket.context) : ticket.context}>{agentWrote(ticket) ? <InlineMarkdown clickable={false}>{ticket.context}</InlineMarkdown> : ticket.context}</blockquote>}
                 {ticket.until && <p className="ticket-until t-meta">{ticket.until}</p>}
@@ -224,12 +240,13 @@ export function NeedsYouTray({ tickets, working, onAnswer, onPermission, onSpend
                   </form>
                 ) : (
                   <div className="ticket-acts">
-                    {ticket.kind === 'review' && <button type="button" className={main(index)} disabled={busy === ticket.id} onClick={() => void send(ticket, APPROVAL_TEXT)}><Check size={13} aria-hidden="true" />Looks good<kbd>A</kbd></button>}
+                    {ticket.kind === 'review' && <button type="button" className={main(index)} disabled={busy === ticket.id} onClick={() => void send(ticket, APPROVAL_TEXT)}><Check size={13} aria-hidden="true" />Approve<kbd>A</kbd></button>}
                     {ticket.kind === 'review' && <button type="button" className="btn" onClick={() => startReply(ticket)}>{ticket.sendBackTo ? 'Send back…' : 'Add a note…'}<kbd>R</kbd></button>}
                     {ticket.kind === 'question' && <button type="button" className={main(index)} onClick={() => startReply(ticket)}>Answer…<kbd>R</kbd></button>}
                     {ticket.kind === 'permission' && onPermission && <>
                       <button type="button" className={main(index)} disabled={busy === ticket.id} onClick={() => void decide(ticket, 'allow_once')}><Check size={13} aria-hidden="true" />Allow<kbd>A</kbd></button>
-                      <button type="button" className="btn" disabled={busy === ticket.id} onClick={() => void decide(ticket, 'allow_run')}>Allow for this run</button>
+                      {/* A yes to the web is already for the rest of the run (ADR 0104). */}
+                      {ticket.switch !== 'web' && <button type="button" className="btn" disabled={busy === ticket.id} onClick={() => void decide(ticket, 'allow_run')}>Allow for this run</button>}
                       {ticket.team && <button type="button" className="btn" disabled={busy === ticket.id} onClick={() => void decide(ticket, 'allow_team')}>Allow for the whole team</button>}
                       <button type="button" className="btn" disabled={busy === ticket.id} onClick={() => void decide(ticket, 'deny')}>Deny<kbd>D</kbd></button>
                     </>}

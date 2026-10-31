@@ -1,10 +1,11 @@
-import { Check, Plus, X } from 'lucide-react'
+import { Check, Plus, X } from '../ui/icon'
 import { Fragment, useEffect, useState } from 'react'
 
 import { KIND_LABEL, RELATION, type CapabilityKind } from '../../lib/composer-layout/types'
 import { fetchCapabilityDetails, type CapabilityDetails, type DetectedCapability, type SkillRoute } from '../../lib/library/client'
 import { notionPageUrl } from '../../lib/notion/connection'
 import { EntityGlyph } from '../ui/glyphs'
+import { InlineMarkdown } from '../ui/Markdown'
 
 export interface InspectedCapability {
   item: DetectedCapability
@@ -106,7 +107,7 @@ export function CapabilityInspector({ item, kind, placed, connectedAgents, agent
 
         <div className="zone">
           <div className="zone-head t-micro">Details</div>
-          <p className="capability-description t-body">{item.detail}</p>
+          <p className="capability-description t-body"><InlineMarkdown>{item.detail}</InlineMarkdown></p>
           <dl className="proc-list t-meta capability-facts">
             <dt>Type</dt><dd>{chosen ? item.source : KIND_LABEL[kind]}</dd>
             {notionPage
@@ -129,7 +130,7 @@ export function CapabilityInspector({ item, kind, placed, connectedAgents, agent
                   {portability.needs.map((need) => (
                     <Fragment key={need}>
                       <dt>{need}</dt>
-                      <dd>{portability.evidence.find((item) => item.need === need)?.line ?? '—'}</dd>
+                      <dd><InlineMarkdown>{portability.evidence.find((item) => item.need === need)?.line ?? '—'}</InlineMarkdown></dd>
                     </Fragment>
                   ))}
                 </dl>

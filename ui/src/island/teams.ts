@@ -34,6 +34,8 @@ export interface TeamNow {
   startedAt: string | null
   /** What waits for you on this run, oldest first: permissions, questions, reviews, spend stops. */
   asks: Ticket[]
+  /** The agent each ask is about, by the ask's id, for the figure that holds it out (`askerOf`). */
+  askers?: Readonly<Record<string, string | null>>
   /** The asks that can be answered from the island with Allow or Deny (`answerableAtAGlance`). */
   quick: readonly string[]
   /** For a finished or stopped run: the answer's first line, or what went wrong. */
@@ -77,7 +79,8 @@ export function teamsNow(
     if (!live && !(ended && isNews(record.runId, record.finishedAt, since, seen))) continue
     const asks = live ? ticketsFrom([record], names, new Set()).filter((ticket) => ticket.kind !== 'failed') : []
     const moment: Moment = live ? (asks.length ? 'ask' : 'work') : record.status === 'succeeded' ? 'done' : 'fail'
-    const agent = agentOf(record, moment, asks[0], lastAgent)
+    const last = lastAgent.get(record.runId) ?? null
+    const agent = agentOf(record, moment, asks[0], last)
     teams.push({
       runId: record.runId,
       teamPath: record.teamPath,
@@ -89,6 +92,7 @@ export function teamsNow(
       names: record.agentNames,
       startedAt: record.startedAt,
       asks,
+      askers: Object.fromEntries(asks.map((ask) => [ask.id, askerOf(record, ask, last)])),
       quick: live ? (record.permissionRequests ?? []).filter(answerableAtAGlance).map((request) => `${record.runId}:permission:${request.id}`) : [],
       result: moment === 'done' ? firstLine(record.reply) || 'The answer is ready.' : moment === 'fail' ? (record.error ? plainRunError(record.error).split('\n')[0] : '') || 'Something went wrong before it finished.' : null,
       link: historyRunUrl({ id: record.runId, teamPath: record.teamPath }),
@@ -145,30 +149,29 @@ function whoDidNotAnswer(note: NoteAnswering, ids: readonly string[]): string | 
   return ids.length > 2 ? null : listNames(ids.map((id) => note.agentNames[id] || id))
 }
 
-function agentOf(record: RunRecord, moment: Moment, ask: Ticket | undefined, lastAgent: ReadonlyMap<string, string>): string | null {
-  const last = lastAgent.get(record.runId) ?? null
-  if (moment === 'ask' && ask) {
-    // A permission's or a question's asker; a review stop is about the work handed to it.
-    if (ask.kind === 'permission' || ask.kind === 'question') return ask.node
-    if (ask.kind === 'review') return record.waitingOn?.handoverFrom ?? last
-    return ask.node ?? record.working?.[0] ?? last
-  }
+function agentOf(record: RunRecord, moment: Moment, ask: Ticket | undefined, last: string | null): string | null {
+  if (moment === 'ask' && ask) return askerOf(record, ask, last)
   return record.working?.[0] ?? last ?? (moment === 'work' ? null : record.agentIds.at(-1) ?? null)
+}
+
+/** The agent `ask` is about: a permission's or a question's asker; a review stop is about the work
+    handed to it, not the stop, which is you. */
+function askerOf(record: RunRecord, ask: Ticket, last: string | null): string | null {
+  if (ask.kind === 'permission' || ask.kind === 'question') return ask.node
+  if (ask.kind === 'review') return record.waitingOn?.handoverFrom ?? last
+  return ask.node ?? record.working?.[0] ?? last
 }
 
 function teamFromPath(path: string): string {
   return (path.split('/').at(-1) ?? path).replace(/\.ya?ml$/, '')
 }
 
-/** The answer's first line of text, without its Markdown, short enough for one line or two. */
+/** The answer's first line of text, as written: its bold, code and links are shown at the notch
+ * (InlineMarkdown), less a heading's, quote's or list's mark, and the line it sits in cuts it. */
 export function firstLine(reply: string | null | undefined): string {
   for (const raw of (reply ?? '').split('\n')) {
-    const line = raw
-      .replace(/^\s*(#{1,6}\s+|>\s*|[-*+]\s+|\d+[.)]\s+)/, '')
-      .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
-      .replace(/[*_`~]+/g, '')
-      .trim()
-    if (line && !/^-{3,}$/.test(line)) return line.length > 120 ? `${line.slice(0, 119).trimEnd()}…` : line
+    const line = raw.replace(/^\s*(#{1,6}\s+|>\s*|[-*+]\s+|\d+[.)]\s+)/, '').trim()
+    if (line && !/^-{3,}$/.test(line)) return line
   }
   return ''
 }

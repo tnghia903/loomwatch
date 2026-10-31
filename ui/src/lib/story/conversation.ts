@@ -1,5 +1,5 @@
 import type { Evidence } from '../watch/events'
-import { allMet, LOOMWATCH_ID, OPERATOR_ID, type MessageKind, type PermissionOutcome, type TeamMessage } from '../watch/messages'
+import { allMet, OPERATOR_ID, type MessageKind, type PermissionOutcome, type TeamMessage } from '../watch/messages'
 import { nameWithHelpers } from '../chat/helpers'
 
 /**
@@ -42,11 +42,12 @@ export interface Conversation {
 
 /**
  * `predecessors` are the team's connections into each agent. Without them, the stage before in
- * `order` is taken as the one that handed over, as the handover panel has always done.
+ * `order` is taken as the one that handed over, as the handover panel has always done. `guests`
+ * names the person's other agents a run may bring in from My agents (ADR 0092).
  */
-export function converse(messages: readonly TeamMessage[], order: readonly Party[], predecessors?: ReadonlyMap<string, readonly string[]>): Conversation {
+export function converse(messages: readonly TeamMessage[], order: readonly Party[], predecessors?: ReadonlyMap<string, readonly string[]>, guests: ReadonlyMap<string, string> = new Map()): Conversation {
   const known = new Map(order.map((party) => [party.id, party]))
-  const names = new Map(order.map((party) => [party.id, party.name]))
+  const names = new Map([...guests, ...order.map((party) => [party.id, party.name] as const)])
   const firstOperator = order.find((party) => party.operator)
   const laneId = (id: string) => (id === OPERATOR_ID && !known.has(id) && firstOperator ? firstOperator.id : id)
   const before = (id: string): string[] => {
@@ -96,7 +97,7 @@ export function converse(messages: readonly TeamMessage[], order: readonly Party
   for (const id of involved) {
     if (known.has(id)) continue
     // A helper (ADR 0079) is named after the agent it helps.
-    lanes.push(id === OPERATOR_ID ? { id, name: 'You', operator: true } : { id, name: id === LOOMWATCH_ID ? 'LoomWatch' : nameWithHelpers(names, id) ?? id, operator: false })
+    lanes.push(id === OPERATOR_ID ? { id, name: 'You', operator: true } : { id, name: nameWithHelpers(names, id) ?? id, operator: false })
   }
   return { lanes, lines }
 }
@@ -186,6 +187,14 @@ function checkWord(message: TeamMessage): string {
 /** Kinds that expect an answer, so an answer not yet given shows as one owed. */
 const ANSWERED: ReadonlySet<MessageKind> = new Set(['ask', 'question', 'escalate', 'note', 'permission', 'helper'])
 
+/**
+ * Work handed to an agent, whose reply says how the work went ("done", "couldn’t finish"): a
+ * helper's part, and work handed out with `dispatch` or `handoff` (ADR 0092).
+ */
+export function handedWork(kind: MessageKind): boolean {
+  return kind === 'helper' || kind === 'dispatch' || kind === 'handoff'
+}
+
 /** Whether a message to an agent is answered back, so the talk shows the agent owing it while it writes. */
 export function expectsAnswer(kind: MessageKind): boolean {
   return ANSWERED.has(kind) || kind === 'check'
@@ -233,7 +242,7 @@ export function bubbles(items: readonly Item[], lanes: readonly Lane[], live: bo
         // An answer goes back to whoever asked; your review goes back where you sent it, or on.
         to: back ? [back] : reviewing ? passedOn.map((passed) => passed.to) : line.senders.slice(0, 1),
         word: back ? 'sent back' : deciding ? (plain ? 'approved' : 'approved, with a note') : message.kind === 'check' ? 'revised' : reply.asksBack ? 'asks back'
-          : message.kind === 'helper' ? (reply.failed ? 'couldn’t finish' : reply.stopped ? 'stopped' : 'done') : 'answer',
+          : handedWork(message.kind) ? (reply.failed ? 'couldn’t finish' : reply.stopped ? 'stopped' : 'done') : 'answer',
         text: plain ? '' : reply.text, offsetMs: reply.offsetMs, ts: reply.ts,
       })
     } else if (message.state === 'pending' && line.receiver !== null && (expectsAnswer(message.kind) || reviewing)) {

@@ -27,6 +27,12 @@ describe('an agent’s Markdown inside a line of the app’s own', () => {
     expect(container).toHaveTextContent('Fix the slot count one two')
   })
 
+  it('keeps a number that would start a list as its words: “2025.” is not an empty list', async () => {
+    const { container } = render(<p>Answer: <InlineMarkdown>{'2025.'}</InlineMarkdown> then <InlineMarkdown>{'3) **maybe**'}</InlineMarkdown></p>)
+    expect(await screen.findByText('maybe')).toBeInTheDocument()
+    expect(container).toHaveTextContent('Answer: 2025. then 3) maybe')
+  })
+
   it('keeps a claim’s tag and the words a chat search found', async () => {
     showFoundWords([{ text: 'slot', prefix: true }])
     const { container } = render(<FindScopeContext.Provider value><p><InlineMarkdown>{'[Sourced] Two filled slots and one empty.'}</InlineMarkdown></p></FindScopeContext.Provider>)

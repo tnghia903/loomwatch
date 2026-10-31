@@ -12,6 +12,14 @@ const WANTS: Record<string, string> = {
 export const PERMISSION_SAID: Record<PermissionDecision, string> = { edit: 'Allowed as you changed it.', answer: 'Your answer was sent.', allow_once: 'Allowed once.', allow_run: 'Allowed for the rest of the run.', allow_team: 'Allowed for the whole team, for the rest of the run.', deny: 'Denied. The agent carries on without it.' }
 
 /**
+ * What an answer did, for a request under `switchKey`. A yes to the web gives the agent the web for
+ * the rest of the run, whichever button sent it (ADR 0104), so it is said that way.
+ */
+export function permissionSaid(decision: PermissionDecision, switchKey?: string | null): string {
+  return PERMISSION_SAID[switchKey === 'web' && decision === 'allow_once' ? 'allow_run' : decision]
+}
+
+/**
  * Whether a request can be answered with one tap, away from its full card: the island at the notch
  * offers Allow and Deny only for these (ADR 0083). A command can't be judged from one line, and
  * the ones Auto mode still asks about are the risky ones, so they, and a request that offers an

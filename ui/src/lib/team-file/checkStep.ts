@@ -22,6 +22,12 @@ export const CHECK_EFFORT: Readonly<Record<string, Effort>> = {
   designer: 'high',
   lead: 'high',
   analyst: 'high',
+  deck: 'high',
+  document: 'high',
+  sheet: 'high',
+  chart: 'high',
+  dashboard: 'high',
+  video: 'high',
 }
 
 /** The effort for work of a kind the table has no row for. */

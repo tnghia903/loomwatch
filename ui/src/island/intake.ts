@@ -1,6 +1,7 @@
 // What went into the island's slot for the box's agent (ADR 0083, decisions 10 and 11): files, a
 // picture, a link or some text, dragged from any app. Pure: what it is, what to call it, the jobs
 // that fit it, and the words sent with it.
+import { extensionOf } from '../lib/files/fileRefs'
 
 export interface Intake {
   files: readonly File[]
@@ -20,6 +21,12 @@ const EMAIL = /\.eml$/i
 
 const emails = (intake: Intake) => intake.files.length > 0 && intake.files.every((file) => EMAIL.test(file.name))
 
+/** A file is the same file dropped again when its name and size are. */
+const fileKey = (file: File) => `${file.name}\n${file.size}`
+
+export const isPicture = (file: File) => PICTURE.test(file.name) || file.type.startsWith('image/')
+export const isEmail = (file: File) => EMAIL.test(file.name)
+
 /** What a drop carries, or `null` when it carries nothing the agent can take. */
 export function intakeFrom(data: { files: Iterable<File> | null; getData: DataTransfer['getData'] }): Intake | null {
   const files = [...(data.files ?? [])]
@@ -35,16 +42,53 @@ export function intakeFrom(data: { files: Iterable<File> | null; getData: DataTr
     a link or some text takes the place of what was there, as files do of a link or text. */
 export function withDropped(waiting: Intake | null, dropped: Intake): Intake {
   if (!waiting?.files.length || !dropped.files.length) return dropped
-  const key = (file: File) => `${file.name}\n${file.size}`
-  const there = new Set(waiting.files.map(key))
-  return { ...dropped, files: [...waiting.files, ...dropped.files.filter((file) => !there.has(key(file)))] }
+  const there = new Set(waiting.files.map(fileKey))
+  return { ...dropped, files: [...waiting.files, ...dropped.files.filter((file) => !there.has(fileKey(file)))] }
+}
+
+/** What waits once one of its files is taken out: the rest, or nothing when it was the last. */
+export function withoutFile(waiting: Intake, file: File): Intake | null {
+  const files = waiting.files.filter((each) => fileKey(each) !== fileKey(file))
+  return files.length || waiting.link || waiting.text ? { ...waiting, files } : null
+}
+
+/** About as many letters as one of a tile's two short lines holds. */
+const TILE_LINE = 10
+
+/** A file's name under its tile, in one or two lines, where its page says its kind already: an
+    email by its subject, as Mail names its file, and any other file without its extension, unless
+    that is all it is. A name longer than two lines loses its middle, as Finder cuts it: its first
+    words, then "…" and its last, so "Budget … rent v1" and "Budget … rent v2" still differ. */
+export function tileName(file: File): readonly string[] {
+  const extension = extensionOf(file.name)
+  const name = (extension && file.name.slice(0, -(extension.length + 1))) || file.name
+  if ([...name].length <= 2 * TILE_LINE) return [name]
+  return [wordsUpTo(name, TILE_LINE, 'start'), `…${wordsUpTo(name, TILE_LINE - 1, 'end')}`]
+}
+
+/** As many whole words from the `side` of `name` as fit in `room` letters, or the letters there
+    when even the first word doesn't. */
+function wordsUpTo(name: string, room: number, side: 'start' | 'end'): string {
+  const words = name.split(/\s+/).filter(Boolean)
+  if (side === 'end') words.reverse()
+  let taken: string[] = []
+  for (const word of words) {
+    const more = [...taken, word]
+    if ([...more.join(' ')].length > room) break
+    taken = more
+  }
+  if (!taken.length) {
+    const letters = [...name.trim()]
+    return (side === 'start' ? letters.slice(0, room) : letters.slice(-room)).join('')
+  }
+  return (side === 'end' ? taken.reverse() : taken).join(' ')
 }
 
 export function kindOf(intake: Intake): IntakeKind {
   if (emails(intake)) return 'email'
   if (intake.files.length > 1) return 'files'
   const file = intake.files[0]
-  if (file) return PICTURE.test(file.name) || file.type.startsWith('image/') ? 'picture' : TABLE.test(file.name) ? 'table' : 'document'
+  if (file) return isPicture(file) ? 'picture' : TABLE.test(file.name) ? 'table' : 'document'
   return intake.link ? 'link' : 'text'
 }
 

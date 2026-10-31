@@ -20,11 +20,26 @@ describe('the permission card (ADR 0040)', () => {
     expect(screen.getByText('Web search · Model Cards for Model Reporting 2019')).toBeInTheDocument()
     expect(screen.getByText(/Researcher is paused until you answer\. Declines by itself in 9 min/)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Always allow/ })).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'Allow for this run' }))
+    // A yes to the web is for the rest of the run (ADR 0104): one Allow, which says so.
+    expect(screen.queryByRole('button', { name: 'Allow for this run' })).toBeNull()
+    const allow = screen.getByRole('button', { name: 'Allow' })
+    expect(allow).toHaveAttribute('title', 'Researcher may use the web until this run ends')
+    fireEvent.click(allow)
     await vi.waitFor(() => expect(screen.queryByText('Researcher wants to use the web')).toBeNull())
     const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit]
     expect(url).toBe('/api/runs/r1/permissions')
     expect(JSON.parse(String(init.body))).toEqual({ requestId: 'p1', decision: 'allow_run' })
+  })
+
+  it('keeps Allow once and Allow for this run apart for a command', async () => {
+    const fetch = vi.fn(() => Promise.resolve(json({ runId: 'r1' })))
+    vi.stubGlobal('fetch', fetch)
+    render(<PermissionPrompt run={{ runId: 'r1', permissionRequests: [request({ title: 'Run: npm test', kind: 'execute', switch: 'commands', detail: undefined })] }} />)
+    expect(screen.getByRole('button', { name: 'Allow for this run' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Allow' }))
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalled())
+    const [, init] = fetch.mock.calls[0] as unknown as [string, RequestInit]
+    expect(JSON.parse(String(init.body))).toEqual({ requestId: 'p1', decision: 'allow_once' })
   })
 
   // A command you'd run a little differently: change it on the card, and that is what runs.

@@ -22,6 +22,21 @@ properties:
   name:
     type: string
     minLength: 1
+  project:
+    description: >-
+      The project this team works in (ADR 0097): `<teams root>/.projects/<id>.yaml`. Every agent of
+      the team reads the project's About and notes first in what the team knows, may read its
+      folders without asking, and shares its Notebook with the project's other teams.
+    type: string
+    pattern: "^[a-z0-9][a-z0-9-]{0,63}$"
+  shares:
+    description: >-
+      The team this file is one place of (ADR 0103). A team set up once can work in several
+      projects: each project has a team file of its own, and every one of them names the same
+      `shares` id. Each keeps its own `id`, `project`, `schedule`, `deliver` and `memory` (the
+      Brief beside it), so its chat, run history and files are that project's; everything else is
+      the team's setup, and saving one place in LoomWatch writes it into the others.
+    $ref: "#/$defs/Identifier"
   budget:
     $ref: "#/$defs/RetiredBudget"
   spend:
@@ -120,7 +135,8 @@ $defs:
 
   Check:
     description: >-
-      What a check step (`checks:`) is shown besides the work it checks.
+      How work is checked: what a check step (`checks:`) is shown besides the work it checks, and
+      what a person's message says done looks like (`fromMessage`).
     type: object
     additionalProperties: false
     properties:
@@ -134,6 +150,48 @@ $defs:
         minimum: 0
         maximum: 24000
         default: 8000
+      fromMessage:
+        description: >-
+          What a person's message says done looks like (ADR 0098): "at most 250 words", "three
+          sections", "stop after 5 tries". One turn of the fast model reads it beside the work,
+          quoting the message and never adding, and the message shows what was read. The work is
+          checked against it before it becomes the answer: by the team's check step when that
+          checks the answering agent (its items come first), else by LoomWatch's own check, the
+          built-in Checker job on another maker's model where one is connected. Work that misses
+          goes back into the answering agent's open session. A routine's message is not read.
+        $ref: "#/$defs/FromMessage"
+
+  FromMessage:
+    type: object
+    additionalProperties: false
+    properties:
+      read:
+        description: >-
+          Read each message for what it says done looks like. Off, a message's words are never
+          turned into checks.
+        type: boolean
+        default: true
+      rounds:
+        description: >-
+          How many times the work may go back when the message names no number of tries.
+        type: integer
+        minimum: 1
+        maximum: 10
+        default: 2
+      maxRounds:
+        description: >-
+          The most times a message may send the work back, however many tries it asks for. A try
+          is the first work or one revision, so "5 tries" is four send-backs.
+        type: integer
+        minimum: 1
+        maximum: 10
+        default: 5
+      whenStillNotMet:
+        description: >-
+          After the last round: `ask` stops the run on a review of the work with its checks beside
+          it, `answer` shows the answer with what was not met marked.
+        enum: [answer, ask]
+        default: ask
 
   Stop:
     description: >-
@@ -578,6 +636,15 @@ $defs:
         minimum: 0
         maximum: 8
         default: 4
+      myAgents:
+        description: >-
+          How many of the person's agents in My agents are listed to the team's starting agent, or
+          an agent working alone, when it may bring one in for a part no one on the team does (ADR
+          0092), most recently saved first. 0, the default, turns bringing in off for the team.
+        type: integer
+        minimum: 0
+        maximum: 100
+        default: 0
 
   Agent:
     description: >-
@@ -592,16 +659,22 @@ $defs:
     additionalProperties: false
     required:
       - id
-      - role
     oneOf:
       - title: Harness node
-        description: An agent, so it must say which model it runs on.
+        description: >-
+          An agent. Either one of My agents (`from`, ADR 0094), whose own fields are filled in
+          from `<teams root>/.jobs/<agent>.yaml` when the team is read, or an agent written out in
+          full, which must say what it is told and which model it runs on.
         properties:
           kind:
             const: harness
-        required:
-          - name
-          - model
+        anyOf:
+          - title: One of My agents
+            required: [from]
+            not:
+              required: [role]
+          - title: Written out in full
+            required: [name, role, model]
         not:
           required: [sendBack, sendBackOnce]
       - title: Operator node
@@ -614,6 +687,7 @@ $defs:
             const: operator
         required:
           - kind
+          - role
         not:
           anyOf:
             - required: [spawn]
@@ -621,6 +695,7 @@ $defs:
             - required: [followsSuggestion]
             - required: [thinkingEffort]
             - required: [doneWhen]
+            - required: [part]
             - required: [checks]
             - required: [sendBackOnce]
             - required: [sendBack]
@@ -687,6 +762,29 @@ $defs:
           type: string
           minLength: 1
           maxLength: 160
+      part:
+        description: >-
+          What this team needs from this agent (ADR 0097): a line or two about its part in this
+          team's work, and that part's own Done when items. It is the team's, never the agent's: one
+          of My agents keeps instructions and a Done when for its kind of work, the same in every
+          team, and each team says here what it needs from it. The agent reads `text` under
+          `## Your part in this team`, and `doneWhen` comes first in its Done when, which a check
+          step checks too. Not for an operator node.
+        type: object
+        additionalProperties: false
+        minProperties: 1
+        properties:
+          text:
+            type: string
+            minLength: 1
+            maxLength: 1000
+          doneWhen:
+            type: array
+            maxItems: 5
+            items:
+              type: string
+              minLength: 1
+              maxLength: 160
       checks:
         description: >-
           Makes this agent a check step (ADR 0062): the id of the agent whose work it checks, which
@@ -735,6 +833,14 @@ $defs:
         $ref: "#/$defs/Spend"
       allowRecruiting:
         description: Whether this agent may recruit helpers while executing its own step.
+        type: boolean
+        default: true
+      allowMyAgents:
+        description: >-
+          Whether this agent, as the team's starting agent or working alone, may bring in another
+          of the person's agents from My agents for a part no one on the team does (ADR 0092),
+          when the team lists any (`guards.myAgents`). The agent's own switch, filled in from My
+          agents (`bringsIn: false` in its file).
         type: boolean
         default: true
       capabilities:
@@ -805,17 +911,16 @@ $defs:
                 const: loomwatch-team-bus
       from:
         description: >-
-          The agent in "Your agents" this one was placed from (`<teams root>/.jobs/<agent>.yaml`),
-          and the version it copies. The fields above are that version's, so the team runs exactly
-          what it was approved with: editing the agent there makes a new version, which reaches
-          this team only when the operator chooses Update here. The daemon reads only `agent`: it
-          names whose lessons the agent reads and adds to, the same in every team (ADR 0078).
-          Removing it makes the agent this team's own.
+          The agent in My agents this one is (`<teams root>/.jobs/<agent>.yaml`, ADR 0094). Its
+          name, instructions, model, skills, tools, what it reads, Done when, switches and helpers
+          switch are that agent's, the same in every team, and are filled in from there when the
+          team is read; the entry keeps only what is this team's. An entry that writes its own
+          `role` runs as it is written, and `from` then only names whose lessons it reads and
+          adds to (ADR 0078). `version` is what an earlier LoomWatch wrote: read and ignored.
         type: object
         additionalProperties: false
         required:
           - agent
-          - version
         properties:
           agent:
             $ref: "#/$defs/Identifier"

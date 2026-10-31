@@ -134,6 +134,37 @@ fn schema_and_all_examples_are_valid() {
     }
 }
 
+/// ADR 0094: an agent entry may be one of My agents, holding only the team's fields; then it writes
+/// no `role` of its own. One written out in full still names what it is told and its model, and a
+/// review stop still asks its question.
+#[test]
+fn an_agent_is_one_of_my_agents_or_written_out_in_full() {
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let schema = read_yaml(&workspace.join("schemas/team.schema.yaml"));
+    let validator = jsonschema::draft202012::new(&schema)
+        .unwrap_or_else(|error| panic!("failed to compile team schema: {error}"));
+    let team = |agent: Value| json!({"schemaVersion": 1, "id": "t", "name": "T", "entrypoint": "a", "agents": [agent], "edges": []});
+
+    assert!(validator.is_valid(&team(json!({"id": "a", "from": {"agent": "researcher"}}))));
+    assert!(validator.is_valid(&team(json!({
+        "id": "a", "from": {"agent": "researcher"}, "spawn": {"cwd": "work"}, "model": "fake/offline",
+        "followsSuggestion": true, "capabilities": [{"kind": "knowledge", "name": "Notes", "path": "/notes"}]
+    }))));
+    // What an earlier LoomWatch wrote, a copy and its version, still validates.
+    assert!(validator.is_valid(&team(json!({
+        "id": "a", "name": "A", "role": "Do it.", "model": "fake/offline", "from": {"agent": "researcher", "version": 3}
+    }))));
+    // Neither one of My agents nor written out in full.
+    assert!(!validator.is_valid(&team(
+        json!({"id": "a", "name": "A", "model": "fake/offline"})
+    )));
+    assert!(!validator.is_valid(&team(
+        json!({"id": "a", "role": "Do it.", "from": {"agent": "researcher"}})
+    )));
+    // A review stop asks its question.
+    assert!(!validator.is_valid(&team(json!({"id": "a", "kind": "operator"}))));
+}
+
 #[test]
 fn responder_is_an_optional_identifier() {
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");

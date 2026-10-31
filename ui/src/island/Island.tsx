@@ -4,12 +4,12 @@
 // notch drawn in the menu bar of a screen without one is the same (decision 12). With no notch at
 // all, on a screen showing no menu bar, only the box is drawn, while it is called, then its agent
 // at work in a pill, and its answer (decision 11).
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 
 import { AgentFigure } from '../components/agents/benchFigure'
 import { FigureStill } from '../components/agents/FigureStill'
-import { ArrowUp, CornerDownLeft } from 'lucide-react'
+import { Mic, Plus } from '../components/ui/icon'
 
 import { LoomMark, StatusGlyph } from '../components/ui/glyphs'
 import { dropped } from '../lib/chat/attachments'
@@ -18,18 +18,22 @@ import { figureFor } from '../lib/library/figures'
 import type { Ticket } from '../lib/story/needsYou'
 import { useSessionEvents } from '../lib/watch/useSessionEvents'
 import { workPhase } from '../lib/watch/workPhase'
-import { inApp, tellApp, type Area } from './bridge'
+import { inApp, PINNED_SHORTCUT_WORDS, tellApp, type Area } from './bridge'
+import { talkProblem, type TalkProblem } from './talk'
 import { intakeFrom } from './intake'
-import { AnswerSlip, CrewStage, IntakeJobs, Slot, StartTeam, TeamAskBody } from './PinnedAgent'
+import { AnswerSlip, CrewStage, IntakeJobs, Slot, StartTeam, Suggestions, TeamAskBody } from './PinnedAgent'
 import { teamAskKey, workedFor, type TeamNow } from './teams'
 import { useIsland, type Island as IslandState } from './useIsland'
 import { useRunLimit } from './useRunLimit'
 import { ISLAND_WAITS } from './waits'
+import { InlineMarkdown } from '../components/ui/Markdown'
+import { STATE_WORDS } from '../lib/state/words'
+import { SendButton } from '../components/box/BoxButtons'
 
 /** Rows in the list before "N more teams in LoomWatch", as in the menu. */
 const LIST_ROWS = 5
-/** Other agents shown beside the box before "+N"; Tab reaches every one. */
-const OTHER_AGENTS = 5
+/** While files wait in the box, which takes their room in the panel: the rest are counted. */
+const LIST_ROWS_WITH_FILES = 2
 
 /** The agent's workbench, with three.js: fetched once the page has settled, not with the page, so
     the page loads at once and the bench is ready by the time the box opens. */
@@ -341,7 +345,7 @@ function Hang({ island, onPointerEnter, onPointerLeave }: { island: IslandState;
         {shown && ticket && (
           <>
             <span className="island-hang-figure glow" data-moment="ask">
-              <FigureStill figure={island.figure(shown.team.teamPath, ticket.node ?? shown.team.agent)} alt="" />
+              <FigureStill figure={island.figure(shown.team.teamPath, shown.team.askers?.[ticket.id] ?? shown.team.agent)} alt="" />
             </span>
             <div className="island-card" role="group" aria-label={`${shown.team.teamName}: ${ticket.text}`}>
               <AskBody island={island} team={shown.team} ticket={ticket} first />
@@ -367,8 +371,8 @@ function AskBody({ island, team, ticket, first }: { island: IslandState; team: T
     <>
       <div className="island-words">
         <small>{team.teamName}</small>
-        <p className="island-ask">{text}</p>
-        {context && <small className="island-detail">{context}</small>}
+        <p className="island-ask"><InlineMarkdown clickable={false}>{text}</InlineMarkdown></p>
+        {context && <small className="island-detail"><InlineMarkdown clickable={false}>{context}</InlineMarkdown></small>}
         {failed && <small className="island-problem" role="alert">That didn’t go through. Answer it in LoomWatch.</small>}
         {said && <small className="island-said" role="status">{said}</small>}
       </div>
@@ -395,7 +399,7 @@ function AskBody({ island, team, ticket, first }: { island: IslandState; team: T
 function resultWords(team: TeamNow): string {
   if (team.didNotStart) return `${team.teamName} didn’t start`
   if (team.chat && team.moment === 'fail') return `${team.agentName ?? team.teamName} didn’t answer`
-  if (team.moment === 'fail') return `${team.teamName} stopped`
+  if (team.moment === 'fail') return `${team.teamName} ${STATE_WORDS.failed}`
   if (team.pinned) return `${team.teamName} answered`
   if (team.chat) return `${team.agentName ?? 'The team'} answered in ${team.teamName}`
   return `${team.teamName} is done`
@@ -426,7 +430,7 @@ function ResultBody({ island, team }: { island: IslandState; team: TeamNow }) {
     <>
       <div className="island-words">
         <small>{resultWords(team)}</small>
-        <p>{team.result}</p>
+        <p className="island-result">{team.result && <InlineMarkdown clickable={false}>{team.result}</InlineMarkdown>}</p>
       </div>
       <div className="island-acts">
         <button type="button" className="island-button" onClick={() => island.open(team)}>{resultButton(team)}</button>
@@ -450,7 +454,7 @@ function List({ island, mode, benchSlot, openedFrom, ear }: { island: IslandStat
   // A team the pinned agent started works on its stage, in its row; a question from it stays a row.
   const crews = island.teams.filter((team) => team.crewFor && team.moment === 'work')
   const teams = mode !== 'list' || island.bench ? [] : island.teams.filter((team) => !team.pinned && !(team.crewFor && team.moment === 'work'))
-  const rows = teams.slice(0, LIST_ROWS)
+  const rows = teams.slice(0, island.intake?.files.length ? LIST_ROWS_WITH_FILES : LIST_ROWS)
   const more = teams.length - rows.length
   const firstPermission = [...(pinnedWork ? [pinnedWork] : []), ...rows].flatMap((team) => team.asks.filter((ask) => team.quick.includes(ask.id)))[0]?.id
   // The island grows to the list's height, which only the drawn list knows.
@@ -522,9 +526,10 @@ function RowFigures({ island, team }: { island: IslandState; team: TeamNow }) {
 /**
  * The box's agent: what it is doing, if anything, and a box to message it. A message starts its
  * work, or joins it as a note while it works; its answer slides out as any team's does. Its figure
- * opens its workbench; the other agents beside it, or Tab, switch the box to one of them. Watching
- * it at its workbench (`watching`), its row only says what it is doing: a click on the island
- * opens the box again. Under the list's foot (`foot`), its answer opens from the foot.
+ * opens its workbench. It is the one agent at the notch: another is pinned in My agents. Holding
+ * ⌃⌥Space, it listens, and what is said writes itself into the box. Watching it at its workbench
+ * (`watching`), its row only says what it is doing: a click on the island opens the box again.
+ * Under the list's foot (`foot`), its answer opens from the foot.
  */
 function PinnedRow({ island, work, crews, firstPermission, watching, foot, flying, ear }: { island: IslandState; work: TeamNow | null; crews: readonly TeamNow[]; firstPermission: string | undefined; watching: boolean; foot: boolean; flying: boolean; ear: RefObject<DOMRect | null> }) {
   const pinned = island.box!
@@ -532,16 +537,28 @@ function PinnedRow({ island, work, crews, firstPermission, watching, foot, flyin
   useLayoutEffect(() => {
     if (flying) flyFromEar(figures.current, ear.current)
   }, [flying, ear])
-  const others = island.agents.filter((agent) => agent.id !== pinned.id)
   const field = useRef<HTMLInputElement>(null)
-  // Writing began without the box, from ⌃⌥Space or a drop, and the app gave the panel the
-  // keyboard: the box takes it. Only then; pointing at the notch never does.
-  const writing = island.composing
+  // While it listens, the newest words heard are the ones to see: the box shows its end.
+  const { listening, draft } = island
   useEffect(() => {
+    const box = field.current
+    if (!listening || !box) return
+    box.setSelectionRange(draft.length, draft.length)
+    box.scrollLeft = box.scrollWidth
+  }, [listening, draft])
+  // Writing began without the box, from ⌃⌥Space or a drop, and the app gave the panel the
+  // keyboard: the box takes it. Only then; pointing at the notch never does. Files chosen with +
+  // come back to a field that kept the page's focus while the Open panel had the keyboard: the box
+  // asks for the keyboard again, so what is typed next comes here.
+  const writing = island.composing
+  const { compose } = island
+  useEffect(() => {
+    if (!writing) return
     // Without scrolling: the box is still growing, and WebKit scrolled the island to show the field,
     // lifting the agent's row, head first, out of its top.
-    if (writing && document.activeElement !== field.current) field.current?.focus({ preventScroll: true })
-  }, [writing])
+    if (document.activeElement !== field.current) field.current?.focus({ preventScroll: true })
+    else if (!document.hasFocus()) compose(true)
+  }, [writing, compose])
   const moment = work?.moment ?? 'ready'
   const phase = useActing(work, work?.agent ?? null, island.now)
   const teamAsk = work?.teamAsks?.[0]
@@ -554,9 +571,8 @@ function PinnedRow({ island, work, crews, firstPermission, watching, foot, flyin
   // box shows the short form, and the whole of it is its name and tooltip.
   const to = island.intake ? 'Or say what to do' : asking ? `Or message ${pinned.name}` : island.pinnedWorking ? `Note for ${pinned.name}` : `Message ${pinned.name}`
   const toWhole = island.pinnedWorking && !island.intake ? `${to} · after its current step` : to
-  // Switched to another agent (Tab, or one of the figures beside the name): the one it was ducks
-  // out of sight and the new one pops up in its place, as agents hand over at the notch, and the one
-  // left comes into the row beside the name.
+  // Another agent pinned while the box is open: the one it was ducks out of sight and the new one
+  // pops up in its place, as agents hand over at the notch.
   const was = useSwitched(pinned.id, moment)
   const left = was ? island.agents.find((agent) => agent.id === was.id) ?? null : null
   const figure = (
@@ -567,7 +583,7 @@ function PinnedRow({ island, work, crews, firstPermission, watching, foot, flyin
     </span>
   )
   if (watching) {
-    const doing = work?.moment === 'work' ? working(work, island.now) : work?.moment === 'done' ? `${pinned.name} answered` : work?.moment === 'fail' ? `${pinned.name} stopped` : `${pinned.name} just started`
+    const doing = work?.moment === 'work' ? working(work, island.now) : work?.moment === 'done' ? `${pinned.name} answered` : work?.moment === 'fail' ? `${pinned.name} ${STATE_WORDS.failed}` : `${pinned.name} just started`
     return (
       <div className="island-row island-pinned" data-moment={moment}>
         <span className="island-row-figures" aria-hidden="true">{figure}</span>
@@ -576,7 +592,7 @@ function PinnedRow({ island, work, crews, firstPermission, watching, foot, flyin
     )
   }
   return (
-    <div className={`island-row island-pinned${asking ? ' is-asking' : ''}`} data-moment={moment}>
+    <div className={`island-row island-pinned${asking ? ' is-asking' : ''}${island.listening ? ' is-listening' : ''}`} data-moment={moment}>
       {/* Pressing a figure keeps the keyboard in the box: WebKit would otherwise take it away from
           the box without giving it to the button, and the box would close. */}
       <button
@@ -597,19 +613,19 @@ function PinnedRow({ island, work, crews, firstPermission, watching, foot, flyin
         )}
         {figure}
       </button>
-      {/* Who the message goes to, by name: the field's own words go once something is written. */}
+      {/* Who the message goes to, by name: the field's own words go once something is written.
+          Beside it, how to talk to it instead, until something is written; while it listens,
+          that it does. */}
       <div className="island-box-head">
         <b className="island-box-name">{pinned.name}</b>
-        {others.length > 0 && (
-          <div className="island-agents" role="group" aria-label="Switch agent">
-            {others.slice(0, OTHER_AGENTS).map((agent) => (
-              <button key={agent.id} type="button" className={`island-agent${agent.id === was?.id ? ' is-coming' : ''}`} aria-label={`Message ${agent.name.trim() || agent.id} instead`} onPointerDown={(event) => event.preventDefault()} onClick={() => island.choose(agent.id)}>
-                <FigureStill figure={figureFor(agent.id, agent.figure)} alt="" />
-              </button>
-            ))}
-            {others.length > OTHER_AGENTS && <span className="island-more">+{others.length - OTHER_AGENTS}</span>}
-            {!island.draft && <kbd className="island-key" aria-hidden="true">tab</kbd>}
-          </div>
+        {island.listening ? (
+          <span className="island-talk is-on" role="status"><Mic size={14} aria-hidden="true" />listening</span>
+        ) : island.canTalk && !island.draft && (
+          <span className="island-talk" role="img" aria-label={`Hold ${PINNED_SHORTCUT_WORDS} to talk to ${pinned.name}`}>
+            <Mic size={14} aria-hidden="true" />
+            <span aria-hidden="true">hold</span>
+            <kbd className="island-key" aria-hidden="true">⌃⌥Space</kbd>
+          </span>
         )}
       </div>
       {teamAsk ? (
@@ -636,8 +652,13 @@ function PinnedRow({ island, work, crews, firstPermission, watching, foot, flyin
         }}
       >
         {/* Send is a mark in the field's end, there once something is written; Enter sends too. A
-            note while it works is the team chat's mark for one: a return arrow, not up. */}
+            note while it works is the team chat's mark for one: a return arrow, not up. + at its
+            start chooses files to go with it, as dropping them does; pressing it keeps the keyboard
+            in the box, as pressing a figure does. */}
         <span className="island-field-box" data-written={island.draft.trim() ? '' : undefined}>
+        <button type="button" className="island-add" aria-label="Add pictures or files" title="Add pictures or files" disabled={island.sending} onPointerDown={(event) => event.preventDefault()} onClick={island.chooseFiles}>
+          <Plus size={16} aria-hidden="true" />
+        </button>
         <input
           ref={field}
           className="island-field"
@@ -657,21 +678,23 @@ function PinnedRow({ island, work, crews, firstPermission, watching, foot, flyin
           onKeyDown={(event) => {
             // Escape folds an open workbench first (`useIsland`), then puts the box away.
             if (event.key === 'Escape' && !island.bench) event.currentTarget.blur()
-            // Before anything is written, Tab switches the box to the next agent, Shift-Tab back.
-            // Once something is, Tab moves on, as anywhere: a habit Tab to reach Send must not send
-            // the message to someone else. Option-Tab moves on too, as in any Mac app.
-            if (event.key === 'Tab' && !event.altKey && others.length > 0 && !island.draft) {
-              event.preventDefault()
-              island.choose(nextAgent(island.agents, pinned.id, event.shiftKey ? -1 : 1))
-            }
           }}
         />
-        {!startHere && (
-          <button type="submit" className="island-send" aria-label={island.pinnedWorking ? 'Send note' : 'Send'} disabled={island.sending || !island.draft.trim()}>{island.pinnedWorking ? <CornerDownLeft size={16} aria-hidden="true" /> : <ArrowUp size={17} aria-hidden="true" />}</button>
+        {/* While it listens, how loud it hears stands in Send's place: let go, and Send is back
+            for the words to be read first. */}
+        {island.listening ? (
+          <Loudness loudness={island.loudness} />
+        ) : !startHere && (
+          <SendButton label={island.pinnedWorking ? 'Send note' : 'Send'} icon={island.pinnedWorking ? 'enter' : 'send'} className="island-send" disabled={island.sending || !island.draft.trim()} />
         )}
         </span>
         {startHere && <StartTeam island={island} request={startHere} first={!firstPermission} limit={limit} />}
       </form>
+      {/* What to ask next, while there is nothing else to do here: nothing written, nothing
+          dropped, and the agent neither at work nor waiting on an answer. While it listens they keep
+          their room out of sight, so the island doesn't shrink as someone starts to speak. */}
+      {(island.listening || !island.draft.trim()) && !island.intake && !teamAsk && work?.moment !== 'work' && work?.moment !== 'ask' && <Suggestions island={island} away={island.listening} />}
+      {island.talkProblem && <TalkProblemLine island={island} why={island.talkProblem} />}
       {island.sent?.ok && <small className="island-sent" role="status">{island.sent.text}</small>}
       {island.sent && !island.sent.ok && (
         <div className="island-sent island-sent-failed">
@@ -736,10 +759,27 @@ function useSwitched(id: string, moment: string, drawn = true): { id: string; mo
   return now.id === id ? was : null
 }
 
-/** The agent after `id` in My agents, or before it with `step` -1, round from the end. */
-function nextAgent(agents: readonly { id: string }[], id: string, step: 1 | -1): string {
-  const at = agents.findIndex((agent) => agent.id === id)
-  return agents[(at + step + agents.length) % agents.length].id
+/** How loud the app hears while ⌃⌥Space is held, as five bars that rise with it, the middle ones
+    most; read outside React (`loudness`), so only the bars are drawn again as it changes. */
+function Loudness({ loudness }: { loudness: IslandState['loudness'] }) {
+  const level = useSyncExternalStore(loudness.subscribe, loudness.get)
+  return (
+    <span className="island-loudness" aria-hidden="true" style={{ ['--level' as string]: level.toFixed(2) }}>
+      {[0.55, 0.8, 1, 0.8, 0.55].map((share, index) => <i key={index} style={{ ['--share' as string]: share }} />)}
+    </span>
+  )
+}
+
+/** Why holding ⌃⌥Space did not listen, and, where a switch in System Settings puts it right, the
+    button that opens it there. */
+function TalkProblemLine({ island, why }: { island: IslandState; why: TalkProblem }) {
+  const { text, pane, failed } = talkProblem(why)
+  return (
+    <div className="island-sent island-sent-failed">
+      <small className="island-problem" role={failed ? 'alert' : 'status'}>{failed && <StatusGlyph status="failed" />}<span>{text}</span></small>
+      {pane && <button type="button" className="island-button" onClick={() => island.openSettings(pane)}>Open System Settings</button>}
+    </div>
+  )
 }
 
 /** "Writer is working · 4 min", or "Writer just started"; "Writer is answering" in the chat. */

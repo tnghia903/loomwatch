@@ -228,6 +228,8 @@ const JOB_STEMS: Record<string, RegExp> = {
   researcher: /\bresearch/, writer: /\bwrit(er|e|ing)\b/, editor: /\bedit(or|ing)?\b|\bproofread/,
   reviewer: /\breview|\bcritic|\bqa\b/, coder: /\bcod(er|e|ing)\b|\bdevelop|\bengineer|\bprogramm/,
   designer: /\bdesign/, analyst: /\banaly/, lead: /\blead\b|\bsupervis/,
+  deck: /\bdecks?\b|\bslides?\b|\bpresentation/, document: /\bdocument maker\b|\bword document/, sheet: /\bspreadsheet|\bsheet maker\b|\bworkbook/,
+  chart: /\bcharts?\b|\bgraphs?\b/, dashboard: /\bdashboard/, video: /\bvideos?\b/,
 }
 
 /** The built-in job whose own instructions these are, word for word: what it is, whatever it is called. */
@@ -520,6 +522,9 @@ export type InstructionPart = 'job' | 'method' | 'check' | 'reply'
 
 /** Every part, in that order. */
 export const INSTRUCTION_PARTS: readonly InstructionPart[] = ['job', 'method', 'check', 'reply']
+
+/** Each part's name, as the instructions box says it. */
+export const PART_LABELS: Record<InstructionPart, string> = { job: 'Its job', method: 'How to work', check: 'How it checks', reply: 'What it replies with' }
 
 /** What the agent panel inserts to start a missing part; the operator writes the rest. */
 export const PART_STARTERS: Record<Exclude<InstructionPart, 'job'>, string> = {

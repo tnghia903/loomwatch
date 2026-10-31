@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { apcaLc, tokenColour, wcagRatio } from './contrast'
+import { apcaLc, THEMES, tokenColour, wcagRatio } from './contrast'
 
 // The tests that ask "does this read?" trust these numbers, so they are held to APCA's and WCAG's
 // own reference pairs, and to the ratios DESIGN_LANGUAGE §4 prints for the tokens.
@@ -53,5 +53,14 @@ describe('the contrast the tests measure', () => {
     expect(() => tokenColour('var(--color-hairline)', 'dark')).toThrow(/not one solid colour/)
     expect(() => tokenColour('var(--no-such-token)', 'light')).toThrow(/not one solid colour/)
     expect(() => tokenColour(null, 'light')).toThrow(/not one solid colour/)
+  })
+
+  // ADR 0100: a delete's confirm button. White on the dark theme's own red-400 read 3.1:1.
+  it('gives a delete’s confirm button a label that reads in both themes', () => {
+    for (const theme of THEMES) {
+      const [label, fill] = [tokenColour('var(--color-alert-on-fill)', theme), tokenColour('var(--color-alert-fill)', theme)]
+      expect(wcagRatio(label, fill), theme).toBeGreaterThanOrEqual(4.5)
+      expect(Math.abs(apcaLc(label, fill)), theme).toBeGreaterThanOrEqual(75)
+    }
   })
 })

@@ -7,15 +7,15 @@ import type { RunRecord } from '../runs/client'
 export interface ChatPreview {
   /** When the newest piece of work last changed: its answer, or its start while it works. */
   at: string
-  line: string
+  /** The app's own words ("Working on: "), then the request's or the answer's first line, whole and
+   * with its Markdown: the card's line cuts it, so a mark is never split. */
+  lead: string
+  words: string
   /** The newest piece is still going, or waits on you. */
   live: boolean
 }
 
-const firstLine = (text: string, chars = 90) => {
-  const line = text.trim().split('\n').find((part) => part.trim())?.replace(/^#+\s*/, '').trim() ?? ''
-  return line.length > chars ? `${line.slice(0, chars - 1)}…` : line
-}
+const firstLine = (text: string) => text.trim().split('\n').find((part) => part.trim())?.replace(/^#+\s*/, '').trim() ?? ''
 
 /** The newest piece of work of the team at `teamPath`, as one line; `null` for a team never asked. */
 export function chatPreview(records: readonly RunRecord[], teamPath: string): ChatPreview | null {
@@ -24,14 +24,14 @@ export function chatPreview(records: readonly RunRecord[], teamPath: string): Ch
     .sort((left, right) => (right.finishedAt ?? right.createdAt).localeCompare(left.finishedAt ?? left.createdAt))[0]
   if (!newest) return null
   const at = newest.finishedAt ?? newest.createdAt
-  if (newest.status === 'running' && (newest.waitingOn || newest.spendStops?.length)) return { at, line: 'Waiting for you', live: true }
+  if (newest.status === 'running' && (newest.waitingOn || newest.spendStops?.length)) return { at, lead: 'Waiting for you', words: '', live: true }
   if (newest.status === 'queued' || newest.status === 'starting' || newest.status === 'running') {
-    return { at, line: `Working on: ${firstLine(newest.prompt)}`, live: true }
+    return { at, lead: 'Working on: ', words: firstLine(newest.prompt), live: true }
   }
-  if (newest.status === 'failed' && newest.nextTryAt) return { at, line: `Trying again soon: ${firstLine(newest.prompt)}`, live: false }
-  if (newest.status === 'failed') return { at, line: `Stopped: ${firstLine(newest.prompt)}`, live: false }
-  if (newest.status === 'cancelled') return { at, line: `You stopped: ${firstLine(newest.prompt)}`, live: false }
-  return { at, line: firstLine(newest.reply ?? '') || firstLine(newest.prompt), live: false }
+  if (newest.status === 'failed' && newest.nextTryAt) return { at, lead: 'Trying again soon: ', words: firstLine(newest.prompt), live: false }
+  if (newest.status === 'failed') return { at, lead: 'Stopped: ', words: firstLine(newest.prompt), live: false }
+  if (newest.status === 'cancelled') return { at, lead: 'You stopped: ', words: firstLine(newest.prompt), live: false }
+  return { at, lead: '', words: firstLine(newest.reply ?? '') || firstLine(newest.prompt), live: false }
 }
 
 /** "09:40" today, "Yesterday", "Mon" this week, then "5 Oct". */

@@ -1,10 +1,10 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { BookmarkCheck, Box, ChartColumn, Code2, ExternalLink, FileText, Folder, GripVertical, Info, LocateFixed, NotebookText, PanelLeftClose, PanelLeftOpen, PenLine, Plug, Plus, Puzzle, RefreshCw, ScanEye, Scissors, Search, Shapes, Telescope, Trash2, UserCheck, UserRound, type LucideIcon } from 'lucide-react'
+import { BookmarkCheck, Box, ChartColumn, ChartSpline, Clapperboard, Code2, ExternalLink, FileText, Folder, GripVertical, Info, LayoutDashboard, LocateFixed, NotebookText, PanelLeftClose, PanelLeftOpen, PenLine, Plug, Plus, Presentation, Puzzle, RefreshCw, ScanEye, Scissors, ScrollText, Search, Shapes, Sheet, Telescope, Trash2, UserCheck, UserRound, type IconComponent } from '../ui/icon'
 import { DEFAULT_MODEL, modelNameFromId } from '../../lib/ai/modelIds'
 import { OPERATOR_SOURCE } from '../../lib/library/fixtures'
-import { removeJob, savedJobPreset, useSavedJobs } from '../../lib/library/jobs'
+import { benchChatOwner, removeJob, savedJobPreset, useSavedJobs } from '../../lib/library/jobs'
 import { isOpenTeam, teamAgentSource, useAgentUses, type TeamOwnAgent } from '../../lib/library/uses'
-import { figureFor, type FigureChoice } from '../../lib/library/figures'
+import { agentFigure, figureFor, type FigureChoice } from '../../lib/library/figures'
 import { FigureStill } from '../agents/FigureStill'
 import { modelForPreset, roleSource, type RoleIcon, type RolePreset } from '../../lib/library/roles'
 import type { CapabilityInventory, DetectedCapability } from '../../lib/library/client'
@@ -16,11 +16,13 @@ import { PALETTE_WIDTH } from '../../lib/library/paletteWidth'
 import { PaletteResizer } from './PaletteResizer'
 import { SectionHead } from '../ui/SectionHead'
 import { keys } from '../../lib/platform'
+import { InlineMarkdown } from '../ui/Markdown'
+import { plainWords } from '../../lib/chat/findWords'
 
-const ROLE_ICONS: Record<RoleIcon, LucideIcon> = { research: Telescope, write: PenLine, edit: Scissors, review: ScanEye, code: Code2, design: Shapes, analyse: ChartColumn }
+const ROLE_ICONS: Record<RoleIcon, IconComponent> = { research: Telescope, write: PenLine, edit: Scissors, review: ScanEye, code: Code2, design: Shapes, analyse: ChartColumn, slides: Presentation, document: ScrollText, sheet: Sheet, chart: ChartSpline, dashboard: LayoutDashboard, video: Clapperboard }
 
 const YOURS = 'My agents'
-const STEPS = 'Workflow steps'
+const STEPS = 'Other steps'
 const SKILLS = 'Skills'
 const CONNECTIONS = 'Connections'
 const FILES = 'Folders & files'
@@ -93,7 +95,7 @@ interface PaletteItem {
   /** A third line: the model a job runs on, or where a capability comes from. */
   engine?: string
   quiet?: boolean
-  Icon: LucideIcon
+  Icon: IconComponent
   mime: string
   event: string
   disabled: boolean
@@ -109,7 +111,7 @@ interface PaletteItem {
   /** What a click does instead of adding: a folder or file already has a card, so it is found. */
   onActivate?: () => void
   /** The icon at the end of the row, when a click does not add. */
-  Trailing?: LucideIcon
+  Trailing?: IconComponent
   /** `false` for a row that can be clicked but not dragged: Notion before it is connected. */
   draggable?: boolean
   /** Listed under the row before it: a Notion page under Notion. */
@@ -120,15 +122,15 @@ function jobItem(preset: RolePreset, jobId?: string): PaletteItem {
   return { name: preset.label, detail: preset.does, engine: `on ${modelNameFromId(modelForPreset(preset).model)}`, Icon: preset.icon ? ROLE_ICONS[preset.icon] : BookmarkCheck, mime: LIBRARY_DRAG_MIME, event: 'loomwatch:add-agent', disabled: false, payload: roleSource(preset) as object, ...(jobId ? { jobId } : {}) }
 }
 
-/** One of this team's own agents: it is already on the canvas, so a click finds its card. */
-function hereItem(agent: { id: string; name: string }, reveal?: (id: string) => void): PaletteItem {
-  return { name: agent.name, detail: 'On this canvas', hint: `Show ${agent.name} on the canvas`, Icon: UserRound, mime: LIBRARY_DRAG_MIME, event: 'loomwatch:add-agent', disabled: !reveal, payload: {}, draggable: false, figure: figureFor(agent.id), ...(reveal ? { onActivate: () => reveal(agent.id), Trailing: LocateFixed } : {}) }
+/** One of this team's own agents, in the figure its card wears: it is already on the canvas, so a click finds its card. */
+function hereItem(agent: { id: string; name: string }, figure: FigureChoice, reveal?: (id: string) => void): PaletteItem {
+  return { name: agent.name, detail: 'On this canvas', hint: `Show ${agent.name} on the canvas`, Icon: UserRound, mime: LIBRARY_DRAG_MIME, event: 'loomwatch:add-agent', disabled: !reveal, payload: {}, draggable: false, figure, ...(reveal ? { onActivate: () => reveal(agent.id), Trailing: LocateFixed } : {}) }
 }
 
-/** Another team's own agent: adding it gives this team a copy of its own, and leaves that team's as it is. */
+/** Another team's agent not yet in My agents: once both teams are saved, an identical one is one agent (ADR 0094). */
 function elsewhereItem(agent: TeamOwnAgent): PaletteItem {
   const source = teamAgentSource(agent.agent)
-  return { name: agent.agentName, detail: `in ${agent.teamName}`, engine: `on ${modelNameFromId(source.model ?? DEFAULT_MODEL)}`, hint: `Add a copy of ${agent.agentName} to this team. The one in ${agent.teamName} stays as it is.`, Icon: UserRound, mime: LIBRARY_DRAG_MIME, event: 'loomwatch:add-agent', disabled: false, payload: source as object, figure: figureFor(agent.agentId) }
+  return { name: agent.agentName, detail: `in ${agent.teamName}`, engine: `on ${modelNameFromId(source.model ?? DEFAULT_MODEL)}`, hint: `Add ${agent.agentName} to this team.`, Icon: UserRound, mime: LIBRARY_DRAG_MIME, event: 'loomwatch:add-agent', disabled: false, payload: source as object, figure: figureFor(agent.agentId) }
 }
 
 /** "You": the review step that pauses the team for the operator's approval. It is a step, not an agent. */
@@ -204,12 +206,12 @@ function notionPageItem(page: TeamNotionPage, reveal?: (id: string) => void): Pa
  * when a group is empty; these sentences are for whoever wonders why.
  */
 const EXPLAIN: Record<string, ReactNode> = {
-  [STEPS]: 'Steps of the workflow that are not agents. You (review step) pauses the team so you can approve the work or send it back.',
+  [STEPS]: 'Steps in the team that are not agents. You (review step) pauses the team so you can approve the work or send it back.',
   [SKILLS]: <>LoomWatch’s skills, and the ones this team’s project folder has. Drag one onto an agent to supply its instructions there. Add, bring in or install skills on the <a href="/skills">Skills</a> page. Web search, commands and file edits need no skill: switch them on per agent, under <b>Allowed without asking</b>.</>,
   [CONNECTIONS]: <>Services you connected in Connections. Drag <b>Notion</b> onto an agent and choose a page: the agent is given the page’s text each time the team runs. The pages this team reads are listed under it.</>,
   [FILES]: <>This team’s folders and files. Add one from an agent’s panel, with <b>Folder</b> or <b>File</b> under Given. Then drag it onto another agent to share it, or click it to find its card.</>,
   [MEMORY]: 'Other teams’ memory and imported packs. Drag one onto an agent to supply it there.',
-  [YOURS]: <>A team’s agents come from here: the ones you built, then the ones that live in your teams. A team keeps its copy of a built agent until you choose <b>Update</b> in that agent’s panel. An agent from another team comes as a copy this team owns. Build one in <a href="/agents">My agents</a>, starting from a job such as Researcher or Writer, and try it there first.</>,
+  [YOURS]: <>A team’s agents come from here. Each is the same agent in every team it’s in. Build one in <a href="/agents">My agents</a>, starting from a job such as Researcher or Writer, and try it there first.</>,
 }
 
 /** The one add panel, beside the Workflow canvas (ADR 0041): what you can add — jobs, skills, knowledge. */
@@ -256,7 +258,7 @@ export function ComponentPalette({ capabilityInventory, capabilitiesLoading = fa
   // this team's own (found on the canvas) and other teams' (added as a copy).
   const yours = { name: YOURS, items: [
     ...saved.jobs.map(job => { const item = jobItem(savedJobPreset(job), job.id); return { ...item, figure: figureFor(job.id, job.figure) } }),
-    ...teamAgents.map(agent => hereItem(agent, onRevealAgent)),
+    ...teamAgents.map(agent => hereItem(agent, agentFigure(agent, saved.jobs, benchChatOwner(teamPath)), onRevealAgent)),
     ...(teamOwn ?? []).filter(agent => !isOpenTeam(agent.teamPath, teamPath, teamsRoot)).map(elsewhereItem),
   ] }
   const groups: { name: string; items: PaletteItem[] }[] = [
@@ -282,7 +284,7 @@ export function ComponentPalette({ capabilityInventory, capabilitiesLoading = fa
     removeJob(item.jobId).catch((error: unknown) => setRemoveError(error instanceof Error ? error.message : String(error)))
   }
   const row = (item: PaletteItem, i: number) => {
-    const add = <button key={`${item.name}-${i}`} className={item.nested ? 'palette-item nested' : 'palette-item'} disabled={item.disabled} title={item.hint ?? (item.engine ? `${item.detail} · ${item.engine}` : item.detail)} draggable={!item.disabled && item.draggable !== false} onDragStart={e => { e.dataTransfer.effectAllowed = 'copy'; e.dataTransfer.setData(item.mime, JSON.stringify(item.payload)); e.dataTransfer.setData('text/plain', item.name); onDragStateChange?.(true) }} onDragEnd={() => onDragStateChange?.(false)} onClick={() => { if (item.onActivate) item.onActivate(); else window.dispatchEvent(new CustomEvent(item.event, { detail: JSON.stringify(item.payload) })); if (narrow()) setCollapsed(true) }}><GripVertical size={13} />{item.figure ? <FigureStill className="palette-figure" figure={item.figure} alt="" width={38} height={38} loading="lazy" decoding="async" /> : <span className="palette-icon"><item.Icon size={15} /></span>}<span><strong>{item.name}</strong><small>{item.detail}</small>{item.engine && <em className={item.quiet ? 'palette-engine quiet' : 'palette-engine'}>{item.engine}</em>}</span>{item.Trailing ? <item.Trailing size={13} aria-hidden="true" /> : <Plus size={13} />}</button>
+    const add = <button key={`${item.name}-${i}`} className={item.nested ? 'palette-item nested' : 'palette-item'} disabled={item.disabled} title={item.hint ?? (item.engine ? `${plainWords(item.detail)} · ${item.engine}` : plainWords(item.detail))} draggable={!item.disabled && item.draggable !== false} onDragStart={e => { e.dataTransfer.effectAllowed = 'copy'; e.dataTransfer.setData(item.mime, JSON.stringify(item.payload)); e.dataTransfer.setData('text/plain', item.name); onDragStateChange?.(true) }} onDragEnd={() => onDragStateChange?.(false)} onClick={() => { if (item.onActivate) item.onActivate(); else window.dispatchEvent(new CustomEvent(item.event, { detail: JSON.stringify(item.payload) })); if (narrow()) setCollapsed(true) }}><GripVertical size={13} />{item.figure ? <FigureStill className="palette-figure" figure={item.figure} alt="" width={38} height={38} loading="lazy" decoding="async" /> : <span className="palette-icon"><item.Icon size={15} /></span>}<span><strong>{item.name}</strong><small><InlineMarkdown clickable={false}>{item.detail}</InlineMarkdown></small>{item.engine && <em className={item.quiet ? 'palette-engine quiet' : 'palette-engine'}>{item.engine}</em>}</span>{item.Trailing ? <item.Trailing size={13} aria-hidden="true" /> : <Plus size={13} />}</button>
     if (item.capability && onInspectCapability) {
       const { item: capability, kind } = item.capability
       return <div key={`${item.name}-${i}`} className="palette-job">
@@ -294,7 +296,7 @@ export function ComponentPalette({ capabilityInventory, capabilitiesLoading = fa
     const confirming = confirmRemove === item.jobId
     return <div key={`${item.name}-${i}`} className="palette-job" onMouseLeave={() => { if (confirming) setConfirmRemove(null) }}>
       {add}
-      <button className={confirming ? 'palette-job-remove confirming' : 'palette-job-remove icon-button'} onClick={() => remove(item)} onBlur={() => { if (confirming) setConfirmRemove(null) }} aria-label={confirming ? `Confirm removing ${item.name}` : `Remove the agent ${item.name}`} title={confirming ? 'Click again to remove. Teams that use it keep their copy.' : 'Remove this job'}>{confirming ? 'Remove' : <Trash2 size={12} />}</button>
+      <button className={confirming ? 'palette-job-remove confirming' : 'palette-job-remove icon-button'} onClick={() => remove(item)} onBlur={() => { if (confirming) setConfirmRemove(null) }} aria-label={confirming ? `Confirm removing ${item.name} from My agents` : `Remove ${item.name} from My agents`} title={confirming ? 'Click again to remove it from My agents.' : 'Remove from My agents'}>{confirming ? 'Remove' : <Trash2 size={12} />}</button>
     </div>
   }
   const section = (name: string, rows: ReactNode[], total: number, extra?: ReactNode, explain?: ReactNode) => <section key={name} aria-label={name}>
@@ -305,7 +307,8 @@ export function ComponentPalette({ capabilityInventory, capabilitiesLoading = fa
   </section>
   const visible = <T,>(name: string, items: readonly T[]) => items.slice(0, query || expanded[name] ? undefined : limitFor(name))
 
-  if (collapsed) return <button className="palette-reopen" onClick={expand} title={`Open the panel (${keys('⌘\\')})`}>
+  // Folded, it is still where the guide points to add an agent: the button opens it.
+  if (collapsed) return <button type="button" className="palette-reopen" onClick={expand} title={`Open the panel (${keys('⌘\\')})`} data-tour="palette">
     <PanelLeftOpen size={16} />Add agents
   </button>
   const scanned = capabilitiesScannedAt ? `Skills listed at ${capabilitiesScannedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Listing LoomWatch’s skills'

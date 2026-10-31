@@ -69,6 +69,10 @@ else
   skip "Rust: test" "the Frontend build failed"
 fi
 
+# The quality bench's developer build (docs/ARCHITECTURE.md): its job runs on GitHub only, so this
+# script never builds with the feature.
+skip "Rust with prompt overrides" "runs on GitHub only; this script never builds with the feature"
+
 # Windows job: what a Mac can check of it. Windows PowerShell 5.1 reads a file without a
 # byte-order mark in the local code page, so every script must be ASCII.
 ps1_ascii() {

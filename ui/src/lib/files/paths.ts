@@ -75,3 +75,35 @@ export function pathFromFileUrl(url: string): string | null {
     return null
   }
 }
+
+/**
+ * The file a link written in the file `from` names: `figures/chart.svg` or `../chart.png` beside
+ * it, a full path, or a `file://` URL. `null` for anything else (the web, `data:`, a place in the
+ * file) and for a link that steps above the top of the disk.
+ */
+export function linkedPath(from: string, link: string): string | null {
+  const written = link.trim()
+  if (/^file:/i.test(written)) return pathFromFileUrl(written)
+  let value = written.replace(/[?#].*$/, '')
+  try {
+    value = decodeURIComponent(value)
+  } catch {
+    // Kept as written: a `%` that starts no escape is part of the name.
+  }
+  if (!value || value.startsWith('//')) return null
+  if (isAbsolutePath(value)) return value
+  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) return null
+  const share = from.startsWith('\\\\')
+  const parts = splitPath(dirName(from))
+  // A drive or a network share is as high as a link can step.
+  const top = share ? 2 : /^[A-Za-z]:/.test(from) ? 1 : 0
+  for (const name of splitPath(value)) {
+    if (name === '.') continue
+    if (name !== '..') parts.push(name)
+    else if (parts.length > top) parts.pop()
+    else return null
+  }
+  const windows = isWindowsPath(from)
+  const joined = parts.join(windows ? '\\' : '/')
+  return share ? `\\\\${joined}` : windows || !isAbsolutePath(from) ? joined : `/${joined}`
+}

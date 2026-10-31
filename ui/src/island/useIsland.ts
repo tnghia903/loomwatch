@@ -5,25 +5,28 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'r
 
 import { fetchChatPage, fetchNotesAnswering } from '../lib/chat/client'
 import { agentFigure, figureFor, type FigureChoice } from '../lib/library/figures'
-import { fetchJobs, type SavedJob } from '../lib/library/jobs'
+import { benchChatOwner, fetchJobs, type SavedJob } from '../lib/library/jobs'
 import { fetchPinnedAgent, pinAgent } from '../lib/library/pinned'
 import { crewOf, type CrewAgent } from '../lib/rail/teamCrews'
 import { answerPermission, fetchRecentRuns, fetchRun, type RunRecord } from '../lib/runs/client'
-import { PERMISSION_SAID } from '../lib/runs/permissionRequests'
+import { permissionSaid } from '../lib/runs/permissionRequests'
 import { answerTeamRequest, fetchTeamRequests, type TeamRequest } from '../lib/runs/teamRequests'
 import type { Ticket } from '../lib/story/needsYou'
 import { fetchTeamFile } from '../lib/team-file/client'
 import { inApp, listen, openInLoomWatch, tellApp } from './bridge'
-import { takeDropped } from './dropped'
+import { pickFiles } from './dropped'
 import { sortDropped } from './readable'
 import type { Intake } from './intake'
 import { pinnedNow, pinnedWorking, sendToPinned, type PinnedNow } from './pinned'
 import { wakesAt } from './popouts'
 import { initialIsland, islandReducer, viewOf, type IslandAction, type IslandState, type IslandViewName } from './state'
+import { fetchSuggestions, type Suggestion } from './suggestions'
+import { loudness, withHeard, type Loudness, type TalkProblem } from './talk'
 import { copyText, tucked, type TeamNow, type Tucked } from './teams'
 import { ISLAND_WAITS } from './waits'
 
 const NO_TEAMS: TeamNow[] = []
+const NONE_UPLOADED: ReadonlySet<File> = new Set()
 
 /** How far back the island looks for finished runs: an hour, as the menu bar does. */
 const FINISHED_WITHIN_SECONDS = 60 * 60
@@ -72,14 +75,23 @@ export interface Island {
   pointerOnDrop: (over: boolean) => void
   /** The agent pinned to the notch, beside it at rest. */
   pinned: PinnedNow | null
-  /** The agent the box writes to (one chosen in it, else the pinned one, else the first of My
-      agents), and writing to it:
-      the message so far, whether it is at work (a message then joins its turn), and what sending
-      did. */
+  /** The agent the box writes to (the pinned one, else the first of My agents, which a message
+      pins), and writing to it: the message so far, whether it is at work (a message then joins its
+      turn), and what sending did. */
   box: PinnedNow | null
-  /** My agents, to switch the box to for this message; sending pins the one it went to. */
+  /** My agents, by id: the one the box wrote to before another was pinned is drawn as it goes. */
   agents: readonly SavedJob[]
-  choose: (id: string) => void
+  /** ⌃⌥Space can be held to talk: the page is in the Mac app, which listens. */
+  canTalk: boolean
+  /** ⌃⌥Space is held and the app listens, how loud it hears, and why it could not listen last. */
+  listening: boolean
+  loudness: Loudness
+  talkProblem: TalkProblem | null
+  /** System Settings, where the microphone or speech recognition is turned on for LoomWatch. */
+  openSettings: (pane: 'microphone' | 'speech') => void
+  /** What the person may want to ask it next, and putting one in the box, to change or send. */
+  suggestions: readonly Suggestion[]
+  suggest: (text: string) => void
   /** Its newest run in its chat, which its workbench acts out while it works. */
   boxRecord: RunRecord | null
   /** Its workbench, open under the box, or folded away; opened from the pill, the box opens too. */
@@ -91,6 +103,8 @@ export interface Island {
   setDraft: (text: string) => void
   pinnedWorking: boolean
   sending: boolean
+  /** While a message goes, the files of it already with its agent, each as its upload ends. */
+  uploaded: ReadonlySet<File>
   sent: { ok: boolean; text: string } | null
   /** What was just sent, for a moment, as it folds into the agent's head, from where it was
       written (`from`, in the page; `null` when that couldn't be told). */
@@ -111,6 +125,11 @@ export interface Island {
   drop: (intake: Intake, folders?: readonly string[]) => void
   dragOver: (over: boolean) => void
   clearIntake: () => void
+  /** Take one of the files waiting out. */
+  takeOut: (file: File) => void
+  /** Choose files to go to the box's agent, as a drop of them: + in the box. Chosen or not, the
+      box is written in again after. */
+  chooseFiles: () => void
   /** The whole answer of a finished turn of the pinned agent, once read: what its card shows, and
       what Copy takes. `null` until then, when Copy is off. */
   answerOf: (team: TeamNow) => WholeAnswer | null
@@ -140,6 +159,7 @@ export function useIsland(): Island {
   const [savedRead, setSavedRead] = useState(false)
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
+  const [uploaded, setUploaded] = useState<ReadonlySet<File>>(NONE_UPLOADED)
   const [sent, setSent] = useState<{ ok: boolean; text: string } | null>(null)
   const [folding, setFolding] = useState<Island['folding']>(null)
 
@@ -165,18 +185,62 @@ export function useIsland(): Island {
   const toldSeen = useRef(new Set<string>())
   // Files the app took from a drop go as a drop does (`drop`, below), as it is now.
   const dropping = useRef<(intake: Intake) => void>(() => {})
+  // Talking: what is heard goes after what was written before ⌃⌥Space was held (`heardAfter`),
+  // until the last words of that hold are in, or until the box is sent or written in: the last
+  // words come a moment after letting go, and must not bring back a message sent, or undo a word
+  // put right.
+  const [level] = useState(loudness)
+  const [talkProblem, setTalkProblem] = useState<TalkProblem | null>(null)
+  const written = useRef('')
+  useEffect(() => { written.current = draft }, [draft])
+  const heardAfter = useRef<string | null>(null)
+  const typeDraft = useCallback((text: string) => {
+    heardAfter.current = null
+    setDraft(text)
+  }, [])
   useEffect(() => {
     const stop = listen((message) => {
       if (message.kind === 'seen') for (const run of message.runs) toldSeen.current.add(run)
       if (message.kind === 'dropped') {
-        takeDropped((files) => dropping.current({ files, link: null, text: null }))
+        pickFiles((files) => dropping.current({ files, link: null, text: null }))
+        return
+      }
+      if (message.kind === 'listen') {
+        level.set(0)
+        if (message.on) {
+          setTalkProblem(null)
+          heardAfter.current = written.current
+        }
+      }
+      if (message.kind === 'heard') {
+        if (heardAfter.current === null) return
+        setDraft(withHeard(heardAfter.current, message.text))
+        if (!message.done) return
+        // A hold that ends with nothing heard says so, rather than leaving the box as it was.
+        if (!message.text.trim()) setTalkProblem('nothing')
+        heardAfter.current = null
+        return
+      }
+      if (message.kind === 'level') {
+        level.set(message.level)
+        return
+      }
+      if (message.kind === 'cantListen') {
+        setTalkProblem(message.why)
         return
       }
       dispatch({ type: 'app', message })
     })
     tellApp({ kind: 'ready' })
     return stop
-  }, [])
+  }, [level])
+  // What stopped talking is said until the box is put away.
+  const writing = state.composing
+  const [wasWriting, setWasWriting] = useState(writing)
+  if (writing !== wasWriting) {
+    setWasWriting(writing)
+    if (!writing) setTalkProblem(null)
+  }
   // Results looked at here leave the other screens' islands too.
   const seen = state.seen
   useEffect(() => {
@@ -199,24 +263,15 @@ export function useIsland(): Island {
   useEffect(() => { if (listOpen) readSaved() }, [readSaved, listOpen])
   const pinned = useMemo(() => pinnedNow(pinnedId ?? null, saved), [pinnedId, saved])
   useEffect(() => { dispatch({ type: 'pinned', pinned }) }, [pinned])
-  // The box opens with the pinned agent; with none pinned, with the first of My agents. Another
-  // can be chosen while it is open, for this message: sending pins the one it went to, so the box
-  // opens with the agent last written to. Put away unsent, it opens as before.
-  const opens = useMemo(() => pinned ?? pinnedNow(saved[0]?.id ?? null, saved), [pinned, saved])
-  const [chosenId, setChosenId] = useState<string | null>(null)
-  const [wasOpen, setWasOpen] = useState(listOpen)
-  if (listOpen !== wasOpen) {
-    setWasOpen(listOpen)
-    if (!listOpen) setChosenId(null)
-  }
-  const box = useMemo(() => (chosenId ? pinnedNow(chosenId, saved) : null) ?? opens, [chosenId, saved, opens])
+  // The box writes to the pinned agent, the one agent at the notch; with none pinned, to the first
+  // of My agents, and sending pins it. Another is pinned in My agents.
+  const box = useMemo(() => pinned ?? pinnedNow(saved[0]?.id ?? null, saved), [pinned, saved])
   useEffect(() => { dispatch({ type: 'box', box }) }, [box])
   // The app hears whom the box opens with, so ⌃⌥Space and Message in its menu have a box to open.
-  const opensName = opens?.name ?? null
+  const opensName = box?.name ?? null
   useEffect(() => {
     if (pinnedId !== undefined) tellApp({ kind: 'agent', name: opensName })
   }, [pinnedId, opensName])
-  const choose = useCallback((id: string) => setChosenId(id), [])
   // A drop goes in once its files are sorted (`sortDropped`): what the box's agent can't open
   // stays out, and the box says why. Files already waiting count toward the ten a message carries.
   const boxName = box?.name ?? null
@@ -344,16 +399,20 @@ export function useIsland(): Island {
   const send = useCallback((job?: string) => {
     const text = (job ?? draft).trim()
     if (!text || !box || sending) return
+    // What is still to be heard from a hold let go a moment ago stays out of the box: this is sent.
+    heardAfter.current = null
     // The words fold from where they are written: the field's place now, before sending disables it.
-    const field = document.querySelector('.island-field')?.getBoundingClientRect()
-    const from = field ? { x: field.left + 14, y: field.top + 7 } : null
+    const input = document.querySelector('.island-field')
+    const field = input?.getBoundingClientRect()
+    const from = input && field ? { x: field.left + (parseFloat(getComputedStyle(input).paddingLeft) || 0), y: field.top + 7 } : null
     setSending(true)
+    setUploaded(NONE_UPLOADED)
     setSent(null)
     // The first message from the box to an agent not yet pinned pins it: its work and answer then
     // come back here, and the box opens with it next time.
     const pinFirst = pinned?.id === box.id ? Promise.resolve() : pinAgent(box.id).then((now) => setPinnedId(now.agent))
     pinFirst
-      .then(() => sendToPinned(box, text, records.current, intake))
+      .then(() => sendToPinned(box, text, records.current, intake, (file) => setUploaded((before) => new Set(before).add(file))))
       .then(() => {
         if (job === undefined) setDraft('')
         dispatch({ type: 'intakeDone' })
@@ -364,7 +423,10 @@ export function useIsland(): Island {
         dispatch({ type: 'sent' })
         read()
       }, () => setSent({ ok: false, text: `That didn’t go through. Try again, or open ${box.name}’s chat.` }))
-      .finally(() => setSending(false))
+      .finally(() => {
+        setSending(false)
+        setUploaded(NONE_UPLOADED)
+      })
   }, [draft, box, pinned, sending, intake, putAway, read])
 
   // The whole answer of each finished turn of the pinned agent, read once: the run's reply, or for
@@ -433,7 +495,7 @@ export function useIsland(): Island {
     answerPermission(team.runId, ticket.requestId, decision)
       .then(() => {
         // Say what it did, then let the card go and drop the next question.
-        setSaid({ ticket: ticket.id, text: PERMISSION_SAID[decision] })
+        setSaid({ ticket: ticket.id, text: permissionSaid(decision, ticket.switch) })
         window.setTimeout(() => {
           setSaid(null)
           dispatch({ type: 'answered', ticket: ticket.id })
@@ -456,6 +518,35 @@ export function useIsland(): Island {
   const { notch, menuBar } = state.app
   const boxPath = box?.chatPath ?? null
   const boxRecord = useMemo(() => newestIn(state.records, boxPath), [state.records, boxPath])
+
+  // What to suggest asking it next: read only while the box is open, and again as an answer comes
+  // in, so next steps are written for an answer only when the person reaches for the box after it.
+  // While they are being written, read again in a moment.
+  const [suggested, setSuggested] = useState<readonly Suggestion[]>([])
+  const boxId = box?.id ?? null
+  const writingNow = state.composing
+  const readFor = `${boxId}\n${boxRecord?.finishedAt ?? ''}\n${writingNow}`
+  const [rereads, setRereads] = useState({ for: readFor, count: 0 })
+  if (rereads.for !== readFor) setRereads({ for: readFor, count: 0 })
+  const reread = rereads.count
+  useEffect(() => {
+    if (!boxId || !writingNow) return
+    const stop = new AbortController()
+    let again: number | undefined
+    fetchSuggestions(stop.signal).then(({ suggestions, writing }) => {
+      setSuggested(suggestions)
+      if (writing && reread < ISLAND_WAITS.suggestionRereads) again = window.setTimeout(() => setRereads((now) => ({ ...now, count: now.count + 1 })), ISLAND_WAITS.suggestionReread)
+    }, () => {})
+    return () => {
+      stop.abort()
+      window.clearTimeout(again)
+    }
+  }, [boxId, writingNow, readFor, reread])
+  const suggest = useCallback((text: string) => {
+    typeDraft(text)
+    compose(true)
+  }, [typeDraft, compose])
+
   return {
     view,
     teams,
@@ -482,7 +573,13 @@ export function useIsland(): Island {
     pinned,
     box,
     agents: saved,
-    choose,
+    canTalk: inApp(),
+    listening: state.listening,
+    loudness: level,
+    talkProblem,
+    openSettings: useCallback((pane: 'microphone' | 'speech') => tellApp({ kind: 'settings', pane }), []),
+    suggestions: suggested,
+    suggest,
     boxRecord,
     bench: state.bench,
     setBench: useCallback((on: boolean) => dispatch({ type: 'bench', on }), []),
@@ -492,9 +589,10 @@ export function useIsland(): Island {
     }, [compose]),
     composing: state.composing,
     draft,
-    setDraft,
+    setDraft: typeDraft,
     pinnedWorking: box ? pinnedWorking(state.records, box) : false,
     sending,
+    uploaded,
     sent,
     folding,
     compose,
@@ -510,6 +608,8 @@ export function useIsland(): Island {
     drop,
     dragOver: useCallback((over: boolean) => dispatch({ type: 'dragOver', over }), []),
     clearIntake: useCallback(() => dispatch({ type: 'intakeDone' }), []),
+    takeOut: useCallback((file: File) => dispatch({ type: 'intakeLess', file }), []),
+    chooseFiles: useCallback(() => pickFiles((files) => dropping.current({ files, link: null, text: null }), () => compose(true)), [compose]),
     answerOf,
     copy,
     copied,
@@ -563,7 +663,7 @@ function useFigures(teams: readonly TeamNow[], saved: readonly SavedJob[], pinne
     if (pinned && teamPath === pinned.chatPath) return figureFor(pinned.id, pinned.job.figure)
     if (!agent) return figureFor(teamPath)
     const placed = crews.get(teamPath)?.find((each) => each.id === agent)
-    return agentFigure(placed ?? { id: agent }, saved)
+    return agentFigure(placed ?? { id: agent }, saved, benchChatOwner(teamPath))
   }, [crews, saved, pinned])
   const crewFigures = useCallback((teamPath: string) => (crews.get(teamPath) ?? []).map((agent) => agentFigure(agent, saved)), [crews, saved])
   return { figure, crewFigures }

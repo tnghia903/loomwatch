@@ -3,6 +3,7 @@
 // `sessionId`, so the evidence stream at /api/session/stream can be opened immediately.
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
+import { readDoneWhen, type DoneWhen } from '../chat/doneWhen'
 import { daemonFetch } from '../daemonFetch'
 import { keepIfSame } from '../keepIfSame'
 
@@ -109,6 +110,8 @@ export interface CheckWait {
   met: number
   /** The check step's own account of the problems, when it wrote one. */
   problems?: string
+  /** The person's message named its tries (ADR 0098): the stop counts tries, the first work one. */
+  tries?: boolean
 }
 
 /**
@@ -154,6 +157,12 @@ export interface RunRecord {
   replyableAgents?: string[]
   /** What the run spent and may spend (ADR 0068); absent on runs recorded before spend limits. */
   spend?: RunSpend | null
+  /**
+   * The files the run's agents made, by full path: what their edit calls name, of those that went
+   * through. Worked out by the daemon once the run ends (`made.rs`, the same rule as
+   * `filesWritten`); absent while it runs, and when it made none.
+   */
+  made?: string[]
   /** Limits the run waits at until you answer (ADR 0068); absent when there are none. */
   spendStops?: SpendStop[]
   waitingOn?: WaitingOn | null
@@ -397,6 +406,14 @@ export async function answerPermission(runId: string, requestId: string, decisio
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ requestId, decision, ...(text === undefined ? {} : { text }) }), cache: 'no-store',
   }))
+}
+
+/** Take item `item` of what the run's message said done looks like off the check, or put it back. */
+export async function setDoneWhen(runId: string, item: number, checked: boolean): Promise<DoneWhen | null> {
+  return readDoneWhen(await readRun<Record<string, unknown>>(await daemonFetch(`/api/runs/${encodeURIComponent(runId)}/done-when`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ item, checked }), cache: 'no-store',
+  })))
 }
 
 /** Your answer at a spend stop (ADR 0068). Resolves with the run once the waiting agents have it. */

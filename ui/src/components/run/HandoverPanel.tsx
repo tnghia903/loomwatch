@@ -1,7 +1,8 @@
-import { X } from 'lucide-react'
+import { X } from '../ui/icon'
 import { useEffect, useRef } from 'react'
 
 import type { ContextPacket, PacketSection } from '../../lib/memory/client'
+import { InlineMarkdown } from '../ui/Markdown'
 
 /**
  * What an agent was given: the packet inspector (docs/TEAM_MEMORY.md → "What an agent was given").
@@ -104,7 +105,7 @@ function SectionRow({ section }: { section: PacketSection }) {
           revision the agent was actually given, which is the whole point of recording them. */}
       {(section.notes ?? []).map((note) => (
         <span key={note.id} className="t-mono-sm" style={{ color: 'var(--color-ink-3)' }}>
-          {note.kind} · {note.title} · {note.originTeamId ?? note.authorAgentId} · revision {note.revision}
+          {note.kind} · <InlineMarkdown>{note.title}</InlineMarkdown> · {note.originTeamId ?? note.authorAgentId} · revision {note.revision}
         </span>
       ))}
     </div>

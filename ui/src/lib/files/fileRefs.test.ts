@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { fileLabel, fileNoun, filePathFrom, filePathFromLink, fileRefsIn, filesTouched, filesWritten, fileTitle, folderWords, formatBytes, withFolderPaths, workspaceAgent } from './fileRefs'
+import { fileKindIn, fileLabel, fileNoun, filePathFrom, filePathFromLink, fileRefsIn, filesTouched, filesWritten, fileTitle, folderWords, formatBytes, withFolderPaths, workspaceAgent } from './fileRefs'
 
 const REPORT = '/Users/me/loomwatch/teams/.loomwatch/launch-plan/writer/market-research-report.docx'
 
@@ -96,6 +96,91 @@ describe('fileRefsIn', () => {
     expect(fileRefsIn('[guide](./guide.html)', [], 'writer')).toEqual([])
   })
 
+  it('finds a file the run wrote where the reply names it in plain words, by name or by path', () => {
+    const design = '/Users/me/sutd-final-project/design'
+    const written = [`${design}/solution-design.md`, `${design}/architecture.html`, '/Users/me/My Files/LLM Prefill Guide.html']
+    // The shape of a real Designer reply (run a75f05b4): no code, no links, only words.
+    const reply = `Files are in ${design}:\n- solution-design.md\n- architecture.html`
+    expect(fileRefsIn(reply, written, null, written)).toEqual([`${design}/solution-design.md`, `${design}/architecture.html`])
+    expect(withFolderPaths(reply, written, null, written)).toBe(`Files are in ${design}:\n- \`${design}/solution-design.md\`\n- \`${design}/architecture.html\``)
+    // From its folder, by its full path at the end of a sentence, in bold, in brackets, with spaces.
+    expect(fileRefsIn('See design/architecture.html.', written, null, written)).toEqual([`${design}/architecture.html`])
+    expect(fileRefsIn(`Saved to ${design}/solution-design.md, as asked.`, written, null, written)).toEqual([`${design}/solution-design.md`])
+    expect(fileRefsIn('**architecture.html** (the diagram)', written, null, written)).toEqual([`${design}/architecture.html`])
+    expect(fileRefsIn('The guide (LLM Prefill Guide.html) is done.', written, null, written)).toEqual(['/Users/me/My Files/LLM Prefill Guide.html'])
+    expect(withFolderPaths('Open /Users/me/My Files/LLM Prefill Guide.html to read it.', written, null, written)).toBe('Open `/Users/me/My Files/LLM Prefill Guide.html` to read it.')
+    // On Windows, either way round its separators go, in any case.
+    const plan = 'C:\\Users\\ana\\work\\plan.md'
+    expect(withFolderPaths('Wrote plan.md and c:/users/ana/work/plan.md.', [plan], null, [plan])).toBe(`Wrote \`${plan}\` and \`${plan}\`.`)
+    // A path a code span cannot hold stays words.
+    expect(withFolderPaths('See /a/x`y.md.', [], null, ['/a/x`y.md'])).toBe('See /a/x`y.md.')
+  })
+
+  it('finds a file an agent made in its own folder where the reply gives its full path in plain words', () => {
+    const maker = '/Users/me/LoomWatch/teams/.loomwatch/slide-deck-prep-team/presentation-maker'
+    const deck = `${maker}/EKIS_Presentation_2026-11-05.pptx`
+    // The shape of a real Presentation maker reply (run 5d07bc73): `python make_deck.py` made the
+    // deck, so the only file the run wrote by name is the script.
+    const script = [`${maker}/build/make_deck.py`]
+    const reply = `The deck is ready, unchanged since last round:\n**${deck}**\n\nIts notes cite the files in \`/Users/me/sutd-final-project/\`.`
+    expect(fileRefsIn(reply, script, maker, script)).toEqual([deck])
+    expect(withFolderPaths(reply, script, maker, script).split('\n')[1]).toBe(`**\`${deck}\`**`)
+    // Whoever answers: the checker names the maker's deck, at the end of a sentence, or in brackets.
+    expect(fileRefsIn(`Checked ${deck}.`, [], '/Users/me/LoomWatch/teams/.loomwatch/slide-deck-prep-team/checker')).toEqual([deck])
+    expect(fileRefsIn(`The deck (${deck}) has 13 slides.`)).toEqual([deck])
+    // In a folder of its own there, and on Windows.
+    expect(fileRefsIn(`Saved ${maker}/out/notes.md, as asked.`)).toEqual([`${maker}/out/notes.md`])
+    const plan = 'C:\\Users\\ana\\LoomWatch\\teams\\.loomwatch\\launch\\writer\\plan.docx'
+    expect(fileRefsIn(`Done: ${plan}`)).toEqual([plan])
+    // An agent in no team works in `.loomwatch/<agent>`.
+    expect(fileRefsIn('See /Users/me/teams/.loomwatch/writer/notes.md.')).toEqual(['/Users/me/teams/.loomwatch/writer/notes.md'])
+  })
+
+  it('finds a full path with spaces when the reply sets it off in bold or quotes', () => {
+    const deck = '/Users/John Smith/LoomWatch/teams/.loomwatch/review/maker/Q3 Report.pptx'
+    expect(fileRefsIn(`The deck is ready: **${deck}**`)).toEqual([deck])
+    expect(withFolderPaths(`Saved “${deck}” for you.`)).toBe(`Saved “\`${deck}\`” for you.`)
+    const plan = 'C:\\Users\\John Smith\\LoomWatch\\teams\\.loomwatch\\launch\\writer\\Launch plan.docx'
+    expect(fileRefsIn(`Done: "${plan}"`)).toEqual([plan])
+    // In running words, where it ends would be a guess; and the marks around it must match.
+    expect(fileRefsIn(`The deck is ready: ${deck} for Thursday`)).toEqual([])
+    expect(fileRefsIn(`**${deck}" and more`)).toEqual([])
+  })
+
+  it('leaves a full path in plain words alone outside an agent’s own folder, or not something it made', () => {
+    const maker = '/teams/.loomwatch/news/writer'
+    // Read from the person's own folders, or no file at all.
+    expect(fileRefsIn('Read /Users/me/brief/budget.md and /Users/me/sutd/report.docx first.', [], maker)).toEqual([])
+    expect(fileRefsIn(`See ${maker}/build and ${maker}/draft.`, [], maker)).toEqual([])
+    // LoomWatch's own files there: hidden folders, the copies of what it was given, its notes file.
+    expect(fileRefsIn(`${maker}/.agents/skills/deck/SKILL.md ${maker}/knowledge/brief.md ${maker}/AGENTS.md`, [], maker)).toEqual([])
+    // LoomWatch's folder itself holds no agent's work.
+    expect(fileRefsIn('See /teams/.loomwatch/notes.md.', [], maker)).toEqual([])
+    // A kind of file the reader doesn't name, a path that climbs out, inside a word or an address.
+    expect(fileRefsIn(`Ran ${maker}/build/make_deck.py and ${maker}/../../secret.md.`, [], maker)).toEqual([])
+    expect(fileRefsIn(`~${maker}/a.md x${maker}/b.md https://example.com${maker}/c.html`, [], maker)).toEqual([])
+    // Code and fenced blocks stay as they are.
+    const kept = `\`\`\`\n${maker}/deck.pptx\n\`\`\``
+    expect(withFolderPaths(kept, [], maker)).toBe(kept)
+  })
+
+  it('leaves plain words alone unless they name just one file the run wrote', () => {
+    const written = ['/a/design/architecture.html', '/a/one/README.md', '/a/two/README.md']
+    const read = ['/a/brief/budget.md', ...written]
+    // Read, not written; two written files of that name; a name inside another word or address.
+    expect(fileRefsIn('From budget.md. See README.md.', read, null, written)).toEqual([])
+    expect(fileRefsIn('old-architecture.html, my_architecture.html, architecture.html.bak, architecture.htmlx', read, null, written)).toEqual([])
+    expect(fileRefsIn('https://example.com/architecture.html and www.example.com/architecture.html', read, null, written)).toEqual([])
+    expect(fileRefsIn('/b/design/architecture.html, ../design/architecture.html, ~/architecture.html', read, null, written)).toEqual([])
+    // A link's words, and fenced code, stay as written.
+    const kept = '[architecture.html](https://example.com/page)\n\n```\narchitecture.html\n```'
+    expect(withFolderPaths(kept, read, null, written)).toBe(kept)
+    // Without the run's files, words are words.
+    expect(fileRefsIn('See architecture.html.', read)).toEqual([])
+    // Its full path picks one of two files of the same name.
+    expect(fileRefsIn('See /a/two/README.md.', read, null, written)).toEqual(['/a/two/README.md'])
+  })
+
   it('reads a link’s %20s as the spaces in a file’s name', () => {
     expect(filePathFromLink('/Users/me/My%20Report.pdf')).toBe('/Users/me/My Report.pdf')
     expect(filePathFromLink('file:///Users/me/My%20Report.pdf')).toBe('/Users/me/My Report.pdf')
@@ -131,6 +216,19 @@ describe('describing a file in words', () => {
     expect(fileLabel(REPORT)).toBe('Word document')
     expect(fileLabel('/x/a.PDF')).toBe('PDF')
     expect(fileLabel('/x/a.weird')).toBe('WEIRD file')
+    expect(fileLabel('/x/a.docm')).toBe('Word document')
+    expect(fileLabel('/x/a.pptm')).toBe('Slides')
+  })
+
+  it('names the kind inside a sentence, keeping the names of apps and letters', () => {
+    expect(fileKindIn(REPORT, 'a')).toBe('a Word document')
+    expect(fileKindIn(REPORT, 'the')).toBe('the Word document')
+    expect(fileKindIn('/x/a.pdf', 'a')).toBe('a PDF')
+    expect(fileKindIn('/x/a.png', 'a')).toBe('an image')
+    expect(fileKindIn('/x/deck.pptx', 'a')).toBe('slides')
+    expect(fileKindIn('/x/deck.pptx', 'the')).toBe('the slides')
+    expect(fileKindIn('/x/a.odt', 'a')).toBe('a document')
+    expect(fileKindIn('/x/a.weird', 'a')).toBe('a WEIRD file')
   })
 
   it('says where a managed workspace file sits as team › agent', () => {

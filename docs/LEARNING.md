@@ -175,8 +175,8 @@ every agent reads, rather than in one agent's list.
 
 | Agent | Its list |
 |---|---|
-| One of **My agents** | One list, `agent:<id>`, shared by its own chat and every team that placed it (`from: {agent}`). |
-| A **team's own** agent | Its own list, `team:<team id>#<agent id>`, which survives renaming the team file, as the Notebook does. |
+| One of **My agents** | One list, `agent:<id>`, shared by its own chat and every team that uses it (`from: {agent}`). |
+| A **team's own** agent, in a team not yet saved since ADR 0094 | Its own list, `team:<team id>#<agent id>`, which survives renaming the team file, as the Notebook does. When the team is saved and the agent becomes one of My agents, the list moves to the agent's, history and all, keeping its limit of lessons, the least backed going first. |
 
 Each lesson counts how it has done:
 

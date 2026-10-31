@@ -1,7 +1,7 @@
 import type { Node, NodeProps } from '@xyflow/react'
 
 import { CardPorts } from './CardPorts'
-import { AlertCircle, Clock3 } from 'lucide-react'
+import { AlertCircle, Clock3 } from '../ui/icon'
 
 import { summarizeSchedule } from '../../lib/team-file/schedule'
 import type { ScheduleConfig } from '../../lib/team-file/types'

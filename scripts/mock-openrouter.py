@@ -20,11 +20,21 @@ Replies are scripted from what the request says, so a run exercises real tool ca
                                          or in bullets, one about the person ("aboutYou") when they
                                          ask for Vietnamese, else no edits; an agent whose
                                          instructions hold the bullets lesson answers in three bullets
+- the next steps after an answer (ADR 0105) -> three short requests, the first naming the answer's
+                                         first bold words
+- the read of what a message says done looks like (ADR 0098) -> its "at most <n> words" and
+                                         "<n> tries", quoted, else NONE
+- "at most <n> words" in the task     -> a draft <n> + 16 words long, and one 10 words under the
+                                         limit once the work is sent back
+- the Checker job (its role says so)  -> a Check block that counts the work's words for an
+                                         "at most <n> words" item, and meets every other item
 - "MOCK-LONG: <n>" in the task        -> an answer of about n words, streamed three words at a time
                                          as a real model streams (for measuring how the app keeps up)
 - "MOCK-HELPERS: <n>" in the task     -> n start_helper calls at once (ADR 0079); each helper lists
   its folder, waits a few seconds ("MOCK-WAIT: <s>" in its brief) and sends back its findings, and
   the agent then answers with what they found
+- "MOCK-MY-AGENTS: <name>" in the task -> a my_agents call (ADR 0092), then a dispatch to the listed
+  agent whose id holds <name> (the first listed when none does), then an answer from what it sent
 - a Research lead (its role says so)  -> two dispatch calls at once, then ask the Writer
 - a Researcher / a Writer             -> findings / a cited report
 - anything else                       -> a short text reply
@@ -43,6 +53,7 @@ Usage: python3 scripts/mock-openrouter.py [port]   (default 4100)
 import hashlib
 import json
 import os
+import re
 import sys
 import tempfile
 import threading
@@ -155,6 +166,19 @@ def plan(body):
             return ("text", f"{reply}\n\n## Not confirmed\n- Nothing: both sources agreed.")
         if call_name.endswith("start_helper"):
             return ("text", "I started helpers on the parts. Their work comes back next.")
+        if call_name.endswith("my_agents"):
+            # ADR 0092: bring in the listed agent the task names, or the first one listed.
+            try:
+                listed = [entry.get("agent", "") for entry in json.loads(said).get("agents", [])]
+            except (ValueError, AttributeError):
+                listed = []
+            brief = latest_task(messages)
+            wanted = brief.rsplit("MOCK-MY-AGENTS:", 1)[1].split()[0].lower() if "MOCK-MY-AGENTS:" in brief else ""
+            chosen = next((agent for agent in listed if wanted and wanted in agent.lower()), listed[0] if listed else "")
+            dispatch = find_tool(names, "dispatch")
+            if chosen and dispatch:
+                return ("calls", [(dispatch, {"agent": chosen, "task": "The part no one on this team does: find three facts with a source for each."})])
+            return ("text", "None of your other agents can help here, so I did it myself.")
         if call_name.endswith("list_files") and "MOCK-WAIT:" in latest_task(messages):
             brief = latest_task(messages)
             time.sleep(float(brief.rsplit("MOCK-WAIT:", 1)[1].split()[0]))
@@ -185,7 +209,49 @@ def plan(body):
     if "## What you have learned" in system and "keep it to three short bullets" in system:
         return ("text", "- First point, short.\n- Second point, short.\n- Third point, short.")
 
+    # ADR 0105: the next steps after an answer, for the buttons under the notch's box. The first
+    # names the answer's first bold words, so a trial shows they follow the answer.
+    if "You guess what a person will ask their AI assistant next" in system:
+        answer = latest.split("The assistant answered:", 1)[-1]
+        bold = re.search(r"\*\*([^*]{2,40})\*\*", answer)
+        about = bold.group(1) if bold else "that"
+        return ("text", json.dumps({"next": [f"Tell me more about {about}", "Make it shorter", "What should I do next?"]}))
+    # ADR 0098: the read of what a message says done looks like quotes its limit and its tries.
+    if "list what it says the finished work must satisfy" in system:
+        said = latest.split("<message>", 1)[-1].split("</message>", 1)[0]
+        limit = re.search(r"at most \d+ words", said, re.IGNORECASE)
+        tries = re.search(r"(\d+) tr(?:y|ies)\b", said, re.IGNORECASE)
+        if not limit:
+            return ("text", "NONE")
+        return ("text", "DONE WHEN\n- " + limit.group(0) + (f"\nTRIES {tries.group(1)}" if tries else ""))
+    # The Checker job counts the work's words for a word limit and meets the rest.
+    if "you are the team’s checker" in lower_system or "you are the team's checker" in lower_system:
+        work = latest.split("### Work from", 1)[-1].split("\n", 1)[-1]
+        work = work.split("\n### ", 1)[0] if "## The revised work" not in latest else work
+        count = len(work.split())
+        # Only the numbered items it is asked about: the first check's list, or a recheck's.
+        listed = re.search(r"work must satisfy\n((?:\d+\. .+\n?)+)", latest) or re.search(r"the revision changed:\n\n((?:\d+\. .+\n?)+)", latest)
+        lines = []
+        for number, item in re.findall(r"^(\d+)\. (.+?)(?: \((?:Not met|Not sure)\))?$", listed.group(1) if listed else "", re.MULTILINE):
+            limit = re.search(r"at most (\d+) words", item, re.IGNORECASE)
+            if limit:
+                verdict = "Met" if count <= int(limit.group(1)) else "Not met"
+                lines.append(f"{number}. {verdict} — {item} — {count} words")
+            else:
+                lines.append(f"{number}. Met — {item} — it is the update that was asked for")
+        return ("text", "## Check\n" + "\n".join(lines))
+    # An agent given a word limit runs long, and keeps to it once the work is sent back.
+    asked = re.search(r"at most (\d+) words", first, re.IGNORECASE)
+    if asked and "## Sent back by" in latest:
+        return ("text", long_answer(int(asked.group(1)) // 2))
+    if asked and "## Sent back by" not in latest and "## Direction from you" not in latest:
+        return ("text", long_answer(int(asked.group(1)) + 16))
+
     task = latest.rsplit("## Task", 1)[-1]
+    if "## What the agents you started came back with" in latest:
+        return ("text", "# What the team found\n\nThe agent I brought in sent back three facts, each with a source, and I checked them against the request.")
+    if "MOCK-MY-AGENTS" in task and find_tool(names, "my_agents"):
+        return ("calls", [(find_tool(names, "my_agents"), {})])
     if "## What your helpers came back with" in latest:
         parts = [line.split(":", 1)[0].lstrip("- ").strip() for line in latest.splitlines() if line.startswith("- Part ")]
         return ("text", "# What I found\n\nI split this into " + str(len(parts)) + " parts and checked what came back.\n\n"

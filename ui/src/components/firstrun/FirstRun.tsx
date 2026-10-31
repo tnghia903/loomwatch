@@ -1,4 +1,3 @@
-import { ArrowUp } from 'lucide-react'
 import { Fragment, useCallback, useEffect, useId, useMemo, useState } from 'react'
 
 import type { AiStatus } from '../../lib/ai/client'
@@ -21,6 +20,8 @@ import { MakerMark } from '../models/MakerMark'
 import { LoomMark, LoomWordmark } from '../ui/glyphs'
 import { Markdown } from '../ui/Markdown'
 import { ConnectSheet, type AiOption } from './ConnectSheet'
+import { SaidText } from '../chat/SaidText'
+import { SendButton } from '../box/BoxButtons'
 
 /** The colour the first run shows a connected AI in: LoomWatch's own indigo, not a brand's. */
 const AI_COLOR = '#5867A8'
@@ -194,7 +195,7 @@ export function FirstRun({ onLookAround, onDone }: { onLookAround: () => void; o
             onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send() } }} />
           <div className="fr-composer-bar">
             <span className="fr-who"><i style={connected ? { background: AI_COLOR } : undefined} />Your first agent{using ? ` · ${using.chip}` : ''}</span>
-            <button type="submit" className="fr-send" aria-label="Send" disabled={!text.trim() || sending || working}><ArrowUp size={18} aria-hidden="true" /></button>
+            <SendButton label="Send" primary disabled={!text.trim() || sending || working} />
           </div>
         </form>
         {turns.length === 0 && (
@@ -209,7 +210,7 @@ export function FirstRun({ onLookAround, onDone }: { onLookAround: () => void; o
             <div key={turn.runId} className="fr-turn">
               {turn.forYou
                 ? <p className="fr-again">Same request, made for you</p>
-                : <p className="fr-request">{turn.request}</p>}
+                : <div className="fr-request"><SaidText text={turn.request} /></div>}
               <FirstAnswer turn={turn} about={turn.forYou ? aboutLine(told) : null} name={name}
                 onSettled={onSettled} onRetry={() => void start(turn.request, turn.forYou)} />
             </div>

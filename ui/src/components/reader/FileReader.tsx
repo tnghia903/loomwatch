@@ -1,39 +1,63 @@
-import { ExternalLink, FolderOpen, X } from 'lucide-react'
-import { createElement, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { ExternalLink, FolderOpen, X } from '../ui/icon'
+import { createElement, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 
-import type { ReplyTo } from '../../lib/chat/client'
+import type { BoxAt, ReplyTo, TimeAt } from '../../lib/chat/client'
 import type { AgentFacts } from '../../lib/chat/faces'
 import { quoteLine } from '../../lib/chat/reply'
-import { baseName, extensionOf, fileLabel, fileTitle, formatBytes, withFolderPaths } from '../../lib/files/fileRefs'
+import { baseName, extensionOf, fileKindIn, fileLabel, fileTitle, formatBytes, withFolderPaths } from '../../lib/files/fileRefs'
 import { fileIcon } from '../../lib/files/icons'
 import { answerRead, markAnswerRead } from '../../lib/files/answersRead'
 import { markParts, type MarkedPart, type PartMarks } from '../../lib/files/partMarks'
 import type { PageMark, PagePart } from '../../lib/files/pageFrame'
-import { answerPlace, askKey, bubbleAgent, bubbleCardLine, bubbleLabel, bubblePlace, bubbleTitle, fileAsks, findPassage, pageText, partBox, partLines, partLook, partTexts, passageOf, passageReply, wordsLook, wordsOpen, type AskedPassage, type PartLook } from '../../lib/files/passage'
+import { answerPlace, askKey, bubbleAgent, bubbleCardParts, bubbleLabel, bubblePlace, bubbleTitle, fileAsks, findPassage, pageText, partBox, partId, partLines, partLook, partTexts, passageOf, passageReply, wordsLook, wordsOpen, type AskedPassage, type PartLook } from '../../lib/files/passage'
+import { partPictureName, pictureInside, WHOLE } from '../../lib/files/parts'
+import { MOST_PAGES, placeSlotOnPage } from '../../lib/files/pdf'
+import { cellsText, parseWorkbook, tableSheet } from '../../lib/files/cells'
+import { clockTime, frameTimes, framesOf, stillCopy } from '../../lib/files/moments'
 import { figureStill } from '../../lib/library/figures'
 import { wearerOf } from '../../lib/chat/helpers'
 import { TeamFiguresContext } from '../agents/figureContext'
 import { useFigurePictures } from './useFigurePictures'
-import { canMark, FileOriginContext, rawFileUrl, readerFormat, type FileToRead } from '../../lib/files/reader'
+import { ChangedSince, FileOriginContext, putBack, rawFileUrl, rawVersion, readerFormat, readFile, ToldWhy, writeFile, type FileToRead, type Written } from '../../lib/files/reader'
+import { CellLocked, withTableCell, withWorkbookCell } from '../../lib/files/cellEdits'
+import { separatorOf } from '../../lib/files/table'
+import { MarkdownDraft, TextDraft, type Saving } from './Draft'
+import { ChangeField } from './ChangeField'
+import { addChange, removeChange, sendChanges, useFileChanges, withChanges } from '../../lib/files/changes'
+import { uploadChatFile } from '../../lib/chat/client'
+import { readerLook, rememberOwnChange, useDrawnPage } from '../../lib/files/drawnPage'
+import { officeEdit } from '../../lib/files/officeEdits'
+import { PAPER_LOOK } from '../../lib/files/pageLook'
+import { useTheme } from '../../lib/theme'
 import { useFileActions } from '../../lib/files/useFile'
 import { useFileText } from '../../lib/files/useFileText'
 import { relativeTime } from '../../lib/format'
 import { AvatarFace } from '../agents/AvatarFace'
 import { AgentCardPopup } from '../chat/AgentFace'
 import { useAgentCard } from '../../lib/chat/useAgentCard'
-import { Markdown } from '../ui/Markdown'
-import { CodeView, DocumentView, TableView } from './formats'
+import { InlineMarkdown, Markdown } from '../ui/Markdown'
+import { MarkdownPictures } from '../ui/markdownPictures'
+import { linkedPath } from '../../lib/files/paths'
+import { plainWords } from '../../lib/chat/findWords'
+import { CodeView, DocumentView } from './formats'
 import { PageFrame, type Marked } from './PageFrame'
 import { PassageAnswer } from './PassageAnswer'
 import { PartBubble } from './PartBubble'
+import { PictureView } from './PictureView'
+import { SheetView, type CellEdit, type MarkedCells } from './SheetView'
+import { MediaView } from './MediaView'
+import { PdfView } from './PdfView'
 
 export interface FileReaderProps {
   file: FileToRead
   name: (id: string) => string
   hue: (id: string) => number
-  /** Ask `agent` about a marked part: put it in the message box with its quote, or send `words` about it at once. */
-  onAsk?: (reply: ReplyTo, words: string | undefined, agent: string) => void
+  /**
+   * Ask `agent` about a marked part: put it in the message box with its quote, or send `words` about
+   * it at once. A part that isn't words comes with its `pictures` (ADR 0091), to send with it.
+   */
+  onAsk?: (reply: ReplyTo, words: string | undefined, agent: string, pictures?: readonly File[]) => void
   /** The team's agents who can be asked instead of the one who made the file, in the team's order. */
   team?: readonly string[]
   /** What an agent on the team is for, so a teammate can be chosen by its job. */
@@ -46,12 +70,29 @@ export interface FileReaderProps {
   onShowAsked?: (passage: AskedPassage) => void
   /** The team's agents as the chat's cards show them: pointing at a bubble opens its agent's card. */
   faces?: readonly AgentFacts[]
+  /**
+   * The team whose chat the file is read beside, by the chat's path: changes left on any part of
+   * the file for its agents go there (ADR 0107). Without it, Make changes is for your own typing.
+   */
+  teamPath?: string | null
 }
 
 /** What Explain sends: one press for the commonest question a newcomer has. */
 export const EXPLAIN_WORDS = 'Explain this part in plain words.'
 /** The tip under a file until the first part is asked about, kept for this browser. */
 const HINT_KEY = 'loomwatch.readerHint'
+/** The same for a picture, whose gesture is a drag: a person who has marked words has not learnt it. */
+const PICTURE_HINT_KEY = 'loomwatch.readerHint.picture'
+/** And for a sheet, whose drag is across cells. */
+const CELLS_HINT_KEY = 'loomwatch.readerHint.cells'
+/** And for a recording, whose line is pressed or dragged along. */
+const MEDIA_HINT_KEY = 'loomwatch.readerHint.media'
+/** And for changing a file yourself (ADR 0107), until a change is saved. */
+const CHANGE_HINT_KEY = 'loomwatch.readerHint.change'
+/** And for a web page, any part of which is asked about by the Pick switch. */
+const PICK_HINT_KEY = 'loomwatch.readerHint.pick'
+/** And for a PDF's pages, where a drag over a picture or a chart marks a box. */
+const PDF_HINT_KEY = 'loomwatch.readerHint.pdf'
 /** How long "Updated" stays lit after the file changed on disk. */
 const UPDATED_MS = 2_400
 /** The ask bubble's size before it has been measured. */
@@ -61,6 +102,8 @@ const FRESH_MS = 1_400
 /** The answer's size before it has been measured. */
 const ANSWER_GUESS = { width: 360, height: 96 }
 const NO_PASSAGES: readonly AskedPassage[] = []
+/** A page drawn to be typed into marks nothing in it (ADR 0107). */
+const NO_PAGE_MARKS: { parts: PageMark[]; asking: string | null } = { parts: [], asking: null }
 const NO_TEAM: readonly string[] = []
 const NO_FACES: readonly AgentFacts[] = []
 /** Teammates' faces shown in the bubble beside the one asked; past this the rest are a list away. */
@@ -71,6 +114,32 @@ interface Measured { page: boolean; parts: readonly PagePart[]; view: Rect; slot
 const NO_SLOTS: ReadonlyMap<string, HTMLElement> = new Map()
 const sameMeasure = (a: Measured, b: Measured) => a.page === b.page && JSON.stringify([a.parts, a.view]) === JSON.stringify([b.parts, b.view])
   && a.slots.size === b.slots.size && [...a.slots].every(([key, slot]) => b.slots.get(key) === slot)
+
+/** Whether a box is the whole of its picture, page or frame. */
+const isWholeBox = (at: BoxAt) => at.x === 0 && at.y === 0 && at.w === WHOLE && at.h === WHOLE
+
+/** Whether a tip has been seen in this browser, read once for each tip. */
+function useTipSeen(key: string): boolean {
+  return useMemo(() => {
+    try { return window.localStorage.getItem(key) === 'seen' } catch { return false }
+  }, [key])
+}
+
+/** How far apart bubbles in the margin of words being typed into stand, top to top: a bubble and a gap. */
+const DRAFT_MARK_SPACE = 28
+/** The most bubbles shown side by side for one part, in the margin or the header; past them, how many more. */
+const BUBBLES_SHOWN = 3
+
+/** The asks to show first when not all can be: a change waiting, then one at work, then the newest. */
+function shownFirst(asks: readonly AskedPassage[]): AskedPassage[] {
+  const rank = (passage: AskedPassage) => (passage.answer.state === 'held' ? 0 : ['sending', 'writing', 'working'].includes(passage.answer.state) ? 1 : 2)
+  return asks.map((passage, at) => ({ passage, at })).sort((one, other) => rank(one.passage) - rank(other.passage) || other.at - one.at).map(({ passage }) => passage)
+}
+
+/** How wide a row of `shown` bubbles is, overlapped as reader.css draws them, with room for "+N". */
+function bubbleRowWidth(shown: number, more: boolean): number {
+  return 44 + Math.max(0, shown - 1) * 36 + (more ? 26 : 0)
+}
 
 /**
  * A file an agent made, read inside LoomWatch beside the chat it came from (ADR 0077): a report as a
@@ -84,15 +153,109 @@ const sameMeasure = (a: Measured, b: Measured) => a.page === b.page && JSON.stri
  * again. The file is read again whenever it changes on disk, so a part the agent was asked to change
  * is seen changed.
  */
-export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked = NO_PASSAGES, asking = null, onShowAsked, faces = NO_FACES }: FileReaderProps) {
+export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked = NO_PASSAGES, asking = null, onShowAsked, faces = NO_FACES, teamPath = null }: FileReaderProps) {
   const { path, from } = file
   const format = readerFormat(path) ?? 'text'
   const words = format !== 'picture' && format !== 'media'
   const content = useFileText(path, words)
   const text = content.file?.text ?? null
   const [view, setView] = useState<'page' | 'code'>('page')
-  const shown = format === 'page' && view === 'code' ? 'code' : format
-  const askable = Boolean(onAsk && from && canMark(format))
+  // A PDF that PDF.js couldn't open is shown by its words, as before (ADR 0091).
+  const [pdfFailed, setPdfFailed] = useState<string | null>(null)
+  // A slide deck or a Word document is drawn by LoomWatch itself as a page of its slides or pages,
+  // shown as a web page an agent made is (ADR 0091); its words alone where it can't be drawn.
+  const drawnKind = format === 'slides' || format === 'document' ? format : null
+  // Its paper lies on the reader's own ground, in the theme shown now.
+  const { resolved: theme } = useTheme()
+  const look = useMemo(() => (drawnKind ? readerLook(theme) : null), [drawnKind, theme])
+  // A slide that changed since it was last seen shows the face of the agent whose file it is.
+  const figures = useContext(TeamFiguresContext)
+  const figureOf = (id: string) => figures.get(id) ?? figures.get(wearerOf(id)) ?? null
+  const maker = drawnKind === 'slides' && from ? figureOf(from) : null
+  // Make changes (ADR 0107): the file's words typed into where they are, and saved into the file.
+  // For the file open now, and off with it. Not a web page: its code is not what you read.
+  const version = content.file?.version ?? null
+  // Changed yourself, when the daemon says it can be: a Markdown, text or code file typed into, or
+  // a table's or a workbook's cells.
+  const typesInto = format === 'markdown' || format === 'code' || format === 'text'
+  const cellsChange = format === 'table' || format === 'sheet'
+  const ownEditable = Boolean(content.file?.editable && version) && (typesInto || cellsChange || drawnKind !== null)
+  // Any part of any kind of file in a team's chat can be left a change for its agents (step 3).
+  const leavesChanges = Boolean(teamPath && onAsk && from)
+  const changeable = ownEditable || leavesChanges
+  const [changingIn, setChangingIn] = useState<string | null>(null)
+  const changing = changeable && changingIn === path
+  const drafting = changing && ownEditable && typesInto
+  const changingCells = changing && ownEditable && cellsChange
+  // A deck's words and notes, or a Word document's paragraphs, typed into where they are drawn.
+  const changingDrawn = changing && ownEditable && drawnKind !== null
+  const drawn = useDrawnPage(drawnKind ? path : null, drawnKind, baseName(path), String(content.changes), look ?? PAPER_LOOK, maker ? figureStill(maker) : null, changingDrawn)
+  // Until it is drawn, or can't be, it is neither its pages nor only its words.
+  const drawing = drawnKind !== null && !drawn
+  const asPages = format === 'pdf'
+  const pdfPages = asPages && pdfFailed !== path
+  // Whether one of its pages shows a picture or a chart: only then does its tip speak of boxes.
+  const [pdfPictured, setPdfPictured] = useState<string | null>(null)
+  const pdfPicture = useRef<((at: BoxAt & { page: number }) => Promise<Blob | null>) | null>(null)
+  const takePdfPictures = useCallback((take: ((at: BoxAt & { page: number }) => Promise<Blob | null>) | null) => { pdfPicture.current = take }, [])
+  // How many pages it has, and the page each part of words asked about is on (`null`: on none).
+  const [pdfCount, setPdfCount] = useState<{ path: string; pages: number } | null>(null)
+  const [pdfFound, setPdfFound] = useState<{ path: string; pages: ReadonlyMap<string, number | null> } | null>(null)
+  const pdfOn = pdfPages && pdfFound?.path === path ? pdfFound.pages : null
+  const shown = format === 'page' && view === 'code' ? 'code' : drawn?.html ? 'page' : format
+  const pageHtml = drawn?.html ?? text
+  // How to change the file, said for each way of changing one until it is used in this browser:
+  // typing into words, a box, a drawn page or cells, or leaving changes for agents.
+  const changeTipKey = `${CHANGE_HINT_KEY}.${changingDrawn ? 'page' : changingCells ? 'cells' : !drafting ? 'agents' : shown === 'markdown' ? 'markdown' : 'text'}`
+  const changeTipSeen = useTipSeen(changeTipKey)
+  const [changeTipsDropped, setChangeTipsDropped] = useState<ReadonlySet<string>>(() => new Set())
+  const changeTipGone = changeTipSeen || changeTipsDropped.has(changeTipKey)
+  const dropChangeTip = useCallback(() => {
+    setChangeTipsDropped((was) => new Set(was).add(changeTipKey))
+    try { window.localStorage.setItem(changeTipKey, 'seen') } catch { /* kept for this visit only */ }
+  }, [changeTipKey])
+  // What came of the last change saved here, and the copy that puts it back.
+  const [saving, setSaving] = useState<{ path: string; saving: Saving | { state: 'undone'; kept: string } } | null>(null)
+  const savingHere = saving?.path === path ? saving.saving : null
+  const takeSaving = useCallback((next: Saving) => {
+    setSaving({ path, saving: next })
+    if (next.state === 'saved') dropChangeTip()
+  }, [path, dropChangeTip])
+  const putBackHere = (kept: string, state: 'undone' | 'saved') => {
+    void putBack(kept).then(
+      (written) => {
+        // A deck or a document put back is drawn again from the file, as it is now.
+        if (drawnKind) rememberOwnChange(path, written.version, false)
+        setSaving({ path, saving: state === 'undone' ? { state: 'undone', kept: written.kept } : { state: 'saved', kept: written.kept } })
+      },
+      (caught: unknown) => setSaving({ path, saving: { state: 'failed', message: caught instanceof Error ? caught.message : String(caught), changed: false, undo: true, said: caught instanceof ToldWhy } }),
+    )
+  }
+  // Any part of every kind the reader draws can be asked about (ADR 0077, ADR 0091), except while
+  // you change the file.
+  const askable = Boolean(onAsk && from) && !changing
+  // Parts are marked to ask about them, or, while you make changes, to leave a change on them.
+  const markable = Boolean(onAsk && from) && (!changing || leavesChanges)
+  // Views that mark their parts themselves, by pointer, rather than by selecting words: a picture
+  // (a box) and a sheet (cells). A web page reports its own marked words.
+  const cellsView = shown === 'table' || shown === 'sheet'
+  const selfMarking = !words || cellsView
+  // A web page's Pick switch (ADR 0091): while it is on, a click on the page marks the part under
+  // it. It is for the page open now, and goes off with the file.
+  const [pickingIn, setPickingIn] = useState<string | null>(null)
+  const pickable = markable && shown === 'page' && !changingDrawn
+  const picking = pickable && pickingIn === path
+  // Turned on from the keyboard, the page takes the keys, for its arrows to walk its parts.
+  const [pickKeys, setPickKeys] = useState(0)
+  // What the arrow keys reached while picking, said to a screen reader; turned on from the
+  // keyboard, how to pick with it.
+  const [pointedAt, setPointedAt] = useState('')
+  const togglePick = (event: ReactMouseEvent) => {
+    const keys = !picking && event.detail === 0
+    setPickingIn(picking ? null : path)
+    setPointedAt(keys ? 'Picking. Use the arrow keys, then Enter.' : '')
+    if (keys) setPickKeys((count) => count + 1)
+  }
 
   const stage = useRef<HTMLDivElement>(null)
   const scroller = useRef<HTMLDivElement>(null)
@@ -104,9 +267,12 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
   const [cleared, setCleared] = useState(0)
   const dragging = useRef(false)
   const readSelection = useCallback(() => {
+    // Words selected in a text file's box say so themselves (TextDraft): its selection isn't the page's.
+    if (document.activeElement instanceof HTMLTextAreaElement && page.current?.contains(document.activeElement)) return
     const selection = document.getSelection()
     const element = page.current
-    if (!selection || selection.isCollapsed || selection.rangeCount === 0 || !element) { setMarked(null); return }
+    // No words selected lets go of words, but not of a box drawn on a PDF's page beside them.
+    if (!selection || selection.isCollapsed || selection.rangeCount === 0 || !element) { setMarked((current) => (current?.at?.kind === 'box' ? current : null)); return }
     const range = selection.getRangeAt(0)
     const passage = element.contains(range.commonAncestorContainer) ? passageOf(selection.toString()) : null
     if (!passage) { setMarked(null); return }
@@ -114,7 +280,7 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
     setMarked({ text: passage, rect: { top: box.top, bottom: box.bottom, left: box.left, right: box.right } })
   }, [])
   useEffect(() => {
-    if (!askable || shown === 'page') return
+    if (!markable || shown === 'page' || selfMarking) return
     let timer = 0
     const changed = () => {
       window.clearTimeout(timer)
@@ -139,7 +305,7 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
       document.removeEventListener('pointerdown', down, true)
       document.removeEventListener('pointerup', up, true)
     }
-  }, [askable, shown, readSelection])
+  }, [markable, shown, selfMarking, readSelection])
   useEffect(() => {
     if (!marked) return
     const away = (event: KeyboardEvent) => {
@@ -152,11 +318,25 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
     document.addEventListener('keydown', away, true)
     return () => document.removeEventListener('keydown', away, true)
   }, [marked])
+  // A part that isn't words is let go of as marked words are: by pressing anywhere else. A press on
+  // the picture itself marks again there (PictureView).
+  const markedAt = Boolean(marked?.at)
+  useEffect(() => {
+    if (!markedAt) return
+    const elsewhere = (event: PointerEvent) => {
+      const target = event.target as Node
+      if (bubble.current?.contains(target) || page.current?.contains(target)) return
+      setMarked(null)
+    }
+    document.addEventListener('pointerdown', elsewhere, true)
+    return () => document.removeEventListener('pointerdown', elsewhere, true)
+  }, [markedAt])
 
   // Who is asked: the agent who made the file, unless another face in the bubble was chosen for
-  // these words. Marking other words asks the maker again.
-  const [chosen, setChosen] = useState<{ text: string; agent: string } | null>(null)
-  const askee = chosen && marked && chosen.text === marked.text && team.includes(chosen.agent) ? chosen.agent : from
+  // this part. Marking another part asks the maker again.
+  const markedId = marked ? partId(marked) : null
+  const [chosen, setChosen] = useState<{ part: string; agent: string } | null>(null)
+  const askee = chosen && chosen.part === markedId && team.includes(chosen.agent) ? chosen.agent : from
   const others = askee ? team.filter((id) => id !== askee) : NO_TEAM
   // A small team shows every face. A big one shows the maker (a press back to the default) and the
   // first of the rest in the team's order; everyone, with what each is for, is a list away.
@@ -164,42 +344,248 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
     : [...others.filter((id) => id === from), ...others.filter((id) => id !== from)].slice(0, FACES_SHOWN)
   const unshown = others.length - shownFaces.length
   const [listFor, setListFor] = useState<string | null>(null)
-  const listing = Boolean(marked && unshown > 0 && listFor === marked.text)
+  const listing = Boolean(markedId !== null && unshown > 0 && listFor === markedId)
   const choose = (agent: string) => {
-    if (!marked) return
-    setChosen({ text: marked.text, agent })
+    if (markedId === null) return
+    setChosen({ part: markedId, agent })
     setListFor(null)
   }
 
   // Where the bubble sits over the marked words, in the coordinates of the page's stage it floats on.
   const [size, setSize] = useState(BUBBLE_GUESS)
+  // Opened from one button over words being typed into, the change field is measured again.
+  const [fieldOpened, setFieldOpened] = useState(0)
   useLayoutEffect(() => {
     const element = bubble.current
     if (!element) return
     const measured = { width: element.offsetWidth, height: element.offsetHeight }
     if (measured.width && (measured.width !== size.width || measured.height !== size.height)) setSize(measured)
-  }, [marked, size, others.length, listing])
+  }, [marked, size, others.length, listing, fieldOpened])
   const [place, setPlace] = useState<ReturnType<typeof bubblePlace> | null>(null)
   useLayoutEffect(() => {
     const box = stage.current?.getBoundingClientRect()
-    setPlace(marked && box ? bubblePlace(marked.rect, { top: box.top, left: box.left, width: box.width }, { top: 0, left: 0 }, size) : null)
+    setPlace(marked && box ? bubblePlace(marked.rect, { top: box.top, left: box.left, width: box.width, height: box.height }, { top: 0, left: 0 }, size) : null)
   }, [marked, size])
+  // Marked from the keyboard (Enter on the picture): the keyboard goes on to Ask, once it is there.
+  useEffect(() => {
+    if (marked?.at && place && page.current?.contains(document.activeElement)) bubble.current?.querySelector<HTMLButtonElement>('.rd-ask-main')?.focus()
+  }, [marked, place])
+
+  // What a part is seen as, sent with the question: the picture inside a box; the frame of a
+  // moment, a span's first, middle and last frames, or a box cut out of its frame. Cells and the
+  // moments of a recording of sound only go as their words.
+  const picturesOf = async (at: BoxAt | TimeAt): Promise<File[]> => {
+    const video = page.current?.querySelector('video')
+    if (video) {
+      const stem = baseName(path).replace(/\.[^.]+$/, '') || 'recording'
+      const times = frameTimes(at)
+      if (!times.length) return []
+      // Taken from a hidden copy, so the recording on screen stays where the person put it.
+      const copy = await stillCopy(video)
+      const frames = await framesOf(copy ?? video, times, (index) => `${stem} at ${clockTime(times[index]).replace(/:/g, '.')}.png`, at.kind === 'box' ? at : undefined)
+      copy?.removeAttribute('src')
+      return frames
+    }
+    // A box on a PDF's page: drawn again, sharp, by PDF.js; or else cut out of the page as drawn.
+    if (at.kind === 'box' && at.page && pdfPicture.current) {
+      const blob = await pdfPicture.current({ ...at, page: at.page }).catch(() => null)
+      if (blob) return [new File([blob], partPictureName(baseName(path)), { type: 'image/png' })]
+    }
+    const drawnPage = at.kind === 'box' && at.page ? page.current?.querySelector<HTMLCanvasElement>(`.rd-pdf-page[data-page="${at.page}"] canvas`) : null
+    if (drawnPage && at.kind === 'box') {
+      const picture = await pictureInside(drawnPage, at, partPictureName(baseName(path)))
+      return picture ? [picture] : []
+    }
+    const image = at.kind === 'box' ? page.current?.querySelector('img') : null
+    const picture = image && at.kind === 'box' ? await pictureInside(image, at, partPictureName(baseName(path))) : null
+    return picture ? [picture] : []
+  }
+  const askAbout = (reply: ReplyTo, words: string | undefined, agent: string, picture?: File) => {
+    if (!onAsk) return
+    // A thing in a web page comes with the picture the page drew of it, when it could.
+    if (reply.at?.kind === 'element') { onAsk(reply, words, agent, ...(picture ? [[picture]] : [])); return }
+    if (reply.at?.kind !== 'box' && reply.at?.kind !== 'time') { onAsk(reply, words, agent); return }
+    void picturesOf(reply.at).then((pictures) => onAsk(reply, words, agent, ...(pictures.length ? [pictures] : [])))
+  }
 
   const ask = (words?: string) => {
     if (!marked || !from || !askee || !onAsk) return
-    const reply = passageReply({ path, runId: file.runId, from }, marked.text)
+    const reply = passageReply({ path, runId: file.runId, from }, marked.text, marked.at)
     flyToMessageBox(bubble.current, marked.text)
-    onAsk(reply, words, askee)
+    askAbout(reply, words, askee, marked.picture)
     document.getSelection()?.removeAllRanges()
     setCleared((count) => count + 1)
     setMarked(null)
-    setHint(false)
-    try { window.localStorage.setItem(HINT_KEY, 'seen') } catch { /* The tip shows again next time. */ }
+    // Asked: picking stops, so the page's own buttons and links work again while the person writes.
+    setPickingIn(null)
+    // Asking about a part picked in a page, or a box on a PDF's page, is what their tips teach; words
+    // asked about there teach words.
+    const teaches = hintKey === PICK_HINT_KEY || hintKey === PDF_HINT_KEY
+    hideHint(marked.at?.kind === 'element' ? PICK_HINT_KEY : marked.at?.kind === 'box' && hintKey === PDF_HINT_KEY ? PDF_HINT_KEY : teaches ? HINT_KEY : hintKey)
   }
+
+  // Leave a change on the marked part for the agent chosen (ADR 0107): it waits on the file with the
+  // others until Send. A part that isn't words goes with its picture, as a question about it does.
+  const leaveChange = async (words: string) => {
+    if (!marked || !from || !askee || !teamPath) return
+    const part = passageReply({ path, runId: file.runId, from }, marked.text, marked.at)
+    const pictures = marked.at?.kind === 'element' ? (marked.picture ? [marked.picture] : [])
+      : marked.at?.kind === 'box' || marked.at?.kind === 'time' ? await picturesOf(marked.at) : []
+    const sent = await Promise.all(pictures.map((picture) => uploadChatFile(teamPath, picture, picture.name)))
+    await addChange({ teamPath, file: path, agent: askee, words, part, files: sent.map((each) => ({ path: each.path })) })
+    refreshChanges()
+    // Where a change can only be left for an agent, its tip has done its work; where words are typed into, it says that too.
+    if (!drafting && !changingDrawn && !changingCells) dropChangeTip()
+    document.getSelection()?.removeAllRanges()
+    setCleared((count) => count + 1)
+    setMarked(null)
+  }
+  // A cell you changed (ADR 0107): the file is read again as it is now, that one cell changed in
+  // it, and written on the version just read; one after another, never two at once.
+  const cellWrites = useRef<Promise<unknown>>(Promise.resolve())
+  const editCell = (edit: CellEdit): Promise<boolean> => {
+    const write = cellWrites.current.then(async () => {
+      try {
+        let written: Written | null = null
+        if (format === 'sheet') {
+          const response = await fetch(rawFileUrl(path), { cache: 'no-store' })
+          const was = rawVersion(response)
+          if (!response.ok || !was) throw new Error(`${fileName} couldn’t be read again.`)
+          const next = await withWorkbookCell(await response.arrayBuffer(), edit.sheet, edit.row, edit.col, edit.value)
+          if (next) written = await writeFile(path, next, was)
+        } else {
+          const now = await readFile(path)
+          if (!now.version || now.truncated) throw new Error(`${fileName} is too long to change here.`)
+          const next = withTableCell(now.text, edit.row, edit.col, edit.value, separatorOf(path, now.text))
+          if (next !== null) written = await writeFile(path, next, now.version)
+        }
+        if (written) takeSaving({ state: 'saved', kept: written.kept })
+        return true
+      } catch (caught: unknown) {
+        const message = caught instanceof Error ? caught.message : String(caught)
+        takeSaving({ state: 'failed', message, changed: caught instanceof ChangedSince, said: caught instanceof CellLocked || caught instanceof ToldWhy })
+        return false
+      }
+    })
+    cellWrites.current = write
+    return write
+  }
+  // Words typed into a deck or a Word document where it is drawn (ADR 0107): written into its own
+  // part of the file, one after another, on the bytes you were looking at, or on your own last
+  // save while the drawing catches up with it; told to the drawing as yours, so it is not marked
+  // as the agent's.
+  const drawnNow = useRef(drawn)
+  useEffect(() => { drawnNow.current = drawn }, [drawn])
+  const ownDrawn = useRef<{ path: string; bytes: Uint8Array; version: string; versions: Set<string> } | null>(null)
+  const drawnWrites = useRef<Promise<unknown>>(Promise.resolve())
+  const editDrawn = useCallback((part: string, words: string) => {
+    drawnWrites.current = drawnWrites.current.then(async () => {
+      const shownNow = drawnNow.current
+      if (!drawnKind || !shownNow?.html || !shownNow.version) return
+      const own = ownDrawn.current
+      const base = own && own.path === path && own.versions.has(shownNow.version) ? own : { path, bytes: shownNow.bytes, version: shownNow.version, versions: new Set([shownNow.version]) }
+      try {
+        const next = await officeEdit(drawnKind, base.bytes, part, words)
+        if (!next) return
+        const written = await writeFile(path, next, base.version)
+        ownDrawn.current = { path, bytes: next, version: written.version, versions: new Set([...base.versions, written.version]) }
+        rememberOwnChange(path, written.version, true)
+        takeSaving({ state: 'saved', kept: written.kept })
+      } catch (caught: unknown) {
+        takeSaving({ state: 'failed', message: caught instanceof Error ? caught.message : String(caught), changed: caught instanceof ChangedSince, said: caught instanceof ToldWhy })
+      }
+    })
+  }, [drawnKind, path, takeSaving])
+  // Words selected in a text file's box, to leave a change on (the page's selection never holds them).
+  const markInBox = useCallback((words: string | null, box: DOMRect | null) => {
+    const passage = words ? passageOf(words) : null
+    // At the box's top, or the top of what is in view of it when it is scrolled past.
+    const top = box ? Math.max(box.top, (stage.current?.getBoundingClientRect().top ?? box.top) + 8) : 0
+    setMarked(passage && box ? { text: passage, rect: { top, bottom: top + 24, left: box.left + 12, right: box.left + 160 } } : null)
+  }, [])
 
   // The parts asked about: marked in the text, with a bubble after them for each agent asked, each
   // ask known by its key (`askKey`).
-  const mine = useMemo(() => fileAsks(asked, path), [asked, path])
+  // With the changes left on the file for its agents (ADR 0107), each at its part.
+  const { changes: left, refresh: refreshChanges } = useFileChanges(leavesChanges ? teamPath : null, leavesChanges ? path : null)
+  const mine = useMemo(() => withChanges(fileAsks(asked, path), left, path), [asked, path, left])
+  const waitingChanges = left.filter((change) => change.state === 'waiting').length
+  const [sendingChanges, setSendingChanges] = useState<{ path: string; problem: string | null; told: boolean; busy: boolean } | null>(null)
+  const sendHere = () => {
+    if (!teamPath) return
+    setSendingChanges({ path, problem: null, told: false, busy: true })
+    void sendChanges(teamPath, path).then(
+      () => { setSendingChanges(null); refreshChanges() },
+      (caught: unknown) => setSendingChanges({ path, problem: caught instanceof Error ? caught.message : String(caught), told: caught instanceof ToldWhy, busy: false }),
+    )
+  }
+  const sendingHere = sendingChanges?.path === path ? sendingChanges : null
+  // While a Markdown file is typed into, nothing is marked in its words (that would change what is
+  // typed into): a part asked about, or a change left, shows its bubble on a layer over the page,
+  // at the end of its words, found again as the page scrolls or the words move.
+  const [draftMarks, setDraftMarks] = useState<readonly { keys: readonly string[]; top: number; left: number }[]>([])
+  const [draftMoved, setDraftMoved] = useState(0)
+  useEffect(() => {
+    const scrolling = scroller.current
+    const element = page.current
+    if (!drafting || !scrolling || !element) return
+    const moved = () => setDraftMoved((count) => count + 1)
+    scrolling.addEventListener('scroll', moved, { passive: true })
+    element.addEventListener('input', moved)
+    window.addEventListener('resize', moved)
+    // The page settling as it is first drawn (a font, a picture) moves its lines with no other sign.
+    const resized = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(moved)
+    resized?.observe(element)
+    return () => {
+      scrolling.removeEventListener('scroll', moved)
+      element.removeEventListener('input', moved)
+      window.removeEventListener('resize', moved)
+      resized?.disconnect()
+    }
+  }, [drafting])
+  // A change whose words the file no longer has (the agent changed them, as asked) keeps its bubble
+  // in the header, where its card, and Put back, are a press away.
+  const [lostChanges, setLostChanges] = useState<readonly string[]>([])
+  useLayoutEffect(() => {
+    const element = page.current
+    const lost = element && words && text !== null && !(drawnKind && !drawn)
+      ? mine.filter((passage) => passage.change?.state === 'sent' && !passage.at && !findPassage(pageText(element), passage.text)).map(askKey)
+      : []
+    setLostChanges((current) => (current.join('\u0000') === lost.join('\u0000') ? current : lost))
+  }, [mine, text, words, drawnKind, drawn, draftMoved])
+  useLayoutEffect(() => {
+    const element = page.current
+    const box = stage.current?.getBoundingClientRect()
+    if (!drafting || !element || !box) {
+      setDraftMarks((current) => (current.length ? [] : current))
+      return
+    }
+    const words = pageText(element)
+    // In the margin beside the paragraph its words are in, at their last line, so it never covers
+    // words you might click into: a part's bubbles in a row, a few at most, and a row that would
+    // cover another goes under it.
+    const parts = new Map<string, AskedPassage[]>()
+    for (const passage of mine) if (!passage.at) parts.set(passage.text, [...(parts.get(passage.text) ?? []), passage])
+    const placed = [...parts.values()].flatMap((asks) => {
+      const range = findPassage(words, asks[0].text)
+      const end = range ? [...range.getClientRects()].at(-1) : undefined
+      const holder = range?.endContainer instanceof Element ? range.endContainer : range?.endContainer.parentElement
+      const block = holder?.closest('[data-lw-block]') ?? holder
+      if (!end || !block) return []
+      const keys = shownFirst(asks).map(askKey)
+      // Inside the pane, the row's width from its edge at most.
+      const width = bubbleRowWidth(Math.min(keys.length, BUBBLES_SHOWN), keys.length > BUBBLES_SHOWN)
+      const left = Math.min(Math.round(block.getBoundingClientRect().right - box.left + 8), Math.round(box.width - width - 8))
+      return [{ keys, top: Math.round(end.top - box.top - 3), left }]
+    }).sort((one, other) => one.top - other.top)
+    let below = -Infinity
+    const found = placed.map((mark) => {
+      const top = Math.max(mark.top, below + DRAFT_MARK_SPACE)
+      below = top
+      return { ...mark, top }
+    })
+    setDraftMarks((current) => (JSON.stringify(current) === JSON.stringify(found) ? current : found))
+  }, [drafting, mine, draftMoved, text])
 
   // The answer to one ask, open beside its part: it opens as you send a question about a part of
   // this file, and again from its bubble or the marked words. It steps aside while other words are marked.
@@ -241,9 +627,16 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
   // The reader marks its own text (lib/files/partMarks.ts); a web page marks itself (pageFrame.ts)
   // and says where its parts are. A part the file no longer has is `missing`.
   // Marked again only when the words change, not when an answer comes in or another agent is asked.
-  const partsKey = partTexts(mine).join('\u0000')
+  // Parts with a place (a box, cells: ADR 0091) are drawn by their view, each known by its id
+  // (`partId`); parts of words are marked in the words, in a file of words.
+  const partsKey = (words ? partTexts(mine.filter((passage) => !passage.at)) : []).join('\u0000')
   const texts = useMemo(() => (partsKey ? partsKey.split('\u0000') : []), [partsKey])
+  const placesKey = partTexts(mine.filter((passage) => passage.at).map((passage) => ({ text: partId(passage) }))).join('\u0000')
+  const places = useMemo(() => (placesKey ? placesKey.split('\u0000') : []), [placesKey])
   const [measured, setMeasured] = useState<Measured | null>(null)
+  // Whether the page is dark under a sheet's ranges, for their bubbles; where a workbook's tabs go.
+  const [pageDark, setPageDark] = useState(false)
+  const [sheetBar, setSheetBar] = useState<HTMLDivElement | null>(null)
   const takeMeasured = useCallback((next: Measured) => setMeasured((current) => (current && sameMeasure(current, next) ? current : next)), [])
   const takeParts = useCallback((parts: PagePart[], view: Rect) => takeMeasured({ page: true, parts, view, slots: NO_SLOTS }), [takeMeasured])
   // What was measured in the view now on screen: the page's own report, or the text's.
@@ -257,22 +650,42 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
     const scrolling = scroller.current
     if (!element || !scrolling) return
     const box = scrolling.getBoundingClientRect()
-    const dark = darkBehind(element)
+    // What is in view: the scroller less its scroll bars.
+    const view = { top: box.top, left: box.left, right: box.left + (scrolling.clientWidth || box.width), bottom: box.top + (scrolling.clientHeight || box.height) }
+    // A PDF's pages are paper, light in either theme, whatever is round them.
+    const dark = darkBehind(element.querySelector('.rd-pdf-page') ?? element)
+    setPageDark(dark)
     const marked = marks.current?.parts ?? new Map<string, MarkedPart>()
+    // A box or a range is drawn by its view (PictureView, SheetView), each with the slot for its
+    // bubbles; one on a sheet not shown (`data-away`) is not lost, only out of sight.
+    const drawn = new Map([...element.querySelectorAll<HTMLElement>('.rd-box[data-part]')].map((each) => [each.dataset.part ?? '', each]))
+    // A PDF still opening, or with words on a page not laid out yet, has not lost them: only words
+    // on none of its pages are gone (PdfView `onWanted`), and a box once its pages are there.
+    const opening = pdfPages && !element.querySelector('.rd-pdf')
     takeMeasured({
       page: false,
-      parts: texts.map((text) => ({
-        text,
-        rects: (marked.get(text)?.marks ?? []).flatMap((mark) => [...mark.getClientRects()].map((rect) => ({ top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right }))),
-        missing: !found.current.has(text),
-        as: marked.get(text)?.key ?? text,
-        dark,
-      })),
-      // What is in view: the scroller less its scroll bars.
-      view: { top: box.top, left: box.left, right: box.left + (scrolling.clientWidth || box.width), bottom: box.top + (scrolling.clientHeight || box.height) },
-      slots: new Map([...marked].map(([key, part]) => [key, part.slot])),
+      parts: [
+        ...texts.map((text) => ({
+          text,
+          rects: (marked.get(text)?.marks ?? []).flatMap((mark) => [...mark.getClientRects()].map((rect) => ({ top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right }))),
+          missing: !found.current.has(text) && (!pdfPages || pdfOn?.get(text) === null),
+          as: marked.get(text)?.key ?? text,
+          dark,
+        })),
+        ...places.map((id) => {
+          const each = drawn.get(id)
+          const away = each?.hasAttribute('data-away') ?? false
+          const rect = each && !away ? each.getBoundingClientRect() : null
+          return { text: id, rects: rect ? [{ top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right }] : [], missing: !each && !opening, as: id, dark: false }
+        }),
+      ],
+      view,
+      slots: new Map([
+        ...[...marked].map(([key, part]) => [key, part.slot] as const),
+        ...[...drawn].flatMap(([id, each]) => { const slot = each.querySelector<HTMLElement>('.rd-slot'); return slot ? [[id, slot] as const] : [] }),
+      ]),
     })
-  }, [texts, takeMeasured])
+  }, [texts, places, takeMeasured, pdfPages, pdfOn])
   // A click on marked words, with nothing marked now, opens an answer to them (`wordsOpen`).
   const openAt = (event: { target: EventTarget }) => {
     if (document.getSelection()?.isCollapsed === false) return
@@ -284,19 +697,22 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
   const [layout, setLayout] = useState(0)
   useEffect(() => {
     const element = page.current
-    if (!element) return
+    // Typing into the file changes the page with every key: nothing is marked in it then.
+    if (!element || changing) return
     let pending = 0
     const again = () => { cancelAnimationFrame(pending); pending = requestAnimationFrame(() => setLayout((count) => count + 1)) }
     const resized = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(again)
     resized?.observe(element)
     // Markdown arrives a moment after the page: the parts are found once it has. A bubble drawn in
-    // its slot is no change to the file.
+    // its slot is no change to the file, nor is the block a drag over a PDF's words moves along
+    // (`holdSelections`): marking again then would end the drag.
     const inSlot = (node: Node) => Boolean((node instanceof Element ? node : node.parentElement)?.closest('.rd-slot'))
-    const changed = typeof MutationObserver === 'undefined' ? null : new MutationObserver((records) => { if (records.some((record) => !inSlot(record.target))) again() })
+    const selecting = (record: MutationRecord) => record.type === 'childList' && [...record.addedNodes, ...record.removedNodes].every((node) => node instanceof Element && node.classList.contains('endOfContent'))
+    const changed = typeof MutationObserver === 'undefined' ? null : new MutationObserver((records) => { if (records.some((record) => !inSlot(record.target) && !selecting(record))) again() })
     changed?.observe(element, { childList: true, subtree: true, characterData: true })
     changes.current = changed
     return () => { cancelAnimationFrame(pending); resized?.disconnect(); changed?.disconnect(); changes.current = null }
-  }, [shown, text])
+  }, [shown, text, changing])
   useLayoutEffect(() => {
     const element = page.current
     const registry = typeof CSS !== 'undefined' ? (CSS as unknown as { highlights?: Map<string, unknown> }).highlights : undefined
@@ -305,14 +721,16 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
       if (ranges.length) registry.set(key, new Highlight(...ranges))
       else registry.delete(key)
     }
-    if (shown === 'page' || !element || !words) return
+    // Parts are marked in the words as they are read, never in words being typed into (ADR 0107).
+    if (shown === 'page' || !element || !words || changing) return
     const texts = partsKey ? partsKey.split('\u0000') : []
     const ranges = texts.flatMap((key) => {
       const range = findPassage(pageText(element), key)
       return range ? [{ key, range }] : []
     })
     found.current = new Set(ranges.map((part) => part.key))
-    const marked = markParts(ranges, { mark: 'rd-mark', slot: 'rd-slot' })
+    // On a PDF's page, the bubbles go over the page, not in its stretched lines of words.
+    const marked = markParts(ranges, { mark: 'rd-mark', slot: 'rd-slot' }, placeSlotOnPage)
     marks.current = marked
     // Our own marks are no change to the file.
     changes.current?.takeRecords()
@@ -325,12 +743,16 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
       marked.undo()
       changes.current?.takeRecords()
     }
-  }, [partsKey, asking, layout, shown, words, text, measure])
+  }, [partsKey, asking, layout, shown, words, text, measure, changing])
+  // Boxes and ranges are measured as they are drawn, and again as the file is laid out.
+  useLayoutEffect(() => {
+    if (shown !== 'page') measure()
+  }, [shown, layout, measure])
 
   // How each part's words look, from what came of the asks on them: set on its marks as it changes.
   const dark = onScreen?.parts[0]?.dark ?? false
   const wordsLookOf = (keys: readonly string[]) => {
-    const asks = mine.filter((passage) => keys.includes(passage.text)).map(askKey)
+    const asks = mine.filter((passage) => keys.includes(partId(passage))).map(askKey)
     return `${wordsLook(asks.map((key) => looks.get(key) ?? 'read'))}${dark ? ' on-dark' : ''}${asks.some((key) => fresh.includes(key)) ? ' fresh' : ''}${asks.some((key) => key === shownKey || key === focus) ? ' lit' : ''}`
   }
   useLayoutEffect(() => {
@@ -339,10 +761,10 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
   })
 
   const inView = onScreen?.view ?? null
-  const openPart = answerShown ? onScreen?.parts.find((part) => part.text === answerShown.text) ?? null : null
+  const openPart = answerShown ? onScreen?.parts.find((part) => part.text === partId(answerShown)) ?? null : null
   const answerLost = Boolean(openPart?.missing)
   // An earlier part shown with the newer one that overlaps it: its answer says which words it is about.
-  const answerAbout = answerShown && openPart?.as && openPart.as !== answerShown.text ? answerShown.text : null
+  const answerAbout = answerShown && !answerShown.at && openPart?.as && openPart.as !== answerShown.text ? answerShown.text : null
   const answerPart = useMemo(() => {
     const box = openPart && !openPart.missing ? partBox(partLines(openPart.rects)) : null
     // Out of the view's sight, it has nothing to point at.
@@ -375,7 +797,7 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
       if (event.key !== 'Escape' || event.defaultPrevented) return
       const target = event.target as HTMLElement | null
       // Escape in the message box is the message box's.
-      if (target?.closest?.('input, textarea, [contenteditable="true"]') && !card.current?.contains(target)) return
+      if (target?.closest?.('input, textarea, [contenteditable]:not([contenteditable="false"])') && !card.current?.contains(target)) return
       // It closes the answer, and only the answer: not the pane the file is read in too.
       event.preventDefault()
       event.stopPropagation()
@@ -405,8 +827,13 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
   }
   const cardAsk = agentCard.shown && cardFor ? mine.find((passage) => askKey(passage) === cardFor) ?? null : null
   const cardFacts = cardAsk ? factsOf(bubbleAgent(cardAsk)) : null
-  const cardLine = cardAsk ? bubbleCardLine(cardAsk, lookOfAsk(cardAsk), name) : ''
+  const cardLine = cardAsk ? bubbleCardParts(cardAsk, lookOfAsk(cardAsk), name) : null
   const closeAnswer = () => setAnswerFor(null)
+  // Escape in a page with nothing marked in it closes the answer open over it, or else stops picking.
+  const escapePage = () => {
+    if (answerFor) closeAnswer()
+    else setPickingIn(null)
+  }
   // The open answer's talk before it: what the same agent was asked about the same words, oldest first.
   const earlierTalk = answerShown ? asked.filter((passage) => passage !== answerShown && passage.file === path && askKey(passage) === shownKey) : NO_PASSAGES
   // Reply under an answer is one more ask about the same part, to the agent that answered, written
@@ -415,13 +842,23 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
   const replyAbout = (passage: AskedPassage, button: HTMLElement) => {
     if (!from || !onAsk) return
     flyToMessageBox(button, passage.text)
-    onAsk(passageReply({ path, runId: file.runId, from }, passage.text), undefined, bubbleAgent(passage))
+    askAbout(passageReply({ path, runId: file.runId, from }, passage.text, passage.at), undefined, bubbleAgent(passage))
   }
 
-  // The tip under a file, until a part of one has been asked about.
-  const [hint, setHint] = useState(() => {
-    try { return window.localStorage.getItem(HINT_KEY) !== 'seen' } catch { return true }
-  })
+  // The tip under a file, until a part of one has been asked about. A web page has its own:
+  // someone who has marked words has not found the Pick switch.
+  const hintKey = format === 'media' ? MEDIA_HINT_KEY : !words ? PICTURE_HINT_KEY : cellsView ? CELLS_HINT_KEY : shown === 'page' ? PICK_HINT_KEY : pdfPages && pdfPictured === path ? PDF_HINT_KEY : HINT_KEY
+  const [hidden, setHidden] = useState<readonly string[]>([])
+  const unseen = !useTipSeen(hintKey)
+  // Whether marking words has been learnt: before the reader opened, or since, here.
+  const wordsLearnt = useTipSeen(HINT_KEY) || hidden.includes(HINT_KEY)
+  const hint = unseen && !hidden.includes(hintKey)
+  // The Pick switch, drawn small in the page's tip as in the reader's bar.
+  const pickMark = <i className="rd-hint-pick" role="img" aria-label="the Pick a part button"><PickMark size={18} /></i>
+  const hideHint = (key = hintKey) => {
+    setHidden((keys) => [...keys, key])
+    try { window.localStorage.setItem(key, 'seen') } catch { /* The tip shows again next time. */ }
+  }
 
   // "Updated" lights for a moment each time the file changes on disk while it is open.
   const [updated, setUpdated] = useState(false)
@@ -440,24 +877,30 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
   const actions = useFileActions(path)
   const modifiedAt = content.file?.modifiedAt ?? content.modifiedAt
   const meta = [
-    content.file?.extracted ? `Words from a ${fileLabel(path).toLowerCase()}` : fileLabel(path),
+    content.file?.extracted && shown !== 'sheet' && shown !== 'page' && !pdfPages && !drawing ? `Words from ${fileKindIn(path, 'a')}` : fileLabel(path),
     content.file ? formatBytes(content.file.sizeBytes) : null,
     modifiedAt ? `changed ${relativeTime(new Date(modifiedAt))}` : null,
   ].filter(Boolean).join(' · ')
   const origin = useMemo(() => (file.runId && from ? { runId: file.runId, from } : null), [file.runId, from])
+  // The pictures a Markdown file shows, from beside it on this computer, as they were when it was read.
+  const besideFile = useMemo(() => (link: string) => {
+    const picture = linkedPath(path, link)
+    return picture ? `${rawFileUrl(picture)}&v=${encodeURIComponent(modifiedAt ?? '')}` : null
+  }, [path, modifiedAt])
   // A web page marks its own parts (lib/files/pageFrame.ts), told how each looks and handed its
   // agent's figure as a picture it can show.
-  const figures = useContext(TeamFiguresContext)
-  const figureOf = (id: string) => figures.get(id) ?? figures.get(wearerOf(id)) ?? null
   const pictures = useFigurePictures(shown === 'page' ? mine.flatMap((passage) => { const figure = figureOf(bubbleAgent(passage)); return figure ? [figureStill(figure)] : [] }) : [])
   const pageMarksSaid = JSON.stringify({
-    parts: mine.map((passage): PageMark => {
+    // Words, and the things in the page asked about (ADR 0091), each known by its part's id.
+    parts: mine.filter((passage) => !passage.at || passage.at.kind === 'element').map((passage): PageMark => {
       const key = askKey(passage)
       const by = bubbleAgent(passage)
       const figure = figureOf(by)
       const look = lookOfAsk(passage)
       return {
-        key, text: passage.text, look, fresh: fresh.includes(key), lit: key === shownKey || key === focus, open: key === shownKey,
+        key, text: passage.at ? partId(passage) : passage.text, ...(passage.at?.kind === 'element' ? { at: passage.at } : {}),
+        // A change waiting for Send, or for its turn, is its agent's figure and the dashed line, drawn as one read is.
+        look: look === 'held' ? 'read' : look, ...(passage.change ? { change: look === 'held' ? 'waits' as const : 'sent' as const } : {}), fresh: fresh.includes(key), lit: key === shownKey || key === focus, open: key === shownKey,
         // With the agent's card to show on hover, the page's own tooltip would cover it.
         label: bubbleLabel(passage, look, name), title: hasCard(passage) ? '' : bubbleTitle(passage, look, name),
         // An agent with a figure shows nothing until its picture is in; one without shows its initials.
@@ -475,21 +918,78 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
     scrolled.current = requestAnimationFrame(() => { scrolled.current = 0; measure() })
   }
 
+  // A part with a place (ADR 0091): where it is, and the answer a press on it opens.
+  const atOf = (id: string) => mine.find((passage) => partId(passage) === id)?.at
+  const openPlace = (id: string) => {
+    const opens = wordsOpen(mine.filter((passage) => partId(passage) === id), lookOfAsk)
+    if (opens) setAnswerFor(askKey(opens))
+  }
+  // A CSV or TSV file is one sheet; a workbook's sheets are read out of its words (lib/files/cells.ts).
+  const sheets = useMemo(() => (text === null || !cellsView ? null : shown === 'sheet' ? parseWorkbook(text) : [tableSheet(text, path)]), [text, cellsView, shown, path])
+  const markCells = (cells: MarkedCells | null) => {
+    const sheet = cells && sheets?.find((each) => each.name === cells.sheet)
+    setMarked(cells && sheet ? { text: cellsText(sheet, cells.range), rect: cells.rect, at: { kind: 'cells', ...(cells.sheet ? { sheet: cells.sheet } : {}), ...cells.range } } : null)
+  }
+
   let body: ReactNode
-  if (content.error) body = <div className="rd-failed" role="alert"><p>{content.error}</p></div>
-  else if (format === 'picture') body = <figure className="rd-picture"><img src={`${rawFileUrl(path)}&v=${encodeURIComponent(modifiedAt ?? '')}`} alt={fileTitle(fileName)} /></figure>
-  else if (format === 'media') body = /^(mp3|wav|m4a)$/.test(extensionOf(path))
-    ? <audio className="rd-media" controls src={rawFileUrl(path)} />
-    : <video className="rd-media" controls src={rawFileUrl(path)} />
-  else if (text === null) body = <p className="rd-loading" role="status">Reading {fileName}…</p>
-  else if (shown === 'page') body = <PageFrame path={path} name={fileName} html={text} marks={pageMarks} onMarked={setMarked} onParts={takeParts} onOpen={setAnswerFor} onEscape={closeAnswer} cleared={cleared}
+  // A PDF's own pages come first: the words the daemon reads out of it are only for when they can't
+  // be drawn, and a PDF of pictures or scanned pages has none to read.
+  if (content.error && !pdfPages && !drawn?.html) body = <div className="rd-failed" role="alert"><p>{content.error}</p></div>
+  else if (drafting && text !== null && version) body = (
+    // Typed into in place (ADR 0107): a Markdown file as it is drawn, any other as its words.
+    <div ref={page} className={`tc-document-page rd-page rd-drafting rd-as-${shown === 'markdown' ? 'markdown delivery-response' : 'code'}`}>
+      {shown === 'markdown'
+        ? <MarkdownDraft path={path} text={text} version={version} onSaving={takeSaving} />
+        : <TextDraft path={path} name={fileName} text={text} version={version} onSaving={takeSaving} onSelectWords={leavesChanges ? markInBox : undefined} />}
+    </div>
+  )
+  else if (format === 'picture') body = (
+    <div ref={page} className="rd-page rd-as-picture">
+      <PictureView src={`${rawFileUrl(path)}&v=${encodeURIComponent(modifiedAt ?? '')}`} alt={fileTitle(fileName)} askable={markable} asking={asking} marking={marked?.at?.kind === 'box' ? marked.at : null} onMarked={setMarked}
+        boxes={places.flatMap((id) => { const at = atOf(id); return at?.kind === 'box' ? [{ id, at, look: wordsLookOf([id]) }] : [] })} onOpen={openPlace} />
+    </div>
+  )
+  else if (format === 'media') body = (
+    <div ref={page} className="rd-page rd-as-media">
+      <MediaView src={rawFileUrl(path)} audio={/^(mp3|wav|m4a)$/.test(extensionOf(path))} name={fileTitle(fileName)} askable={markable} asking={asking} dark={pageDark}
+        agent={from ? name(from) : ''} face={from ? <AvatarFace id={from} hue={hue(from)} size={20} fontSize={8} text={initials(name(from))} /> : null}
+        open={answerShown ? partId(answerShown) : null} marking={marked?.at?.kind === 'time' || marked?.at?.kind === 'box' ? marked.at : null} onMarked={setMarked} onOpen={openPlace} onDrawn={measure}
+        marks={places.flatMap((id) => { const at = atOf(id); return at?.kind === 'time' || at?.kind === 'box' ? [{ id, at, look: wordsLookOf([id]) }] : [] })} />
+    </div>
+  )
+  else if (pdfPages && (content.file || content.error)) body = (
+    // Drawn afresh when the file changes, once it has been read, so it is opened once, at the
+    // version read. Its words are marked as any file's are; a drag on a page where there are none
+    // marks a box there (ADR 0091).
+    <div key={content.changes} ref={page} className="rd-page rd-as-pdf" onClick={openAt}>
+      <PdfView src={`${rawFileUrl(path)}&v=${encodeURIComponent(modifiedAt ?? '')}`} name={fileName} askable={markable}
+        asking={asking} open={answerShown ? partId(answerShown) : null} wanted={texts}
+        marking={marked?.at?.kind === 'box' ? marked.at : null} onMarked={setMarked} onOpen={openPlace} onDrawn={measure} onFailed={() => setPdfFailed(path)} onPictures={takePdfPictures} onPictured={() => setPdfPictured(path)}
+        onPages={(pages) => setPdfCount({ path, pages })} onWanted={(pages) => setPdfFound({ path, pages })}
+        boxes={places.flatMap((id) => { const at = atOf(id); return at?.kind === 'box' && at.page ? [{ id, at, look: wordsLookOf([id]) }] : [] })} />
+    </div>
+  )
+  else if (shown === 'page' && pageHtml !== null) body = <PageFrame path={path} name={fileName} html={pageHtml} drawn={Boolean(drawn?.html)} marks={changingDrawn ? NO_PAGE_MARKS : pageMarks} picking={picking} pickKeys={pickKeys} onMarked={setMarked} onParts={takeParts} onOpen={setAnswerFor} onEscape={escapePage} cleared={cleared}
+    onEdit={changingDrawn ? editDrawn : undefined}
+    onPointing={setPointedAt}
     onHover={(key, at, now) => { const passage = key ? mine.find((item) => askKey(item) === key) : undefined; if (key && passage && hasCard(passage)) cardAt(key, at, now); else cardAt('', null, now) }} />
+  else if (text === null || (drawnKind && !drawn)) body = <p className="rd-loading" role="status">Reading {fileName}…</p>
+  else if (cellsView && sheets) body = (
+    // Drawn afresh when the file changes. Words asked about in a table before it could be marked by
+    // its cells are still marked in them (lib/files/partMarks.ts).
+    // While its cells are changed, never drawn afresh around the cell you are in (ADR 0107).
+    <div key={changingCells ? 'changing' : content.changes} ref={page} className="tc-document-page rd-page rd-as-sheet" onClick={openAt}>
+      <SheetView sheets={sheets} askable={markable} asking={asking} open={answerShown ? partId(answerShown) : null} onMarked={markCells} onOpen={openPlace} onDrawn={measure} dark={pageDark} tabsInto={sheetBar}
+        editable={changingCells} onCellEdit={editCell}
+        marking={marked?.at?.kind === 'cells' ? { sheet: marked.at.sheet ?? null, range: marked.at } : null}
+        ranges={places.flatMap((id) => { const at = atOf(id); return at?.kind === 'cells' ? [{ id, sheet: at.sheet ?? null, range: at, look: wordsLookOf([id]) }] : [] })} />
+    </div>
+  )
   else body = (
     // Drawn afresh when the file changes, never updated around the marks in it (lib/files/partMarks.ts).
-    <div key={content.changes} ref={page} className={`tc-document-page rd-page rd-as-${shown}${shown === 'markdown' ? ' delivery-response' : ''}`} onClick={openAt}>
-      {shown === 'markdown' ? <Markdown>{withFolderPaths(text)}</Markdown>
-        : shown === 'table' ? <TableView text={text} path={path} />
-          : shown === 'document' ? <DocumentView text={text} />
+    <div key={content.changes} ref={page} className={`tc-document-page rd-page rd-as-${asPages || drawnKind ? 'document' : shown}${shown === 'markdown' ? ' delivery-response' : ''}`} onClick={openAt}>
+      {shown === 'markdown' ? <MarkdownPictures.Provider value={besideFile}><Markdown>{withFolderPaths(text)}</Markdown></MarkdownPictures.Provider>
+          : asPages || drawnKind ? <DocumentView text={text} />
             : <CodeView text={text} language={shown === 'code' && format === 'page' ? 'html' : extensionOf(path)} />}
     </div>
   )
@@ -506,10 +1006,45 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
           <h3 className="rd-title" title={path}>{fileTitle(fileName)}</h3>
           <p className="rd-meta">
             {updated ? <span className="rd-updated" role="status">Updated just now</span> : <span>{meta}</span>}
-            {from && <span className="rd-from"><AvatarFace id={from} hue={hue(from)} size={16} fontSize={7} text={initials(name(from))} />{name(from)}</span>}
+            {from && <span className="rd-from"><AvatarFace id={from} hue={hue(from)} size={16} fontSize={7} text={initials(name(from))} /><span className="rd-from-name">{name(from)}</span></span>}
           </p>
         </div>
-        {format === 'page' && (
+        {pickable && from && (
+          <button type="button" className="rd-pick" aria-pressed={picking} onClick={togglePick}
+            aria-label="Pick a part of the page to ask about" title={picking ? 'Click any part. Click here or press Esc to stop.' : 'Pick a part to ask about'}>
+            <PickMark size={18} />
+          </button>
+        )}
+        {changeable && (
+          <button type="button" className="rd-change" aria-pressed={changing} onClick={() => { setChangingIn(changing ? null : path); setSaving(null) }}
+            title={changing ? 'Stop making changes' : ownEditable && leavesChanges ? `Change it yourself, or mark a part for ${name(from ?? '')} to change` : leavesChanges ? `Mark a part for ${name(from ?? '')} to change` : 'Change the words yourself'}>
+            <ChangeMark on={changing} />Make changes
+          </button>
+        )}
+        {savingHere && (
+          <span className="rd-saved" role={savingHere.state === 'failed' ? 'alert' : 'status'}>
+            {savingHere.state === 'failed' ? <span className="rd-saved-problem" title={savingHere.message}>{savingHere.said ? savingHere.message : savingHere.changed ? 'The file changed just now, so yours wasn’t saved. Type it again.' : savingHere.undo ? 'Couldn’t put it back.' : 'Couldn’t save. Try again.'}</span>
+              : savingHere.state === 'undone' ? <>Undone<button type="button" className="rd-saved-act" title="Redo your last change" onClick={() => putBackHere(savingHere.kept, 'saved')}>Redo</button></>
+                : <>Saved<button type="button" className="rd-saved-act" title="Undo your last change" onClick={() => putBackHere(savingHere.kept, 'undone')}>Undo</button></>}
+          </span>
+        )}
+        {lostChanges.length > 0 && (
+          <span className={`rd-lost-changes${theme === 'dark' ? ' on-dark' : ''}`} role="group" aria-label="Changes made">
+            {shownFirst(mine.filter((each) => lostChanges.includes(askKey(each)))).slice(0, BUBBLES_SHOWN).map((passage) => {
+              const key = askKey(passage)
+              return <PartBubble key={key} passage={passage} look={lookOfAsk(passage)} name={name} hue={hue} open={key === shownKey} fresh={false}
+                lit={key === shownKey || key === focus} onOpen={() => toggleAnswer(key)} onFocus={(on) => setFocus(on ? key : null)} />
+            })}
+            {lostChanges.length > BUBBLES_SHOWN && <span className="rd-bubble-more" title={`${lostChanges.length - BUBBLES_SHOWN} more, in the chat`}>+{lostChanges.length - BUBBLES_SHOWN}</span>}
+          </span>
+        )}
+        {leavesChanges && (waitingChanges > 0 || sendingHere?.problem) && (
+          <span className="rd-changes">
+            {sendingHere?.problem && <span className="rd-saved-problem" role="alert" title={sendingHere.problem}>{sendingHere.told ? sendingHere.problem : 'Couldn’t send. Try again.'}</span>}
+            {waitingChanges > 0 && <button type="button" className="btn btn-primary rd-send" onClick={sendHere} disabled={sendingHere?.busy} title="Send each agent the changes left for it">{waitingChanges === 1 ? 'Send 1 change' : `Send ${waitingChanges} changes`}</button>}
+          </span>
+        )}
+        {format === 'page' && !changing && (
           <div className="tc-pane-tabs rd-views" role="tablist" aria-label="Show the page as">
             <button type="button" role="tab" aria-selected={view === 'page'} onClick={() => setView('page')}>Page</button>
             <button type="button" role="tab" aria-selected={view === 'code'} onClick={() => setView('code')}>Code</button>
@@ -520,18 +1055,34 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
           <button type="button" className="btn btn-icon" onClick={() => void actions.open(true)} disabled={actions.busy} aria-label={`Show ${fileName} in its folder`} title="Show in folder"><FolderOpen size={14} aria-hidden="true" /></button>
         </span>
         <span className="visually-hidden" role="status">{actions.said}</span>
+        {pickable && <span className="visually-hidden" role="status">{picking ? pointedAt : ''}</span>}
       </header>
-      {(content.file?.extracted || content.file?.truncated) && (
+      {!drawing && ((content.file?.extracted && shown !== 'sheet' && shown !== 'page' && !pdfPages) || (content.file?.truncated && shown !== 'page' && !pdfPages)) && (
         <p className="rd-note">
-          {content.file.extracted
-            ? `These are the words of the ${fileLabel(path).toLowerCase()}, as your agents read them, without its layout. Open it in its own app to see it as it looks.`
-            : 'Only the start of this file is shown: it is larger than 2 MB. Open it in its own app for the rest.'}
+          {content.file.extracted && shown !== 'sheet'
+            ? `These are the words of ${fileKindIn(path, 'the')}, as your agents read them, without the layout. Open the file in its own app to see how it looks.`
+            : shown === 'sheet' ? 'This workbook is too big to show whole here. Open it in its own app for the rest.'
+              : 'Only the start of this file is shown: it is larger than 2 MB. Open it in its own app for the rest.'}
         </p>
       )}
+      {pdfPages && pdfCount?.path === path && pdfCount.pages > MOST_PAGES && (
+        <p className="rd-note">Only the first {MOST_PAGES} pages are shown here. Open it in its own app for the rest.</p>
+      )}
+      {cellsView && sheets && sheets.length > 1 && <div ref={setSheetBar} className="rd-sheet-bar" />}
       <div ref={stage} className="rd-stage">
-        <div ref={scroller} className={`rd-scroll${shown === 'page' ? ' rd-scroll-frame' : ' tc-document'}`} onScroll={onScroll}>
+        <div ref={scroller} className={`rd-scroll${shown === 'page' ? ' rd-scroll-frame' : ' tc-document'}${drawn?.html ? ' drawn' : ''}`} onScroll={onScroll}>
           {body}
         </div>
+        {drafting && draftMarks.map(({ keys, top, left }) => (
+          <span key={keys[0]} className={`rd-draft-bubble${theme === 'dark' ? ' on-dark' : ''}`} style={{ top, left }}>
+            {keys.slice(0, BUBBLES_SHOWN).map((key) => {
+              const passage = mine.find((each) => askKey(each) === key)
+              return passage ? <PartBubble key={key} passage={passage} look={lookOfAsk(passage)} name={name} hue={hue} open={key === shownKey} fresh={fresh.includes(key)}
+                lit={key === shownKey || key === focus} onOpen={() => toggleAnswer(key)} onFocus={(on) => setFocus(on ? key : null)} /> : null
+            })}
+            {keys.length > BUBBLES_SHOWN && <span className="rd-bubble-more" title={`${keys.length - BUBBLES_SHOWN} more here: stop making changes to see them all`}>+{keys.length - BUBBLES_SHOWN}</span>}
+          </span>
+        ))}
         {[...bubblesIn(onScreen?.slots ?? NO_SLOTS, mine)].map(([slot, asks]) => createPortal(
           asks.map((passage) => {
             const key = askKey(passage)
@@ -544,7 +1095,7 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
           slot, slot.dataset.part,
         ))}
         {askable && marked && place && from && askee && (
-          <div ref={bubble} className={`rd-ask${place.below ? ' below' : ''}${listing ? ' listing' : ''}`} style={{ top: place.top, left: place.left }} role="toolbar" aria-label={`Ask ${name(askee)} about the words you marked`} onMouseDown={(event) => event.preventDefault()}>
+          <div ref={bubble} className={`rd-ask${place.below ? ' below' : ''}${listing ? ' listing' : ''}${pdfPages || drawn?.html ? ' on-paper' : ''}`} style={{ top: place.top, left: place.left }} role="toolbar" aria-label={`Ask ${name(askee)} about the ${marked.at?.kind === 'cells' ? 'cells' : marked.at?.kind === 'time' ? 'moment' : marked.at?.kind === 'element' ? marked.at.what : marked.at?.kind === 'box' && marked.at.page && isWholeBox(marked.at) ? 'page' : marked.at ? 'part' : 'words'} you marked`} onMouseDown={(event) => event.preventDefault()}>
             <button type="button" className="rd-ask-main" onClick={() => ask()} title={`Ask ${name(askee)} about this`}>
               <AvatarFace key={askee} id={askee} hue={hue(askee)} size={24} fontSize={9} text={initials(name(askee))} className="rd-ask-face" />
               <span>Ask</span>
@@ -572,10 +1123,10 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
                   const job = role ? roleLine(role(id)) : ''
                   return (
                     <li key={id}>
-                      <button type="button" onClick={() => choose(id)} aria-label={`Ask ${name(id)}${id === from ? ', who made this,' : ''} instead${job ? `: ${job}` : ''}`}>
+                      <button type="button" onClick={() => choose(id)} aria-label={`Ask ${name(id)}${id === from ? ', who made this,' : ''} instead${job ? `: ${plainWords(job)}` : ''}`}>
                         <AvatarFace id={id} hue={hue(id)} size={22} fontSize={8} text={initials(name(id))} />
                         <span className="rd-ask-who"><b>{name(id)}</b>{id === from && <i>made this</i>}</span>
-                        {job && <span className="rd-ask-job" title={job}>{job}</span>}
+                        {job && <span className="rd-ask-job" title={plainWords(job)}><InlineMarkdown clickable={false}>{job}</InlineMarkdown></span>}
                       </button>
                     </li>
                   )
@@ -584,20 +1135,51 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
             )}
           </div>
         )}
+        {changing && leavesChanges && marked && place && from && askee && (
+          <ChangeField key={markedId ?? ''} ref={bubble} agent={askee} others={shownFaces} maker={from} name={name} hue={hue} onChoose={choose}
+            folded={drafting || changingDrawn || changingCells} onAdd={leaveChange} onOpened={() => setFieldOpened((count) => count + 1)} style={{ top: place.top, left: place.left }} below={place.below} />
+        )}
         {cardAsk && cardFacts && agentCard.place && (
           <AgentCardPopup id={cardId} facts={cardFacts} place={agentCard.place} leaving={agentCard.phase === 'leaving'}
-            hint={cardLine ? <p className="tc-agent-card-asked">{cardLine}</p> : null} />
+            hint={cardLine && (cardLine.said || cardLine.words) ? <p className="tc-agent-card-asked">{cardLine.said}{cardLine.said && cardLine.words ? ' · ' : ''}{cardLine.words && <>{cardAsk?.change ? 'Your change: ' : 'You asked: '}<InlineMarkdown>{cardLine.words}</InlineMarkdown></>}</p> : null} />
         )}
         {answerShown && (answerPart || answerLost) && (
           <PassageAnswer ref={card} passage={answerShown} earlier={earlierTalk} name={name} hue={hue} place={answerAt} gone={answerLost} maxHeight={answerMax} about={answerAbout}
             onClose={() => setAnswerFor(null)} onShowInChat={onShowAsked && (() => onShowAsked(answerShown))}
-            onReply={onAsk && from ? (button) => replyAbout(answerShown, button) : undefined} />
+            onReply={onAsk && from && !answerShown.change ? (button) => replyAbout(answerShown, button) : undefined}
+            onRemove={answerShown.change?.state === 'waiting' ? async () => { const id = answerShown.change?.id; if (id) { await removeChange(id); setAnswerFor(null); refreshChanges() } } : undefined}
+            onPutBack={answerShown.change && answerShown.answer.state === 'said' && answerShown.change.kept ? () => { const kept = answerShown.change?.kept; if (kept) putBackHere(kept, 'undone') } : undefined}
+            putBackCount={answerShown.change?.kept ? mine.filter((each) => each.change?.kept === answerShown.change?.kept).length : 1} />
         )}
-        {askable && hint && !marked && from && text !== null && (
+        {/* While you change the file: where to type, until a change is saved (ADR 0107). */}
+        {changing && !changeTipGone && (
+          <p className="rd-hint" data-reader-chrome>
+            <ChangeMark on />
+            {changingDrawn ? <span><mark>Click any words</mark> {drawnKind === 'slides' ? 'on a slide or in its notes ' : ''}to change them{leavesChanges ? <>, or mark some for <b>{name(from ?? '')}</b> to change</> : null}. Enter saves.</span>
+              : changingCells ? <span><mark>Double-click a cell</mark> to change it{leavesChanges ? <>, or mark cells for <b>{name(from ?? '')}</b> to change</> : null}.</span>
+              : !drafting ? <span><mark>Mark any part</mark> for <b>{name(from ?? '')}</b> to change</span>
+              : shown === 'markdown' ? <span><mark>Click any words</mark> to change them{leavesChanges ? <>, or mark some for <b>{name(from ?? '')}</b> to change</> : null}. Enter saves.</span>
+                : <span>Change the words in the box. They save as you go{leavesChanges ? <>. Mark some for <b>{name(from ?? '')}</b> to change</> : null}.</span>}
+            <button type="button" className="rd-hint-close" onClick={dropChangeTip} aria-label="Hide this tip"><X size={12} aria-hidden="true" /></button>
+          </p>
+        )}
+        {/* Over pages, once there are pages: a deck's can take a while, and the tip asks for what they hold. */}
+        {askable && hint && !marked && from && (pdfPages ? pdfCount?.path === path : text !== null || !words) && (
           <p className="rd-hint" data-reader-chrome>
             <AvatarFace id={from} hue={hue(from)} size={20} fontSize={8} text={initials(name(from))} />
-            <span><mark>Mark any words</mark> to ask <b>{name(from)}</b> about them</span>
-            <button type="button" className="rd-hint-close" onClick={() => { setHint(false); try { window.localStorage.setItem(HINT_KEY, 'seen') } catch { /* Shown again next time. */ } }} aria-label="Hide this tip"><X size={12} aria-hidden="true" /></button>
+            {format === 'media' ? <span><mark className="box">Click or drag the bar</mark> to ask <b>{name(from)}</b> about a moment</span>
+              : !words ? <span><mark className="box">Drag over any part</mark> to ask <b>{name(from)}</b> about it</span>
+              : cellsView ? <span><mark className="box">Drag across any cells</mark> to ask <b>{name(from)}</b> about them</span>
+                : hintKey === PDF_HINT_KEY ? (wordsLearnt
+                  ? <span><mark className="box">Drag over a chart or picture</mark> to ask <b>{name(from)}</b> about it</span>
+                  : <span><mark>Mark any words</mark> or <mark className="box">drag over a chart or picture</mark> to ask <b>{name(from)}</b></span>)
+                : hintKey === PICK_HINT_KEY ? (picking
+                  ? <span>Click any part to ask <b>{name(from)}</b> about it</span>
+                  : wordsLearnt
+                    ? <span>Click {pickMark} at the top, then any part, to ask <b>{name(from)}</b> about it</span>
+                    : <span><mark>Mark any words</mark>, or click {pickMark} at the top, then any part, to ask <b>{name(from)}</b></span>)
+                  : <span><mark>Mark any words</mark> to ask <b>{name(from)}</b> about them</span>}
+            <button type="button" className="rd-hint-close" onClick={() => hideHint()} aria-label="Hide this tip"><X size={12} aria-hidden="true" /></button>
           </p>
         )}
       </div>
@@ -606,11 +1188,40 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
   )
 }
 
-/** An agent's job in a line, as the team list shows it: the first line of its role that is not a heading. */
+/**
+ * Make changes' mark (ADR 0107): a line of words with the gold stitch the reader draws under a
+ * changed part (slidesPage.ts), dashed while off; on, the stitch closes into a line, so the
+ * switch says it is on by its shape as well as its colour.
+ */
+function ChangeMark({ on = false }: { on?: boolean }) {
+  return (
+    <svg className={`rd-change-mark${on ? ' on' : ''}`} width="18" height="18" viewBox="0 0 18 18" aria-hidden="true" focusable="false">
+      <path className="rd-change-words" d="M3 6.5h12" />
+      <path className="rd-change-stitch" d="M2 12.5h14" />
+    </svg>
+  )
+}
+
+/**
+ * The Pick switch's mark (ADR 0091): a page of a few blocks, one of them picked, outlined dashed as
+ * the page outlines a part a click marks, and drawn whole while picking. It says what the switch
+ * does, not who answers: the pill says that.
+ */
+function PickMark({ size }: { size: number }) {
+  return (
+    <svg className="rd-pick-mark" width={size} height={size} viewBox="0 0 18 18" aria-hidden="true" focusable="false">
+      <rect className="rd-pick-block" x="2" y="2" width="14" height="4" rx="1" />
+      <rect className="rd-pick-block" x="2" y="8" width="6" height="8" rx="1" />
+      <rect className="rd-pick-part" x="11" y="9" width="4" height="6" />
+    </svg>
+  )
+}
+
+/** An agent's job in a line, as the team list shows it: the first line of its role that is not a
+ * heading, whole and with its Markdown (its line cuts it), less a heading's, quote's or list's mark. */
 function roleLine(role: string): string {
   const lines = role.split('\n').map((part) => part.trim()).filter(Boolean)
-  const line = (lines.find((part) => !part.startsWith('#')) ?? lines[0] ?? '').replace(/^[#>*\-\s]+/, '')
-  return line.length > 120 ? `${line.slice(0, 119).trimEnd()}…` : line
+  return (lines.find((part) => !part.startsWith('#')) ?? lines[0] ?? '').replace(/^(#{1,6}\s+|>\s*|[-*+]\s+)/, '')
 }
 
 /** How each part's words look, on its marks, from the parts marked with them; and its slot's lightness, for its bubbles. */
@@ -628,7 +1239,7 @@ function showLooks(marked: PartMarks | null, lookOf: (keys: readonly string[]) =
 function bubblesIn(slots: ReadonlyMap<string, HTMLElement>, asks: readonly AskedPassage[]): Map<HTMLElement, AskedPassage[]> {
   const shown = new Map<HTMLElement, AskedPassage[]>()
   for (const passage of asks) {
-    const slot = slots.get(passage.text)
+    const slot = slots.get(partId(passage))
     if (slot) shown.set(slot, [...(shown.get(slot) ?? []), passage])
   }
   return shown

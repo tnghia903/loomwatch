@@ -1,4 +1,4 @@
-import { CircleHelp } from 'lucide-react'
+import { CircleHelp } from '../ui/icon'
 import { Fragment, useId, useState } from 'react'
 
 import { type SetupReadingState, announceReadingStatus, saveReadingEnabled, useReadingStatus } from '../../lib/ai/reading'

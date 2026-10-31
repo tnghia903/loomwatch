@@ -22,29 +22,14 @@
 }
 
 .home-top {
-  position: relative; display: flex; align-items: center; justify-content: space-between;
+  position: relative; display: flex; align-items: center; justify-content: flex-end;
   padding: var(--sp-5) var(--sp-7);
 }
-.home-brand { display: inline-flex; align-items: center; gap: 10px; }
-.home-brand .fr-mark { animation: none; }
 /* Wraps rather than scroll sideways when the bell and an update badge are long. */
 .home-top-acts { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: var(--sp-2); }
-/* Skills and Quests: a word each, quieter than a button, so a newcomer finds them without hunting
-   through menus. */
-.home-pill {
-  display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 var(--sp-3);
-  border-radius: 99px; border: 1px solid var(--color-hairline); background: transparent;
-  color: var(--color-ink-2); font: 500 12px/1 var(--font-sans); text-decoration: none; cursor: pointer;
-  transition: color var(--t-quick) var(--ease-out), border-color var(--t-quick) var(--ease-out);
-}
-.home-pill:hover { color: var(--color-ink); border-color: var(--color-accent-dim); }
-.home-pill:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
-/* The menu stands in the row, and stays on a phone, where it is the only way to Feedback and the
-   theme. */
-.home-top-acts .prototype-workspace-menu { display: flex; position: relative; right: auto; top: auto; }
 
 .home-main {
-  position: relative; flex: 1; width: min(1040px, 100%); margin: 0 auto;
+  position: relative; flex: 1; width: min(1180px, 100%); margin: 0 auto;
   padding: var(--sp-7) var(--sp-7) var(--sp-8); box-sizing: border-box;
   display: flex; flex-direction: column; gap: var(--sp-8);
 }
@@ -130,7 +115,6 @@
   .home-top { flex-wrap: wrap; gap: var(--sp-3); }
   .home-top-acts { margin-left: auto; }
   /* A touch target, as tall as the header's other buttons (app.css, §11.6). */
-  .home-pill { height: 44px; }
   .home-top .needs-you { position: static; }
   .home-top .needs-you-panel { top: calc(100% - var(--sp-3)); right: var(--sp-3); width: min(420px, calc(100% - 2 * var(--sp-3))); }
 }
@@ -223,8 +207,13 @@
 .lw-deleteteam h2 { margin: 0 0 var(--sp-1); font: 600 19px/1.3 var(--font-sans); letter-spacing: -.01em; color: var(--color-ink); overflow-wrap: anywhere; }
 .lw-deleteteam p { margin: 0; font-size: 14px; line-height: 1.5; color: var(--color-ink-2); overflow-wrap: anywhere; }
 .lw-deleteteam .dt-alert { color: var(--color-alert); }
-.lw-deleteteam .dt-acts { display: flex; justify-content: flex-end; gap: var(--sp-2); margin-top: var(--sp-2); }
-.lw-deleteteam .btn-danger-fill { background: var(--color-alert); color: var(--color-white); border-color: transparent; }
+/* A team at work is a wait, not something wrong: said in ink, with Delete or Remove held. */
+.lw-deleteteam .dt-wait { color: var(--color-ink-2); }
+.lw-deleteteam .input { height: 40px; font-size: 15px; }
+@media (max-width: 767px) { .lw-deleteteam .input { height: 44px; font-size: 16px; } }
+.lw-deleteteam .dt-acts { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--sp-2); margin-top: var(--sp-2); }
+.lw-deleteteam .btn-danger-fill { background: var(--color-alert-fill); color: var(--color-alert-on-fill); border-color: transparent; }
+.lw-deleteteam form { display: flex; flex-direction: column; gap: var(--sp-3); }
 .lw-deleteteam .btn-danger-fill:disabled { opacity: .45; cursor: not-allowed; }
 /* ADR 0048: what a team from outside LoomWatch runs, before its first run. */
 .lw-teamreview { width: min(560px, calc(100vw - 32px)); }
@@ -238,3 +227,7 @@
 .lw-teamreview code { font-size: 12.5px; overflow-wrap: anywhere; }
 /* The switcher's footer links, "Delete team…" included, read as unavailable when they are. */
 .pop-foot .link:disabled { color: var(--color-ink-3); cursor: not-allowed; text-decoration: none; }
+/* Removing one of My agents (ADR 0100): who starts a team it started, when several could. */
+.lw-deleteteam .ra-choose { display: flex; flex-direction: column; gap: var(--sp-2); }
+.lw-deleteteam .ra-choices { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.lw-deleteteam .ra-choices .btn[aria-pressed="true"] { border-color: var(--color-accent); box-shadow: inset 0 0 0 1px var(--color-accent); }

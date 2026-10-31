@@ -26,12 +26,14 @@ const researcher = { id: 'researcher', name: 'Researcher', role: 'Find sources o
 const gatherer = { id: 'gatherer', name: 'Gatherer', role: 'Find what happened in tech in the last 24 hours, from the trusted sources only. Do not judge the stories or write them: the Writer does.' }
 const team = { agents: [gatherer, researcher, writer], responder: 'writer' }
 
+let served = catalog
 let reading = { enabled: false, readings: 0, spent: 0, today: 0, dailyLimit: 50 }
 let calls: { method: string; path: string; body?: { setup?: Record<string, unknown>; enabled?: boolean } }[] = []
 const readings = () => calls.filter((call) => call.path === '/api/models/reading' && call.method === 'POST')
 
 beforeEach(() => {
   forgetModels(); forgetKeyStatus(); forgetReadings()
+  served = catalog
   reading = { enabled: false, readings: 0, spent: 0, today: 0, dailyLimit: 50 }
   calls = []
   try { window.localStorage.clear() } catch { /* none */ }
@@ -40,7 +42,7 @@ beforeEach(() => {
     const body = init?.body ? JSON.parse(String(init.body)) : undefined
     calls.push({ method, path, body })
     const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } })
-    if (path === '/api/models') return json(catalog)
+    if (path === '/api/models') return json(served)
     if (path === '/api/ai') return json({ openrouter: { connected: true } })
     if (path === '/api/models/reading' && method === 'PUT') { reading = { ...reading, enabled: Boolean(body?.enabled) }; return json(reading) }
     if (path === '/api/models/reading' && method === 'POST') {
@@ -151,7 +153,7 @@ describe('ModelPicker', () => {
     expect(new Set(marks).size).toBe(3)
     expect(marks[0]).toBe(ofPlan.querySelector('.model-row .maker-mark svg')?.innerHTML)
     fireEvent.click(within(suggested).getByRole('option', { name: /Claude Opus 5\.5/ }))
-    expect(onChange).toHaveBeenCalledWith(credit.id, true)
+    expect(onChange).toHaveBeenCalledWith(credit.id, true, 'medium')
   })
 
   it('suggests the model first and who pays second, and says what connecting would change', async () => {
@@ -296,7 +298,29 @@ describe('ModelPicker', () => {
     expect(within(suggested).queryByRole('option')).toBeNull()
     fireEvent.click(within(suggested).getByRole('button', { name: /Claude Opus 5\.5/ }))
     // Picking the suggestion has the agent follow it.
-    expect(onChange).toHaveBeenCalledWith(opus.id, true)
+    expect(onChange).toHaveBeenCalledWith(opus.id, true, 'medium')
+  })
+
+  // ADR 0062: the suggestion's effort is the one Ask gives its kind of work, set by picking it.
+  it('says how hard the suggestion thinks and sets it when picked, on a model that reasons', async () => {
+    const onChange = vi.fn()
+    const editor = { id: 'editor', name: 'Step 2', role: ROLE_PRESETS.find((preset) => preset.id === 'editor')!.role }
+    render(<ModelPicker value={haiku.id} onChange={onChange} suggestFor={{ agent: editor }} />)
+    fireEvent.click(await screen.findByRole('button', { name: /Claude Haiku 5\.5/ }))
+    const suggestion = screen.getAllByRole('option')[0]
+    expect(suggestion).toHaveTextContent('Claude Opus 5.5 · low effort')
+    fireEvent.click(suggestion)
+    expect(onChange).toHaveBeenLastCalledWith(opus.id, true, 'low')
+
+    // A model with no effort setting: picking it leaves the effort as it is.
+    cleanup(); forgetModels()
+    served = { ...catalog, models: catalog.models.map((model) => (model.id === opus.id ? { ...model, reasoning: false } : model)) }
+    render(<ModelPicker value={haiku.id} onChange={onChange} suggestFor={{ agent: editor }} />)
+    fireEvent.click(await screen.findByRole('button', { name: /Claude Haiku 5\.5/ }))
+    await waitFor(() => expect(screen.getAllByRole('option')[0]).toHaveTextContent('Claude Opus 5.5'))
+    expect(screen.getAllByRole('option')[0]).not.toHaveTextContent('effort')
+    fireEvent.click(screen.getAllByRole('option')[0])
+    expect(onChange).toHaveBeenLastCalledWith(opus.id, true)
   })
 
   it('says Suggested on its button whenever its model is the suggestion, following or not, and pins any other pick', async () => {
@@ -318,7 +342,7 @@ describe('ModelPicker', () => {
     const suggestion = screen.getAllByRole('option')[0]
     expect(suggestion).toHaveAccessibleDescription('Pick it, and this agent’s model follows its configuration from now on.')
     fireEvent.click(suggestion)
-    expect(onChange).toHaveBeenLastCalledWith(opus.id, true)
+    expect(onChange).toHaveBeenLastCalledWith(opus.id, true, 'medium')
 
     // One of My agents, which never follows: on the suggested model, its button says so too.
     cleanup()
@@ -339,7 +363,7 @@ describe('ModelPicker', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Model Claude Opus 5.5 Suggested' }))
     await waitFor(() => expect(screen.getByRole('group', { name: 'Suggested for this agent' })).toHaveTextContent('Claude Sonnet 5.5'))
     fireEvent.click(screen.getAllByRole('option')[0])
-    expect(onChange).toHaveBeenLastCalledWith(sonnet.id, true)
+    expect(onChange).toHaveBeenLastCalledWith(sonnet.id, true, 'medium')
     rerender(<ModelPicker value={sonnet.id} onChange={onChange} suggestFor={{ agent: gatherer, team }} />)
     expect(screen.getByRole('button', { name: /Claude Sonnet 5\.5/ })).toHaveAccessibleName('Model Claude Sonnet 5.5 Suggested')
     expect(readings()).toHaveLength(1)
@@ -351,6 +375,17 @@ describe('ModelPicker', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('Its configuration changed, so it moved from Claude Opus 5.5. Undo')
     fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
     expect(onUndo).toHaveBeenCalled()
+  })
+
+  it('says the effort it moved from too, and only the effort when the model stayed', async () => {
+    const said = async (value: string, moved: { from: string; fromEffort?: string }) => {
+      cleanup()
+      render(<ModelPicker value={value} onChange={() => {}} follows moved={{ ...moved, onUndo: () => {} }} />)
+      return (await screen.findByRole('status')).textContent
+    }
+    expect(await said(sonnet.id, { from: opus.id, fromEffort: 'medium' })).toBe('Its configuration changed, so it moved from Claude Opus 5.5 at medium thinking effort. Undo')
+    expect(await said(opus.id, { from: opus.id, fromEffort: 'medium' })).toBe('Its configuration changed, so it moved from medium thinking effort. Undo')
+    expect(await said(opus.id, { from: opus.id, fromEffort: '' })).toBe('Its configuration changed, so it moved from the model’s default thinking effort. Undo')
   })
 
   it('says when a team names a model OpenRouter doesn’t list', async () => {

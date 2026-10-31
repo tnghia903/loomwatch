@@ -1,0 +1,591 @@
+/* ===========================================================================
+   The studio (ADR 0097): Home as Your desk, a room per project, and the room itself.
+   Semantic tokens only, so both themes come for free. Rooms are neutral: the panel and a hairline.
+   The only colour a project has is its small mark; state is carried by the figures' glows and words.
+   =========================================================================== */
+
+.studio { display: flex; flex-direction: column; gap: var(--sp-7); }
+.studio-head { margin: 0; font: 600 11px/14px var(--font-sans); letter-spacing: .07em; text-transform: uppercase; color: var(--color-ink-3); }
+.studio-quiet { color: var(--color-ink-3); font-size: 13px; }
+
+/* ---------- A figure at its desk, its state in its glow: one light per element ---------- */
+.desk-figure { display: inline-flex; flex: none; }
+.desk-figure img, .desk-figure .figure-still { display: block; }
+.desk-figure[data-glow="ready"] { --glow: var(--glow-ready); }
+.desk-figure[data-glow="working"] { --glow: var(--glow-working); }
+.desk-figure[data-glow="waiting"] { --glow: var(--glow-waiting); }
+.desk-figure[data-glow="failed"] { --glow: var(--glow-failed); }
+.desk-figure[data-glow] { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 3px var(--glow)); }
+/* Somewhere else now: its own figure, faint and grey, with no glow, faded whole with what it wears. */
+.desk-figure.away { opacity: .55; filter: grayscale(1); }
+/* Where you check: the review step's ring, as on the canvas, in a figure's square. */
+.desk-you { display: grid; place-items: center; width: var(--fig, 44px); height: var(--fig, 44px); }
+
+/* A room card's row stays one row: its desks narrow, and their names end in an ellipsis. */
+.team-desks { display: flex; align-items: flex-start; flex-wrap: nowrap; gap: 2px; min-width: 0; max-width: 100%; }
+.team-desks.all { flex-wrap: wrap; row-gap: var(--sp-4); }
+.desk-slot { display: inline-flex; align-items: flex-start; min-width: 0; flex: 0 1 auto; }
+.desk {
+  display: inline-flex; flex-direction: column; align-items: center; gap: 4px; flex: 0 1 78px; width: 78px; min-width: 52px;
+  padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: center;
+}
+/* The desk itself: a table top drawn in front of the figure's feet, on two legs. A filled grey bar
+   read as something still loading. */
+.desk-top {
+  position: relative; z-index: 1; display: block; width: 84%; max-width: 64px; height: 7px; margin: -8px 0 7px;
+  box-sizing: border-box; border: 1px solid var(--color-warp); border-radius: 2px; background: var(--color-panel-solid);
+}
+.desk-top::before, .desk-top::after { content: ''; position: absolute; top: 5px; width: 1px; height: 7px; background: var(--color-warp); }
+.desk-top::before { left: 12%; }
+.desk-top::after { right: 12%; }
+.desk-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--color-ink-2); }
+.desk-state { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 14px; color: var(--color-ink-3); }
+.desk-state.waiting { color: var(--color-accent); }
+.desk-state.working { color: var(--color-live); }
+.desk-state.failed { color: var(--color-alert); }
+/* Each state has a pose as well as a colour, held still, as the crew rail's figures do. */
+.desk-figure[data-glow="waiting"] img { rotate: -8deg; }
+.desk-figure[data-glow="working"] img { translate: 0 -3px; }
+.desk-figure[data-glow="failed"] img { rotate: 8deg; translate: 0 3px; }
+.desk-figure[data-glow="failed"] { filter: saturate(.35) drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 3px var(--glow)); }
+/* Level with the middle of the figures, whatever words stand under each desk. */
+.desk-onward { flex: none; width: 16px; margin-top: calc(var(--fig, 44px) / 2 - 5px); }
+.desk-onward path { fill: none; stroke: var(--color-ink-3); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.desk-more { align-self: center; margin-left: var(--sp-2); font-size: 13px; color: var(--color-ink-3); }
+.desk-empty { color: var(--color-ink-3); font-size: 13px; }
+
+/* ---------- Menus: chat with one agent, an agent in no project ---------- */
+.desk-chat-menu, .idle-agent-menu {
+  position: absolute; z-index: 5; top: calc(100% + 6px); right: 0; min-width: 200px; max-height: 320px; overflow-y: auto;
+  display: flex; flex-direction: column; padding: 6px; border: 1px solid var(--color-hairline); border-radius: var(--r-md);
+  background: var(--color-panel-solid); box-shadow: var(--e2-shadow); max-width: calc(100vw - 32px); box-sizing: border-box;
+}
+.desk-chat-menu a, .idle-agent-menu a, .idle-agent-menu button {
+  display: flex; align-items: center; gap: var(--sp-2); min-height: 40px; padding: 0 var(--sp-3);
+  border: 0; border-radius: var(--r-sm); background: none; color: var(--color-ink); font: 500 13px var(--font-sans);
+  text-align: left; text-decoration: none; cursor: pointer;
+}
+.desk-chat-menu a:hover, .idle-agent-menu a:hover, .idle-agent-menu button:hover:not(:disabled) { background: var(--color-hairline); }
+.idle-agent-menu button:disabled { color: var(--color-ink-3); cursor: not-allowed; }
+
+/* ---------- Rooms on Home ---------- */
+.studio-projects { display: flex; flex-direction: column; gap: var(--sp-3); }
+.studio-projects-head { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3); }
+.studio-projects-head .studio-head { flex: 1; }
+.studio-view { display: inline-flex; border: 1px solid var(--color-hairline); border-radius: var(--r-full); padding: 2px; }
+.studio-view button { min-height: 28px; padding: 0 var(--sp-3); border: 0; border-radius: var(--r-full); background: none; color: var(--color-ink-3); font: 500 12px var(--font-sans); cursor: pointer; }
+.studio-view button[aria-pressed="true"] { background: var(--color-hairline); color: var(--color-ink); }
+
+.project-mark { display: inline-block; flex: none; border-radius: 4px; background: var(--mark); }
+.project-mark[data-mark="sky"] { --mark: var(--color-fig-sky); }
+.project-mark[data-mark="sage"] { --mark: var(--color-fig-sage); }
+.project-mark[data-mark="rose"] { --mark: var(--color-fig-rose); }
+.project-mark[data-mark="lilac"] { --mark: var(--color-fig-lilac); }
+.project-mark[data-mark="clay"] { --mark: var(--color-fig-clay); }
+.project-mark[data-mark="oat"] { --mark: var(--color-fig-oat); }
+.project-mark[data-mark="butter"] { --mark: var(--color-fig-butter); }
+
+.room-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); gap: var(--sp-4); }
+/* Your desk on Home: the tiles, then the box to give any team work. */
+.studio-desk { display: flex; flex-direction: column; gap: var(--sp-3); scroll-margin: var(--sp-6); }
+
+/* A room card lists its teams, each on a line: its state as a shape, its name over what it is doing,
+   then its agents' figures alone, small. */
+.room-card-top { display: flex; align-items: center; gap: var(--sp-2); }
+.room-card-top .room-card-name { flex: 1; min-width: 0; }
+.room-card-count { flex: none; font-size: 12px; color: var(--color-ink-3); }
+.room-card-teams { list-style: none; margin: var(--sp-2) 0 0; padding: 0; display: flex; flex-direction: column; }
+/* The whole line opens the team's chat, above the card's own link to the room. */
+.room-card-teams li + li { border-top: 1px solid var(--color-hairline); }
+.room-card-team {
+  position: relative; z-index: 1; display: flex; align-items: center; gap: var(--sp-2); min-height: 48px; padding: 4px 0;
+  color: var(--color-ink); text-decoration: none;
+}
+.room-card-team:hover b { text-decoration: underline; text-underline-offset: 3px; }
+.room-card-team:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; border-radius: var(--r-sm); }
+.room-card-team > .glance-shape, .room-card-team > .glance-dot, .room-card-noshape { flex: none; width: 12px; }
+.room-card-team > .glance-dot { height: 8px; width: 8px; margin: 0 2px; }
+.room-card-team-words { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.room-card-team-words b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 13.5px/18px var(--font-sans); }
+.room-card-team-words small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 16px; color: var(--color-ink-2); }
+/* The other projects it works in, under what it is doing (ADR 0103). */
+/* The figures in a line pass the press to the line. */
+.room-card-team .desk { pointer-events: none; }
+.room-card-more { margin: 0; font-size: 12.5px; color: var(--color-ink-3); }
+.room-card-foot { display: flex; align-items: center; gap: var(--sp-3); margin-top: auto; padding-top: var(--sp-3); border-top: 1px solid var(--color-hairline); }
+.room-card-file { position: relative; z-index: 1; flex: 1; min-width: 0; }
+.room-card-spend { flex: none; margin-left: auto; font-size: 12px; color: var(--color-ink-2); font-variant-numeric: tabular-nums; }
+
+/* In a list of files (where you left off, a card, Made here, a tile) a file is a plain card, with
+   gold only to point at or focus it: a list of gilt tabs would make gold mean "a file". */
+:is(.pick-up-file, .room-card-file, .team-card-made, .made-here-files, .glance-tile) .file-chip {
+  min-height: 32px; padding: 4px 6px 4px 9px; border-color: var(--color-hairline); background: var(--color-panel-solid); font-weight: 500;
+}
+:is(.pick-up-file, .room-card-file, .team-card-made, .made-here-files, .glance-tile) .file-chip svg { color: var(--color-ink-3); }
+:is(.pick-up-file, .room-card-file, .team-card-made, .made-here-files, .glance-tile) .file-chip-ext { box-shadow: inset 0 0 0 1px var(--color-hairline); color: var(--color-ink-3); }
+:is(.pick-up-file, .room-card-file, .team-card-made, .made-here-files, .glance-tile) .file-chip:hover:not(:disabled) { border-color: var(--color-accent-dim); background: var(--color-panel-solid); }
+
+/* The figures alone, in a line of words: no desk, no names (each still says who it is, and where). */
+.team-desks.compact { flex: none; gap: 0; }
+.team-desks.compact .desk { width: auto; min-width: 0; flex: none; }
+.team-desks.compact .desk-you { width: var(--fig); height: var(--fig); }
+.team-desks.compact .desk-onward { width: 10px; margin: calc(var(--fig) / 2 - 5px) 1px 0; }
+.team-desks.compact .desk-more { margin-left: 4px; font-size: 12px; }
+
+/* ---------- Pick up where you left off ---------- */
+.pick-up { display: flex; flex-direction: column; gap: var(--sp-2); }
+.pick-up-row { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.pick-up-file { display: inline-flex; min-width: 0; max-width: 260px; }
+.pick-up-chat {
+  display: inline-flex; align-items: center; gap: var(--sp-2); min-height: 44px; padding: 4px 12px 4px 6px;
+  border: 1px solid var(--color-hairline); border-radius: var(--r-md); background: var(--color-panel-solid); color: var(--color-ink); text-decoration: none;
+}
+.pick-up-chat > span:last-child { display: flex; flex-direction: column; }
+.pick-up-chat b { font: 500 13px/17px var(--font-sans); }
+.pick-up-chat small { font-size: 12px; line-height: 16px; color: var(--color-ink-3); }
+.pick-up-chat:hover { border-color: var(--color-accent-dim); }
+.pick-up-choose { position: relative; }
+.pick-up-choose .btn { min-height: 44px; }
+.pick-up-choose .desk-chat-menu { left: 0; right: auto; }
+/* The whole card opens the room: its name's button stretches over it, and an agent at your desk
+   stays pressable above that, to go to it. */
+.room-card {
+  position: relative; display: flex; flex-direction: column; min-height: 168px; padding: 14px 16px; box-sizing: border-box;
+  border: 1px solid var(--color-hairline); border-radius: var(--r-lg); background: var(--color-panel-solid);
+}
+.room-card-name button::after { content: ''; position: absolute; inset: 0; border-radius: var(--r-lg); }
+.room-card:hover { border-color: var(--color-accent-dim); }
+.room-card button.desk.away { position: relative; z-index: 1; }
+/* Every other desk passes a click to the card: a figure's light (a filter) or fade would otherwise
+   lift it above the card's link and swallow the click. */
+.room-card span.desk { pointer-events: none; }
+.room-card-name { margin: 0; }
+.room-card-name button {
+  display: inline-flex; align-items: center; gap: var(--sp-2); min-height: 28px; max-width: 100%; padding: 0;
+  border: 0; background: none; color: var(--color-ink); font: 600 15px/20px var(--font-sans); text-align: left; cursor: pointer;
+}
+.room-card-name button span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.room-card-name button:hover span:last-child { text-decoration: underline; text-underline-offset: 3px; }
+.room-line { margin: 0; font-size: 13px; color: var(--color-ink-3); }
+.room-line.waiting, .room-state.waiting { color: var(--color-accent); }
+.room-line.working, .room-state.working { color: var(--color-live); }
+.room-line.failed, .room-state.failed { color: var(--color-alert); }
+/* Each other team's words stay on one line, its name plain and its state in colour; the dots are punctuation. */
+.room-other, .room-more { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+.room-other { color: var(--color-ink-2); }
+.room-sep, .room-more { color: var(--color-ink-3); }
+
+.room-tile, .room-new {
+  display: flex; flex-direction: column; justify-content: center; gap: 4px; min-height: 96px; padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--color-hairline); border-radius: var(--r-lg); background: transparent;
+  color: var(--color-ink); font: inherit; text-align: left; cursor: pointer;
+}
+.room-tile-name { display: inline-flex; align-items: center; gap: var(--sp-2); font-weight: 600; }
+.room-tile.put-away { cursor: default; align-items: flex-start; }
+.room-tile.put-away button { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.room-tile.put-away button.room-tile-name { font-weight: 600; }
+.room-tile-when { font-size: 13px; color: var(--color-ink-3); }
+.room-new { align-items: center; color: var(--color-ink-2); border-style: dashed; min-height: 168px; font-weight: 500; }
+.room-tile:hover, .room-new:hover { border-color: var(--color-accent-dim); }
+.room-tile:focus-visible, .room-new:focus-visible, .room-card-name button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+
+.room-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; border-top: 1px solid var(--color-hairline); }
+.room-list li { border-bottom: 1px solid var(--color-hairline); }
+.room-list li > button:not(.btn):not(.link) {
+  display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: var(--sp-3);
+  width: 100%; min-height: 48px; padding: 0 var(--sp-2); border: 0; background: none; color: var(--color-ink); font: inherit; text-align: left; cursor: pointer;
+}
+.room-list li > .btn, .room-list li > .link { margin: var(--sp-3) var(--sp-2); }
+.room-list-teams { font-size: 13px; color: var(--color-ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- Not in a project ---------- */
+.not-in-project { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-4); }
+.idle-agents { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
+.idle-agent { position: relative; }
+.idle-agent .idle-agent-menu { left: 0; right: auto; }
+.idle-agent-chip {
+  display: inline-flex; align-items: center; gap: var(--sp-2); min-height: 44px; padding: 4px 12px 4px 6px;
+  border: 1px solid var(--color-hairline); border-radius: var(--r-md); background: var(--color-panel-solid);
+  color: var(--color-ink); font: 500 13px var(--font-sans); cursor: pointer;
+}
+
+/* ---------- Set up project: the one question a project starts from ---------- */
+.studio-empty { gap: var(--sp-6); }
+.set-up-card {
+  position: relative; width: 100%; max-width: 640px; margin: 0 auto; box-sizing: border-box;
+  padding: 40px 36px; border: 1px solid var(--color-hairline); border-radius: 20px; background: var(--color-panel-solid);
+}
+.set-up-project { display: flex; flex-direction: column; align-items: center; gap: var(--sp-4); text-align: center; }
+.set-up-project h1 { margin: 0; font: 600 26px/32px var(--font-sans); letter-spacing: -.02em; color: var(--color-ink); }
+.set-up-row {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); width: 100%; box-sizing: border-box;
+  padding: 6px; border: 1px solid var(--color-hairline); border-radius: 14px; background: var(--color-ground);
+}
+.set-up-words { flex: 1 1 260px; display: flex; min-width: 0; }
+.set-up-words input { flex: 1; min-width: 0; height: 44px; padding: 0 var(--sp-2); border: 0; outline: 0; background: transparent; color: var(--color-ink); font: 400 15px var(--font-sans); }
+.set-up-row:focus-within { border-color: var(--color-accent-dim); outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.set-up-folder { width: 44px; height: 44px; border: 1px solid var(--color-hairline); border-radius: 10px; }
+.set-up-row .btn { min-height: 44px; padding: 0 18px; }
+.set-up-chosen { display: inline-flex; align-items: center; gap: var(--sp-2); margin: 0; font-size: 13px; color: var(--color-ink-2); }
+.set-up-hint { margin: 0; font-size: 13px; color: var(--color-ink-3); }
+.set-up-examples { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--sp-2); }
+.set-up-examples button {
+  min-height: 44px; padding: 0 14px; border: 1px solid var(--color-hairline); border-radius: 22px; background: transparent;
+  color: var(--color-ink-2); font: 500 13px var(--font-sans); cursor: pointer;
+}
+.set-up-examples button:hover { color: var(--color-ink); border-color: var(--color-accent-dim); }
+.set-up-backdrop { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: var(--sp-4); background: color-mix(in srgb, var(--color-ground) 55%, transparent); }
+.set-up-card.dialog { box-shadow: var(--e2-shadow); }
+.set-up-close { position: absolute; top: var(--sp-3); right: var(--sp-3); }
+
+/* Phones: every control a finger presses is at least 44 px. */
+@media (max-width: 767px) {
+  .studio-view button, .room-team-name, .room-marks button, .desk-chat-menu a, .idle-agent-menu a, .idle-agent-menu button { min-height: 44px; }
+  .room-marks button { min-width: 44px; }
+  .room-card-name button { min-height: 44px; }
+  :is(.pick-up-file, .room-card-file, .team-card-made, .made-here-files, .glance-tile) .file-chip, .glance-ask { min-height: 44px; }
+  .glance-more, .made-here > .link { display: inline-flex; align-items: center; min-height: 44px; }
+  .reader-sheet-top .iconbtn { width: 44px; height: 44px; }
+}
+
+@media (max-width: 640px) {
+  .set-up-card { padding: var(--sp-6) var(--sp-4); }
+  .room-list li > button:not(.btn):not(.link) { grid-template-columns: minmax(0, 1fr); padding: var(--sp-2); }
+}
+
+/* ---------- Inside a room: the wall, then the floor ---------- */
+.project-room-page { position: absolute; inset: 0; z-index: 50; overflow-y: auto; display: flex; flex-direction: column; background: var(--color-ground); color: var(--color-ink); }
+.room-top { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3); padding: var(--sp-2) var(--sp-5); border-bottom: 1px solid var(--color-hairline); }
+.room-top h1 { flex: 1; margin: 0; font: 600 18px/24px var(--font-sans); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.room-badge { height: 24px; padding: 0 10px; border: 1px solid var(--color-hairline); border-radius: var(--r-full); color: var(--color-ink-3); font: 500 12px/22px var(--font-sans); box-sizing: border-box; }
+.room-rename { flex: 1; display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.room-rename input { flex: 1; min-width: 160px; height: 36px; padding: 0 var(--sp-3); border: 1px solid var(--color-hairline); border-radius: var(--r-sm); background: var(--color-panel-solid); color: var(--color-ink); font: 600 16px var(--font-sans); }
+.room-menu { position: relative; }
+.room-menu .iconbtn { width: 44px; height: 44px; }
+.room-marks { display: flex; flex-wrap: wrap; gap: 2px; padding: var(--sp-1) var(--sp-2); }
+.room-marks button { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 1px solid transparent; border-radius: var(--r-sm); background: none; cursor: pointer; }
+.room-marks button[aria-checked="true"] { border-color: var(--color-ink-2); }
+
+.project-room { flex: 1; width: min(1200px, 100%); margin: 0 auto; box-sizing: border-box; padding: var(--sp-5) var(--sp-5) var(--sp-8); display: flex; flex-direction: column; gap: var(--sp-6); }
+.room-wall { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-4) var(--sp-5) var(--sp-5); border: 1px solid var(--color-hairline); border-radius: var(--r-lg); background: var(--color-panel-solid); }
+.room-wall-head { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3); }
+.room-wall-head .section-head { flex: 1; display: flex; align-items: center; gap: var(--sp-2); }
+.room-wall-acts { display: inline-flex; flex-wrap: wrap; gap: var(--sp-2); }
+.room-wall-acts .btn { gap: 6px; min-height: 36px; }
+.room-wall-board { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--sp-4); }
+
+/* Paper notes: the About and what is kept, on the paper colour the reader's paper uses. */
+.wall-paper {
+  position: relative; display: flex; flex-direction: column; gap: 4px; width: 250px; padding: 12px 14px; box-sizing: border-box;
+  /* Paper is light in both themes, so its words are always the ink a light page takes. */
+  border: 1px solid var(--color-paper-rule); border-radius: 4px; background: var(--color-paper); color: var(--color-bubble-light-ink); font: 400 13px/19px var(--font-sans);
+  text-align: left; box-shadow: var(--e2-shadow);
+}
+button.wall-paper { cursor: pointer; }
+button.wall-paper:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.wall-paper.note { width: 170px; padding-right: 30px; }
+.wall-paper.editing { width: min(420px, 100%); }
+.wall-paper-head { font: 600 11px/14px var(--font-sans); letter-spacing: .07em; text-transform: uppercase; }
+.wall-paper-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.wall-paper-by { font-size: 12px; color: var(--color-bubble-light-ink-2); }
+.wall-paper .iconbtn { position: absolute; top: 4px; right: 4px; color: var(--color-bubble-light-ink-2); }
+.wall-paper .iconbtn:hover { background: color-mix(in srgb, var(--color-paper-rule) 45%, transparent); color: var(--color-bubble-light-ink); }
+.wall-paper .btn:not(:disabled) { color: var(--color-bubble-light-ink); border-color: var(--color-paper-rule); background: transparent; }
+/* The app's gold ring is too faint on paper in dark mode: the light page's gold, the same in both. */
+.wall-paper :focus-visible { outline-color: var(--color-bubble-light-gold); }
+.wall-paper textarea { width: 100%; box-sizing: border-box; margin-top: 4px; padding: var(--sp-2); border: 1px solid var(--color-paper-rule); border-radius: var(--r-xs); background: transparent; color: inherit; font: inherit; resize: vertical; }
+.wall-paper-acts { display: flex; justify-content: flex-end; gap: var(--sp-2); margin-top: var(--sp-2); }
+.wall-error { margin: 0; font-size: 12px; color: var(--color-alert); }
+.wall-folder {
+  display: inline-flex; align-items: center; gap: var(--sp-2); min-height: 44px; padding: 0 var(--sp-2) 0 var(--sp-3);
+  border: 1px solid var(--color-hairline); border-radius: var(--r-md); background: var(--color-panel); font: 500 13px var(--font-sans);
+}
+.wall-folder svg { color: var(--color-ink-3); }
+
+/* ---------- Inside a room, at a glance: tiles, the box, then teams and what they made beside the wall ---------- */
+.room-body { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--sp-6); }
+.room-main { flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: var(--sp-6); }
+.room-side { flex: 1 1 280px; max-width: 380px; min-width: 0; display: flex; flex-direction: column; gap: var(--sp-4); }
+.room-side .room-wall-board { flex-direction: column; align-items: stretch; gap: var(--sp-3); }
+.room-side .wall-paper, .room-side .wall-paper.note, .room-side .wall-paper.editing { width: 100%; }
+.room-side .wall-folder { display: flex; }
+.room-side .wall-folder span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.room-floor { display: flex; flex-direction: column; gap: var(--sp-3); }
+.room-floor-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
+.room-floor-head .studio-head { flex: 1; }
+.room-floor-acts { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.room-floor-acts .btn { min-height: 40px; }
+
+/* A team's card opens its chat, as its name does; its ⋯ and its newest file stay pressable above that. */
+/* Wide enough for four desks and their names, whole, before a row wraps. */
+.team-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr)); gap: var(--sp-3); }
+.team-grid.one { grid-template-columns: minmax(0, 1fr); }
+.team-card {
+  position: relative; display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; padding: 12px 14px 14px;
+  border: 1px solid var(--color-hairline); border-radius: var(--r-lg); background: var(--color-panel-solid);
+}
+/* Waiting for you is a gold line; pointing at a card is a quieter one, so the two never look alike. */
+.team-card:hover { border-color: var(--color-ink-3); }
+.team-card[data-state="waiting"] { border-color: var(--color-accent); }
+.team-card-head { display: flex; align-items: flex-start; gap: var(--sp-2); min-width: 0; }
+.team-card .team-desks { flex-wrap: wrap; row-gap: var(--sp-3); }
+/* "waiting for you" and "in Launch posts" say where an agent is: whole, on two lines if they must. */
+.team-card .desk-state { white-space: normal; overflow: visible; text-align: center; }
+/* A figure's light (a filter) or fade would lift it above the card's link and swallow the click. */
+.team-card span.desk { pointer-events: none; }
+.team-card-made { position: relative; z-index: 2; min-width: 0; }
+.room-team-name::after { content: ''; position: absolute; inset: 0; border-radius: var(--r-lg); }
+.room-team-name { flex: 1; min-width: 0; display: inline-flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--sp-2); min-height: 28px; color: var(--color-ink); text-decoration: none; }
+.room-team-name b { font-weight: 600; }
+.room-team-name span { font-size: 13px; color: var(--color-ink-3); }
+.room-team-name:hover b { text-decoration: underline; text-underline-offset: 3px; }
+.room-team-name:focus-visible { outline: none; }
+.room-team-name:focus-visible::after { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.room-team-move { position: relative; z-index: 2; flex: none; margin: -8px -8px 0 0; }
+/* An open menu stays over the cards after it, whose own ⋯ would otherwise paint over it. */
+.room-team-move:has([aria-expanded="true"]) { z-index: 3; }
+.room-team-move .iconbtn { width: 44px; height: 44px; }
+.room-team-move-head { padding: 4px var(--sp-3) 2px; font-size: 12px; color: var(--color-ink-3); }
+
+/* ---------- The tiles a room and Home open with ---------- */
+.glance { display: grid; grid-template-columns: minmax(280px, 1.5fr) repeat(3, minmax(150px, 1fr)); gap: var(--sp-3); }
+.glance-tile {
+  display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; padding: 14px 16px;
+  border: 1px solid var(--color-hairline); border-radius: var(--r-lg); background: var(--color-panel-solid);
+}
+.glance-tile.needs { border-color: var(--color-accent-dim); }
+.glance-label { margin: 0; font: 500 12px/16px var(--font-sans); color: var(--color-ink-3); }
+.glance-tile.needs .glance-label { color: var(--color-accent); }
+.glance-needs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.glance-needs li { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
+.glance-needs .btn { flex: none; min-height: 40px; }
+/* Home, the quiet desk: what needs you spans the row, and its first item steps up, bigger, its
+   line first. The crew's tiles stand under it. */
+.glance.glance-home { grid-template-columns: repeat(3, minmax(150px, 1fr)); }
+.glance.glance-home > .glance-tile:first-child { grid-column: 1 / -1; }
+.glance-needs li.glance-up { gap: var(--sp-4); padding-bottom: var(--sp-2); border-bottom: 1px solid var(--color-hairline); }
+.glance-needs li.glance-up .glance-need-words { font-size: 16px; line-height: 22px; font-weight: 600; }
+.glance-needs li.glance-up .glance-need-words small { font-size: 13px; font-weight: 400; }
+.glance-needs li.glance-up .btn { min-height: 44px; }
+/* Approve, with the work one press away to read first. */
+.glance-acts { flex: none; display: inline-flex; align-items: center; gap: var(--sp-1); }
+.glance-read { width: 40px; height: 40px; color: var(--color-ink-2); }
+.glance-said { margin: 0; color: var(--color-ink-2); }
+@media (max-width: 767px) { .glance-read, .glance-needs .btn { min-width: 44px; min-height: 44px; } }
+.glance-need-words { flex: 1; min-width: 0; display: flex; flex-direction: column; font-size: 13px; line-height: 18px; color: var(--color-ink); }
+.glance-need-words > span { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.glance-need-words small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--color-ink-2); }
+.glance-shape { width: 12px; height: 12px; flex: none; fill: none; stroke-width: 2; stroke-linecap: round; }
+/* Sixteen even dashes round the ring, so it has no seam. */
+.glance-shape.waiting { stroke: var(--color-accent); stroke-dasharray: 2.16 2.16; }
+.glance-shape.failed { stroke: var(--color-alert); }
+.glance-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--color-live); }
+.glance-agent { display: flex; align-items: center; gap: var(--sp-3); min-height: 44px; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.glance-agent:hover .glance-need-words > span { text-decoration: underline; text-underline-offset: 3px; }
+.glance-main { margin: 0; font: 500 14px/19px var(--font-sans); color: var(--color-ink); overflow-wrap: anywhere; }
+.glance-number { margin: 0; font: 600 26px/32px var(--font-sans); font-variant-numeric: tabular-nums; color: var(--color-ink); }
+.glance-number small { font: 500 12px var(--font-sans); color: var(--color-ink-3); }
+.glance-sub { margin: 0; font-size: 12.5px; line-height: 17px; color: var(--color-ink-2); }
+.glance-quiet { margin: 0; font-size: 13px; color: var(--color-ink-3); }
+.glance-ask {
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 38px; padding: 0;
+  border: 0; background: none; color: var(--color-ink); font: 500 14px/19px var(--font-sans); text-align: left; cursor: pointer;
+}
+.glance-ask:hover { text-decoration: underline; text-underline-offset: 3px; }
+.glance-more { align-self: flex-start; font-size: 13px; }
+.glance-agent:focus-visible, .glance-ask:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; border-radius: var(--r-sm); }
+/* The agents carry the tiles: who did the last work, drawn big, with what they were asked in the
+   words it was asked in; who works now and on what; today's work as the agents who did it. */
+.glance-last { display: flex; align-items: flex-start; gap: var(--sp-3); min-width: 0; }
+.glance-last-words { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.glance-last-words small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--color-ink-2); }
+/* Fraunces ships at 400 only: a heavier weight is a bold the browser fakes. */
+.glance-last .glance-ask { min-height: 0; -webkit-line-clamp: 3; font: 400 16px/22px var(--font-serif); }
+/* Who works and on what wraps rather than cuts: its team and how long are the end of the line.
+   Where the tile is too narrow for both, the words go under the figure. */
+.glance-lead { flex-wrap: wrap; align-items: flex-start; }
+.glance-lead .glance-need-words { flex: 1 1 110px; }
+.glance-need-words > .glance-doing { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.glance-agent .glance-need-words small { white-space: normal; font-variant-numeric: tabular-nums; }
+.glance-agent:hover .glance-need-words > small { text-decoration: underline; text-underline-offset: 3px; }
+.glance-crew, .glance-heads, .glance-spenders { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; align-items: center; }
+.glance-crew { gap: 6px 8px; }
+.glance-crew li { display: flex; }
+.glance-today { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); }
+.glance-heads { gap: 2px; }
+.glance-heads button { display: flex; align-items: center; justify-content: center; padding: 2px; border: 0; border-radius: var(--r-sm); background: none; cursor: pointer; }
+.glance-heads button:hover { background: var(--color-hairline); }
+.glance-heads button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+/* This month's dollars split by agent, the costliest first, in steps of ink, each part keyed in
+   the list under the bar by the same mark. Every step clears 3:1 on the panel in both themes, so
+   the last part never reads as the empty end of a meter. */
+.glance-split { display: flex; gap: 2px; height: 6px; }
+.glance-split span, .glance-spenders .glance-key { border-radius: var(--r-full); background: color-mix(in srgb, var(--color-ink) 46%, transparent); }
+.glance-split span { flex-basis: 0; min-width: 3px; }
+.glance-split span[data-part="0"], .glance-spenders .glance-key[data-part="0"] { background: color-mix(in srgb, var(--color-ink) 90%, transparent); }
+.glance-split span[data-part="1"], .glance-spenders .glance-key[data-part="1"] { background: color-mix(in srgb, var(--color-ink) 72%, transparent); }
+.glance-split span[data-part="2"], .glance-spenders .glance-key[data-part="2"] { background: color-mix(in srgb, var(--color-ink) 58%, transparent); }
+.glance-spenders .glance-key { flex: none; width: 10px; height: 6px; }
+.glance-spenders .glance-else { color: var(--color-ink-3); }
+.glance-spenders { gap: 4px 10px; }
+.glance-spenders li { display: flex; align-items: center; gap: 4px; font-size: 12px; line-height: 16px; font-variant-numeric: tabular-nums; color: var(--color-ink-2); }
+
+/* ---------- Give a team work, as its chat's box does ---------- */
+.work-box { display: flex; flex-direction: column; gap: var(--sp-2); }
+.work-box-row {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); padding: 6px;
+  border: 1px solid var(--color-hairline); border-radius: var(--r-lg); background: var(--color-panel-solid);
+}
+.work-box-row:focus-within { border-color: var(--color-accent-dim); outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.work-box-to { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 4px 0 12px; border-radius: var(--r-md); background: var(--color-ground); font-size: 13px; color: var(--color-ink-3); }
+.work-box-to select { min-height: 40px; max-width: 240px; border: 0; background: transparent; color: var(--color-ink); font: 500 13px var(--font-sans); cursor: pointer; }
+.work-box-to select:focus { outline: none; }
+.work-box-words { flex: 1 1 240px; display: flex; min-width: 0; }
+.work-box-words input { flex: 1; min-width: 0; height: 44px; padding: 0 var(--sp-2); border: 0; outline: 0; background: transparent; color: var(--color-ink); font: 400 15px var(--font-sans); }
+.work-box-files { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.work-box-files li { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 4px 0 10px; border: 1px solid var(--color-hairline); border-radius: var(--r-full); font-size: 12.5px; }
+.work-box-files li.failed { border-color: var(--color-alert); }
+.work-box-files small { color: var(--color-ink-3); }
+.work-box-said { margin: 0; font-size: 13px; color: var(--color-ink-2); }
+.work-box-said.alert { color: var(--color-alert); }
+
+/* ---------- What the agents made, and reading one where you are ---------- */
+.made-here { display: flex; flex-direction: column; gap: var(--sp-3); }
+.made-here-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
+.made-here-teams { display: flex; flex-wrap: wrap; gap: 6px; }
+.made-here-teams button {
+  min-height: 32px; padding: 0 12px; border: 1px solid var(--color-hairline); border-radius: var(--r-full);
+  background: transparent; color: var(--color-ink-2); font: 500 12.5px var(--font-sans); cursor: pointer;
+}
+.made-here-teams button[aria-pressed="true"] { background: var(--color-hairline); color: var(--color-ink); }
+.made-here-files { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--sp-3) var(--sp-4); }
+.made-here-files li { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; }
+.made-here-files li .file-chip-wrap { max-width: 100%; }
+.made-here-files small { padding-left: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; font-size: 12px; color: var(--color-ink-2); }
+.made-here > .link { align-self: flex-start; font-size: 13px; }
+
+.reader-sheet-backdrop { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; padding: var(--sp-4); background: color-mix(in srgb, var(--color-ground) 60%, transparent); }
+.reader-sheet {
+  display: flex; flex-direction: column; width: min(900px, 100%); height: min(88vh, 1000px); overflow: hidden;
+  border: 1px solid var(--color-hairline); border-radius: var(--r-lg); background: var(--color-panel-solid); box-shadow: var(--e2-shadow);
+}
+.reader-sheet-top { flex: none; display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-3); padding: 4px 4px 4px var(--sp-4); border-bottom: 1px solid var(--color-hairline); }
+.reader-sheet-top .link { margin-right: auto; font-size: 13px; }
+.reader-sheet-top .iconbtn { width: 40px; height: 40px; }
+.reader-sheet-body { position: relative; flex: 1; min-height: 0; }
+
+@media (max-width: 1000px) {
+  .glance, .glance.glance-home { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .room-side { max-width: none; }
+}
+@media (max-width: 767px) {
+  .made-here-teams button, .work-box-files li { min-height: 44px; }
+  /* The last work's words are a press too: a one-line prompt still a finger tall. */
+  .glance-last .glance-ask { min-height: 44px; }
+  /* Three to a half-width tile on a phone, each a full press wide. */
+  .glance-heads { gap: 0; }
+  .glance-heads button { min-width: 44px; min-height: 44px; }
+}
+@media (max-width: 560px) {
+  /* What needs you and this month across the width, the other two side by side, so the box is in
+     reach; the box's words and Start on one line under "To". */
+  .glance, .glance.glance-home { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .glance > .glance-tile:first-child, .glance > .glance-tile:last-child { grid-column: 1 / -1; }
+  /* The stepped-up item keeps its words beside a smaller figure, and its buttons drop under them. */
+  .glance-needs li.glance-up { flex-wrap: wrap; }
+  .glance-needs li.glance-up .desk-figure :is(img, .figure-still) { width: 56px; height: 56px; }
+  .glance-needs li.glance-up .glance-need-words { flex: 1 1 calc(100% - 72px); }
+  .glance-needs li.glance-up > :is(.btn, .glance-acts) { margin-left: auto; }
+  .glance-tile { padding: 12px 14px; }
+  .glance-number { font-size: 22px; line-height: 28px; }
+  .work-box-to { flex: 1 1 100%; }
+  .work-box-to select { max-width: none; flex: 1; }
+  .work-box-words { flex: 1 1 0; }
+}
+
+.add-agent h2 { margin: 0 0 var(--sp-3); font: 600 18px/24px var(--font-sans); }
+.add-agent-pick { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-bottom: var(--sp-4); }
+.add-agent-option { display: inline-flex; align-items: center; gap: var(--sp-2); min-height: 44px; padding: 4px 12px 4px 6px; border: 1px solid var(--color-hairline); border-radius: var(--r-md); cursor: pointer; }
+.add-agent-option.on { border-color: var(--color-accent); }
+.add-agent-option input { position: absolute; opacity: 0; pointer-events: none; }
+.add-agent-option:focus-within { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.add-agent-where { display: flex; flex-direction: column; gap: 6px; text-align: left; font-size: 13px; color: var(--color-ink-2); }
+.add-agent-where select { min-height: 40px; padding: 0 var(--sp-2); border: 1px solid var(--color-hairline); border-radius: var(--r-sm); background: var(--color-panel-solid); color: var(--color-ink); font: inherit; }
+
+@media (max-width: 640px) {
+  .room-top { padding: var(--sp-2) var(--sp-3); }
+  .project-room { padding: var(--sp-4) var(--sp-3) var(--sp-7); }
+  .wall-paper, .wall-paper.note { width: 100%; }
+}
+.studio-problems { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--color-ink-3); }
+.not-in-project .agents-know-you { flex-basis: 100%; }
+
+/* Ask in a project's room answers under LoomWatch's own mark, beside its title (ADR 0097). */
+.ask-head h2 { display: flex; align-items: center; gap: var(--sp-2); }
+
+/* ---------- A project's "…" on Home (ADR 0100) ---------- */
+/* Above the link the card's name stretches over it, as a team's "…" in a room is. */
+.room-card-menu { position: relative; z-index: 2; flex: none; margin: calc(-1 * var(--sp-2)) calc(-1 * var(--sp-2)) calc(-1 * var(--sp-2)) 0; }
+.room-card-menu:has([aria-expanded="true"]) { z-index: 3; }
+.room-card-menu .iconbtn { width: 44px; height: 44px; }
+.room-tile-box { position: relative; display: flex; flex-direction: column; }
+.room-tile-box > .room-tile { flex: 1; padding-right: calc(44px + var(--sp-2)); }
+.room-tile-box > .room-card-menu { position: absolute; top: 6px; right: 6px; margin: 0; }
+.room-list li:has(> .room-card-menu) { display: flex; align-items: center; }
+.room-list li:has(> .room-card-menu) > button:not(.btn):not(.link) { flex: 1; min-width: 0; width: auto; }
+.room-list li > .room-card-menu { margin: 0 var(--sp-1) 0 0; }
+/* What is done to the thing itself comes last, under a rule; deleting it is in the alert colour
+   with words, never colour alone. */
+.idle-agent-menu .menu-rule { flex: none; height: 1px; margin: var(--sp-1) 0; background: var(--color-hairline); }
+.idle-agent-menu button.menu-alert { color: var(--color-alert); font-weight: 600; }
+.idle-agent-menu button.menu-alert:hover:not(:disabled) { background: color-mix(in srgb, var(--color-alert) 10%, transparent); }
+/* As wide as its longest item, so "Remove from My agents…" stays on one line. */
+:is(.room-card-menu, .agent-card-menu, .move-to-project, .add-a-team) .idle-agent-menu { width: max-content; }
+/* An open "…" or Add list looks open, as a card's menu button on Home does; the ring shows it on the
+   dark panel, where the tint alone barely does. */
+:is(.room-card-menu, .agent-card-menu, .room-team-move) .iconbtn[aria-expanded="true"],
+:is(.move-to-project, .add-a-team) > .btn[aria-expanded="true"] { background: var(--color-accent-tint); color: var(--color-ink); box-shadow: inset 0 0 0 1px var(--color-accent-dim); }
+:is(.move-to-project, .add-a-team) > .btn > svg { transition: rotate var(--t-quick) var(--ease-out); }
+:is(.move-to-project, .add-a-team) > .btn[aria-expanded="true"] > svg { rotate: 180deg; }
+
+/* ---------- A team in no project, under "Not in a project" (ADR 0100) ---------- */
+/* Each on its line as in a room's card, then its one step into a project and its "…". In a narrow
+   window the line takes the row and the two controls go under it, at its right. */
+.not-in-project .loose-teams { flex-basis: 100%; list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(380px, 100%), 1fr)); gap: var(--sp-3); }
+.loose-team { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); padding: var(--sp-1) var(--sp-1) var(--sp-1) var(--sp-3); border: 1px solid var(--color-hairline); border-radius: var(--r-md); background: var(--color-panel-solid); }
+.loose-team > .room-card-team { flex: 1 1 200px; min-width: 0; }
+.move-to-project { position: relative; flex: none; margin-left: auto; }
+.move-to-project > .btn { gap: 6px; min-height: 36px; }
+.loose-team > .room-card-menu { margin: 0; }
+/* In a narrow window the list of projects hangs under the whole row, as wide as it, so a long
+   project name never pushes it off the window's left edge. */
+@media (max-width: 767px) {
+  .loose-team { position: relative; }
+  .loose-team > .move-to-project { position: static; }
+  .loose-team > .move-to-project > .idle-agent-menu { left: 0; right: 0; width: auto; }
+}
+.not-in-project > :is(.loose-moved, .alert) { flex-basis: 100%; margin: 0; }
+
+/* ---------- One team in several projects (ADR 0103) ---------- */
+/* On a room's team card, under its name: the other projects it works in, which a save or a delete
+   reaches too, so it reads as well as the line above it (ink-2: APCA Lc 53 dark, 87 light). */
+.team-card-title { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.team-card-also { font-size: 12px; line-height: 16px; color: var(--color-ink-2); overflow-wrap: anywhere; }
+.room-card-team-words .room-card-also { color: var(--color-ink-2); }
+/* Add a team, in the room's toolbar beside Add an agent and New team: its own rules, so it stands
+   as they do. Each of yours in its list, the name over where it works now. */
+.add-a-team { position: relative; flex: none; }
+.add-a-team > .btn { gap: 6px; }
+.add-a-team .idle-agent-menu { min-width: 240px; }
+.add-a-team-name { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: var(--sp-1) 0; overflow-wrap: anywhere; }
+/* ink-2: a hovered row's hairline tint takes ink-3 under 4.5:1. */
+.add-a-team-name small { font-size: 12px; font-weight: 400; color: var(--color-ink-2); }
+.add-a-team .idle-agent-menu button { min-height: 48px; }
+/* In a narrow window the list hangs under the whole toolbar, as wide as it, so a long project name
+   never pushes it off the window's left edge. */
+@media (max-width: 767px) {
+  .room-floor-head { position: relative; }
+  .room-floor-acts > .add-a-team { position: static; }
+  .add-a-team > .idle-agent-menu { left: 0; right: 0; width: auto; }
+}

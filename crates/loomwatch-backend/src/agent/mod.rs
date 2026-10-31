@@ -28,7 +28,7 @@ mod error;
 mod events;
 mod openrouter;
 mod permission;
-mod prompt;
+pub(crate) mod prompt;
 mod provider;
 mod sandbox;
 mod session;
@@ -36,7 +36,7 @@ mod skills;
 mod spend;
 mod sse;
 mod store;
-mod tools;
+pub(crate) mod tools;
 
 #[cfg(test)]
 mod tests;
@@ -61,7 +61,7 @@ pub use provider::{
 };
 pub use sandbox::use_own_programs;
 pub use session::{
-    CancelHandle, HostAsk, HostTools, MAX_PICTURE_BYTES, MAX_PICTURES, NoHostTools, Session,
+    Asks, CancelHandle, HostAsk, HostTools, MAX_PICTURE_BYTES, MAX_PICTURES, NoHostTools, Session,
     SessionConfig, Snapshot, StopReason, ToolSet, TurnEnd, WORK,
 };
 pub use skills::{SkillEntry, SkillIndex, index_skills};

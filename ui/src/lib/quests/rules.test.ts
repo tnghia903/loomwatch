@@ -129,12 +129,12 @@ describe('quests', () => {
     expect(items(facts({ agents: [mac], projection: { agents: [ran('analyst')], evidence: [read], messages: [], checks: [] } }))).toEqual([])
   })
 
-  it('pin: a scheduled run that never asked, and used every key it held', () => {
+  it('pin: a scheduled run that never asked, and used everything it was allowed', () => {
     const scout = agent('scout', { allow: { web: true } })
     const searched = evidence('scout', { kind: 'search', relation: 'searched' })
     const scheduled = { runId: 'now', createdAt: '', trigger: 'schedule' as const }
     const base = facts({ agents: [scout], run: scheduled, projection: { agents: [ran('scout')], evidence: [searched], messages: [], checks: [] } })
-    expect(questsEarned(base)).toEqual([{ item: 'pin', agentId: null, line: 'This scheduled run never had to ask for a permission, and every key it held was used (search the web).' }])
+    expect(questsEarned(base)).toEqual([{ item: 'pin', agentId: null, line: 'This scheduled run never had to ask you, and its agents used everything they were allowed (search the web).' }])
     expect(items({ ...base, run: { ...scheduled, trigger: 'manual' } })).toEqual([])
     // A key it held and never used is more than it needed.
     expect(items({ ...base, agents: [agent('scout', { allow: { web: true, commands: true } })] })).toEqual([])
@@ -143,9 +143,9 @@ describe('quests', () => {
     expect(items({ ...base, agents: [agent('scout')] })).toEqual([])
   })
 
-  it('cushion: an agent from My agents that had a test bench run first', () => {
+  it('cushion: an agent from My agents that was tried in its Chat tab first', () => {
     const placed = agent('writer', { from: { agent: 'house-writer', version: 2 } })
-    expect(questsEarned(facts({ agents: [placed], benched: new Set(['house-writer']) }))).toEqual([{ item: 'cushion', agentId: 'writer', line: 'Writer was tried on its test bench before this team used it.' }])
+    expect(questsEarned(facts({ agents: [placed], benched: new Set(['house-writer']) }))).toEqual([{ item: 'cushion', agentId: 'writer', line: 'Writer was tried in its Chat tab before this team used it.' }])
     expect(items(facts({ agents: [placed] }))).toEqual([])
     expect(items(facts({ agents: [agent('writer')], benched: new Set(['writer']) }))).toEqual([])
   })

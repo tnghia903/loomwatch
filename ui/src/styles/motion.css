@@ -146,3 +146,81 @@
 @keyframes mark-glance { 0%, 16% { translate: 0 0; } 28%, 46% { translate: -24px 0; } 58%, 76% { translate: 24px 0; } 88%, 100% { translate: 0 0; } }
 @keyframes mark-blink { 50% { scale: 1 .08; } }
 @keyframes mark-breathe { 50% { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 6px var(--glow)); } }
+
+/* ---- Round 3: the frame and its screens --------------------------------------------------
+   Every place arrives with its parts in turn; what you point at and press answers you; the dock's
+   stitch draws in where you are and its count pops when something new needs you; a working
+   figure's blue glow breathes, as a running card's halo does; and what opens (the workbench, a
+   setting's row, a question, a note) opens toward you. Exits stay unanimated (Overlays, above).
+   Arrivals fill `backwards` only: a filling `translate` would keep a containing block under fixed
+   menus. Nothing here runs inside the canvas, where an opacity or transform animation blurs
+   Safari's zoomed text (dd78104). */
+
+/* Pointing: cards and controls ease into their hover, and rise a pixel, as Home's cards do. */
+.lw-dock-place { transition: background-color var(--t-instant) var(--ease-out), color var(--t-instant) var(--ease-out), scale var(--t-instant) var(--ease-out); }
+:is(.room-card, .room-tile, .room-new, .pick-up-chat, .team-card, .set-up-examples button) {
+  transition: border-color var(--t-quick) var(--ease-out), box-shadow var(--t-quick) var(--ease-out), translate var(--t-quick) var(--ease-out), color var(--t-quick) var(--ease-out);
+}
+.agent-tile-figure, .agent-tile-mark { transition: translate var(--t-move) var(--ease-out), border-color var(--t-quick) var(--ease-out); }
+.byhand-row-says { transition: color var(--t-quick) var(--ease-out); }
+@media (prefers-reduced-motion: no-preference) {
+  :is(.room-card, .room-tile, .room-new, .pick-up-chat, .team-card):hover { translate: 0 -1px; box-shadow: var(--e1-shadow); }
+  /* A lifted card is its own layer: one with its Move to menu open stays above the cards after it. */
+  :is(.team-card, .room-card):has([aria-expanded="true"]) { z-index: 3; }
+  /* Home's cards (and My agents' tiles) ease into a press, as into their hover (home.css). */
+  .home-card { transition: border-color var(--t-quick) var(--ease-out), transform var(--t-quick) var(--ease-out), box-shadow var(--t-quick) var(--ease-out), scale var(--t-instant) var(--ease-out); }
+  /* On My agents, the agent you point at looks up from its desk. */
+  .agent-card:is(:hover, :focus-visible) .agent-tile-figure { translate: 0 -3px; }
+
+  /* Pressing: a control gives a little under the pointer, and springs back. */
+  :is(.btn, .iconbtn, .lw-send, .lw-attach):not(.react-flow *) { transition: background-color var(--t-instant) var(--ease-out), color var(--t-instant) var(--ease-out), border-color var(--t-instant) var(--ease-out), scale var(--t-instant) var(--ease-out); }
+  :is(.btn, .iconbtn, .lw-send, .lw-attach, .lw-dock-place, .home-card):active:not(:disabled, .react-flow *) { scale: .97; }
+
+  /* The dock: the stitch draws in beside the place you are in, a name fades in when it shows, and
+     the count pops each time it changes (Dock.tsx keys it by the number). */
+  .lw-dock-stitch { animation: stitch-in var(--t-move) var(--ease-out) backwards; }
+  .lw-dock-label { animation: fade-in var(--t-quick) var(--ease-out) backwards; }
+  .lw-dock-count.rose { animation: count-pop var(--t-move) var(--ease-out) backwards; }
+
+  /* A place arrives: its parts rise in, one after another, and a long page never waits. */
+  /* New project's scrim and dialog, and a delete's or a rename's, sit in the studio too, but open
+     when asked, not with the page. */
+  :is(.studio, .agents-main, .quests-main, .lw-skills-main, .lw-settings) > :not(.set-up-backdrop, .lw-scrim),
+  :is(.home-grid, .room-list, .glance-needs) > li {
+    animation: rise-in var(--t-entrance) var(--ease-out) backwards;
+  }
+  :is(.studio, .agents-main, .quests-main, .lw-skills-main, .lw-settings) > :nth-child(2):not(.set-up-backdrop, .lw-scrim),
+  :is(.home-grid, .room-list, .glance-needs) > li:nth-child(2) { animation-delay: 40ms; }
+  :is(.studio, .agents-main, .quests-main, .lw-skills-main, .lw-settings) > :nth-child(3):not(.set-up-backdrop, .lw-scrim),
+  :is(.home-grid, .room-list, .glance-needs) > li:nth-child(3) { animation-delay: 80ms; }
+  :is(.studio, .agents-main, .quests-main, .lw-skills-main, .lw-settings) > :nth-child(4):not(.set-up-backdrop, .lw-scrim),
+  :is(.home-grid, .room-list, .glance-needs) > li:nth-child(4) { animation-delay: 120ms; }
+  :is(.studio, .agents-main, .quests-main, .lw-skills-main, .lw-settings) > :nth-child(5):not(.set-up-backdrop, .lw-scrim),
+  :is(.home-grid, .room-list, .glance-needs) > li:nth-child(5) { animation-delay: 160ms; }
+  :is(.studio, .agents-main, .quests-main, .lw-skills-main, .lw-settings) > :nth-child(1n+6):not(.set-up-backdrop, .lw-scrim),
+  :is(.home-grid, .room-list, .glance-needs) > li:nth-child(1n+6) { animation-delay: 200ms; }
+
+  /* What needs you first steps up: when it is new, its figure pops up (the spring, DESIGN.md § 9),
+     once the page has arrived, so nothing moves, fades and grows at once. */
+  .glance-needs li.glance-up[data-new] .desk-figure { animation: figure-pop var(--t-spring) var(--ease-spring) var(--t-entrance) backwards; }
+  /* Quests: the earned pips fill in from the left, once the heading has arrived. */
+  .quests-progress-pips i.on { transform-origin: 0 50%; animation: pip-fill var(--t-move) var(--ease-out) var(--t-entrance) backwards; }
+
+  /* Working: the figure's blue glow breathes; waiting, ready and stopped hold still. Not while
+     Ask's glass floats over the page: Safari would redraw its blur every frame. */
+  .desk-figure[data-glow="working"] { animation: mark-breathe var(--t-breathe) ease-in-out infinite; }
+  .lw-app:has(.ask-panel) .desk-figure[data-glow="working"] { animation: none; }
+
+  /* What opens comes toward you. */
+  .team-agents-page { animation: sheet-in var(--t-move) var(--ease-out) backwards; }
+  .byhand-row-body:not([hidden]) { animation: pop-in var(--t-quick) var(--ease-out) backwards; }
+  .explain-text { animation: pop-in var(--t-quick) var(--ease-out) backwards; }
+  .lw-devices-connect { animation: pop-in var(--t-quick) var(--ease-out) backwards; }
+  .lw-confirm { animation: pop-in-up var(--t-quick) var(--ease-out) backwards; }
+  :is(.instruction-update-bar, .lw-notice, .home-empty.alert) { animation: rise-in var(--t-move) var(--ease-out) backwards; }
+}
+@keyframes stitch-in { from { opacity: 0; scale: 1 0; } }
+@keyframes count-pop { from { scale: .4; } }
+@keyframes sheet-in { from { opacity: 0; translate: 0 12px; } }
+@keyframes figure-pop { from { scale: .6; translate: 0 8px; } }
+@keyframes pip-fill { from { scale: 0 1; } }

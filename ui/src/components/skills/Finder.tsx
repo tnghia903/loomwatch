@@ -1,4 +1,4 @@
-import { Link2, Search } from 'lucide-react'
+import { Link2, Search } from '../ui/icon'
 
 import { looksLikeLink, SKILL_TOPICS } from '../../lib/library/skillStore'
 import { TopicIcon } from './SkillTags'

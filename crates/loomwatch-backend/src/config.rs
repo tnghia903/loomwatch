@@ -72,6 +72,17 @@ pub struct TeamConfig {
     /// What one run may spend (ADR 0068). Absent: no limit, though spend is still counted.
     #[serde(default)]
     pub spend: crate::spend::SpendConfig,
+    /// The project this team works in (ADR 0097): `<teams root>/.projects/<id>.yaml`.
+    #[serde(default)]
+    pub project: Option<String>,
+    /// The team this file is one place of (ADR 0103): every team file naming the same id shares
+    /// its setup, and keeps its own project, schedule, delivery and Brief (`team_places.rs`).
+    #[serde(default)]
+    pub shares: Option<String>,
+    /// That project as it was read with the team. Read only in the teams folder
+    /// ([`Self::parse_in`]): a team read on its own runs without it.
+    #[serde(skip)]
+    pub project_file: Option<crate::projects::Project>,
 }
 
 /// The `permissions:` block (ADR 0061).
@@ -371,12 +382,80 @@ pub struct CheckConfig {
     /// The most of what the checked agent was given that its check step is shown, in characters:
     /// what lets it trace a claim without opening the claim's source. 0 shows none of it.
     pub given_chars: u32,
+    /// What a person's message says done looks like, checked before the work becomes the answer
+    /// (ADR 0098).
+    pub from_message: FromMessage,
 }
 
 impl Default for CheckConfig {
     fn default() -> Self {
         // About 2,000 tokens: a research handover's findings and its sources, whole, in most runs.
-        Self { given_chars: 8_000 }
+        Self {
+            given_chars: 8_000,
+            from_message: FromMessage::default(),
+        }
+    }
+}
+
+/// How a message's own Done when is checked (ADR 0098): whether it is read at all, how many times
+/// the work may go back for it, and what happens when it is still not met.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
+pub struct FromMessage {
+    /// Read what each message says the finished work must satisfy. Off, a message's words are never
+    /// turned into checks, and every run is checked only as its team is built to be.
+    pub read: bool,
+    /// How many times the work may go back when the message names no number of tries.
+    pub rounds: u32,
+    /// The most times a message may send the work back, however many tries it asks for.
+    pub max_rounds: u32,
+    pub when_still_not_met: WhenStillNotMet,
+}
+
+/// The most a team file may set `fromMessage.maxRounds` to.
+pub const FROM_MESSAGE_MAX_ROUNDS: u32 = 10;
+
+impl Default for FromMessage {
+    fn default() -> Self {
+        // Two rounds, as a new check step (`SendBack::NEW`); up to five when the person asks, since
+        // they named the number for this one request and a round that fixes nothing stops the loop
+        // early; then the person decides rather than see work that missed.
+        Self {
+            read: true,
+            rounds: 2,
+            max_rounds: 5,
+            when_still_not_met: WhenStillNotMet::Ask,
+        }
+    }
+}
+
+impl FromMessage {
+    /// How the work goes back for a message that asked for `tries` tries, or named none. A try is
+    /// the first work or one revision, so five tries is four send-backs.
+    #[must_use]
+    pub fn send_back(self, tries: Option<u32>) -> SendBack {
+        let rounds = tries
+            .map_or(self.rounds, |tries| tries.saturating_sub(1))
+            .min(self.max_rounds);
+        SendBack {
+            rounds,
+            when_still_not_met: self.when_still_not_met,
+        }
+    }
+
+    /// Why this block can't be used, when it can't.
+    fn problem(self) -> Option<String> {
+        if !(1..=FROM_MESSAGE_MAX_ROUNDS).contains(&self.max_rounds) {
+            return Some(format!(
+                "conversation.check.fromMessage.maxRounds must be 1 to {FROM_MESSAGE_MAX_ROUNDS}."
+            ));
+        }
+        if !(1..=self.max_rounds).contains(&self.rounds) {
+            return Some(
+                "conversation.check.fromMessage.rounds must be 1 to its maxRounds.".to_owned(),
+            );
+        }
+        None
     }
 }
 
@@ -548,6 +627,9 @@ pub struct AgentConfig {
     pub model: String,
     pub thinking_effort: Option<String>,
     pub allow_recruiting: bool,
+    /// Whether it may bring in another of the person's agents from My agents (ADR 0092), when the
+    /// team lists any (`guards.myAgents`). Its own switch, filled in from My agents.
+    pub allow_my_agents: bool,
     pub capabilities: Vec<CapabilityRef>,
     /// Per-agent memory overrides; the team's `memory:` block applies when absent.
     pub memory: Option<AgentMemoryConfig>,
@@ -556,9 +638,15 @@ pub struct AgentConfig {
     /// Skills and tools the operator turned off for this agent (ADR 0060): its app would otherwise
     /// load them itself. Empty for an operator node.
     pub turned_off: Vec<TurnedOff>,
-    /// What the finished result must satisfy (ADR 0062), trimmed, blanks dropped. Rendered under
-    /// the role as `## Done when`. Empty for an operator node and for most hand-written agents.
+    /// What the finished result must satisfy (ADR 0062), trimmed, blanks dropped: the items of the
+    /// agent's part in this team first, then its own. Rendered under the role as `## Done when`,
+    /// and what a check step checks. Empty for an operator node and for most hand-written agents.
     pub done_when: Vec<String>,
+    /// What this team needs from the agent (`part.text`, ADR 0097), trimmed. The team's, never the
+    /// agent's: one of My agents keeps instructions for its kind of work, and each team says here
+    /// what it needs from it. Rendered as `## Your part in this team` after what the team knows.
+    /// `None` for an operator node and for an agent whose team gives it no part.
+    pub part: Option<String>,
     /// Set on a check step (ADR 0062): the agent whose work this one checks, its direct
     /// predecessor. It is handed that agent's work as written and its Done when, and when it is the
     /// last stage the checked agent's reply stays the team's answer.
@@ -693,6 +781,8 @@ struct RawAgent {
     thinking_effort: Option<String>,
     #[serde(default = "default_allow_recruiting")]
     allow_recruiting: bool,
+    #[serde(default = "default_allow_recruiting")]
+    allow_my_agents: bool,
     #[serde(default)]
     capabilities: Vec<CapabilityRef>,
     #[serde(default)]
@@ -703,6 +793,8 @@ struct RawAgent {
     turned_off: Vec<TurnedOff>,
     #[serde(default)]
     done_when: Vec<String>,
+    #[serde(default)]
+    part: Option<RawPart>,
     #[serde(default)]
     checks: Option<String>,
     #[serde(default)]
@@ -721,10 +813,39 @@ struct RawAgent {
     _status: Option<String>,
 }
 
-/// `from: {agent, version}` (ADR 0071): only the agent is read; the version is the canvas's.
+/// `part` (ADR 0097): what this team needs from the agent, and that part's own Done when items.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RawPart {
+    #[serde(default)]
+    text: Option<String>,
+    #[serde(default)]
+    done_when: Vec<String>,
+}
+
+/// At most this many characters in an agent's `part.text`: a line or two of what the team needs
+/// from it, not a second set of instructions (ADR 0097). The schema's limit, held for a hand-edited
+/// file too.
+pub const PART_CHARS: usize = 1000;
+
+/// `from: {agent}` (ADR 0071, 0094): the agent in My agents it is. A `version` an earlier
+/// `LoomWatch` wrote is ignored.
 #[derive(Debug, Deserialize)]
 struct RawFrom {
     agent: String,
+}
+
+/// An agent that is one of My agents and holds none of its own fields was filled in from its
+/// teams folder (ADR 0094); one read without it says so rather than running with no instructions.
+fn filled_in(id: &str, role: Option<&String>, from: Option<&RawFrom>) -> Result<(), String> {
+    match (role, from) {
+        (None, Some(from)) => Err(format!(
+            "agent {id:?} is {:?} from My agents, so the team has to be read in its teams \
+             folder, where `.jobs/{}.yaml` fills it in.",
+            from.agent, from.agent
+        )),
+        _ => Ok(()),
+    }
 }
 
 impl TryFrom<RawAgent> for AgentConfig {
@@ -742,6 +863,7 @@ impl TryFrom<RawAgent> for AgentConfig {
                     ("allow", raw.allow.is_some()),
                     ("turnedOff", !raw.turned_off.is_empty()),
                     ("doneWhen", !raw.done_when.is_empty()),
+                    ("part", raw.part.is_some()),
                     ("checks", raw.checks.is_some()),
                     ("sendBackOnce", raw.send_back_once),
                     ("sendBack", raw.send_back.is_some()),
@@ -777,11 +899,13 @@ impl TryFrom<RawAgent> for AgentConfig {
                     model: String::new(),
                     thinking_effort: None,
                     allow_recruiting: false,
+                    allow_my_agents: false,
                     capabilities: raw.capabilities,
                     memory: raw.memory,
                     allow: AgentAllow::default(),
                     turned_off: Vec::new(),
                     done_when: Vec::new(),
+                    part: None,
                     checks: None,
                     send_back: None,
                     spend: crate::spend::SpendConfig::default(),
@@ -790,6 +914,7 @@ impl TryFrom<RawAgent> for AgentConfig {
                 })
             }
             AgentKind::Harness => {
+                filled_in(&id, raw.role.as_ref(), raw.from.as_ref())?;
                 let spawn = raw.spawn.unwrap_or_default();
                 let model = raw.model.ok_or_else(|| {
                     format!("agent {id:?} is missing `model`, the model it runs on.")
@@ -797,7 +922,7 @@ impl TryFrom<RawAgent> for AgentConfig {
                 for entry in &raw.turned_off {
                     check_turned_off(&id, entry)?;
                 }
-                let done_when = done_when(&id, raw.done_when)?;
+                let (part, done_when) = part_and_done_when(&id, raw.part, raw.done_when)?;
                 let send_back = send_back(&id, raw.send_back, raw.send_back_once)?;
                 Ok(Self {
                     id,
@@ -808,11 +933,13 @@ impl TryFrom<RawAgent> for AgentConfig {
                     model,
                     thinking_effort: raw.thinking_effort,
                     allow_recruiting: raw.allow_recruiting,
+                    allow_my_agents: raw.allow_my_agents,
                     capabilities: raw.capabilities,
                     memory: raw.memory,
                     allow: raw.allow.unwrap_or_default(),
                     turned_off: raw.turned_off,
                     done_when,
+                    part,
                     checks: raw
                         .checks
                         .map(|checked| checked.trim().to_owned())
@@ -830,9 +957,39 @@ impl TryFrom<RawAgent> for AgentConfig {
     }
 }
 
-/// `doneWhen` as the prompt will state it: each item trimmed, blank ones dropped, within the
-/// schema's limits.
-fn done_when(id: &str, items: Vec<String>) -> Result<Vec<String>, String> {
+/// The agent's part in this team as the prompt will state it, and its Done when: the part's items
+/// first, as what this team asked of it, then the agent's own, each once (ADR 0097).
+fn part_and_done_when(
+    id: &str,
+    part: Option<RawPart>,
+    own: Vec<String>,
+) -> Result<(Option<String>, Vec<String>), String> {
+    let part = part.unwrap_or_default();
+    let text = part
+        .text
+        .map(|text| text.trim().to_owned())
+        .filter(|text| !text.is_empty());
+    if let Some(text) = &text {
+        let length = text.chars().count();
+        if length > PART_CHARS {
+            return Err(format!(
+                "agent {id:?} has a `part.text` of {length} characters; keep it to {PART_CHARS}, a \
+                 line or two of what this team needs from it."
+            ));
+        }
+    }
+    let mut items = done_when(id, "part.doneWhen", part.done_when)?;
+    for item in done_when(id, "doneWhen", own)? {
+        if !items.contains(&item) {
+            items.push(item);
+        }
+    }
+    Ok((text, items))
+}
+
+/// `doneWhen` (or `part.doneWhen`, the `field`) as the prompt will state it: each item trimmed,
+/// blank ones dropped, within the schema's limits.
+fn done_when(id: &str, field: &str, items: Vec<String>) -> Result<Vec<String>, String> {
     let items: Vec<String> = items
         .into_iter()
         .map(|item| item.trim().to_owned())
@@ -840,7 +997,7 @@ fn done_when(id: &str, items: Vec<String>) -> Result<Vec<String>, String> {
         .collect();
     if items.len() > DONE_WHEN_ITEMS {
         return Err(format!(
-            "agent {id:?} has {} `doneWhen` items; keep it to {DONE_WHEN_ITEMS}, the ones the \
+            "agent {id:?} has {} `{field}` items; keep it to {DONE_WHEN_ITEMS}, the ones the \
              result must meet.",
             items.len()
         ));
@@ -850,7 +1007,7 @@ fn done_when(id: &str, items: Vec<String>) -> Result<Vec<String>, String> {
         .find(|item| item.chars().count() > DONE_WHEN_CHARS)
     {
         return Err(format!(
-            "agent {id:?} has a `doneWhen` item longer than {DONE_WHEN_CHARS} characters: {long:?}. \
+            "agent {id:?} has a `{field}` item longer than {DONE_WHEN_CHARS} characters: {long:?}. \
              Say it in one short sentence."
         ));
     }
@@ -911,6 +1068,18 @@ pub struct CapabilityRef {
 const MAX_ALWAYS_ALLOWED: usize = 200;
 
 impl CapabilityRef {
+    /// A folder or file to read, labelled `name`: what a project gives every agent in it (ADR 0097).
+    #[must_use]
+    pub fn knowledge(name: &str, path: PathBuf) -> Self {
+        Self {
+            kind: CapabilityKind::Knowledge,
+            name: name.to_owned(),
+            path: Some(path),
+            notion: None,
+            always_allow: Vec::new(),
+        }
+    }
+
     /// Where a path or a Notion page may appear, and that a Notion page is named by its id.
     fn validate(&self) -> Result<(), String> {
         let (name, kind) = (&self.name, self.kind.as_str());
@@ -1015,6 +1184,41 @@ impl CapabilityKind {
 }
 
 impl AgentConfig {
+    /// `LoomWatch`'s own check of an answer (ADR 0098): `role` on `model` at `effort`, with every
+    /// switch off and nothing given to it, learning nothing. Never one of the team's: `id` is one a
+    /// team file cannot give an agent.
+    #[must_use]
+    pub fn checker(
+        id: &str,
+        name: &str,
+        role: String,
+        model: String,
+        effort: Option<String>,
+    ) -> Self {
+        Self {
+            id: id.to_owned(),
+            name: name.to_owned(),
+            role,
+            kind: AgentKind::Harness,
+            spawn: SpawnConfig::default(),
+            model,
+            thinking_effort: effort,
+            allow_recruiting: false,
+            allow_my_agents: false,
+            capabilities: Vec::new(),
+            memory: None,
+            allow: AgentAllow::default(),
+            turned_off: Vec::new(),
+            done_when: Vec::new(),
+            part: None,
+            checks: None,
+            send_back: None,
+            spend: crate::spend::SpendConfig::default(),
+            from_agent: None,
+            learns: false,
+        }
+    }
+
     /// Whether this entry is a review stop rather than a harness.
     #[must_use]
     pub fn is_operator(&self) -> bool {
@@ -1108,6 +1312,11 @@ pub struct GuardsConfig {
     /// helpers off for the team.
     #[serde(default = "default_max_helpers")]
     pub max_helpers: u32,
+    /// How many of the person's agents in My agents the `my_agents` tool lists for an agent that
+    /// may bring one in (ADR 0092), most recently saved first. `0`, the default until the bench
+    /// shows it helps, turns bringing in off for the team.
+    #[serde(default)]
+    pub my_agents: u32,
 }
 
 impl Default for GuardsConfig {
@@ -1116,6 +1325,7 @@ impl Default for GuardsConfig {
             max_dispatch_depth: default_max_dispatch_depth(),
             max_concurrent_dispatches: default_max_concurrent_dispatches(),
             max_helpers: default_max_helpers(),
+            my_agents: 0,
         }
     }
 }
@@ -1473,7 +1683,65 @@ impl TeamConfig {
     /// Returns an error when the document cannot be parsed, uses an unknown version, or
     /// fails the runtime's semantic checks.
     pub fn parse(source: &str) -> Result<Self> {
-        let mut team: Self = serde_yaml::from_str(source).context("invalid team YAML")?;
+        let team: Self = serde_yaml::from_str(source).context("invalid team YAML")?;
+        Self::checked(team)
+    }
+
+    /// Read and validate a team file in the teams folder `teams_root`, filling in each agent that
+    /// points at one of My agents from there first (ADR 0094). Every run and every check of a team
+    /// in the teams folder reads it this way.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::parse_in`], and when the file cannot be read.
+    pub fn load_in(path: &Path, teams_root: &Path) -> Result<Self> {
+        let source = fs::read_to_string(path)
+            .with_context(|| format!("failed to read team file {}", path.display()))?;
+        Self::parse_in(&source, teams_root)
+            .with_context(|| format!("failed to parse team file {}", path.display()))
+    }
+
+    /// [`Self::load_in`] for a team file read on its own, as `loomwatchd run` reads one: its teams
+    /// folder is the nearest folder at or above it that holds My agents (`.jobs`), or its own.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::load_in`].
+    pub fn load_beside(path: &Path) -> Result<Self> {
+        Self::load_in(path, &crate::my_agents::teams_root_of(path))
+    }
+
+    /// [`Self::parse`] for a team in the teams folder `teams_root`: an agent that points at one of
+    /// My agents (`from: {agent}`, no `role` of its own) is filled in from
+    /// `<teams root>/.jobs/<agent>.yaml` first (ADR 0094, [`crate::my_agents`]).
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::parse`], and when an agent points at one of My agents that isn't there.
+    pub fn parse_in(source: &str, teams_root: &Path) -> Result<Self> {
+        let mut document: serde_yaml::Value =
+            serde_yaml::from_str(source).context("invalid team YAML")?;
+        crate::my_agents::fill(&mut document, teams_root).map_err(anyhow::Error::msg)?;
+        let mut team: Self = serde_yaml::from_value(document).context("invalid team YAML")?;
+        // The project it works in: its folders are every agent's to read (ADR 0097), and its About
+        // and notes reach them through the memory packet.
+        if let Some(id) = team
+            .project
+            .as_deref()
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+        {
+            let project = crate::projects::read(teams_root, id)
+                .map_err(anyhow::Error::msg)?
+                .ok_or_else(|| anyhow::Error::msg(crate::projects::missing(id)))?;
+            crate::projects::give_folders(&mut team, &project);
+            team.project_file = Some(project);
+        }
+        Self::checked(team)
+    }
+
+    /// The checks every team document passes, however it was read.
+    fn checked(mut team: Self) -> Result<Self> {
         if team.schema_version != 1 {
             bail!("unsupported team schema version {}", team.schema_version);
         }
@@ -1508,6 +1776,9 @@ impl TeamConfig {
         // than as the incoming-edge violation it also happens to be.
         team.validate_operator_nodes()?;
         team.validate_check_steps()?;
+        if let Some(problem) = team.conversation.check.from_message.problem() {
+            bail!(problem);
+        }
         team.responder_id()?;
         for agent in &team.agents {
             for capability in &agent.capabilities {
@@ -1934,9 +2205,118 @@ mod tests {
         );
     }
 
+    /// ADR 0097: a team says what it needs from an agent in its `part`. The part's text is the
+    /// team's, its items come before the agent's own in the Done when, each once, and the limits
+    /// hold for a hand-edited file. A review stop has no part.
+    #[test]
+    fn a_part_is_the_teams_and_its_items_lead_the_done_when() {
+        let team = |fields: &str| {
+            TeamConfig::parse(&format!(
+                "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    model: test/model\n    role: Research.\n    doneWhen: ['Every claim has a link', 'Names its sources']\n{fields}edges: []\n"
+            ))
+        };
+        let parsed = team(
+            "    part:\n      text: '  Find two or three options for the SUTD gate.  '\n      doneWhen: ['Gives each option its trade-offs', 'Names its sources']\n",
+        )
+        .expect("valid");
+        let agent = &parsed.agents[0];
+        assert_eq!(
+            agent.part.as_deref(),
+            Some("Find two or three options for the SUTD gate.")
+        );
+        assert_eq!(
+            agent.done_when,
+            [
+                "Gives each option its trade-offs",
+                "Names its sources",
+                "Every claim has a link"
+            ],
+            "the part's items first, then the agent's own, each once"
+        );
+        assert_eq!(agent.role, "Research.", "the instructions stay the agent's");
+
+        let without = team("").expect("valid");
+        assert_eq!(without.agents[0].part, None);
+        assert_eq!(
+            without.agents[0].done_when,
+            ["Every claim has a link", "Names its sources"]
+        );
+
+        let six = team("    part:\n      doneWhen: [a, b, c, d, e, f]\n").expect_err("six items");
+        assert!(
+            format!("{six:#}").contains("6 `part.doneWhen` items"),
+            "{six:#}"
+        );
+        let essay = team(&format!("    part:\n      text: '{}'\n", "x".repeat(1001)))
+            .expect_err("a second set of instructions");
+        assert!(
+            format!("{essay:#}").contains("keep it to 1000"),
+            "{essay:#}"
+        );
+        let unknown =
+            team("    part:\n      role: Something else.\n").expect_err("only text and doneWhen");
+        assert!(format!("{unknown:#}").contains("role"), "{unknown:#}");
+
+        let operator = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    model: test/model\n  - id: you\n    kind: operator\n    role: Check it.\n    part: {text: Approve it.}\nedges:\n  - {from: a, to: you, layer: configured, kind: sequence, ts: \"2026-10-28T00:00:00Z\"}\n",
+        )
+        .expect_err("a review stop is answered by the person");
+        assert!(format!("{operator:#}").contains("no part"), "{operator:#}");
+    }
+
     /// A check step's `sendBack` says how many times the work may go back (1 to 3) and what happens
     /// when its checks are still not met; an older file's `sendBackOnce` reads as what it always
     /// did, one round that shows the answer, and a file without either sends nothing back.
+    #[test]
+    fn from_message_reads_with_defaults_and_holds_its_rounds_to_its_cap() {
+        let team = |conversation: &str| {
+            TeamConfig::parse(&format!(
+                "schemaVersion: 1\nentrypoint: writer\nagents:\n  - id: writer\n    model: test/model\n{conversation}"
+            ))
+        };
+        let read = |conversation: &str| {
+            team(conversation)
+                .expect("valid")
+                .conversation
+                .check
+                .from_message
+        };
+        assert_eq!(read(""), FromMessage::default());
+        assert!(FromMessage::default().read);
+        assert_eq!(FromMessage::default().send_back(None).rounds, 2);
+        assert_eq!(
+            read("conversation:\n  check:\n    fromMessage: {read: false}\n"),
+            FromMessage {
+                read: false,
+                ..FromMessage::default()
+            }
+        );
+        let set = read(
+            "conversation:\n  check:\n    fromMessage: {rounds: 3, maxRounds: 4, whenStillNotMet: answer}\n",
+        );
+        assert_eq!(set.send_back(None).rounds, 3);
+        assert_eq!(set.send_back(Some(9)).rounds, 4, "never past maxRounds");
+        assert_eq!(set.send_back(Some(2)).rounds, 1, "two tries: one send-back");
+        assert_eq!(
+            set.send_back(None).when_still_not_met,
+            WhenStillNotMet::Answer
+        );
+        for (block, says) in [
+            ("{maxRounds: 0}", "maxRounds must be 1 to 10"),
+            ("{maxRounds: 11}", "maxRounds must be 1 to 10"),
+            ("{rounds: 6}", "rounds must be 1 to its maxRounds"),
+            ("{rounds: 0}", "rounds must be 1 to its maxRounds"),
+            ("{tries: 3}", "unknown field"),
+        ] {
+            let error = team(&format!(
+                "conversation:\n  check:\n    fromMessage: {block}\n"
+            ))
+            .expect_err(block);
+            let error = format!("{error:#}");
+            assert!(error.contains(says), "{block}: {error}");
+        }
+    }
+
     #[test]
     fn send_back_takes_one_to_three_rounds_and_send_back_once_is_one_that_answers() {
         let team = |fields: &str| {

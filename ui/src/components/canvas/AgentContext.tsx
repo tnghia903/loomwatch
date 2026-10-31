@@ -1,4 +1,4 @@
-import { Ban, Box, BookOpen, Check, FilePlus2, FolderPlus, Puzzle, RotateCcw, ScrollText, Wrench, X } from 'lucide-react'
+import { Ban, Box, BookOpen, Check, FilePlus2, FolderPlus, Puzzle, RotateCcw, ScrollText, Wrench, X } from '../ui/icon'
 import { useRef, useState } from 'react'
 
 import { uniqueLabel } from '../../lib/composer-layout/types'
@@ -116,7 +116,7 @@ export function AgentContext({ agent, place, pipeline = false, briefCount = 0, i
       {pipeline && onAllowRecruitingChange && (
         <button type="button" className={`check ${agent.allowRecruiting !== false ? 'on' : ''}`} disabled={readOnly} onClick={() => onAllowRecruitingChange(agent.allowRecruiting === false)} aria-pressed={agent.allowRecruiting !== false}>
           <span className="box"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg></span>
-          <span className="txt"><b className="t-body">Can bring in helpers</b><span className="t-meta">Can ask agents outside the steps to help with its step. It can always ask the step before it.</span></span>
+          <span className="txt"><b className="t-body">Can bring in helpers</b><span className="t-meta">Can ask agents outside the steps to help with its step. It can always ask the step before it.{agent.from ? ' This is the same in every team it’s in.' : ''}</span></span>
         </button>
       )}
 

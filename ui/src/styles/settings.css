@@ -37,13 +37,19 @@
   gap: var(--sp-6);
 }
 
-/* Every settings surface returns to the canvas the same way, top left. */
-.lw-settings-back {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-2);
-  align-self: flex-start;
-}
+/* You's row, the same on About you, Connections and Usage: its tabs, then the look, the guide and
+   feedback. The dock is the way back to everything else. */
+.lw-you-tabs { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-3); width: 100%; max-width: 640px; align-self: center; }
+.lw-you-tabset { display: inline-flex; gap: 4px; padding: 4px; border-radius: var(--r-lg); background: var(--color-panel); border: 1px solid var(--color-hairline); }
+.lw-you-tab { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2); min-width: 48px; height: 36px; padding: 0 var(--sp-3); box-sizing: border-box; border-radius: var(--r-md); border: 1px solid transparent; color: var(--color-ink-2); text-decoration: none; font-size: 13px; font-weight: 500; }
+.lw-you-tab-label[hidden] { display: none; }
+.lw-you-tab:hover { color: var(--color-ink); }
+.lw-you-tab[aria-current='page'] { color: var(--color-ink); background: color-mix(in srgb, var(--color-ink) 9%, var(--color-panel-solid)); border-color: color-mix(in srgb, var(--color-ink) 18%, transparent); }
+.lw-you-acts { display: inline-flex; gap: var(--sp-2); }
+.lw-you-acts .iconbtn { width: 40px; height: 40px; }
+@media (max-width: 767px) { .lw-you-tab, .lw-you-acts .iconbtn { min-height: 44px; min-width: 44px; } }
+/* A phone keeps the three tabs in one row: their names are in their titles and to screen readers. */
+@media (max-width: 560px) { .lw-you-tab-label { display: none; } }
 
 .lw-settings-head { display: flex; flex-direction: column; gap: var(--sp-2); }
 .lw-settings-head h1 { margin: 0; }
@@ -218,6 +224,8 @@
   box-shadow: 0 0 0 2px var(--color-panel-solid);
 }
 .model-row .name { grid-area: name; white-space: normal; overflow-wrap: anywhere; }
+/* The suggestion's thinking effort wraps as one piece, never "high" on one line and "effort" on the next. */
+.model-row .model-row-effort { white-space: nowrap; }
 .model-row .aside { grid-area: aside; align-self: start; padding-top: 2px; }
 .model-row-detail { grid-area: detail; min-width: 0; color: var(--color-ink-3); }
 .model-row-why { color: var(--color-ink-2); }
@@ -326,7 +334,7 @@
 .usage-bars-readout { color: var(--color-ink-2); text-align: right; }
 .usage-bars svg { width: 100%; height: 64px; display: block; overflow: visible; }
 .usage-bar { fill: var(--color-accent); opacity: .85; }
-.usage-bar.pointed { opacity: 1; }
+.usage-bars g.pointed .usage-bar { opacity: 1; }
 .usage-bar-hit { fill: transparent; outline: none; }
 .usage-bar-hit:focus-visible { stroke: var(--color-accent); stroke-width: 1; }
 .usage-bars-base { stroke: var(--color-hairline); stroke-width: 1; vector-effect: non-scaling-stroke; }
@@ -336,5 +344,87 @@
 .usage-table th { text-align: left; font-weight: 500; color: var(--color-ink-3); padding: var(--sp-1) var(--sp-2); }
 .usage-table td { padding: var(--sp-1) var(--sp-2); border-top: 1px solid var(--color-hairline); color: var(--color-ink-2); }
 @media (max-width: 720px) { .usage-figures { grid-template-columns: 1fr; } }
+/* Two kinds of use (ADR 0106): the agents' work solid in the accent, LoomWatch's own help striped
+   in the ink's quiet tone and set apart by a gap, each named in words beside its key, so tone is
+   never the only cue. LoomWatch's face names its help where it is a heading. */
+.usage-tracks { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: var(--sp-3); }
+.usage-track { gap: var(--sp-1); }
+.usage-track > * { margin: 0; }
+.usage-track-title { display: flex; align-items: center; gap: var(--sp-2); color: var(--color-ink-2); }
+.usage-track-figure { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2); }
+.usage-track-figure .t-meta, .usage-track-about { color: var(--color-ink-3); }
+.usage-split { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-4); margin: 0; color: var(--color-ink-2); }
+.usage-split span { display: inline-flex; align-items: center; gap: var(--sp-1); }
+.usage-key-whole, .usage-key-part { flex: none; width: 8px; height: 8px; border-radius: 2px; }
+.usage-key-whole { background: var(--color-accent); }
+.usage-key-part { background: repeating-linear-gradient(to bottom, var(--color-ink-3) 0 1.5px, transparent 1.5px 3px); box-shadow: inset 0 0 0 1px var(--color-ink-3); }
+.usage-bar-part { stroke: var(--color-ink-3); stroke-width: 1; vector-effect: non-scaling-stroke; pointer-events: none; }
+.usage-bar-stripe { fill: var(--color-ink-3); }
+.usage-tracks-when { grid-column: 1 / -1; margin: 0; color: var(--color-ink-3); }
+.usage-where-title { display: flex; align-items: center; gap: var(--sp-2); margin: var(--sp-2) 0 0; color: var(--color-ink); }
+/* Behind a "?", the heading's space sits on the row that holds it, so the "?" stays level with it. */
+.section-head:has(> .usage-where-title) { margin-top: var(--sp-2); }
+.section-head > .usage-where-title { margin: 0; }
+/* A feature's switch beside its name, so a narrow screen never scrolls the table to reach it. */
+.usage-feature { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-2) var(--sp-3); }
+.usage-feature-switch { display: flex; flex-direction: column; align-items: flex-end; text-align: right; }
+.usage-switch-hint { display: block; max-width: 30ch; margin-top: 2px; color: var(--color-ink-3); }
+.usage-switch-failed { display: block; margin-top: 2px; }
+/* An "on" here is a line, not a fill: the page's one gold fill stays its main action. */
+.usage-table .lw-settings-switch input:checked + .lw-settings-switch-track { background: var(--color-accent-tint); box-shadow: inset 0 0 0 1px var(--color-accent); }
+.usage-table .lw-settings-switch input:checked + .lw-settings-switch-track i { background: var(--color-accent); }
+@media (max-width: 767px) {
+  .usage-table .lw-settings-switch { min-width: 44px; min-height: 44px; justify-content: center; }
+}
+@media (max-width: 560px) {
+  .usage-col-tokens { display: none; }
+  .usage-feature { flex-direction: column; gap: 0; min-width: 14ch; }
+  .usage-feature-switch { align-items: flex-start; text-align: left; }
+  .usage-table .lw-settings-switch { justify-content: flex-start; }
+}
 .usage-notices { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); max-width: 720px; }
 .usage-notices li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); border-radius: var(--r-md); }
+
+/* A connected tool's call, as its maker describes it: Markdown and all, two lines at most. */
+.lw-call-desc { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; color: var(--color-ink-3); }
+
+/* ---- Your devices (ADR 0102) ------------------------------------------------ */
+/* The iPhones and computers connected to LoomWatch here, as Tools lists what is connected. The
+   section's quiet lines sit where the e1 sheen is brightest in dark mode: ink-3 falls under 4.5:1
+   there, so they are ink-2. */
+.lw-devices .lw-settings-quiet { color: var(--color-ink-2); }
+.lw-devices .t-meta .link { font: inherit; font-weight: 500; }
+.lw-devices-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-2); }
+.lw-devices-list > li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-2) var(--sp-3); padding: var(--sp-3) var(--sp-4); border: 1px solid var(--color-hairline); border-radius: var(--r-md); }
+.lw-devices-list > li > .link { margin-left: auto; }
+.lw-devices-name { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.lw-devices-name b { font-size: 14px; font-weight: 600; color: var(--color-ink); overflow-wrap: anywhere; }
+.lw-devices-name .t-meta { color: var(--color-ink-2); }
+.lw-devices-connect { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-4); border: 1px solid var(--color-hairline); border-radius: var(--r-md); }
+.lw-devices-other { align-self: flex-start; }
+/* iPhone or computer: the picked one as the app's other picked choices show it (Connect a tool's
+   topics): a gold edge on a gold tint, never a fill, so it doesn't read as a button to press. */
+.lw-devices-kind { display: inline-flex; align-self: flex-start; gap: 2px; padding: 2px; border: 1px solid var(--color-hairline); border-radius: var(--r-md); }
+.lw-devices-kind button { min-height: 32px; padding: 0 var(--sp-4); border: 1px solid transparent; border-radius: calc(var(--r-md) - 2px); background: none; color: var(--color-ink-2); font: 500 13px/18px var(--font-sans); cursor: pointer; }
+.lw-devices-kind button:hover:not([aria-pressed="true"]) { color: var(--color-ink); border-color: var(--color-hairline); }
+.lw-devices-kind button[aria-pressed="true"] { border-color: var(--color-accent); box-shadow: inset 0 0 0 1px var(--color-accent); background: var(--color-accent-tint); color: var(--color-ink); font-weight: 600; }
+.lw-devices-kind button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+.lw-devices-step { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-2); }
+.lw-devices-step p, .lw-devices-link p, .lw-devices-qr p, .lw-devices-connect > p { margin: 0; overflow-wrap: anywhere; }
+/* The code stays dark on paper in both themes: phone cameras read that best. */
+.lw-devices-qr { margin: 0; display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-2); }
+.lw-devices-qr svg { width: 196px; height: 196px; max-width: 100%; border-radius: var(--r-md); }
+.lw-devices-qr .paper { fill: var(--color-paper); }
+.lw-devices-qr .ink { fill: var(--color-paper-ink); }
+.lw-devices-link { display: flex; flex-direction: column; gap: var(--sp-2); }
+.lw-devices-link-row { display: flex; gap: var(--sp-2); }
+.lw-devices-link-row .input { flex: 1; min-width: 0; font: 400 12px/17px var(--font-mono); }
+.lw-devices-link-row .btn { height: 32px; }
+/* A phone's width: room to tap, and the link field gets the whole line. The button's 44 px is
+   said again here, since the 32 px above outranks app.css's narrow rule. */
+@media (max-width: 767px) {
+  .lw-devices-kind button { min-height: 44px; }
+  .lw-devices .link { display: inline-flex; align-items: center; min-height: 44px; }
+  .lw-devices-link-row { flex-direction: column; }
+  .lw-devices-link-row .btn { height: 44px; align-self: flex-start; }
+}

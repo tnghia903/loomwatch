@@ -36,9 +36,10 @@ export interface PartMarks {
  * Marks `parts`, oldest first, on the page their ranges are in. Where two overlap, the newer is
  * marked, and the older is shown with it: its key gives the newer one's marks and slot, so its
  * bubble sits there too. A part with no words is not marked. `mark` and `slot` are the class names
- * of marks and slots.
+ * of marks and slots. `place` may put a part's slot somewhere of its own, given the part's last
+ * mark, and says whether it did; otherwise the slot goes after that mark.
  */
-export function markParts(parts: readonly PartToMark[], names: { mark: string; slot: string }): PartMarks {
+export function markParts(parts: readonly PartToMark[], names: { mark: string; slot: string }, place?: (slot: HTMLElement, last: HTMLElement) => boolean): PartMarks {
   const undo: (() => void)[] = []
   const marked = new Map<string, MarkedPart>()
   const kept: PartToMark[] = []
@@ -84,7 +85,8 @@ export function markParts(parts: readonly PartToMark[], names: { mark: string; s
     slot.dataset.part = key
     slot.dataset.readerChrome = ''
     slot.setAttribute('contenteditable', 'false')
-    marks.at(-1)!.after(slot)
+    const last = marks.at(-1)!
+    if (!place?.(slot, last)) last.after(slot)
     undo.push(() => slot.remove())
     marked.set(key, { key, marks, slot })
   }

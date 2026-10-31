@@ -1,4 +1,4 @@
-import { ShieldQuestionMark } from 'lucide-react'
+import { ShieldQuestionMark } from '../ui/icon'
 import { useId, useState, type ReactNode } from 'react'
 
 import { useRevealOnArrival } from '../../lib/chat/follow'
@@ -11,8 +11,9 @@ import { useNow } from '../../lib/useNow'
 interface PermissionPromptProps {
   run: Pick<RunRecord, 'runId' | 'permissionRequests'>
   /**
-   * "Always allow": switch it on for this agent in the team file (ADR 0037), or always allow that
-   * one call of a connected tool (ADR 0069), as well as letting the rest of this run through.
+   * "Always allow": switch it on for this agent (ADR 0037), or always allow that one call of a
+   * connected tool (ADR 0069), in every team it is in (ADR 0094), as well as letting the rest of
+   * this run through.
    * Absent when the team cannot be changed from here, or for a request nothing covers.
    */
   onAlwaysAllow?: (agentId: string, what: AlwaysAllowed) => void
@@ -104,6 +105,7 @@ export function PermissionActions({ runId, request, team = false, onAlwaysAllow,
   const [writing, setWriting] = useState<'edit' | 'answer' | null>(null)
   const [text, setText] = useState('')
   const fieldId = useId()
+  const webAsk = !request.tool && request.switch === 'web'
 
   const answer = async (decision: PermissionDecision, words?: string) => {
     onDecide?.()
@@ -143,7 +145,9 @@ export function PermissionActions({ runId, request, team = false, onAlwaysAllow,
             ? <input id={fieldId} className="input mono" value={text} maxLength={MAX_PERMISSION_TEXT} spellCheck={false} autoFocus onChange={(event) => setText(event.target.value)} />
             : <textarea id={fieldId} className="input" rows={3} value={text} maxLength={MAX_PERMISSION_TEXT} autoFocus placeholder="For example: use the copy in notes.md instead" onChange={(event) => setText(event.target.value)} />}
           <span className="hint t-meta">{changing
-            ? `${request.name} runs it as you wrote it, this once.`
+            ? webAsk
+              ? `${request.name} reads it as you wrote it, and may use the web until this run ends.`
+              : `${request.name} runs it as you wrote it, this once.`
             : `Nothing runs. ${request.name} reads your answer and carries on.`}</span>
         </div>
         <div className="permission-acts">
@@ -157,16 +161,18 @@ export function PermissionActions({ runId, request, team = false, onAlwaysAllow,
     <>
       <p className="permission-note">{request.name} is paused until you answer. {permissionDeadline(request.expiresAt, now)}</p>
       <div className="permission-acts">
-        <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void answer('allow_once')}>Allow</button>
-        <button type="button" className="btn" disabled={busy} onClick={() => void answer('allow_run')} title={`Allow every ${request.title.toLowerCase()} request from ${request.name} until this run ends`}>Allow for this run</button>
+        {/* A yes to the web is for the rest of the run (ADR 0104): one search is rarely enough, so
+            the web has one Allow, and it says so. */}
+        <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void answer(webAsk ? 'allow_run' : 'allow_once')} title={webAsk ? `${request.name} may use the web until this run ends` : undefined}>Allow</button>
+        {!webAsk && <button type="button" className="btn" disabled={busy} onClick={() => void answer('allow_run')} title={`Allow every ${request.title.toLowerCase()} request from ${request.name} until this run ends`}>Allow for this run</button>}
         {team && (
           <button type="button" className="btn" disabled={busy} onClick={() => void answer('allow_team')} title={`Allow ${request.title} for every agent in this run, without asking, until the run ends. Other tools still ask.`}>Allow for the whole team</button>
         )}
         {request.tool && onAlwaysAllow && (
-          <button type="button" className="btn" disabled={busy} onClick={always} title={`${request.name} may do “${request.title}” without asking from now on. Its other actions still ask. Take it back in its Tools block.`}>Always allow this</button>
+          <button type="button" className="btn" disabled={busy} onClick={always} title={`${request.name} may do “${request.title}” without asking from now on, in every team it’s in. Its other actions still ask. Take it back in its Tools block.`}>Always allow this</button>
         )}
         {!request.tool && request.switch && onAlwaysAllow && (
-          <button type="button" className="btn" disabled={busy} onClick={always} title={`Switch on “${SWITCH_LABEL[request.switch]}” for ${request.name} in the team file, so later runs do not ask`}>Always allow {SWITCH_LABEL[request.switch]}</button>
+          <button type="button" className="btn" disabled={busy} onClick={always} title={`Switch on “${SWITCH_LABEL[request.switch]}” for ${request.name} in every team it’s in, so later runs don’t ask`}>Always allow {SWITCH_LABEL[request.switch]}</button>
         )}
         <button type="button" className="btn permission-deny" disabled={busy} onClick={() => void answer('deny')}>Deny</button>
       </div>

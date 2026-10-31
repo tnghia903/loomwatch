@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { CHECK_MODEL, DEFAULT_MODEL, FAST_MODEL } from '../ai/modelIds'
+import { CHECK_MODEL, DEFAULT_MODEL, FAST_MODEL, NEW_AGENT, effortFor, jobNeeds } from '../ai/modelIds'
 import { CHECKER_ROLE } from '../library/checker'
 import { onTheFastTier } from '../library/onTheFastTier'
 import { ROLE_PRESETS } from '../library/roles'
@@ -13,7 +13,7 @@ const writer = { id: 'writer', name: 'Writer', role: 'Write the article from wha
 describe('suggestModel', () => {
   it('keeps a researcher on the strongest model while its job is on the strong tier', () => {
     const suggestion = suggestModel({ agent: researcher, team: { agents: [researcher, writer], responder: 'writer' } })
-    expect(suggestion).toEqual({ model: DEFAULT_MODEL, tier: 'strong', why: 'A researcher finds and checks sources. That work decides the result, so it gets the strongest model.' })
+    expect(suggestion).toEqual({ model: DEFAULT_MODEL, tier: 'strong', effort: 'medium', why: 'A researcher finds and checks sources. That work decides the result, so it gets the strongest model.' })
   })
 
   it('puts a gatherer on the faster model when another agent writes the answer', onTheFastTier(() => {
@@ -29,7 +29,7 @@ describe('suggestModel', () => {
   }))
 
   it('follows the job alone while the agent is built on its own', onTheFastTier(() => {
-    expect(suggestModel({ agent: researcher })).toEqual({ model: FAST_MODEL, tier: 'fast', why: expect.stringContaining('for another agent to write up') })
+    expect(suggestModel({ agent: researcher })).toEqual({ model: FAST_MODEL, tier: 'fast', effort: 'medium', why: expect.stringContaining('for another agent to write up') })
   }))
 
   it('reads a check on another maker’s model than the work it checks', () => {
@@ -44,14 +44,31 @@ describe('suggestModel', () => {
   })
 
   it('gives work that decides the result the strongest model, and says why in the job’s words', () => {
-    expect(suggestModel({ agent: writer })).toEqual({ model: DEFAULT_MODEL, tier: 'strong', why: 'A writer drafts the finished piece. That work decides the result, so it gets the strongest model.' })
-    expect(suggestModel({ agent: { id: 'a', name: 'Numbers', role: 'Analyse the sales sheet.' } }).why).toMatch(/^An analyst makes sense of data\./)
+    expect(suggestModel({ agent: writer })).toEqual({ model: DEFAULT_MODEL, tier: 'strong', effort: 'medium', why: 'A writer drafts the finished piece. That work decides the result, so it gets the strongest model.' })
+    expect(suggestModel({ agent: { id: 'a', name: 'Numbers', role: 'Analyse the sales sheet.' } }).why).toMatch(/^An analyst answers questions about your data\./)
   })
 
   it('falls back to the strongest all-rounder when nothing says what the agent does', () => {
     const suggestion = suggestModel({ agent: { id: 'x', name: 'Helper', role: '' } })
     expect(suggestion.model).toBe(DEFAULT_MODEL)
     expect(suggestion.why).toContain('don’t say what kind of work it does')
+  })
+
+  it('thinks as hard as the table Ask uses gives its kind of work', () => {
+    const job = (id: string) => ROLE_PRESETS.find((preset) => preset.id === id)!
+    const asAsk = (id: string) => effortFor(jobNeeds(id).effort)
+    // A check step thinks as the checker does, whether checks:, its instructions or its reading say so.
+    const checker = { id: 'checker', name: 'Step 3', role: 'Read the draft.', checks: 'writer' }
+    expect(suggestModel({ agent: checker, team: { agents: [writer, checker], responder: 'writer' } }).effort).toBe(asAsk('checker'))
+    expect(suggestModel({ agent: { id: 'c', name: 'Checker', role: CHECKER_ROLE } }).effort).toBe(asAsk('checker'))
+    expect(suggestModel({ agent: { id: 'c', name: 'Step 3', role: 'Look it over.' }, reading: { kind: 'check', probabilities: { check: 0.9 }, confidence: 0.9 } }).effort).toBe(asAsk('checker'))
+    // A built-in job thinks as its own, by name or by instructions.
+    for (const id of ['editor', 'coder', 'analyst', 'writer']) {
+      expect(suggestModel({ agent: { id: 's', name: 'Step 2', role: job(id).role } }).effort).toBe(asAsk(id))
+    }
+    expect(asAsk('editor')).not.toBe(asAsk('coder'))
+    // Anything else thinks as a new agent does.
+    expect(suggestModel({ agent: { id: 'x', name: 'Helper', role: '' } }).effort).toBe(effortFor(NEW_AGENT.effort))
   })
 
   it('places an agent holding a built-in job’s own instructions on that job, whatever it is called', () => {
@@ -69,7 +86,7 @@ describe('suggestModel with a reading of the whole setup', () => {
   it('puts a gatherer the keywords call a writer on the faster model, and says it was read', () => {
     expect(suggestModel({ agent: gatherer, team }).model).toBe(DEFAULT_MODEL)
     const read = suggestModel({ agent: gatherer, team, reading: sure('gather') })
-    expect(read).toEqual({ model: FAST_MODEL, tier: 'fast', read: true, why: 'Its configuration says it gathers for Writer rather than writing the answer. A faster model does that well, for less, and leaves the strongest one for the step that writes.' })
+    expect(read).toEqual({ model: FAST_MODEL, tier: 'fast', effort: 'medium', read: true, why: 'Its configuration says it gathers for Writer rather than writing the answer. A faster model does that well, for less, and leaves the strongest one for the step that writes.' })
   })
 
   it('keeps the team’s answer on the strongest model whatever the reading says', () => {

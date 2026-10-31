@@ -1,16 +1,22 @@
-import { ArrowUp, AtSign, CornerDownLeft, MessageSquareText, Paperclip, Reply, TextQuote, Users, X, Zap } from 'lucide-react'
-import { createElement, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { AtSign, MessageSquareText, Reply, TextQuote, Users, X, Zap } from '../ui/icon'
+import { createElement, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 
 import { pastedName, type Attachment, type ChatAttachments } from '../../lib/chat/attachments'
 import type { ChatTarget, ReplyTo } from '../../lib/chat/client'
+import { useChatMentions } from '../../lib/chat/faces'
 import { extensionOf } from '../../lib/files/fileRefs'
 import { fileIcon } from '../../lib/files/icons'
 import { rawFileUrl } from '../../lib/files/reader'
-import { quoteLine, replyWhat } from '../../lib/chat/reply'
-import { destination, findMention, mentionChoices, mentionQuery, type ChatAgent, type Destination } from '../../lib/chat/route'
+import { answersDecision, replyWhat, replyWords } from '../../lib/chat/reply'
+import type { ChipAt } from '../../lib/chat/chipField'
+import { destination, findMention, mentionChoices, mentionQuery, mentionsIn, type ChatAgent, type Destination } from '../../lib/chat/route'
+import { InlineMarkdown } from '../ui/Markdown'
 import { ifNobodyAnswers } from '../../lib/story/needsYou'
 import { Swap } from './Appearing'
+import { ChipField, type ChipFieldHandle } from './ChipField'
+import { MentionChip } from './SaidText'
 import type { RunRecord } from '../../lib/runs/client'
+import { AttachButton, SendButton } from '../box/BoxButtons'
 
 /** What the team is waiting on you for, which a typed answer goes with. */
 export interface OpenDecision {
@@ -22,6 +28,8 @@ export interface OpenDecision {
   fromName: string
   /** When the agent goes on with its best guess if nobody answers: a question in a scheduled run (ADR 0090). */
   expiresAt?: string | null
+  /** The agent a review's note can send the work back to, as its Send back does; `null` when none can. */
+  backTo: string | null
 }
 
 interface ChatComposerProps {
@@ -36,7 +44,10 @@ interface ChatComposerProps {
   value: string
   onChange: (text: string) => void
   onSend: (text: string, to: ChatTarget, now: boolean) => Promise<boolean>
-  /** Your answer to an agent's question; a review is answered by the buttons on its message. */
+  /**
+   * Your answer to an agent's question, or a review's note sent back with the work (↵, as its Send
+   * back does). Approve is only ever its button on the message.
+   */
   onAnswer: (decision: OpenDecision, text: string) => Promise<boolean>
   /** Counts the faces clicked to @mention them: each time, the box takes the caret and glows once. */
   mentioned?: number
@@ -60,6 +71,8 @@ interface ChatComposerProps {
   attachments?: ChatAttachments
   /** A line about something just done from the chat, such as a dropped folder added. */
   notice?: string | null
+  /** The line stays until it is let go here: absent, it goes by itself. */
+  onDismissNotice?: () => void
 }
 
 /**
@@ -68,15 +81,18 @@ interface ChatComposerProps {
  * after its current step", "Team note · starts nothing" — because only an @ starts work and
  * nothing is guessed from the words.
  */
-export function ChatComposer({ agents, names, steps, live, decision, disabled = null, value: text, onChange: setText, onSend, onAnswer, mentioned = 0, solo = null, replyTo = null, onCancelReply, onAddress, answerAsked = 0, attachments, notice = null }: ChatComposerProps) {
+export function ChatComposer({ agents, names, steps, live, decision, disabled = null, value: text, onChange: setText, onSend, onAnswer, mentioned = 0, solo = null, replyTo = null, onCancelReply, onAddress, answerAsked = 0, attachments, notice = null, onDismissNotice }: ChatComposerProps) {
   const [caret, setCaret] = useState(0)
+  // Where the caret was left by letters typed; a caret moved there some other way, or by a
+  // deletion, is not typing a name.
+  const [typedAt, setTypedAt] = useState<number | null>(null)
   const [picked, setPicked] = useState(0)
   const [pickerClosed, setPickerClosed] = useState(false)
   const [sending, setSending] = useState(false)
   const [teamInstead, setTeamInstead] = useState(false)
   // Each send ripples once from the box, the message leaving it.
   const [sent, setSent] = useState(0)
-  const box = useRef<HTMLTextAreaElement>(null)
+  const box = useRef<ChipFieldHandle>(null)
   const chooser = useRef<HTMLInputElement>(null)
   const pickerId = useId()
   const whereId = useId()
@@ -123,14 +139,31 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
   }, [answerAsked])
   const attached = attachments?.items ?? []
   // A reply to something else is a message of its own, not your answer to what the team waits on.
-  const answering = decision && !teamInstead && !replyTo ? decision : null
+  const answering = decision && !teamInstead && (!replyTo || answersDecision(decision, replyTo)) ? decision : null
+  // A review's note goes with the work sent back. With nowhere to send it, or words @ someone else
+  // (a note for Writer, or the team, is what Approve passes on), ↵ does nothing: the buttons decide.
+  const sendsBack = answering?.kind === 'review_stop' && answering.backTo
+    && mentionsIn(text, agents).every((found) => found.target.kind === 'agent' && found.target.agent === answering.backTo)
+    ? answering.backTo : null
   // Files go with words, and only once each is kept; one that can't be kept is taken out first.
   // An answer takes words only, so files wait for a message of their own.
   const filesHold = attached.some((item) => item.state !== 'ready') || Boolean(answering && attached.length > 0)
 
+  // Each agent @mentioned is its chip in the box, the very chip the sent message shows (SaidText).
+  const said = useChatMentions()
+  const chipsIn = useCallback((value: string): ChipAt[] => (said
+    ? mentionsIn(value, said.agents).flatMap((found) => (found.target.kind === 'agent' ? [{ start: found.start, end: found.end, agent: found.target.agent }] : []))
+    : []), [said])
+  const drawChip = useCallback((id: string) => {
+    const agent = said?.agents.find((one) => one.id === id)
+    return <MentionChip id={id} name={agent?.name.trim() || id} hue={said?.hue(id) ?? 1} />
+  }, [said])
+
   const mention = useMemo(() => (solo ? null : findMention(text, agents)), [solo, text, agents])
   const target: ChatTarget = solo ? { kind: 'agent', agent: solo.id } : mention?.target ?? null
-  const query = solo ? null : mentionQuery(text, caret)
+  // The picker is for a name being typed: a caret moved to just after a chip has nothing to pick.
+  const afterChip = typedAt !== caret && chipsIn(text).some((chip) => chip.end === caret)
+  const query = solo || afterChip ? null : mentionQuery(text, caret)
   const choices = useMemo(() => (query && !pickerClosed ? mentionChoices(query.query, agents) : []), [query, pickerClosed, agents])
   const pickerOpen = choices.length > 0
   const routed: Destination = destination(target, live, names, steps)
@@ -149,6 +182,24 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
     box.current.focus()
     box.current.setSelectionRange(at, at)
   }, [text])
+  // A name typed in other letters ("@researcher") takes the agent's own once you are past it, as
+  // its chip and the sent message show it. The one at the caret, or still at the end, is left to be
+  // typed on.
+  const named = (value: string, at: number) => {
+    let out = ''
+    let from = 0
+    let caretAt = at
+    for (const found of said ? mentionsIn(value, said.agents) : []) {
+      if (found.target.kind !== 'agent' || found.end >= value.length || (at > found.start && at <= found.end)) continue
+      const id = found.target.agent
+      const agent = said?.agents.find((one) => one.id === id)
+      const word = `@${agent?.name.trim() || id}`
+      out += `${value.slice(from, found.start)}${word}`
+      if (at > found.end) caretAt += word.length - (found.end - found.start)
+      from = found.end
+    }
+    return { value: `${out}${value.slice(from)}`, at: caretAt }
+  }
   const insert = (choice: { insert: string }) => {
     if (!query) return
     const next = `${text.slice(0, query.start)}${choice.insert}${text.slice(caret).replace(/^\S*\s?/, '')}`
@@ -161,20 +212,19 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
 
   const send = async (now: boolean) => {
     if (!trimmed || sending || disabled || filesHold) return
+    if (answering?.kind === 'review_stop' && !sendsBack) return
     // Out of the box at once, as in any chat: the message shows in the log while it goes. It comes
     // back only if it was held — a team that needs checking first — so nothing typed is lost.
     const kept = text
     setText('')
     setSent((count) => count + 1)
     setSending(true)
-    const ok = answering && answering.kind === 'question'
-      ? await onAnswer(answering, trimmed)
-      : await onSend(trimmed, target, now)
+    const ok = answering ? await onAnswer(answering, trimmed) : await onSend(trimmed, target, now)
     setSending(false)
     if (!ok) setText(kept)
   }
 
-  const keyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+  const keyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (pickerOpen) {
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         event.preventDefault()
@@ -209,8 +259,8 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
     }
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault()
-      // A review is decided with its buttons; Enter never approves by accident.
-      if (answering?.kind === 'review_stop') return
+      // In a review, ↵ sends the work back with your note, as you would answer a question; it
+      // never approves by accident.
       void send(false)
     }
   }
@@ -224,7 +274,8 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
   const answeringLabel = answering
     ? answering.kind === 'question'
       ? `Your answer to ${answering.fromName}'s question`
-      : `A note to go with your review of ${answering.fromName}'s work · press Approve or Send back above`
+      : sendsBack ? `Your review note · Enter sends the work back to ${answering.fromName}`
+        : `Your review note · press Approve${answering.backTo ? ' or Send back' : ''} above`
     : null
   const route = answering ? null : where.route
   const icon = answering ? <MessageSquareText size={14} aria-hidden="true" />
@@ -236,10 +287,14 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
   const name = (id: string) => names.get(id) ?? id
   const addressed = target?.kind === 'agent' ? target.agent : null
   const them = attached.length === 1 ? 'it' : 'them'
-  const placeholder = attached.length > 0 && !answering ? (solo || target ? `Say what to do with ${them}` : `@team, then what to do with ${them}`)
+  // A part of a file asked about says so first, though its picture is in the box too (ADR 0091); a
+  // thing in a web page is named for what it is.
+  const thisPart = replyTo?.at?.kind === 'element' ? `this ${replyTo.at.what}` : 'this part'
+  const placeholder = replyTo?.kind === 'passage' && !answering ? `Ask ${name(addressed ?? replyTo.from)} about ${thisPart}…`
+    : attached.length > 0 && !answering ? (solo || target ? `Say what to do with ${them}` : `@team, then what to do with ${them}`)
     : answering?.kind === 'question' ? `Answer ${answering.fromName}…`
-    : answering ? 'A note for Approve, or what to change'
-      : replyTo?.kind === 'passage' ? `Ask ${name(addressed ?? replyTo.from)} about this part…`
+    : answering ? (answering.backTo ? 'What to change, or a note to pass on' : 'A note to pass on')
+      : replyTo?.kind === 'passage' ? `Ask ${name(addressed ?? replyTo.from)} about ${thisPart}…`
         : replyTo ? `Reply to ${name(replyTo.from)}…`
         : solo ? `Message ${solo.name || solo.id}` : 'Message the team'
   // A reply about two agents — a handover, a question between them — can go to either: the other
@@ -252,7 +307,7 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
       {!quiet && (
         <div className={`tc-where route-${route ?? 'answer'}`} id={whereId} aria-live="polite">
           {icon}
-          <Swap key={answeringLabel ?? where.label}>{answeringLabel ?? where.label}</Swap>
+          <Swap key={answeringLabel ?? where.label} className="tc-where-label">{answeringLabel ?? where.label}</Swap>
           {untilHint && <em className="tc-where-hint">{untilHint}</em>}
           {answering && (
             <button type="button" className="tc-where-escape" onClick={() => setTeamInstead(true)}>
@@ -263,16 +318,22 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
           {answering && attached.length > 0 && <em className="tc-where-hint">Pictures and files can’t go with an answer yet. Take them out to answer.</em>}
         </div>
       )}
-      {notice && <p className="tc-notice" role="status">{notice}</p>}
+      {notice && (
+        <p className="tc-notice">
+          <span role="status">{notice}</span>
+          {onDismissNotice && <button type="button" className="iconbtn" aria-label="Dismiss this note" title="Dismiss" onClick={onDismissNotice}><X size={13} aria-hidden="true" /></button>}
+        </p>
+      )}
       {replyTo && (
         <div className={`tc-replying${replyTo.kind === 'passage' ? ' passage' : ''}`} role="group" aria-label={`${replyTo.kind === 'passage' ? 'Asking about' : 'Replying to'} ${replyWhat(replyTo, name)}`}>
           {replyTo.kind === 'passage' ? <TextQuote size={14} aria-hidden="true" /> : <Reply size={14} aria-hidden="true" />}
           <span className="tc-replying-body">
             <span className="tc-replying-what">{replyTo.kind === 'passage' ? 'Asking about' : 'Replying to'} {replyWhat(replyTo, name)}</span>
-            <span className="tc-replying-quote">{quoteLine(replyTo.text)}</span>
+            <span className="tc-replying-quote"><InlineMarkdown clickable={false}>{replyWords(replyTo)}</InlineMarkdown></span>
           </span>
           {other && onAddress && <button type="button" className="tc-link" onClick={() => onAddress(other)}>To {name(other)} instead</button>}
-          {onCancelReply && <button type="button" className="tc-link tc-replying-close" onClick={onCancelReply} aria-label="Don't reply to it" title="Don't reply to it (Esc)"><X size={13} aria-hidden="true" /></button>}
+          {/* A quote of what the box answers anyway only goes from view. */}
+          {onCancelReply && <button type="button" className="tc-link tc-replying-close" onClick={onCancelReply} aria-label={answering ? 'Hide the quote' : "Don't reply to it"} title={answering ? 'Hide the quote (Esc)' : "Don't reply to it (Esc)"}><X size={13} aria-hidden="true" /></button>}
         </div>
       )}
       {attachments && attached.length > 0 && <Attached items={attached} onRemove={attachments.remove} />}
@@ -290,35 +351,46 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
                   onMouseEnter={() => setPicked(index)}>
                   {choice.id === 'team' ? <Users size={14} aria-hidden="true" /> : <AtSign size={14} aria-hidden="true" />}
                   <b>{choice.id === 'team' ? '@team' : `@${choice.label}`}</b>
-                  <span>{choice.id === 'team' ? `everyone, from step one` : working ? 'working now · a note joins its turn' : 'works alone on it'}</span>
+                  {/* An answer goes to who asked, whoever it names: an @ there starts nothing. */}
+                  {!answering && <span>{choice.id === 'team' ? `everyone, from step one` : working ? 'working now · a note joins its turn' : 'works alone on it'}</span>}
                 </li>
               )
             })}
           </ul>
         )}
-        <textarea
-          ref={box}
-          className="tc-input"
-          rows={1}
-          value={text}
-          placeholder={placeholder}
-          aria-label={solo ? `Message ${solo.name || solo.id}` : 'Message the team'}
-          aria-describedby={quiet ? undefined : whereId}
-          aria-controls={pickerOpen ? pickerId : undefined}
-          aria-expanded={pickerOpen}
-          aria-activedescendant={pickerOpen ? `${pickerId}-${choices[Math.min(picked, choices.length - 1)].id}` : undefined}
-          disabled={Boolean(disabled)}
-          onChange={(event) => { setText(event.target.value); setCaret(event.target.selectionStart); setPickerClosed(false); setPicked(0) }}
-          onSelect={(event) => setCaret(event.currentTarget.selectionStart)}
-          onKeyDown={keyDown}
-          onPaste={(event) => {
-            // A screenshot or a file copied in Finder goes with the words; text pastes as text.
-            const files = Array.from(event.clipboardData?.files ?? [])
-            if (!attachments || files.length === 0) return
-            event.preventDefault()
-            attachments.add(files, (file) => pastedName(file))
-          }}
-        />
+        <div className="tc-input-wrap">
+          <ChipField
+            ref={box}
+            className="tc-input"
+            value={text}
+            chipsIn={chipsIn}
+            chip={drawChip}
+            placeholder={placeholder}
+            aria-label={solo ? `Message ${solo.name || solo.id}` : 'Message the team'}
+            aria-describedby={quiet ? undefined : whereId}
+            aria-controls={pickerOpen ? pickerId : undefined}
+            aria-expanded={pickerOpen}
+            aria-activedescendant={pickerOpen ? `${pickerId}-${choices[Math.min(picked, choices.length - 1)].id}` : undefined}
+            disabled={Boolean(disabled)}
+            onChange={(value, at, typing) => {
+              const typed = named(value, at)
+              if (typed.value !== value) pendingCaret.current = typed.at
+              setText(typed.value); setCaret(typed.at); setTypedAt(typing ? typed.at : null); setPickerClosed(false); setPicked(0)
+            }}
+            onSelect={(at) => {
+              setCaret(at)
+              setTypedAt((typed) => (typed === at ? typed : null))
+            }}
+            onKeyDown={keyDown}
+            onPaste={(event) => {
+              // A screenshot or a file copied in Finder goes with the words; text pastes as text.
+              const files = Array.from(event.clipboardData?.files ?? [])
+              if (!attachments || files.length === 0) return
+              event.preventDefault()
+              attachments.add(files, (file) => pastedName(file))
+            }}
+          />
+        </div>
         <div className="tc-send">
           {attachments && (
             <>
@@ -327,9 +399,7 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
                 event.target.value = ''
                 if (files.length > 0) attachments.add(files)
               }} />
-              <button type="button" className="tc-attach" disabled={Boolean(disabled)} onClick={() => chooser.current?.click()} aria-label="Add pictures or files" title="Add pictures or files">
-                <Paperclip size={16} aria-hidden="true" />
-              </button>
+              <AttachButton disabled={Boolean(disabled)} onClick={() => chooser.current?.click()} />
             </>
           )}
           {canSendNow && !answering && (
@@ -337,12 +407,10 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
               <Zap size={13} aria-hidden="true" />Send now
             </button>
           )}
-          {/* A review is decided with the buttons on its message; this box only holds the note. */}
+          {/* A review is decided with the buttons on its message; this box holds the note, which ↵
+              sends back as Send back does. */}
           {answering?.kind !== 'review_stop' && (
-            <button type="submit" className="btn btn-primary tc-go" disabled={!trimmed || sending || Boolean(disabled) || filesHold} aria-label={sendLabel} title={filesHold && !answering ? 'Waits for your files' : undefined}>
-              {starts ? <ArrowUp size={15} aria-hidden="true" /> : <CornerDownLeft size={14} aria-hidden="true" />}
-              <span>{sendLabel}</span>
-            </button>
+            <SendButton label={sendLabel} icon={starts ? 'send' : 'enter'} primary className="tc-go" disabled={!trimmed || sending || Boolean(disabled) || filesHold} title={filesHold && !answering ? 'Waits for your files' : undefined} />
           )}
         </div>
       </div>

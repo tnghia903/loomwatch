@@ -51,7 +51,7 @@ describe('an agent’s helpers on its piece of work (ADR 0079)', () => {
     show([helper(1, 'done'), helper(2, 'working'), helper(3, 'failed')], true, { onShow, onStop })
     fireEvent.click(screen.getByRole('button', { name: /Ada’s helper 1: Part 1, done, 3 steps\. Show what Ada asked it/ }))
     expect(onShow).toHaveBeenCalledWith('ada:call-1')
-    expect(screen.getByRole('button', { name: /Ada’s helper 3: Part 3, couldn’t finish/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Ada’s helper 3: Part 3, didn’t finish/ })).toBeInTheDocument()
     // Only a helper at work can be stopped.
     expect(screen.getAllByRole('button', { name: /^Stop / })).toHaveLength(1)
     fireEvent.click(screen.getByRole('button', { name: 'Stop Ada’s helper 2' }))
@@ -76,6 +76,16 @@ describe('an agent’s helpers on its piece of work (ADR 0079)', () => {
     fireEvent.click(screen.getByRole('button', { name: /1 helper · 1 working/ }))
     expect(screen.getByText('Web search: rent')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^Stop / })).toBeNull()
+  })
+
+  it('shows the Markdown in a part’s title, with no link in its row, and names the row in words', async () => {
+    const onShow = vi.fn()
+    const { container } = show([helper(1, 'done', { title: 'Check **rent** in `prices.csv` against [the list](https://example.com)' })], true, { onShow })
+    expect(await screen.findByText('rent', { selector: 'strong' })).toBeInTheDocument()
+    expect(screen.getByText('prices.csv', { selector: 'code' })).toBeInTheDocument()
+    const row = screen.getByRole('button', { name: /^Ada’s helper 1: Check rent in prices\.csv against the list, done/ })
+    expect(row.querySelector('a')).toBeNull()
+    expect(container.querySelector('.tc-helper-title')).toHaveTextContent('Check rent in prices.csv against the list')
   })
 
   it('is nothing when the agent brought in no helpers', () => {

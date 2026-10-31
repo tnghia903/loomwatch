@@ -120,9 +120,10 @@ export function teamUsage(runs: readonly LessonRun[], agents: readonly AgentConf
   }
 }
 
-function firstLine(text: string, max = 110): string {
-  const line = text.trim().split('\n').find((part) => part.trim())?.trim() ?? ''
-  return line.length > max ? `${line.slice(0, max - 1).trimEnd()}…` : line
+/** A message's first line, whole: it is quoted as written, Markdown and all, and the line it is
+ * shown in clamps it, so a mark is never cut in half. */
+function firstLine(text: string): string {
+  return text.trim().split('\n').find((part) => part.trim())?.trim() ?? ''
 }
 
 export function runLessons(runs: readonly LessonRun[], { agents, edges, entrypoint, scheduled = false }: CheckupInput): CheckupFinding[] {
@@ -229,7 +230,7 @@ export function runLessons(runs: readonly LessonRun[], { agents, edges, entrypoi
     findings.push({
       id: `keeps-failing:${agent.id}`, rule: 'keeps-failing', severity: 'fix', agentId: agent.id, agentIds: [agent.id], learned: runs.length,
       title: `${agent.name} failed in ${failures.length} of ${runs.length} runs`,
-      why: `${why ? `Last time: ${firstLine(why, 140)}. ` : ''}Check its model first, then its instructions.`,
+      why: `${why ? `Last time: ${firstLine(why)}. ` : ''}Check its model first, then its instructions.`,
     })
   }
 

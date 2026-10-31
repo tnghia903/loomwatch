@@ -3,6 +3,7 @@ import { Correspondence, OPERATOR_ID, type TeamMessage } from './messages'
 import { ACTIVITY_KINDS, ReplyText, commentaryOf } from './replyText'
 import { summarizeUsage, turnUsage, type TokenSummary } from './usage'
 import { answerNotes, checkRounds, type AnswerNotes, type CheckRound } from '../story/checks'
+import { readDoneWhen, type DoneWhen } from '../chat/doneWhen'
 
 export const eventKinds = ['message', 'thought', 'tool_call', 'tool_update', 'plan', 'permission', 'session_meta', 'usage', 'turn_end', 'process'] as const
 export interface RunEvent {
@@ -390,6 +391,15 @@ export interface RunProjection {
   checks?: CheckRound[]
   /** What the answer's author could not meet or kept against a check (ADR 0062). */
   notes?: AnswerNotes | null
+  /** What the person's message said done looks like, as it stands now (ADR 0098). */
+  doneWhen?: DoneWhen | null
+}
+
+/** `rounds` without the items of what the message said done looks like that the person took off. */
+function withoutTakenOff(rounds: CheckRound[], doneWhen: DoneWhen | null): CheckRound[] {
+  const off = new Set((doneWhen?.items ?? []).filter((item) => !item.checked).map((item) => item.text))
+  if (off.size === 0) return rounds
+  return rounds.map((round) => ({ ...round, items: round.items.filter((item) => !off.has(item.item)) }))
 }
 
 export interface RunContext {
@@ -575,6 +585,12 @@ export type PromptSectionKind =
   | 'capabilities'
   | 'required_skill'
   | 'memory'
+  /**
+   * `## Your part in this team` — what this team needs from the agent (ADR 0097), the team's own
+   * words beside the agent's instructions. Added here and in `memory::PromptSectionKind` in the
+   * same change.
+   */
+  | 'part'
   /**
    * `## Conversation so far` — the recent messages between you and the team, from its chat (ADR
    * 0051): your requests, notes and decisions, and the team's answers. Handed to every agent a run
@@ -777,6 +793,7 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
   /** Agents paused on a permission request LoomWatch put to you (ADR 0040), by the request's id: the
       call it asked about is open in the record, but nothing runs until you answer. */
   const asking = new Map<string, string>()
+  let doneWhen: DoneWhen | null = null
   for (const event of events) {
     if (event.seq > throughSeq) break
     lastSeq = event.seq
@@ -785,6 +802,12 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
     if (event.kind === 'session_meta' && event.payload.phase === 'session_loaded') { replaying.add(event.agentId); continue }
     if (event.kind === 'session_meta' && event.payload.phase === 'session_replayed') { replaying.delete(event.agentId); continue }
     if (replaying.has(event.agentId)) continue
+    // ADR 0098: what LoomWatch read in the message is no agent at work. Its check, when one runs,
+    // is: that has a session of its own, and comes through below.
+    if (event.kind === 'session_meta' && event.payload.phase === 'done_when') {
+      if (object(event.raw) && event.raw.source === 'loomwatch') doneWhen = readDoneWhen(event.payload) ?? doneWhen
+      continue
+    }
     const agent = ensureAgent(event.agentId, event)
     const p = event.payload
     if (ACTIVITY_KINDS.has(event.kind)) { agent.turnText.noteActivity(); agent.allText.noteActivity() }
@@ -1303,7 +1326,9 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
       sources: category('sources', observed.sources > 0 ? { ...settled, observed: observed.sources } : { ...empty }),
     },
     tokens: atRest ? summarizeUsage(turns) : null,
-    checks: checkRounds(events, throughSeq),
+    // ADR 0098: an item the person took off the check is not what the answer is judged by.
+    checks: withoutTakenOff(checkRounds(events, throughSeq), doneWhen),
+    doneWhen,
     notes: answerNotes(events, throughSeq),
   }
 }

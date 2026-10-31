@@ -1,4 +1,4 @@
-import { ExternalLink, Search } from 'lucide-react'
+import { ExternalLink, Search } from '../ui/icon'
 import { useMemo, useState } from 'react'
 
 import {
@@ -7,6 +7,7 @@ import {
 } from '../../lib/library/skillStore'
 import { Sheet } from './Sheet'
 import { By, Glyph, Locked, NeedTags, Notices, Tick } from './SkillTags'
+import { InlineMarkdown } from '../ui/Markdown'
 
 /** One add, from the moment Add is pressed: downloading, ready to review, or failed. */
 export type Adding =
@@ -118,7 +119,7 @@ export function AddSheet({ adding, publisher, onClose, onAdded, returnFocus }: {
         <div className="lw-skills-intro">
           <Glyph name={single.name} description={single.description} size="lg" />
           <div>
-            {single.description && <p className="lw-skills-intro-desc">{single.description}</p>}
+            {single.description && <p className="lw-skills-intro-desc"><InlineMarkdown>{single.description}</InlineMarkdown></p>}
             <p className="lw-skills-quiet lw-skills-byline">
               {publisher ? <By publisher={publisher} /> : inspection.title}
               {page && <>{' · '}{page}</>}
@@ -187,7 +188,7 @@ function Picker({ candidates, chosen, filter, onFilter, onChange }: {
           <li key={candidate.path} className={candidate.reason ? 'locked' : ''}>
             <Tick checked={chosen.has(candidate.path) && !candidate.reason} disabled={candidate.reason !== undefined} onToggle={() => toggle(candidate.path)}>
               <b>{displayName(candidate.name)}</b>
-              {candidate.description && <span className="lw-skills-pick-desc">{candidate.description}</span>}
+              {candidate.description && <span className="lw-skills-pick-desc"><InlineMarkdown clickable={false}>{candidate.description}</InlineMarkdown></span>}
             </Tick>
             <span className="lw-skills-pick-facts">
               <span className={`lw-skills-tag ${candidate.license.restricted ? 'stop' : ''}`}>{licenseLabel(candidate.license)}</span>

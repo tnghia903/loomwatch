@@ -3,13 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { forgetKeyStatus } from '../lib/ai/useKeyStatus'
 import { forgetModels } from '../lib/ai/useModels'
+import { figureFor, figureStill } from '../lib/library/figures'
 import type { RunEvent } from '../lib/watch/events'
 import type { AgentConfig } from '../lib/team-file/types'
 import { keys } from '../lib/platform'
 import { background, cascaded, DESKTOP, goldFilled, heightOf, isGoldFill, PHONE } from '../test/cascade'
-import { useTeamPage } from '../lib/team-file/teamPage'
-import { FrameTeamRail } from './rail/TeamRail'
+import { typeInto, wordsIn } from '../test/chipField'
 import { Workspace } from './Workspace'
+import { Dock } from './frame/Dock'
 
 // The Run button shows its key as this computer writes it: ↵ on a Mac, Enter elsewhere.
 const RUN_BUTTON = new RegExp(`^Run ${keys('↵')}`)
@@ -39,7 +40,7 @@ const documentState = vi.hoisted(() => ({
   modeSwitchBanner: false, pendingEdgeRemoval: null,
   createNewDocument: vi.fn(), applyYaml: vi.fn(() => true), closeDocument: vi.fn(), teamsRoot: null as string | null, reloadFromDisk: vi.fn(), keepMine: vi.fn(), useDisk: vi.fn(), saveCopy: vi.fn(), layoutNodes: vi.fn(),
   settleNodeCollision: vi.fn(), capturePositionHistory: vi.fn(), undo: vi.fn(), redo: vi.fn(), onNodesChange: vi.fn(), onEdgesChange: vi.fn(),
-  onConnect: vi.fn(), addAgentFromDrop: vi.fn(), save: vi.fn(async () => true), touchField: vi.fn(), renameAgent: vi.fn(), updateAgentModel: vi.fn(),
+  onConnect: vi.fn(), addAgentFromDrop: vi.fn(), refillAgent: vi.fn(), save: vi.fn(async () => true), touchField: vi.fn(), renameAgent: vi.fn(), updateAgentModel: vi.fn(),
   updateAgentCwd: vi.fn(), updateAgentAllowRecruiting: vi.fn(), promoteEntrypoint: vi.fn(), promoteResponder: vi.fn(),
   removeAgent: vi.fn(), updateTeamSchedule: vi.fn(), removeTeamSchedule: vi.fn(), dismissRefusal: vi.fn(), keepLastEdgeRemoval: vi.fn(), undoLastEdgeRemoval: vi.fn(),
   updateAgentMemory: vi.fn(), addBriefEntry: vi.fn(), removeBriefEntry: vi.fn(),
@@ -105,9 +106,8 @@ const at = (seconds: number) => new Date(Date.UTC(2026, 8, 11, 0, 0, seconds)).t
 const event = (seq: number, kind: RunEvent['kind'], payload: RunEvent['payload'], agentId = 'researcher'): RunEvent => ({ id: `e${seq}`, sessionId: 'run-1', agentId, seq, ts: at(seq), kind, payload })
 const runRecord = { runId: 'run-1', sessionId: 'run-1', teamPath: 'demo.yaml', prompt: 'Summarise the repo', status: 'running', mode: 'pipeline', entrypoint: 'researcher', responder: 'reviewer', agentIds: ['researcher', 'reviewer'], createdAt: at(0), startedAt: at(0), finishedAt: null, error: null, exitCode: null, eventCount: null, reply: null }
 
-// The team rail is the page frame's (App.tsx), drawn as the workspace sets it.
 function workspaceTree(runId: string | null = null) {
-  return <><FrameTeamRail /><Workspace onDocumentOpen={vi.fn()} initialRunId={runId} /></>
+  return <Workspace onDocumentOpen={vi.fn()} initialRunId={runId} />
 }
 
 function renderWorkspace(runId: string | null = null) {
@@ -152,12 +152,17 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.clearAllMocks() })
 
 describe('Workspace', () => {
-  it('opens Ask LoomWatch from the header, ⌘J and the palette, where Build’s own words are suggested', async () => {
+  it('opens Ask LoomWatch from the dock, ⌘J and the palette, where Build’s own words are suggested', async () => {
     renderWorkspace()
+    render(<Dock />)
     const ask = () => screen.queryByRole('complementary', { name: 'Ask LoomWatch' })
-    fireEvent.click(screen.getByRole('button', { name: 'Ask LoomWatch' }))
+    // Ask is the dock's, on every screen: the team's header has no button of its own for it.
+    expect(within(document.querySelector('.workspace-chrome') as HTMLElement).queryByRole('button', { name: /Ask/ })).toBeNull()
+    const dockAsk = screen.getByRole('button', { name: 'Ask LoomWatch' })
+    fireEvent.click(dockAsk)
     // At once: the panel comes with the app, so nothing waits for its code.
     expect(screen.getByRole('complementary', { name: 'Ask LoomWatch' })).toBeInTheDocument()
+    expect(dockAsk).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByRole('textbox', { name: 'Message to Ask LoomWatch' })).toHaveAttribute('placeholder', 'Ask for a change, or say “run it”')
     expect(screen.getByRole('button', { name: 'Add a fact-checker before the last step' })).toBeInTheDocument()
 
@@ -170,6 +175,46 @@ describe('Workspace', () => {
     expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0)
   })
 
+  // Ask stays open on the team it has just set up, and the team opens on its chat. Laid under the
+  // panel, the chat's right side, where your own messages sit, was hidden.
+  it('keeps the team’s chat clear of Ask while Ask is open beside it', async () => {
+    renderWorkspace()
+    render(<Dock />)
+    fireEvent.click(screen.getByRole('button', { name: 'Run team' }))
+    const chat = screen.getByRole('region', { name: /chat$/ })
+    expect(cascaded(chat, ['inset', 'right'])).not.toMatch(/inspector/)
+    fireEvent.click(screen.getByRole('button', { name: 'Ask LoomWatch' }))
+    expect(screen.getByRole('complementary', { name: 'Ask LoomWatch' })).toBeInTheDocument()
+    expect(cascaded(chat, ['inset', 'right'])).toBe('calc(var(--lw-inspector-w) + 2 * var(--lw-panel-inset))')
+    // On a phone Ask is a sheet at the bottom, and the chat keeps the whole width.
+    expect(cascaded(chat, ['inset', 'right'], PHONE)).not.toMatch(/inspector/)
+  })
+
+  // Only the screen's own chat moves. An agent's chat on its workbench sits in its column, where
+  // `right` would slide it over the bench; and beside Details on a wide screen the chat is already
+  // the column on the left. Below 1100px Details covers the chat or steps aside from it, so there
+  // the chat still stops short of Ask.
+  it('moves only the screen’s own chat clear of Ask, and leaves it where Details already does', () => {
+    const shell = document.createElement('div')
+    shell.className = 'lw-shell ask-docked'
+    const own = document.createElement('section')
+    own.className = 'tc'
+    const column = document.createElement('div')
+    column.className = 'byhand-chat'
+    const agents = document.createElement('section')
+    agents.className = 'tc'
+    column.append(agents)
+    shell.append(own, column)
+    document.body.append(shell)
+    const clear = 'calc(var(--lw-inspector-w) + 2 * var(--lw-panel-inset))'
+    expect(cascaded(own, ['inset', 'right'])).toBe(clear)
+    expect(cascaded(agents, ['inset', 'right'])).toBe('auto')
+    shell.classList.add('details-open')
+    expect(cascaded(own, ['inset', 'right'])).toBe('auto')
+    expect(cascaded(own, ['inset', 'right'], { width: 900 })).toBe(clear)
+    shell.remove()
+  })
+
   // ADR 0051: Run team opens the team's chat, where work starts only when you send @team.
   it('opens the team’s chat from Run team without starting work', async () => {
     renderWorkspace()
@@ -179,13 +224,16 @@ describe('Workspace', () => {
     expect(screen.getByRole('textbox', {name: 'Message the team'})).toBeInTheDocument()
     expect(await screen.findByRole('heading', {name: /^Talk to /})).toBeInTheDocument()
     expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0)
-    fireEvent.click(screen.getByRole('button', {name: 'Workflow'}))
+    fireEvent.click(screen.getByRole('button', { name: 'Team' }))
     expect(screen.getByRole('application', {name: 'Team canvas'})).toBeInTheDocument()
   })
 
   // ADR 0051: Details opens by default beside the chat, on the newest piece of work, and stays
   // closed once you close it.
-  it('opens Details on the newest piece by default, and keeps it closed once closed', async () => {
+  // ADR 0051: the chat is the screen. The pane opens by itself only to hand over what work made.
+  it('keeps the pane closed until a piece’s line opens its record, and closed once closed', async () => {
+    // The piece's record is read, so its line knows nothing passed between the agents.
+    sessionState.events = [event(0, 'process', { phase: 'spawned', pid: 1 })]
     const fallback = globalThis.fetch
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input).startsWith('/api/chat?')) {
@@ -195,13 +243,83 @@ describe('Workspace', () => {
     }))
     renderWorkspace()
     fireEvent.click(screen.getByRole('button', { name: 'Run team' }))
+    const line = await within(await screen.findByRole('log', { name: 'Messages' })).findByRole('button', { name: 'Details' })
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(screen.queryByRole('complementary', { name: 'Details of this piece of work' })).not.toBeInTheDocument()
+    fireEvent.click(line)
     const details = await screen.findByRole('complementary', { name: 'Details of this piece of work' })
     expect(within(details).getByRole('main', { name: 'Run workspace' })).toBeInTheDocument()
+    expect(within(details).getByRole('tab', { name: 'Details' })).toHaveAttribute('aria-selected', 'true')
+    expect(line).toHaveAttribute('aria-pressed', 'true')
     expect(window.location.search).toContain('run=run-1')
     fireEvent.click(within(details).getByRole('button', { name: 'Close details' }))
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(screen.queryByRole('complementary', { name: 'Details of this piece of work' })).not.toBeInTheDocument()
     expect(screen.getByRole('region', { name: /chat$/ })).toBeInTheDocument()
+  })
+
+  // The owner (2026-10-29): a piece's replies are read in the team chat, under its line, never in
+  // the pane beside it.
+  it('reads a piece’s replies in the chat, under its line, and the pane beside it holds only Details', async () => {
+    const handover = { phase: 'prompt_sections', sections: [{ kind: 'stage_results', heading: '## stage_results', text: 'The repo has three crates.' }] }
+    sessionState.events = [
+      event(0, 'process', { phase: 'spawned', pid: 1 }),
+      { ...event(1, 'session_meta', handover, 'reviewer'), raw: { source: 'loomwatch', phase: 'prompt_sections' } },
+    ]
+    const fallback = globalThis.fetch
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).startsWith('/api/chat?')) {
+        return new Response(JSON.stringify({ teamKey: 'demo', teamPath: 'demo.yaml', more: false, items: [{ kind: 'work', run: runRecord, request: null, notes: [] }] }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      return fallback(input, init)
+    }))
+    renderWorkspace()
+    fireEvent.click(screen.getByRole('button', { name: 'Run team' }))
+    const log = await screen.findByRole('log', { name: 'Messages' })
+    // Work in progress shows its replies as they are said, in the chat.
+    const line = await within(log).findByRole('button', { name: '1 reply' })
+    expect(line).toHaveAttribute('aria-expanded', 'true')
+    expect(within(log).getByText('The repo has three crates.')).toBeInTheDocument()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(screen.queryByRole('complementary', { name: 'Details of this piece of work' })).not.toBeInTheDocument()
+    // The line folds them, and opens them again, in the chat.
+    fireEvent.click(line)
+    expect(line).toHaveAttribute('aria-expanded', 'false')
+    expect(within(log).queryByText('The repo has three crates.')).toBeNull()
+    expect(screen.queryByRole('complementary', { name: 'Details of this piece of work' })).not.toBeInTheDocument()
+    fireEvent.click(line)
+    expect(within(log).getByText('The repo has three crates.')).toBeInTheDocument()
+    // Details, beside the line, opens the record beside the chat: no Replies there.
+    fireEvent.click(within(log).getByRole('button', { name: 'Details' }))
+    const pane = await screen.findByRole('complementary', { name: 'Details of this piece of work' })
+    expect(within(pane).getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Details'])
+    expect(within(pane).queryByText('The repo has three crates.')).toBeNull()
+    expect(within(log).getByText('The repo has three crates.')).toBeInTheDocument()
+  })
+
+  // A newcomer's reading (2026-10-29): on a narrow window the pane covers the chat, where the
+  // replies are, so the timeline's Read the message moves it aside.
+  it('moves the pane aside on a narrow window to show a message the timeline points at', async () => {
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: false, media: query, addEventListener() {}, removeEventListener() {} }))
+    const handover = { phase: 'prompt_sections', sections: [{ kind: 'stage_results', heading: '## stage_results', text: 'The repo has three crates.' }] }
+    sessionState.events = [
+      event(0, 'process', { phase: 'spawned', pid: 1 }),
+      { ...event(1, 'session_meta', handover, 'reviewer'), raw: { source: 'loomwatch', phase: 'prompt_sections' } },
+    ]
+    const fallback = globalThis.fetch
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.startsWith('/api/chat?')) return new Response(JSON.stringify({ teamKey: 'demo', teamPath: 'demo.yaml', more: false, items: [{ kind: 'work', run: runRecord, request: null, notes: [] }] }), { status: 200 })
+      if (url.includes('/api/runs/run-1') && !url.includes('/checkpoints')) return new Response(JSON.stringify(runRecord), { status: 200 })
+      return fallback(input, init)
+    }))
+    renderWorkspace('run-1')
+    const pane = await screen.findByRole('complementary', { name: 'Details of this piece of work' })
+    const previous = within(pane).getByRole('button', { name: 'Previous moment' })
+    for (let tries = 0; tries < 5 && !within(pane).queryByRole('button', { name: 'Read the message' }); tries += 1) fireEvent.click(previous)
+    fireEvent.click(within(pane).getByRole('button', { name: 'Read the message' }))
+    await waitFor(() => expect(screen.queryByRole('complementary', { name: 'Details of this piece of work' })).not.toBeInTheDocument())
+    expect(within(screen.getByRole('log', { name: 'Messages' })).getByText('The repo has three crates.')).toBeInTheDocument()
   })
 
   describe('what a piece of work made, as tabs beside the chat', () => {
@@ -250,6 +368,14 @@ describe('Workspace', () => {
       expect(within(pane).getAllByRole('tab').map((each) => each.textContent)).toEqual(['Details', 'market.md'])
       fireEvent.click(within(pane).getByRole('tab', { name: 'Details' }))
       expect(within(pane).getByRole('main', { name: 'Run workspace' })).toBeInTheDocument()
+    })
+
+    // The owner (2026-10-26): a link to a team's run opens the team's chat at that run's message.
+    it('opens the chat at the message of the run its link names', async () => {
+      const earlier = finished('run-2', 'Done.')
+      serve([work(earlier)], [earlier])
+      renderWorkspace('run-2')
+      await waitFor(() => expect(document.querySelector('[data-said="request:run-2"]')).toHaveClass('flash'))
     })
 
     it('keeps a closed tab closed for that work, until Read opens it again in its place', async () => {
@@ -335,11 +461,37 @@ describe('Workspace', () => {
       expect(within(pane).getAllByRole('tab').map((each) => each.textContent)).toEqual(['Details', 'q3.md', 'make_chart.py', 'market.md'])
     })
 
-    it('keeps the record on screen when the work stopped, with what it named a tab away', async () => {
-      const run = { ...finished('run-2', `Partly done: \`${MADE}\`.`), status: 'failed', error: 'The model stopped answering.' }
+    // A newcomer's run (a75f05b4): the answer named what it wrote, in the person's own folder, in
+    // plain words. It is what the work came to, so the pane opens on it.
+    it('opens on a file the work wrote where the answer names it in plain words', async () => {
+      sessionState.events = [
+        event(0, 'process', { phase: 'spawned', pid: 1 }),
+        event(1, 'tool_call', { callId: 'w1', title: 'Write sales/q3.md', toolKind: 'edit', status: 'in_progress', rawInput: { path: 'sales/q3.md' }, locations: [{ path: OWN }] }),
+        event(2, 'tool_update', { callId: 'w1', status: 'completed' }),
+      ]
+      const run = finished('run-2', `# Sales plan\n\n${'Sales rose in the west. '.repeat(40)}\n\nFiles are in /teams/sales:\n- q3.md`)
       serve([work(run)], [run])
       renderWorkspace()
       const pane = await openPane()
+      await waitFor(() => expect(within(pane).getByRole('tab', { name: 'q3.md' })).toHaveAttribute('aria-selected', 'true'))
+      expect(within(pane).getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Details', 'Reviewer', 'q3.md'])
+      // The answer read in full there names it as a file too.
+      fireEvent.click(within(pane).getByRole('tab', { name: 'Reviewer’s answer' }))
+      const chip = await within(within(pane).getByRole('tabpanel')).findByRole('button', { name: /q3\.md/ })
+      expect(chip.getAttribute('title')?.split('\n')[0]).toBe(OWN)
+    })
+
+    it('hands over nothing when the work stopped: its line opens the record, with what it named a tab away', async () => {
+      sessionState.events = [event(0, 'process', { phase: 'spawned', pid: 1 })]
+      const run = { ...finished('run-2', `Partly done: \`${MADE}\`.`), status: 'failed', error: 'The model stopped answering.' }
+      serve([work(run)], [run])
+      renderWorkspace()
+      fireEvent.click(screen.getByRole('button', { name: 'Run team' }))
+      const line = await within(await screen.findByRole('log', { name: 'Messages' })).findByRole('button', { name: 'Details' })
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(screen.queryByRole('complementary', { name: 'Details of this piece of work' })).not.toBeInTheDocument()
+      fireEvent.click(line)
+      const pane = await screen.findByRole('complementary', { name: 'Details of this piece of work' })
       await within(pane).findByRole('tab', { name: 'market.md' })
       await new Promise((resolve) => setTimeout(resolve, 50))
       expect(within(pane).getByRole('tab', { name: 'Details' })).toHaveAttribute('aria-selected', 'true')
@@ -358,7 +510,7 @@ describe('Workspace', () => {
       await waitFor(() => expect(within(pane).getByRole('tab', { name: 'market.md' })).toHaveAttribute('aria-selected', 'true'))
       const mark = () => within(pane).getByRole('tab', { name: 'market.md' }).querySelector('svg')?.getAttribute('class')
       const itsMark = mark()
-      expect(itsMark).toContain('lucide-file-text')
+      expect(itsMark).toContain('lw-icon-page')
       // Read, then left for the record: still read.
       fireEvent.click(within(pane).getByRole('tab', { name: 'Details' }))
       fireEvent.click(screen.getByRole('button', { name: 'Read sales.md here' }))
@@ -366,7 +518,7 @@ describe('Workspace', () => {
       expect(within(pane).getByRole('tab', { name: 'sales.md' })).toHaveAttribute('aria-selected', 'true')
       expect(window.location.search).toContain('run=run-1')
       expect(tabs()).toEqual(['Details', 'sales.md', 'market.md'])
-      await waitFor(() => expect(within(pane).getByRole('tab', { name: 'sales.md' }).querySelector('svg')?.getAttribute('class')).toContain('lucide-file-text'))
+      await waitFor(() => expect(within(pane).getByRole('tab', { name: 'sales.md' }).querySelector('svg')?.getAttribute('class')).toContain('lw-icon-page'))
       expect(tabs()).toEqual(['Details', 'sales.md', 'market.md'])
       // Its kind's mark, as when its own work was on screen.
       expect(mark()).toBe(itsMark)
@@ -384,6 +536,23 @@ describe('Workspace', () => {
       expect(tabs()).toEqual(['Details', 'market.md'])
     })
 
+    // ADR 0051: work you start shows in the chat; a closed pane stays closed while it runs.
+    it('keeps a closed pane closed when work starts from the chat', async () => {
+      const run = finished('run-2', 'Done.')
+      const next = { ...runRecord, runId: 'run-3', sessionId: 'run-3', status: 'running', reply: null }
+      serve([work(run)], [run, next], (body) => ({ route: 'team', run: next, message: { id: 'm-3', teamKey: 'demo', teamPath: 'demo.yaml', text: body.text, createdAt: at(70), route: 'team', runId: 'run-3', agentId: null, deliveredAt: null, now: false } }))
+      renderWorkspace()
+      fireEvent.click(screen.getByRole('button', { name: 'Run team' }))
+      const log = await screen.findByRole('log', { name: 'Messages' })
+      await within(log).findByText('Done.')
+      typeInto(screen.getByRole('textbox', { name: 'Message the team' }), '@team Make the west part shorter')
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Start' })) })
+      await waitFor(() => expect(log.querySelector('[data-run="run-3"]')).not.toBeNull())
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(screen.queryByRole('complementary', { name: 'Details of this piece of work' })).not.toBeInTheDocument()
+      expect(window.location.search).not.toContain('run=')
+    })
+
     // ADR 0077: asking about a part of the file starts new work; the file stays where it is.
     it('leaves the file on screen when newer work starts from the chat', async () => {
       const run = finished('run-2', `Done. The brief is in \`${MADE}\`.`)
@@ -392,7 +561,7 @@ describe('Workspace', () => {
       renderWorkspace()
       const pane = await openPane()
       await waitFor(() => expect(within(pane).getByRole('tab', { name: 'market.md' })).toHaveAttribute('aria-selected', 'true'))
-      fireEvent.change(screen.getByRole('textbox', { name: 'Message the team' }), { target: { value: '@team Make the west part shorter' } })
+      typeInto(screen.getByRole('textbox', { name: 'Message the team' }), '@team Make the west part shorter')
       await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Start' })) })
       await waitFor(() => expect(window.location.search).toContain('run=run-3'))
       expect(within(pane).getByRole('tab', { name: 'market.md' })).toHaveAttribute('aria-selected', 'true')
@@ -421,7 +590,7 @@ describe('Workspace', () => {
     expect(screen.queryByRole('complementary', { name: 'Details of this piece of work' })).not.toBeInTheDocument()
     expect(screen.getByRole('region', { name: /chat$/ })).toBeInTheDocument()
     expect(window.location.search).not.toContain('run=run-1')
-    fireEvent.click(screen.getByRole('button', { name: 'Workflow' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Team' }))
     expect(screen.getByRole('application', { name: 'Team canvas' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Chat' }))
     expect(screen.getByRole('region', { name: /chat$/ })).toBeInTheDocument()
@@ -465,7 +634,7 @@ describe('Workspace', () => {
     vi.stubGlobal('fetch', withStatus('failed'))
     renderWorkspace('run-1')
     // The failed run's record and its notes are both in before the strip's absence counts.
-    expect(await screen.findByRole('region', { name: 'Run receipt' })).toHaveTextContent('Failed')
+    expect(await screen.findByRole('region', { name: 'Run receipt' })).toHaveTextContent('Didn’t finish')
     await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([input]) => String(input).startsWith('/api/memory/notes'))).toBe(true))
     await act(async () => {})
     expect(screen.queryByTestId('review-strip')).not.toBeInTheDocument()
@@ -478,6 +647,15 @@ describe('Workspace', () => {
     expect(screen.getByText('2 steps in order')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: RUN_BUTTON })).toBeDisabled()
     expect(screen.getByText('sequence from Researcher to Reviewer')).toBeInTheDocument()
+  })
+
+  // The canvas's own words call each agent a card ("Drag from the dot on the right of a card"); its
+  // line under the canvas said "node", a word from code a newcomer doesn't have.
+  it('says to select a card, the canvas’s own word, not a node', () => {
+    renderWorkspace()
+    const legend = document.querySelector('.build-canvas-legend')
+    expect(legend).toHaveTextContent('Select a card to edit')
+    expect(legend?.textContent).not.toMatch(/node/i)
   })
 
   it('keeps a capability card at each live drag position', async () => {
@@ -607,6 +785,39 @@ describe('Workspace', () => {
     } finally {
       view.unmount()
       Reflect.deleteProperty(researcher.data.agent, 'capabilities')
+      Reflect.deleteProperty(reviewer.data.agent, 'capabilities')
+    }
+  })
+
+  /**
+   * ADR 0094: knowledge isn't turned off for one team, so taking one of the agent's own reads off a
+   * team's canvas takes it off the agent in every team it's in. The canvas says so; a folder the
+   * team gave it says nothing of the kind.
+   */
+  it('says when a read of the agent’s own came off it in every team it’s in', async () => {
+    const [, reviewer] = documentState.nodes
+    Object.assign(reviewer.data.agent, { from: { agent: 'reviewer' }, capabilities: [{ kind: 'knowledge', name: 'Style', path: '/Users/me/style' }, { kind: 'knowledge', name: 'Notes', path: '/Users/me/notes' }] })
+    const stubbed = vi.mocked(fetch)
+    const answer = stubbed.getMockImplementation()!
+    stubbed.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => String(input) === '/api/jobs'
+      ? new Response(JSON.stringify({ folder: '.jobs', jobs: [{ id: 'reviewer', file: '.jobs/reviewer.yaml', name: 'Reviewer', instructions: 'Review it.', reads: [{ name: 'Style', path: '/Users/me/style' }] }], problems: [] }), { status: 200 })
+      : answer(input, init))
+    const view = renderWorkspace()
+    try {
+      // A folder's card is named by the folder.
+      await screen.findByText('Reviewer reads notes')
+      // My agents is read before the canvas can tell whose read it is.
+      await waitFor(() => expect(stubbed.mock.calls.some(([url]) => String(url) === '/api/jobs')).toBe(true))
+      await act(async () => {})
+      act(() => flowRuntime.onEdgesChange?.([{ id: 'capability:reviewer->knowledge@/Users/me/notes', type: 'remove' }]))
+      expect(screen.queryByText(/in every team it’s in/)).toBeNull()
+
+      act(() => flowRuntime.onEdgesChange?.([{ id: 'capability:reviewer->knowledge@/Users/me/style', type: 'remove' }]))
+      const note = (await screen.findByText(/off Reviewer in every team it’s in, since it’s one of its own reads\. To give it back, select Reviewer and press Edit Reviewer\./)).closest('[role="status"]')
+      expect(note).toHaveTextContent(/^Took style off Reviewer/)
+    } finally {
+      view.unmount()
+      Reflect.deleteProperty(reviewer.data.agent, 'from')
       Reflect.deleteProperty(reviewer.data.agent, 'capabilities')
     }
   })
@@ -828,7 +1039,7 @@ describe('Workspace', () => {
     await runOnScreen()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     // The request went into that run, so the box it was typed in is empty again.
-    fireEvent.click(screen.getByRole('button', { name: 'Workflow' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Team' }))
     expect(screen.getByLabelText('What should the team do?')).toHaveValue('')
   })
 
@@ -887,6 +1098,30 @@ describe('Workspace', () => {
     fireEvent.click(screen.getByRole('button', { name: /Team.*must NOT have additional properties/ }))
     expect(screen.queryByRole('dialog', { name: /YAML/ })).not.toBeInTheDocument()
     Object.assign(documentState, { isValid: true, documentChipState: 'clean', documentProblems: [], yamlPreview: 'a: 1' })
+  })
+
+  // From a team's chat, the only way to another team's chat was Projects and back in.
+  it('lists the other teams in the team menu, each opening on the tab on screen', async () => {
+    const fallback = globalThis.fetch
+    const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200 })
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith('/api/projects')) return json({ projects: [{ id: 'school', name: 'School', teams: ['demo.yaml', 'notes.yaml'] }], loose: [], missing: [], removed: [] })
+      if (url.endsWith('/api/teams')) return json({ root: '/teams', files: ['demo.yaml', 'notes.yaml'] })
+      if (url.startsWith('/api/team?') && url.includes('notes.yaml')) return json({ path: 'notes.yaml', yaml: 'schemaVersion: 1\nname: Lecture notes\nagents:\n  - id: taker\n    name: Note taker\n', revision: 'r2' })
+      if (url.startsWith('/api/team?')) return json({ path: 'demo.yaml', yaml: 'schemaVersion: 1\nname: Demo\nagents:\n  - id: researcher\n', revision: 'r1' })
+      return fallback(input, init)
+    }))
+    renderWorkspace()
+    fireEvent.click(screen.getByRole('button', { name: /open team menu/ }))
+    const notes = await screen.findByRole('link', { name: /Lecture notes/ })
+    expect(notes).toHaveAttribute('href', `/?path=${encodeURIComponent('notes.yaml')}`)
+    fireEvent.click(screen.getByRole('button', { name: /open team menu/ }))
+
+    fireEvent.click(screen.getByRole('button', { name: /Chat/ }))
+    fireEvent.click(screen.getByRole('button', { name: /open team menu/ }))
+    expect(await screen.findByRole('link', { name: /Lecture notes/ })).toHaveAttribute('href', `/?path=${encodeURIComponent('notes.yaml')}&view=chat`)
+    expect(screen.getByRole('link', { name: /Demo/ })).toHaveAttribute('aria-current', 'page')
   })
 
   it('opens schedule problems in a friendly canvas editor instead of raw YAML', async () => {
@@ -1031,19 +1266,19 @@ describe('Workspace', () => {
 
   // The menu is the only way from a team to Team memory, About you, Connections, Usage and the guide.
   // A phone hid it, so a team opened on a phone had no way to any of them.
-  it('keeps the team menu on a phone, beside Ask and the bell rather than under them', async () => {
+  it('keeps the team’s ⋯ on a phone, beside the bell rather than under it', async () => {
     renderWorkspace()
-    const toggle = screen.getByRole('button', { name: 'Menu' })
+    const toggle = screen.getByRole('button', { name: 'More' })
     const menu = toggle.parentElement!
     const anchor = document.querySelector('.workspace-chrome > .needs-you-anchor')!
     for (const viewport of [DESKTOP, PHONE]) expect(cascaded(menu, 'display', viewport)).toBe('flex')
-    // On a phone both stand in the row under the header, side by side: the menu at the end, with the
-    // bell's 30 px look, and Ask and the bell to its left.
+    // On a phone both stand in the row under the header, side by side: the ⋯ at the end, with the
+    // bell's 30 px look, and the bell to its left.
     expect(cascaded(menu, 'right', PHONE)).toBe('19px')
     expect(heightOf(toggle, PHONE)).toBe(30)
     expect(cascaded(anchor, 'right', PHONE)).toBe('64px')
     fireEvent.click(toggle)
-    for (const item of ['Team memory', 'About you…', 'Connections…', 'Usage…']) expect(screen.getByRole('menuitem', { name: item })).toBeInTheDocument()
+    for (const item of ['Team memory', 'Getting started guide']) expect(screen.getByRole('menuitem', { name: item })).toBeInTheDocument()
   })
 
   // A team with unsaved changes: Run team saves before it starts, so it keeps the one gold fill and
@@ -1136,7 +1371,7 @@ describe('Workspace', () => {
       fireEvent.change(screen.getByLabelText('What should the team do?'), { target: { value: 'Summarise the repo' } })
       fireEvent.click(screen.getByRole('button', { name: RUN_BUTTON }))
       await runOnScreen()
-      fireEvent.click(screen.getByRole('button', { name: 'Workflow' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Team' }))
 
       expect(positionOf('Researcher')).toBe('0x0')
       expect(positionOf('Reviewer')).toBe('300x0')
@@ -1154,8 +1389,8 @@ describe('Workspace', () => {
       const { container } = renderWorkspace()
       expect(nodeKinds(container)).not.toContain('prompt')
       fireEvent.click(screen.getByRole('button', { name: 'Run team' }))
-      fireEvent.change(screen.getByRole('textbox', { name: 'Message the team' }), { target: { value: '@team Audit the harnesses' } })
-      expect(screen.getByRole('textbox', { name: 'Message the team' })).toHaveValue('@team Audit the harnesses')
+      typeInto(screen.getByRole('textbox', { name: 'Message the team' }), '@team Audit the harnesses')
+      expect(wordsIn(screen.getByRole('textbox', { name: 'Message the team' }))).toBe('@team Audit the harnesses')
       expect(screen.getByText(/^Starts the team/)).toBeInTheDocument()
       expect(nodeKinds(container)).not.toContain('prompt')
     })
@@ -1189,11 +1424,181 @@ describe('Workspace', () => {
       researcher.selected = true
       const view = renderWorkspace()
       try {
-        expect(screen.getByRole('region', { name: 'In the workflow' })).toHaveTextContent(/Step 1 of \d · receives your request first/)
+        expect(screen.getByRole('region', { name: 'In the team' })).toHaveTextContent(/Step 1 of \d · receives your request first/)
         expect(screen.queryByRole('button', { name: /Produces the team output/ })).not.toBeInTheDocument()
       } finally {
         view.unmount()
         researcher.selected = false
+      }
+    })
+
+    // Round 3: a team's tabs are Team and Chat. Its agents are on the Team tab, and each one's
+    // workbench opens over it from its card, with Team still marked, and closes back to the team.
+    it('has two tabs, Team and Chat, and opens an agent’s workbench over the Team tab', () => {
+      const researcher = documentState.nodes[0]
+      researcher.selected = true
+      const view = renderWorkspace()
+      try {
+        const tabs = screen.getByRole('navigation', { name: 'Workspace view' })
+        expect(within(tabs).getAllByRole('button').map((tab) => tab.textContent)).toEqual(['Team', 'Chat'])
+        const team = within(tabs).getByRole('button', { name: 'Team' })
+        fireEvent.click(within(screen.getByRole('complementary', { name: 'Selected node settings' })).getByRole('button', { name: 'Edit Researcher' }))
+        const bench = screen.getByRole('region', { name: /’s agents$/ })
+        expect(team).toHaveAttribute('aria-pressed', 'true')
+        expect(window.location.search).toContain('view=agents')
+        // A sheet: the keyboard is in it, and the canvas under it can't be reached.
+        expect(bench).toHaveFocus()
+        expect(screen.getByRole('application', { name: 'Team canvas' })).toHaveAttribute('inert')
+        fireEvent.click(within(bench).getByRole('button', { name: 'Back to the team' }))
+        expect(screen.queryByRole('region', { name: /’s agents$/ })).toBeNull()
+        expect(window.location.search).not.toContain('view=agents')
+        expect(team).toHaveAttribute('aria-pressed', 'true')
+        expect(screen.getByRole('application', { name: 'Team canvas' })).not.toHaveAttribute('inert')
+        expect(team).toHaveFocus()
+      } finally {
+        view.unmount()
+        researcher.selected = false
+      }
+    })
+
+    // The newcomer review: the X, the tabs and the other agents' chips closed the workbench and
+    // dropped what was changed there without a word.
+    it('asks before an agent’s workbench closes on changes not saved, and saves them on Save', async () => {
+      const researcher = documentState.nodes[0]
+      researcher.selected = true
+      Object.assign(researcher.data.agent, { from: { agent: 'researcher' } })
+      const stubbed = vi.mocked(fetch)
+      const answer = stubbed.getMockImplementation()!
+      const job = { id: 'researcher', file: '.jobs/researcher.yaml', name: 'Researcher', instructions: 'Find it.', version: 1 }
+      stubbed.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        if (url === '/api/jobs') return new Response(JSON.stringify({ folder: '.jobs', jobs: [job], problems: [] }), { status: 200 })
+        if (url === '/api/jobs/researcher' && init?.method === 'PUT') return new Response(JSON.stringify({ ...job, ...JSON.parse(String(init.body)), version: 2 }), { status: 200 })
+        return answer(input, init)
+      })
+      const view = renderWorkspace()
+      try {
+        fireEvent.click(within(screen.getByRole('complementary', { name: 'Selected node settings' })).getByRole('button', { name: 'Edit Researcher' }))
+        const bench = screen.getByRole('region', { name: /’s agents$/ })
+        fireEvent.click(await within(bench).findByRole('button', { name: /^Name\b/ }))
+        fireEvent.change(within(bench).getByRole('textbox', { name: 'Name' }), { target: { value: 'Scout' } })
+        const asked = () => screen.queryByRole('alertdialog', { name: 'Save changes to Scout?' })
+
+        // The X asks; Cancel keeps the workbench and its change.
+        fireEvent.click(within(bench).getByRole('button', { name: 'Back to the team' }))
+        expect(asked()).toBeInTheDocument()
+        expect(screen.getByRole('region', { name: /’s agents$/ })).toBeInTheDocument()
+        fireEvent.click(within(asked()!).getByRole('button', { name: 'Cancel' }))
+        expect(asked()).toBeNull()
+        expect(within(bench).getByRole('textbox', { name: 'Name' })).toHaveValue('Scout')
+
+        // So do the tabs and Esc; Don’t save goes where it was going.
+        const tabs = screen.getByRole('navigation', { name: 'Workspace view' })
+        fireEvent.click(within(tabs).getByRole('button', { name: 'Team' }))
+        expect(asked()).toBeInTheDocument()
+        fireEvent.keyDown(asked()!, { key: 'Escape' })
+        expect(asked()).toBeNull()
+        fireEvent.keyDown(document.body, { key: 'Escape' })
+        expect(asked()).toBeInTheDocument()
+        expect(vi.mocked(fetch).mock.calls.some(([url, init]) => String(url) === '/api/jobs/researcher' && init?.method === 'PUT')).toBe(false)
+
+        // Save saves, then closes.
+        fireEvent.click(within(asked()!).getByRole('button', { name: 'Save' }))
+        await waitFor(() => expect(screen.queryByRole('region', { name: /’s agents$/ })).toBeNull())
+        const put = vi.mocked(fetch).mock.calls.find(([url, init]) => String(url) === '/api/jobs/researcher' && init?.method === 'PUT')
+        expect(JSON.parse(String(put?.[1]?.body))).toMatchObject({ name: 'Scout' })
+        expect(documentState.refillAgent).toHaveBeenCalledWith(expect.objectContaining({ id: 'researcher', name: 'Scout' }))
+      } finally {
+        view.unmount()
+        researcher.selected = false
+        Reflect.deleteProperty(researcher.data.agent, 'from')
+      }
+    })
+
+    it('closes an agent’s workbench without asking when nothing changed, and drops changes on Don’t save', async () => {
+      const researcher = documentState.nodes[0]
+      researcher.selected = true
+      Object.assign(researcher.data.agent, { from: { agent: 'researcher' } })
+      const stubbed = vi.mocked(fetch)
+      const answer = stubbed.getMockImplementation()!
+      stubbed.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => String(input) === '/api/jobs'
+        ? new Response(JSON.stringify({ folder: '.jobs', jobs: [{ id: 'researcher', file: '.jobs/researcher.yaml', name: 'Researcher', instructions: 'Find it.', version: 1 }], problems: [] }), { status: 200 })
+        : answer(input, init))
+      const view = renderWorkspace()
+      const open = async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Edit Researcher' }))
+        const bench = screen.getByRole('region', { name: /’s agents$/ })
+        await within(bench).findByRole('button', { name: /^Name\b/ })
+        return bench
+      }
+      try {
+        let bench = await open()
+        fireEvent.click(within(bench).getByRole('button', { name: 'Back to the team' }))
+        expect(screen.queryByRole('alertdialog')).toBeNull()
+        expect(screen.queryByRole('region', { name: /’s agents$/ })).toBeNull()
+
+        act(() => flowRuntime.onNodesChange?.([{ id: 'researcher', type: 'select', selected: true }]))
+        bench = await open()
+        fireEvent.click(within(bench).getByRole('button', { name: /^Name\b/ }))
+        fireEvent.change(within(bench).getByRole('textbox', { name: 'Name' }), { target: { value: 'Scout' } })
+        // Adding another agent from the sheet moves the workbench to it: that asks too.
+        fireEvent.click(within(bench).getByRole('button', { name: /^Add an agent/ }))
+        fireEvent.click(within(screen.getByRole('region', { name: 'Add an agent to this team' })).getByRole('button', { name: /^Add/ }))
+        expect(screen.getByRole('alertdialog', { name: 'Save changes to Scout?' })).toBeInTheDocument()
+        expect(documentState.addAgentFromDrop).not.toHaveBeenCalled()
+        fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Cancel' }))
+        fireEvent.click(within(screen.getByRole('navigation', { name: 'Workspace view' })).getByRole('button', { name: 'Chat' }))
+        fireEvent.click(within(screen.getByRole('alertdialog', { name: 'Save changes to Scout?' })).getByRole('button', { name: 'Don’t save' }))
+        expect(screen.queryByRole('region', { name: /’s agents$/ })).toBeNull()
+        expect(screen.queryByRole('alertdialog')).toBeNull()
+        expect(vi.mocked(fetch).mock.calls.some(([url, init]) => String(url) === '/api/jobs/researcher' && init?.method === 'PUT')).toBe(false)
+      } finally {
+        view.unmount()
+        researcher.selected = false
+        Reflect.deleteProperty(researcher.data.agent, 'from')
+      }
+    })
+
+    // The newcomer review: another team picked from the name's menu skipped the workbench's own
+    // question, and the browser's "Leave site?" asked instead.
+    it('asks about an agent’s workbench before another team opens, then opens it in place', async () => {
+      const researcher = documentState.nodes[0]
+      researcher.selected = true
+      Object.assign(researcher.data.agent, { from: { agent: 'researcher' } })
+      const stubbed = vi.mocked(fetch)
+      const answer = stubbed.getMockImplementation()!
+      const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200 })
+      stubbed.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        if (url === '/api/jobs') return json({ folder: '.jobs', jobs: [{ id: 'researcher', file: '.jobs/researcher.yaml', name: 'Researcher', instructions: 'Find it.', version: 1 }], problems: [] })
+        if (url.endsWith('/api/projects')) return json({ projects: [{ id: 'school', name: 'School', teams: ['demo.yaml', 'notes.yaml'] }], loose: [], missing: [], removed: [] })
+        if (url.endsWith('/api/teams')) return json({ root: '/teams', files: ['demo.yaml', 'notes.yaml'] })
+        if (url.startsWith('/api/team?') && url.includes('notes.yaml')) return json({ path: 'notes.yaml', yaml: 'schemaVersion: 1\nname: Lecture notes\nagents:\n  - id: taker\n    name: Note taker\n', revision: 'r2' })
+        if (url.startsWith('/api/team?')) return json({ path: 'demo.yaml', yaml: 'schemaVersion: 1\nname: Demo\nagents:\n  - id: researcher\n', revision: 'r1' })
+        return answer(input, init)
+      })
+      // The team page's own mover (useTeamPage) takes an in-place move; a held page goes as a load.
+      const movedTo: string[] = []
+      const inPlace = (event: Event) => { event.preventDefault(); movedTo.push((event as CustomEvent<string>).detail) }
+      window.addEventListener('loomwatch:open-team', inPlace)
+      const view = renderWorkspace()
+      try {
+        fireEvent.click(screen.getByRole('button', { name: 'Edit Researcher' }))
+        const bench = screen.getByRole('region', { name: /’s agents$/ })
+        fireEvent.click(await within(bench).findByRole('button', { name: /^Name\b/ }))
+        fireEvent.change(within(bench).getByRole('textbox', { name: 'Name' }), { target: { value: 'Scout' } })
+
+        fireEvent.click(screen.getByRole('button', { name: /open team menu/ }))
+        fireEvent.click(await screen.findByRole('link', { name: /Lecture notes/ }))
+        expect(movedTo).toEqual([])
+        fireEvent.click(within(screen.getByRole('alertdialog', { name: 'Save changes to Scout?' })).getByRole('button', { name: 'Don’t save' }))
+        await waitFor(() => expect(movedTo).toEqual([`/?path=${encodeURIComponent('notes.yaml')}`]))
+        expect(screen.queryByRole('region', { name: /’s agents$/ })).toBeNull()
+      } finally {
+        window.removeEventListener('loomwatch:open-team', inPlace)
+        view.unmount()
+        researcher.selected = false
+        Reflect.deleteProperty(researcher.data.agent, 'from')
       }
     })
 
@@ -1205,7 +1610,7 @@ describe('Workspace', () => {
       const view = renderWorkspace()
       try {
         const panel = screen.getByRole('complementary', { name: 'Selected node settings' })
-        expect(within(panel).getByRole('button', { name: 'Open its workbench' })).toBeInTheDocument()
+        expect(within(panel).getByRole('button', { name: 'Edit Researcher' })).toBeInTheDocument()
         for (const field of ['Name', 'Instructions']) expect(within(panel).queryByRole('textbox', { name: field })).not.toBeInTheDocument()
         expect(within(panel).queryByRole('button', { name: 'Thinking effort and more settings' })).not.toBeInTheDocument()
         expect(within(panel).queryByRole('group', { name: 'Allowed without asking' })).not.toBeInTheDocument()
@@ -1274,10 +1679,20 @@ describe('Workspace', () => {
         fireEvent.click(routes[0])
         const panel = await screen.findByRole('region', { name: /What Researcher was given/ })
         expect(panel).toHaveTextContent('no preceding stage')
-        expect(panel).toHaveTextContent('1 entry · pinned')
+        // The stored packet is read after the panel opens ("Reading the stored packet…").
+        await waitFor(() => expect(panel).toHaveTextContent('1 entry · pinned'))
       } finally {
         HTMLDialogElement.prototype.showModal = showModal
       }
+    })
+
+    // Details' "What was recorded" is Details' own to wire (DeliveryLane's onShowRecorded), so a
+    // team's Details that stops passing it would lose the link without a word.
+    it('opens every record behind the run from Details’ What was recorded', async () => {
+      sessionState.events = [event(0, 'process', { phase: 'spawned', pid: 1 })]
+      renderWorkspace('run-1')
+      fireEvent.click(await screen.findByRole('button', { name: /What was recorded/ }))
+      expect(await screen.findByRole('complementary', { name: 'Provenance' })).toBeInTheDocument()
     })
   })
   // ---- ADR 0016: positions in the sidecar, contract in the team file -------------------------
@@ -1405,9 +1820,9 @@ it('organizes execution and resources without changing the team, and restores th
   composerLayoutState.edges = [{ from: 'researcher', to: 'knowledge:source' }]
   renderWorkspace()
   // Organize and its undo live in the view bar only (ADR 0043).
-  fireEvent.click(screen.getByRole('button', { name: 'Menu' }))
+  fireEvent.click(screen.getByRole('button', { name: 'More' }))
   expect(screen.queryByRole('menuitem', { name: /Organize/ })).not.toBeInTheDocument()
-  fireEvent.click(screen.getByRole('button', { name: 'Menu' }))
+  fireEvent.click(screen.getByRole('button', { name: 'More' }))
   const organize = await screen.findByRole('button', { name: /^Organize$/ })
   await waitFor(() => expect(organize).toBeEnabled())
   fireEvent.click(organize)
@@ -1440,6 +1855,32 @@ describe('the Workflow canvas cards', () => {
   })
 })
 
+// The owner (2026-10-26): Cole wore a lilac spool in My agents, and another figure on the screen a
+// link to a run of Cole's chat opened. The chat is a team of one in `.jobs/.bench/cole.yaml` whose
+// agent names no link, so the file it is says whose agent it is.
+describe('an agent’s own chat, opened on the team screen', () => {
+  const lilac = '/agent/figures/spool-lilac.webp'
+  let nodes: typeof documentState.nodes
+  beforeEach(() => {
+    nodes = documentState.nodes
+    const [, reviewer] = nodes
+    Object.assign(documentState, { path: '/teams/.jobs/.bench/reviewer.yaml', nodes: [{ ...reviewer, data: { ...reviewer.data, isEntrypoint: true } }], edges: [], entrypoint: 'reviewer' })
+    const fallback = globalThis.fetch
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => String(input) === '/api/jobs'
+      ? new Response(JSON.stringify({ folder: '.jobs', jobs: [{ id: 'reviewer', file: '.jobs/reviewer.yaml', name: 'Reviewer', instructions: 'Review it.', figure: { kind: 'spool', color: 'lilac' } }], problems: [] }), { status: 200 })
+      : fallback(input, init)))
+  })
+  afterEach(() => { Object.assign(documentState, { path: '/teams/demo.yaml', nodes, edges: [{ id: 'researcher->reviewer', source: 'researcher', target: 'reviewer', data: { kind: 'sequence', ts: '' }, selected: false }], entrypoint: 'researcher' }) })
+
+  it('draws its agent in the figure it wears in My agents: its card, the team’s sentence and the palette', async () => {
+    expect(figureStill(figureFor('reviewer'))).not.toBe(lilac)
+    renderWorkspace()
+    await waitFor(() => expect(document.querySelector('[data-node="agent"] .build-node-figure')).toHaveAttribute('src', lilac))
+    expect(document.querySelector('.story-name .tc-mention-face img')).toHaveAttribute('src', lilac)
+    expect(screen.getByRole('button', { name: /^Reviewer\s*On this canvas/ }).querySelector('.palette-figure')).toHaveAttribute('src', lilac)
+  })
+})
+
 // An Attention alert used to be a dead label beside a Dismiss button: it named the agent and the
 // failure and left the operator to find both the call and the thing to change. A run is a record,
 // so "fix it" can only mean the team that produced it — repair leads, evidence stays reachable.
@@ -1461,11 +1902,11 @@ describe('an Attention alert routes to the repair and to the record', () => {
     return () => { documentState.nodes = original; vi.mocked(documentState.onNodesChange).mockReset() }
   }
 
-  it('takes "Fix in Workflow" to the field that has to change, and says why', async () => {
+  it('takes "Fix on the Team tab" to the field that has to change, and says why', async () => {
     const restore = withRealSelection()
     sessionState.events = busFailure()
     renderWorkspace('run-1')
-    fireEvent.click(await screen.findByRole('button', { name: /Fix in Workflow/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Fix on the Team tab/ }))
     // Out of the run: Build is the only editing surface.
     await waitFor(() => expect(screen.getByRole('heading', { name: /^(Your team is ready|Finish setting up|Add your first agent)$/ })).toBeInTheDocument())
     // On the agent that did the asking, in its full settings, with the instructions focused.
@@ -1485,7 +1926,7 @@ describe('an Attention alert routes to the repair and to the record', () => {
     const restore = withRealSelection()
     sessionState.events = busFailure()
     renderWorkspace('run-1')
-    fireEvent.click(await screen.findByRole('button', { name: /Fix in Workflow/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Fix on the Team tab/ }))
     const field = await screen.findByLabelText('Role and instructions')
     expect(screen.getByRole('note')).toBeInTheDocument()
     fireEvent.change(field, { target: { value: 'You are an agent receiving the report from Research.' } })
@@ -1499,7 +1940,7 @@ describe('an Attention alert routes to the repair and to the record', () => {
     const restore = withRealSelection()
     sessionState.events = busFailure()
     renderWorkspace('run-1')
-    fireEvent.click(await screen.findByRole('button', { name: /Fix in Workflow/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Fix on the Team tab/ }))
     await screen.findByRole('note')
     fireEvent.change(screen.getByRole('textbox', { name: 'Name' }), { target: { value: 'Report Designer' } })
     await waitFor(() => expect(documentState.renameAgent).toHaveBeenCalledWith('researcher', 'name', 'Report Designer'))
@@ -1511,7 +1952,7 @@ describe('an Attention alert routes to the repair and to the record', () => {
     const restore = withRealSelection()
     sessionState.events = busFailure()
     renderWorkspace('run-1')
-    fireEvent.click(await screen.findByRole('button', { name: /Fix in Workflow/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Fix on the Team tab/ }))
     await screen.findByRole('note')
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss this note' }))
     await waitFor(() => expect(screen.queryByRole('note')).not.toBeInTheDocument())
@@ -1527,7 +1968,7 @@ describe('an Attention alert routes to the repair and to the record', () => {
     renderWorkspace('run-1')
     const panel = await screen.findByRole('region', { name: /^Attention/ })
     expect(panel).toHaveTextContent('Exited unexpectedly')
-    expect(screen.queryByRole('button', { name: /Fix in Workflow/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Fix on the Team tab/ })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Show the agent' })).toBeInTheDocument()
   })
 
@@ -1541,7 +1982,7 @@ describe('an Attention alert routes to the repair and to the record', () => {
     renderWorkspace('run-1')
     const panel = await screen.findByRole('region', { name: /^Attention/ })
     expect(panel).toHaveTextContent('budget exhausted')
-    expect(screen.queryByRole('button', { name: /Fix in Workflow/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Fix on the Team tab/ })).not.toBeInTheDocument()
   })
 
   it('keeps the record reachable: "Show evidence" opens the failing call, without the agent panel over it', async () => {
@@ -1582,7 +2023,7 @@ describe('switching workspace tab closes the node inspector', () => {
     await waitFor(() => expect(nodePanel()).not.toBeInTheDocument())
 
     // Closed, not merely hidden behind a selection that is still set.
-    fireEvent.click(screen.getByRole('button', { name: 'Workflow' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Team' }))
     await waitFor(() => expect(screen.getByRole('heading', { name: /^(Your team is ready|Finish setting up|Add your first agent)$/ })).toBeInTheDocument())
     expect(nodePanel()).not.toBeInTheDocument()
     restore()
@@ -1605,7 +2046,7 @@ describe('switching workspace tab closes the node inspector', () => {
     sessionState.events = [event(0, 'process', { phase: 'spawned', pid: 1 })]
     renderWorkspace('run-1')
     expect(nodePanel()).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Workflow' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Team' }))
     await waitFor(() => expect(nodePanel()).not.toBeInTheDocument())
     restore()
   })
@@ -1662,24 +2103,6 @@ describe('switching workspace tab closes the node inspector', () => {
 // A scheduled delivery fails with "Open Connections and choose a destination page", so the
 // route has to be reachable without knowing the URL or the ⌘K palette. Before this, the
 // workspace menu was the only chrome that could carry it and it did not.
-describe('Connections entry point', () => {
-  it('offers Connections in the workspace menu and navigates to the settings surface', async () => {
-    // jsdom makes location.assign non-configurable, so stand in a whole location.
-    // `search` is kept because Workspace reads it for the ?path= it is rendered with.
-    const real = window.location
-    const assign = vi.fn()
-    Object.defineProperty(window, 'location', { configurable: true, value: { href: real.href, pathname: real.pathname, search: real.search, assign } })
-    renderWorkspace()
-    fireEvent.click(await screen.findByRole('button', { name: 'Menu' }))
-    const item = screen.getByRole('menuitem', { name: 'Connections…' })
-    fireEvent.click(item)
-    expect(assign).toHaveBeenCalledWith('/connections')
-    // The menu closes behind it, like every other item here.
-    expect(screen.queryByRole('menuitem', { name: 'Connections…' })).not.toBeInTheDocument()
-    Object.defineProperty(window, 'location', { configurable: true, value: real })
-  })
-})
-
 // Every agent thinks on the person's OpenRouter key: a team can't run until one is added, and Build
 // says so before the run rather than letting the first model call fail.
 describe('a team whose way of paying isn’t connected', () => {
@@ -1700,7 +2123,7 @@ describe('a team whose way of paying isn’t connected', () => {
     expect(screen.getAllByText(said).length).toBeGreaterThanOrEqual(1)
     fireEvent.click(screen.getByRole('button', { name: 'Run team' }))
     expect(screen.getAllByText(said).length).toBeGreaterThanOrEqual(1)
-    expect(screen.getByRole('textbox', { name: 'Message the team' })).toBeDisabled()
+    expect(screen.getByRole('textbox', { name: 'Message the team' })).toHaveAttribute('aria-disabled', 'true')
     expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0)
   })
 
@@ -1711,8 +2134,8 @@ describe('a team whose way of paying isn’t connected', () => {
     expect(await screen.findByRole('heading', { name: 'Your team is ready' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Run team' }))
     // Run team means start the team: the box starts with @team, not as a note that starts nothing.
-    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Message the team' })).toHaveValue('@team '))
-    fireEvent.change(screen.getByRole('textbox', { name: 'Message the team' }), { target: { value: '@team Summarise the repo' } })
+    await waitFor(() => expect(wordsIn(screen.getByRole('textbox', { name: 'Message the team' }))).toBe('@team '))
+    typeInto(screen.getByRole('textbox', { name: 'Message the team' }), '@team Summarise the repo')
     expect(screen.getByText(/^Starts the team/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Start' })).toBeEnabled()
   })
@@ -1720,14 +2143,15 @@ describe('a team whose way of paying isn’t connected', () => {
 
 // ADR 0043: Home's way into Ask is "Describe the job", so its header has no Ask button too.
 describe('Home', () => {
-  it('asks through Describe the job only, with no second Ask button in the header', async () => {
+  // ADR 0097: on Home, Set up project makes projects, and Ask keeps the app's own button.
+  it('sets projects up through Set up project, with Ask the dock’s rather than a button in Home’s header', async () => {
     const path = documentState.path
     documentState.path = ''
     try {
       renderWorkspace()
-      expect(await screen.findByRole('heading', { name: /^Put AI agents to work as one team\./ })).toBeInTheDocument()
-      expect(screen.getByLabelText('Or describe the job')).toBeInTheDocument()
-      expect(screen.queryByRole('button', { name: /Ask LoomWatch/ })).not.toBeInTheDocument()
+      expect(await screen.findByRole('heading', { name: 'What are you working on?' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Set up project' })).toBeInTheDocument()
+      expect(within(screen.getByRole('banner')).queryAllByRole('button', { name: /Ask/ })).toHaveLength(0)
     } finally {
       documentState.path = path
     }
@@ -1735,114 +2159,3 @@ describe('Home', () => {
 })
 
 // The team rail: every team beside the open one, one click away, without going back to Home.
-describe('the team rail', () => {
-  let assign: ReturnType<typeof vi.fn>
-  let real: Location
-  beforeEach(() => {
-    const fallback = globalThis.fetch
-    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input)
-      if (url.endsWith('/api/teams')) return new Response(JSON.stringify({ root: '/teams', files: ['demo.yaml', 'trip.yaml'], teams: [{ path: 'demo.yaml', name: 'Demo', agentCount: 2 }, { path: 'trip.yaml', name: 'Trip', agentCount: 1 }] }), { status: 200 })
-      if (url.startsWith('/api/team?')) {
-        const path = new URLSearchParams(url.split('?')[1]).get('path')
-        return new Response(JSON.stringify({ path, revision: 'r1', yaml: path === 'trip.yaml' ? 'name: Trip\nagents:\n  - {id: planner, name: Planner}\n' : 'name: Demo\nagents: []\n' }), { status: 200 })
-      }
-      return fallback(input, init)
-    }))
-    // jsdom makes location.assign non-configurable, so stand in a whole location.
-    real = window.location
-    assign = vi.fn()
-    Object.defineProperty(window, 'location', { configurable: true, value: { href: real.href, pathname: real.pathname, search: real.search, assign } })
-  })
-  afterEach(() => {
-    Object.defineProperty(window, 'location', { configurable: true, value: real })
-    Object.assign(documentState, { documentChipState: 'clean', saveState: 'clean', isValid: true })
-  })
-
-  it('lists the teams, this one as it is on screen, and opens another on the same tab', async () => {
-    renderWorkspace()
-    const rail = screen.getByRole('navigation', { name: 'My team' })
-    const trip = await within(rail).findByRole('link', { name: 'Trip' })
-    // The open team's name and agents are the canvas's, saved or not.
-    expect(within(rail).getByRole('link', { name: 'demo' })).toHaveAttribute('aria-current', 'page')
-    expect(within(rail).getByRole('link', { name: 'demo' }).querySelector('.crew-team')).toHaveClass('n2')
-    expect(trip).toHaveAttribute('href', '/?path=trip.yaml')
-    fireEvent.click(trip)
-    expect(assign).toHaveBeenCalledWith('/?path=trip.yaml')
-  })
-
-  // In the app the page follows the address in place (App.tsx): another team's part starts fresh
-  // under a new key, beside the frame's rail.
-  function TeamPageFrame() {
-    const page = useTeamPage()
-    return <><FrameTeamRail /><Workspace key={page.key} onDocumentOpen={vi.fn()} initialRunId={page.runId} /></>
-  }
-
-  it('opens another team in place, the rail staying with the keyboard on the team picked', async () => {
-    render(<TeamPageFrame />)
-    const rail = screen.getByRole('navigation', { name: 'My team' })
-    const trip = await within(rail).findByRole('link', { name: 'Trip' })
-    trip.focus()
-    fireEvent.click(trip)
-    await waitFor(() => expect(real.search).toBe('?path=trip.yaml'))
-    expect(assign).not.toHaveBeenCalled()
-    expect(screen.getByRole('navigation', { name: 'My team' })).toBe(rail)
-    expect(document.activeElement).toBe(trip)
-  })
-
-  it('goes Home in place from the LoomWatch mark', async () => {
-    render(<TeamPageFrame />)
-    const mark = screen.getByRole('link', { name: 'LoomWatch, my team' })
-    // A click that asks for a new tab is left to the browser.
-    expect(fireEvent.click(mark, { metaKey: true })).toBe(true)
-    expect(real.search).toBe('?path=demo.yaml')
-    fireEvent.click(mark)
-    await waitFor(() => expect(`${real.pathname}${real.search}`).toBe('/'))
-    expect(assign).not.toHaveBeenCalled()
-  })
-
-  it('asks before leaving changes, and opens the other team once they are saved', async () => {
-    Object.assign(documentState, { documentChipState: 'dirty', saveState: 'dirty' })
-    const view = renderWorkspace()
-    fireEvent.click(await within(screen.getByRole('navigation', { name: 'My team' })).findByRole('link', { name: 'Trip' }))
-    expect(assign).not.toHaveBeenCalled()
-    await act(async () => { fireEvent.click(within(screen.getByRole('alertdialog', { name: 'Unsaved changes' })).getByRole('button', { name: 'Save first' })) })
-    expect(documentState.save).toHaveBeenCalledOnce()
-    // Its box goes; the keyboard goes to the team picked, not to the page.
-    expect(document.activeElement).toHaveAttribute('href', '/?path=trip.yaml')
-    // The page moves only once the team says it is saved, so the browser's own "Leave site?",
-    // which asks while there are changes, never asks a second time.
-    expect(assign).not.toHaveBeenCalled()
-    Object.assign(documentState, { documentChipState: 'saved', saveState: 'saved' })
-    view.rerender(workspaceTree())
-    await waitFor(() => expect(assign).toHaveBeenCalledWith('/?path=trip.yaml'))
-  })
-
-  it('drops the changes by reading the file again, then goes', async () => {
-    Object.assign(documentState, { documentChipState: 'dirty', saveState: 'dirty' })
-    const view = renderWorkspace()
-    fireEvent.click(await within(screen.getByRole('navigation', { name: 'My team' })).findByRole('link', { name: 'Trip' }))
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Discard' })) })
-    expect(document.activeElement).toHaveAttribute('href', '/?path=trip.yaml')
-    expect(documentState.reloadFromDisk).toHaveBeenCalledOnce()
-    expect(documentState.save).not.toHaveBeenCalled()
-    expect(assign).not.toHaveBeenCalled()
-    Object.assign(documentState, { documentChipState: 'clean', saveState: 'clean' })
-    view.rerender(workspaceTree())
-    await waitFor(() => expect(assign).toHaveBeenCalledWith('/?path=trip.yaml'))
-  })
-
-  // ADR 0043: the rail is the one way to another team or a new one; the team menu is this team's file.
-  it('opens New team from the rail’s +, and the team menu lists no teams', async () => {
-    renderWorkspace()
-    fireEvent.click(within(screen.getByRole('navigation', { name: 'My team' })).getByRole('button', { name: 'New team' }))
-    expect(await screen.findByRole('dialog', { name: 'Create a team' })).toBeInTheDocument()
-    fireEvent.keyDown(screen.getByRole('dialog', { name: 'Create a team' }), { key: 'Escape' })
-    fireEvent.click(screen.getByRole('button', { name: /open team menu/ }))
-    const menu = screen.getByRole('dialog', { name: 'Team menu' })
-    expect(within(menu).queryByRole('listbox')).not.toBeInTheDocument()
-    expect(within(menu).queryByText(/New team/)).not.toBeInTheDocument()
-    // However a list might come back, the other team's name is not in it.
-    expect(within(menu).queryByText('Trip')).not.toBeInTheDocument()
-  })
-})

@@ -1,15 +1,16 @@
-import { ArrowDown, ChevronDown, ChevronRight, Play, Reply, RotateCcw, Search, X } from 'lucide-react'
+import { ArrowDown, ChevronDown, ChevronRight, Play, Reply, RotateCcw, Search, X } from '../ui/icon'
 import { Fragment, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
-import { continueWithTeam, findInChat, sendChatMessage, startFromNote, stillAnswering, type ChatFile, type ChatItem, type ChatMessage, type ChatTarget, type Found, type FoundPassage, type FoundPiece, type NoteFailure, type ReplyTo } from '../../lib/chat/client'
+import { continueWithTeam, findInChat, sendChatMessage, startFromNote, stillAnswering, uploadChatFile, type ChatFile, type ChatItem, type ChatMessage, type ChatTarget, type Found, type FoundPassage, type FoundPiece, type NoteFailure, type ReplyTo } from '../../lib/chat/client'
+import type { HandOver } from '../../lib/chat/handed'
 import { carriesFiles, dropped, useChatAttachments } from '../../lib/chat/attachments'
 import { FindScopeContext, showFoundWords, type FindTerm } from '../../lib/chat/findWords'
 import { isDocument } from '../../lib/chat/document'
 import { nameWithHelpers } from '../../lib/chat/helpers'
 import { clockTime, dayKey, dayLabel, listNames } from '../../lib/chat/format'
 import { destination, withMention, type ChatAgent } from '../../lib/chat/route'
-import { replyOf } from '../../lib/chat/reply'
-import { answerReply, askedPassages, type AskedPassage } from '../../lib/files/passage'
+import { answersDecision, replyOf } from '../../lib/chat/reply'
+import { answerReply, askedPassages, partId, type AskedPassage } from '../../lib/files/passage'
 import { FileReaderContext } from '../../lib/files/reader'
 import { markSeen } from '../../lib/chat/seen'
 import { targets, yoursOn, type Face, type Reaction, type ReactionAbout } from '../../lib/chat/reactions'
@@ -36,11 +37,13 @@ import { Appearing, Swap } from './Appearing'
 import { ChatComposer, type OpenDecision } from './ChatComposer'
 import { Reactions } from './Reactions'
 import { Learned } from './Learned'
-import { ReplyQuote } from './ReplyQuote'
+import { ChangesQuote, ReplyQuote } from './ReplyQuote'
 import { ChatFiles } from './ChatFiles'
 import { FixIt, WorkPiece, type TeamView } from './WorkPiece'
-import { Markdown } from '../ui/Markdown'
+import { InlineMarkdown } from '../ui/Markdown'
 import { earlierTries, triedAgain, tryingAgain } from '../../lib/chat/tries'
+import { fetchMoveStatus, movedLine } from '../../lib/team-file/moveOntoMyAgents'
+import { STATE_WORDS as WORDS } from '../../lib/state/words'
 
 /** Saving the team before work starts: the revision the run is pinned to, or why it could not. */
 export type Prepared = { ok: true; revision: string | null } | { ok: false; error: string }
@@ -61,6 +64,10 @@ interface TeamChatProps {
   answerRunId?: string | null
   /** A document answer's card was opened. */
   onOpenAnswer: (runId: string) => void
+  /** The piece whose record, Details, that pane shows; absent, any piece it shows but for its answer. */
+  recordRunId?: string | null
+  /** The newest piece is done, and hands over what it made (ADR 0077). */
+  onHandOver?: (runId: string, made: Omit<HandOver, 'runId'>) => void
   /** Why nothing can be sent right now, when that is so. */
   blocked: string | null
   /** Save the team before work starts, as Run always has (TNG89 §1.4). */
@@ -77,6 +84,8 @@ interface TeamChatProps {
   onStarted?: (runId: string) => void
   /** A message Details asked to show — its timeline's "Read the message" — in the piece it belongs to. */
   reveal?: { runId: string; id: string; at: number } | null
+  /** The run a link opened the chat on (`?run=`): the chat reads back to its piece and shows it. */
+  landAt?: string | null
   /** A finding of an answer's review, opened in Details: its record, or the agent's work. */
   onOpenFinding: (runId: string, line: ReceiptLine) => void
   /** The newest piece's run as it changes, or null for none: an agent's chat shows its figure at work by it. */
@@ -88,9 +97,10 @@ interface TeamChatProps {
   /**
    * A part of a file marked in the reader beside the chat (ADR 0077): the box takes it as a reply
    * to write about, or — with `words` — it is sent at once, to `agent` (the agent who made the file
-   * unless another was chosen). `at` tells one ask from the next.
+   * unless another was chosen). A part that isn't words brings its `pictures` (ADR 0091), which go
+   * with it: in the box as files, or sent with it. `at` tells one ask from the next.
    */
-  ask?: { reply: ReplyTo; words?: string; agent?: string; at: number } | null
+  ask?: { reply: ReplyTo; words?: string; agent?: string; pictures?: readonly File[]; at: number } | null
   /**
    * The parts of files asked about in this chat, the one in the box now, and the team's agents as
    * their cards show them (for the reader's bubbles), whenever they change.
@@ -123,11 +133,11 @@ const ROSTER_KEY = 'loomwatch.chatRoster'
  * With `team.solo` it is one agent's own chat (its Chat tab): everything you write goes to that
  * agent, starting its work when it is free and joining its turn while it works, so there is no @.
  */
-export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, routine, detailsRunId, answerRunId = null, onOpenAnswer, blocked, prepare, onDetails, onTeamReview, onStale, onAlwaysAllow, announce, onNewest, onStarted, reveal = null, onOpenFinding, onNewestRun, startTeam = false, onStartTeamTaken, ask = null, onPassages, onConnectFolder }: TeamChatProps) {
+export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, routine, detailsRunId, answerRunId = null, recordRunId, onHandOver, onOpenAnswer, blocked, prepare, onDetails, onTeamReview, onStale, onAlwaysAllow, announce, onNewest, onStarted, reveal = null, landAt = null, onOpenFinding, onNewestRun, startTeam = false, onStartTeamTaken, ask = null, onPassages, onConnectFolder }: TeamChatProps) {
   const chat = useTeamChat(teamPath)
   // Pictures and files pasted or dropped in, kept as they are added (ADR 0082).
   const attachments = useChatAttachments(teamPath)
-  const { add: addFiles, clear: clearFiles } = attachments
+  const { add: addFiles, clear: clearFiles, remove: removeFile } = attachments
   // A drag of files from outside the page over the chat: drawn as the gold stitch round it. Set on
   // the way in and out only, never on every move, so nothing re-renders while it is dragged about.
   const [dropping, setDropping] = useState(false)
@@ -207,10 +217,17 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
       const waiting = run.waitingOn
       if (!waiting) continue
       const from = waiting.kind === 'review_stop' ? waiting.handoverFrom ?? waiting.node : waiting.node
-      return { runId: run.runId, node: waiting.node, kind: waiting.kind, from, fromName: team.names.get(from) ?? from, expiresAt: waiting.expiresAt ?? null }
+      const backTo = waiting.kind === 'review_stop' && waiting.sendBackAvailable ? waiting.handoverFrom ?? null : null
+      return { runId: run.runId, node: waiting.node, kind: waiting.kind, from, fromName: team.names.get(from) ?? from, backTo, expiresAt: waiting.expiresAt ?? null }
     }
     return null
   }, [chat.live, team.names])
+  // A quote of what waited on you goes once it is answered, however it was.
+  const [seenDecision, setSeenDecision] = useState(decision)
+  if (decision?.runId !== seenDecision?.runId || decision?.node !== seenDecision?.node) {
+    setSeenDecision(decision)
+    if (answersDecision(seenDecision, replyTo) && !answersDecision(decision, replyTo)) setReplyTo(null)
+  }
   // While nothing waits on you, the newest stop's way out is the screen's one gold fill.
   const fixFill = useMemo(() => filledFix(shownItems, decision), [shownItems, decision])
 
@@ -229,19 +246,26 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
     else setShowJump(true)
   }, [lastKey])
   // And keeps to it while what is there grows — the agents' talk read in, an answer streaming —
-  // unless you are reading further up, or the growth is something you just opened yourself.
+  // unless you are reading further up, or the growth is something you just opened yourself. So it
+  // does when the box below grows into the chat's room (a reply's quote, a longer note), however
+  // it was opened, so a review's buttons stay over the note they send.
   const touched = useRef(0)
   useEffect(() => {
     const element = scroller.current
     if (!element || typeof ResizeObserver === 'undefined') return
     let height = element.scrollHeight
+    let room = element.clientHeight
     const sizes = new ResizeObserver(() => {
       const grew = element.scrollHeight > height
+      const shorter = element.clientHeight < room
       height = element.scrollHeight
-      if (grew && atBottom.current && restore.current === null && performance.now() - touched.current > 600) element.scrollTop = element.scrollHeight
+      room = element.clientHeight
+      if (!atBottom.current || restore.current !== null) return
+      if (shorter || (grew && performance.now() - touched.current > 600)) element.scrollTop = element.scrollHeight
     })
     const watch = () => {
       sizes.disconnect()
+      sizes.observe(element)
       for (const child of element.children) sizes.observe(child)
     }
     watch()
@@ -360,22 +384,48 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
 
   useEffect(() => { resend.current = send }, [send])
 
-  // What happened to a dropped folder, said over the message box for a while.
-  const [folderNote, setFolderNote] = useState<string | null>(null)
+  // What happened, such as to a dropped folder, said over the message box for a while.
+  const [boxNote, setBoxNote] = useState<string | null>(null)
   useEffect(() => {
-    if (!folderNote) return
-    const timer = window.setTimeout(() => setFolderNote(null), 8000)
+    if (!boxNote) return
+    const timer = window.setTimeout(() => setBoxNote(null), 8000)
     return () => window.clearTimeout(timer)
-  }, [folderNote])
+  }, [boxNote])
+  // The move onto My agents changed what an agent of this team runs (ADR 0094): said here each time
+  // the chat opens, until it is let go or a message is sent.
+  const [moved, setMoved] = useState<{ line: string; said: string } | null>(null)
+  useEffect(() => {
+    let live = true
+    fetchMoveStatus().then((status) => {
+      const key = Object.keys(status?.changed ?? {}).find((path) => path === teamPath || teamPath.endsWith(`/${path}`))
+      if (!live || !status || !key) return
+      const said = `loomwatch:moved-said:${key}`
+      try {
+        if (window.localStorage.getItem(said)) return
+      } catch {
+        // Nowhere to remember it was let go: it is said each time.
+      }
+      setMoved({ line: movedLine(status.changed[key]), said })
+    }, () => {})
+    return () => { live = false }
+  }, [teamPath])
+  const letMovedGo = useCallback(() => {
+    setMoved((current) => {
+      if (current) {
+        try { window.localStorage.setItem(current.said, '1') } catch { /* said again next time */ }
+      }
+      return null
+    })
+  }, [])
   const connectFolder = useCallback(async (names: readonly string[]) => {
     if (names.length === 0) return
     if (!onConnectFolder) {
       const who = team.solo ? team.names.get(team.solo) ?? team.solo : null
-      setFolderNote(who ? `A folder can’t go in a chat. Give it to ${who} in Build, under Folder.` : 'A folder can’t go in a chat. Give it to your agents in Build, under Folder.')
+      setBoxNote(who ? `A folder can’t go in a chat. Give it to ${who} in Build, under Folder.` : 'A folder can’t go in a chat. Give it to your agents in Build, under Folder.')
       return
     }
     const said = await onConnectFolder(names[0])
-    if (said) setFolderNote(said)
+    if (said) setBoxNote(said)
   }, [onConnectFolder, team.solo, team.names])
   useEffect(() => {
     takeFiles.current = (transfer) => {
@@ -385,15 +435,19 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
     }
   }, [addFiles, connectFolder])
 
+  // Your answer to a question, or a review's note sent back with the work, as its Send back does.
   const answer = useCallback(async (open: OpenDecision, text: string) => {
+    const sendBack = open.kind === 'review_stop' ? open.backTo : undefined
+    if (sendBack === null) return false
+    follow.pin()
     try {
-      chat.applyRun(await answerRun(open.runId, open.node, text))
+      chat.applyRun(await answerRun(open.runId, open.node, text, sendBack))
       return true
     } catch (caught) {
       announce(caught instanceof Error ? caught.message : String(caught))
       return false
     }
-  }, [chat, announce])
+  }, [chat, announce, follow])
 
   const tryAgain = useCallback((item: Extract<ChatItem, { kind: 'work' }>) => {
     const text = item.request?.text ?? item.run.prompt
@@ -501,18 +555,22 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
       setMentioned((count) => count + 1)
     },
   }
-  // An @mention in a message shows as its agent's chip (SaidText); in one agent's own chat an @ goes nowhere.
-  const mentions = useMemo<ChatMentions | null>(() => (team.solo ? null : { agents, hue: (id) => team.hues.get(id) ?? 1 }), [agents, team.hues, team.solo])
+  // An agent @mentioned in what anyone said shows as its chip (SaidText): the chat's agents, and the
+  // person's other agents a run may bring in (ADR 0092), in an agent's own chat too.
+  const mentions = useMemo<ChatMentions>(() => ({
+    agents: [...team.names].filter(([id]) => !team.operators.has(id)).map(([id, name]) => ({ id, name })),
+    hue: (id) => team.hues.get(id) ?? 1,
+  }), [team.names, team.operators, team.hues])
   // Reply under something said: the box takes it as the message being answered, addressed with
   // the @ of whoever said it (or `to`, a teammate asked about a part of a file instead), so it goes
   // to that agent as any @ does (ADR 0051).
   const startReply = (reply: ReplyTo, to?: string) => {
-    const answers = decision !== null && reply.runId === decision.runId && reply.from === decision.from
-      && (decision.kind === 'question' ? reply.kind === 'question' && reply.to === null : reply.kind === 'handover')
-    if (answers) {
-      // What the team waits on you for is answered in the box already: Reply goes back to it.
-      setReplyTo(null)
+    if (answersDecision(decision, reply)) {
+      // What the team waits on you for is answered in the box: Reply goes back to answering it,
+      // with what it answers quoted above the box. Its @ would send nothing, so none is added.
+      setReplyTo(replyOf(reply))
       setAnswerAsked((count) => count + 1)
+      setMentioned((count) => count + 1)
       return
     }
     setReplyTo(replyOf(reply))
@@ -525,13 +583,35 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
   // asks the teammate whose job it is (ADR 0077). A box that cannot send shows why with the part
   // in it.
   const asked = useRef<number | null>(null)
+  // The pictures a part that isn't words put in the box (ADR 0091), by the quote they came with:
+  // letting go of the quote lets go of them.
+  const partFiles = useRef<{ messageId: string; ids: string[] } | null>(null)
+  useEffect(() => {
+    const brought = partFiles.current
+    if (!brought || replyTo?.messageId === brought.messageId) return
+    for (const id of brought.ids) removeFile(id)
+    partFiles.current = null
+  }, [replyTo, removeFile])
   const takeAsk = useRef<(next: NonNullable<typeof ask>) => void>(() => {})
   useEffect(() => {
     takeAsk.current = (next) => {
       const author = members.find((agent) => agent.id === (next.agent ?? next.reply.from))
-      if (!next.words || blocked || !author) { startReply(next.reply, author?.id); return }
+      const pictures = next.pictures ?? []
+      // Written about in the box: the part's pictures wait in it with the quote, as files you added
+      // do, and go with the quote when it is replaced or let go of.
+      const inTheBox = (to?: string) => {
+        startReply(next.reply, to)
+        for (const id of partFiles.current?.ids ?? []) removeFile(id)
+        partFiles.current = pictures.length > 0 ? { messageId: next.reply.messageId, ids: addFiles([...pictures]) } : null
+      }
+      if (!next.words || blocked || !author) { inTheBox(author?.id); return }
       const text = soloAgent ? next.words : withMention(next.words, author, agents)
-      void send(text, { kind: 'agent', agent: author.id }, false, undefined, replyOf(next.reply))
+      const to = { kind: 'agent', agent: author.id } as const
+      if (pictures.length === 0) { void send(text, to, false, undefined, replyOf(next.reply)); return }
+      // Sent at once with its pictures, kept first; a picture that can't be kept leaves the question
+      // in the box, which says why and sends it from there.
+      void Promise.all(pictures.map((picture) => uploadChatFile(teamPath, picture, picture.name)))
+        .then((kept) => send(text, to, false, undefined, replyOf(next.reply), kept), () => { inTheBox(author.id); setDraft(text) })
     }
   })
   useEffect(() => {
@@ -542,7 +622,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
   // The parts of files asked about here, for the reader to light; compared by what they say, so a
   // page of the chat read again changes nothing.
   const passagesSaid = useMemo(() => JSON.stringify(askedPassages(chat.items, chat.pending)), [chat.items, chat.pending])
-  const askingNow = replyTo?.kind === 'passage' ? replyTo.text : null
+  const askingNow = replyTo?.kind === 'passage' ? partId(replyTo) : null
   const facesSaid = JSON.stringify(members.flatMap((member) => faces.facts(member.id) ?? []))
   useEffect(() => {
     onPassages?.(JSON.parse(passagesSaid) as AskedPassage[], askingNow, JSON.parse(facesSaid) as AgentFacts[])
@@ -571,6 +651,28 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
   // A note shown from outside the chat (`note:<id>`: the answers under it, from the reader), or by a search, whichever was last.
   const revealedNote = shown?.id.startsWith('note:') ? { id: shown.id.slice('note:'.length), at: shown.at } : null
   const noteFlash = revealedNote && (!noteShown || revealedNote.at > noteShown.at) ? revealedNote : noteShown
+  // A link to a run opens the chat at its piece, as a found message is opened: older pages are read
+  // until it is there, then its request comes into view, lit for a moment. A run that is no longer
+  // in the chat leaves the chat where it was; its Details still opens.
+  const [linked, setLinked] = useState(landAt)
+  const [seenLandAt, setSeenLandAt] = useState(landAt)
+  if (landAt !== seenLandAt) {
+    setSeenLandAt(landAt)
+    setLinked(landAt)
+  }
+  useEffect(() => {
+    if (!linked || !chat.loaded) return
+    if (!chat.items.some((item) => item.kind === 'work' && item.run.runId === linked)) {
+      if (chat.loadingOlder) return
+      if (chat.more) { loadOlder(); return }
+      setLinked(null)
+      return
+    }
+    setLinked(null)
+    setShown({ runId: linked, id: revealId(linked, 'request'), at: Date.now() })
+    // `loadOlder` is read as it is now; what moves the landing on is the chat.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linked, chat.loaded, chat.items, chat.more, chat.loadingOlder])
   const [opening, setOpening] = useState<{ piece: FoundPiece; passage: FoundPassage | null } | null>(null)
   const [landingMissed, setLandingMissed] = useState(false)
   const openFound = (piece: FoundPiece, passage: FoundPassage | null) => {
@@ -768,7 +870,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
             </>}
             {suggestion && (
               <button type="button" className="btn tc-suggest" onClick={() => setDraft(soloAgent ? suggestion : `@team ${suggestion}`)}>
-                <Play size={13} aria-hidden="true" />{soloAgent ? suggestion : `@team ${suggestion}`}
+                <Play size={13} aria-hidden="true" />{soloAgent ? '' : '@team '}<InlineMarkdown clickable={false}>{suggestion}</InlineMarkdown>
               </button>
             )}
           </div>
@@ -793,7 +895,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
                 {newDay && <li className="tc-day" aria-hidden="true"><span>{dayLabel(at)}</span></li>}
                 {item.kind === 'work'
                   ? <WorkPiece item={item} newest={item.run.runId === newestRun} approveFilled={!decision || decision.runId === item.run.runId} fixFilled={fixFill === item.run.runId} reveal={shown?.runId === item.run.runId ? shown : null} followed={item.run.followsRunId ? runs.get(item.run.followsRunId) ?? null : null} earlier={earlierTries(item.run, runs)} continuedFrom={continuedFrom.has(item.run.runId)} team={team} draft={draft}
-                      detailsOpen={detailsRunId === item.run.runId} answerOpen={answerRunId === item.run.runId} onDetails={onDetails} onOpenAnswer={onOpenAnswer} onRun={chat.applyRun} onBaton={onBaton} onLine={line.onLine} onTryAgain={tryAgain} onContinue={keepGoing}
+                      detailsOpen={detailsRunId === item.run.runId} answerOpen={answerRunId === item.run.runId} recordOpen={recordRunId === undefined ? undefined : recordRunId === item.run.runId} onHandOver={onHandOver} onDetails={onDetails} onOpenAnswer={onOpenAnswer} onRun={chat.applyRun} onBaton={onBaton} onLine={line.onLine} onTryAgain={tryAgain} onContinue={keepGoing}
                       onDecided={() => setDraft('')} onAlwaysAllow={onAlwaysAllow} onOpenFinding={onOpenFinding} onReply={startReply} onShowReplied={showReplied} onReact={chat.react} onUndoLesson={undoLearned} onTellAllLesson={tellAllLearned} />
                   : <TeamNote message={item.message} reactions={item.reactions} lessons={item.lessons} fixFill={fixFill} name={name} hue={(id) => team.hues.get(id) ?? 1} flash={noteFlash?.id === item.message.id ? noteFlash.at : null} onReply={startReply} onShowReplied={showReplied} onStart={() => void startNote(item.message)} onReact={chat.react} onUndoLesson={undoLearned} onTellAllLesson={tellAllLearned} />}
               </Fragment>
@@ -829,12 +931,14 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
           setReplyTo(null)
           attachments.clear()
           const ok = await send(text, to, now, undefined, reply, files)
+          if (ok) letMovedGo()
           if (!ok && reply) setReplyTo((current) => current ?? reply)
           if (!ok && files.length > 0) attachments.restore(files)
           return ok
         }}
         attachments={attachments}
-        notice={folderNote}
+        notice={boxNote ?? moved?.line ?? null}
+        onDismissNotice={boxNote ? undefined : letMovedGo}
         onAnswer={answer}
         mentioned={mentioned}
         solo={soloAgent}
@@ -872,7 +976,7 @@ function SewnMark() {
 
 // The words the chat uses for work everywhere: ready to take it, at it, waiting on you, or stopped
 // by an error. Each face glows its state's colour (team-chat.css).
-const STATE_WORDS = { working: 'working', waiting: 'waiting for you', idle: 'ready', failed: 'failed', away: 'offline' } as const
+const STATE_WORDS = { working: WORDS.working, waiting: WORDS.waiting, idle: WORDS.ready, failed: WORDS.failed, away: 'offline' } as const
 type Presence = keyof typeof STATE_WORDS
 
 /** The agents whose newest piece of work stopped at them with an error, until they work again. */
@@ -1020,7 +1124,8 @@ function TeamNote({ message, reactions, lessons, fixFill = null, name, hue, flas
             {yours(<div className="chat-bubble">
               {message.replyTo && <ReplyQuote reply={message.replyTo} name={name} onShow={onShowReplied(message.replyTo)} />}
               {message.files && <ChatFiles files={message.files} />}
-              <div className="chat-text tc-plain"><SaidText text={message.text} /></div>
+              <div className="chat-text"><SaidText text={message.text} /></div>
+              {message.changes?.length ? <ChangesQuote changes={message.changes} onShow={onShowReplied} /> : null}
             </div>)}
           </div>
         </li>
@@ -1029,7 +1134,7 @@ function TeamNote({ message, reactions, lessons, fixFill = null, name, hue, flas
             {face(said.from)}
             <div className="chat-stack">
               <div className={`chat-meta hue-${hue(said.from)}`}><span className="chat-name">{name(said.from)}</span><span className="tc-to">to you</span><time>{clockTime(said.at)}</time></div>
-              {reactOn(targets.reply(said.from), `${name(said.from)}'s answer`)(<div className="chat-bubble"><div className="chat-text"><Markdown>{said.text}</Markdown></div></div>)}
+              {reactOn(targets.reply(said.from), `${name(said.from)}'s answer`)(<div className="chat-bubble"><div className="chat-text"><SaidText text={said.text} /></div></div>)}
               {onReply && said.text.trim() && (
                 <p className="chat-under">
                   <button type="button" className="chat-reply" aria-label={`Reply to ${name(said.from)}'s answer`}
@@ -1075,7 +1180,8 @@ function TeamNote({ message, reactions, lessons, fixFill = null, name, hue, flas
         {yours(<div className="chat-bubble">
           {message.replyTo && <ReplyQuote reply={message.replyTo} name={name} onShow={onShowReplied(message.replyTo)} />}
           {message.files && <ChatFiles files={message.files} />}
-          <div className="chat-text tc-plain"><SaidText text={message.text} /></div>
+          <div className="chat-text"><SaidText text={message.text} /></div>
+          {message.changes?.length ? <ChangesQuote changes={message.changes} onShow={onShowReplied} /> : null}
         </div>)}
         <div className="chat-under">
           <span>Starts nothing · the team reads it next time</span>
@@ -1129,7 +1235,7 @@ function Pending({ message, name, onRetry, onEdit, onDismiss }: { message: Pendi
         <div className="chat-bubble">
           {message.replyTo && <ReplyQuote reply={message.replyTo} name={name} />}
           <ChatFiles files={message.files} />
-          <div className="chat-text tc-plain"><SaidText text={message.text} /></div>
+          <div className="chat-text"><SaidText text={message.text} /></div>
         </div>
         {message.state === 'failed' && (
           <div className="chat-under tc-pending-acts">

@@ -65,4 +65,11 @@ describe('BuildHeading checkup', () => {
     rerender(<BuildHeading agentCount={1} isValid checking={false} saveState="saved" onRun={vi.fn()} />)
     expect(screen.queryByText(/tokens a run/)).not.toBeInTheDocument()
   })
+
+  it('puts Apply where the getting-started guide points while Ask’s team is on the canvas', () => {
+    render(<BuildHeading agentCount={2} isValid checking={false} saveState="dirty" onRun={vi.fn()} proposal={{ isNew: true, from: 'Ask LoomWatch', lines: [], applying: false, error: null, onApply: vi.fn(), onDiscard: vi.fn() }} />)
+    expect(screen.getByRole('heading', { name: 'Check your new team' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Apply' })).toHaveAttribute('data-tour', 'apply-proposal')
+    expect(screen.queryByRole('button', { name: /Run team/ })).toBeNull()
+  })
 })

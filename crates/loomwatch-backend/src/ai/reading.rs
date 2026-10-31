@@ -164,6 +164,9 @@ struct ReaderInner {
     /// never written back on.
     settings: std::sync::Mutex<()>,
     resting_until: std::sync::Mutex<Option<Instant>>,
+    /// Where each call is counted, with every other model call, for the Usage page: set once the
+    /// run history is open (`count_in`).
+    archive: std::sync::OnceLock<crate::archive::EventArchive>,
 }
 
 /// The Decisions API beside `OpenRouter`'s `…/api/v1`: `…/api/alpha/decisions`.
@@ -369,6 +372,7 @@ impl Reader {
                 turn: tokio::sync::Mutex::new(()),
                 settings: std::sync::Mutex::new(()),
                 resting_until: std::sync::Mutex::new(None),
+                archive: std::sync::OnceLock::new(),
             }),
         }
     }
@@ -565,6 +569,9 @@ impl Reader {
         let answer = self.ask(client, &key, &state).await;
         // A call OpenRouter answered was paid for, whether or not its answer can be read.
         let cost = answer.as_ref().map_or(0.0, cost_of);
+        if let Ok(body) = &answer {
+            self.count(body, cost).await;
+        }
         let reading = answer.and_then(|body| {
             read_answer(&body)
                 .ok_or_else(|| "OpenRouter's answer didn't say what the agent does.".to_owned())
@@ -583,6 +590,43 @@ impl Reader {
                 self.rest();
                 Err(Refusal::new(StatusCode::BAD_GATEWAY, "failed", error))
             }
+        }
+    }
+
+    /// Count each call from now on with every other model call, in `archive`, so the Usage page
+    /// shows what choosing models cost among `LoomWatch`'s own help.
+    pub(crate) fn count_in(&self, archive: crate::archive::EventArchive) {
+        let _ = self.inner.archive.set(archive);
+    }
+
+    /// Count one answered call, at what `OpenRouter` said it cost.
+    async fn count(&self, body: &Value, cost: f64) {
+        let Some(archive) = self.inner.archive.get() else {
+            return;
+        };
+        let tokens = |name: &str| {
+            body.pointer(&format!("/usage/{name}"))
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+        };
+        let usage = crate::agent::Usage {
+            input_tokens: tokens("input_tokens"),
+            output_tokens: tokens("output_tokens"),
+            cost_usd: cost,
+            ..crate::agent::Usage::default()
+        };
+        let counted = archive
+            .count_call(&crate::archive::OwnCall {
+                session: crate::archive::CHOOSING_MODELS,
+                agent: crate::archive::CHOOSING_MODELS,
+                kind: crate::archive::CHOOSING_MODELS,
+                source: crate::ai::Source::OpenRouter.as_str(),
+                model: READING_MODEL,
+                usage: &usage,
+            })
+            .await;
+        if let Err(error) = counted {
+            eprintln!("warning: the call that chose a model was not counted: {error:#}");
         }
     }
 
@@ -946,6 +990,46 @@ mod tests {
         assert_eq!(body["readings"], 0);
         assert_eq!(body["today"], 1);
         assert!((body["spent"].as_f64().unwrap() - 0.000_02).abs() < 1e-12);
+    }
+
+    /// Choosing a model is counted with every other model call, so the Usage page shows it among
+    /// `LoomWatch`'s own help, at what `OpenRouter` said it cost.
+    #[tokio::test]
+    async fn a_reading_is_counted_with_every_other_model_call() {
+        let state = folder();
+        let (url, _, _) = fake_decisions(StatusCode::OK, gathers()).await;
+        let reader = Reader::new(&state.0, &decisions_url(url.trim_end_matches("/key")));
+        let archive = crate::archive::EventArchive::new(crate::db::Db::temp().await);
+        reader.count_in(archive.clone());
+        reader.set_enabled(true);
+        let setup: Setup = serde_json::from_value(gatherer()["setup"].clone()).unwrap();
+        let client = reqwest::Client::new();
+        reader
+            .read(
+                Some(&client),
+                async || Ok(ApiKey::new("sk-or-v1-good")),
+                &setup,
+            )
+            .await
+            .expect("read");
+        let report = archive
+            .model_usage(chrono::Utc::now() + chrono::Duration::minutes(1), 30)
+            .await
+            .unwrap();
+        assert_eq!(report.features.len(), 1);
+        let choosing = &report.features[0];
+        assert_eq!(
+            (choosing.feature.as_str(), choosing.source.as_str()),
+            ("choosing_models", "openrouter")
+        );
+        assert_eq!(
+            (choosing.tally.calls, choosing.tally.input_tokens),
+            (1, 420)
+        );
+        assert!((choosing.tally.cost_usd - 0.000_017_6).abs() < 1e-12);
+        // LoomWatch's own help, not an agent's work.
+        assert!(report.agents.is_empty());
+        assert_eq!(report.sources[0].loomwatch, report.sources[0].total);
     }
 
     #[tokio::test]

@@ -15,6 +15,17 @@ use loomwatch_backend::runs::RunRegistry;
 #[derive(Debug, Parser)]
 #[command(version, about)]
 struct Cli {
+    /// A folder of `<id>.md` files, each in place of the fixed text agents are given under that
+    /// id, for `serve` and `run` (`--dump-prompt-blocks` writes them all). For the quality bench:
+    /// only a build with the `prompt-overrides` feature has this.
+    #[cfg(feature = "prompt-overrides")]
+    #[arg(
+        long,
+        env = "LOOMWATCH_PROMPT_OVERRIDES",
+        global = true,
+        value_name = "DIR"
+    )]
+    prompt_overrides: Option<PathBuf>,
     #[command(subcommand)]
     command: Commands,
 }
@@ -72,6 +83,20 @@ enum Commands {
         )]
         allow_container_listener: bool,
     },
+    /// Show `LoomWatch` on the other computer this one is connected to (ADR 0102): this computer's
+    /// own address answers, and everything goes on to the other computer with this one's key.
+    Connect {
+        #[arg(long, default_value = "127.0.0.1:3000")]
+        listen: SocketAddr,
+        #[command(flatten)]
+        database: DatabaseArgs,
+    },
+    /// Stop being connected to another computer: its address and this computer's key for it are
+    /// forgotten here.
+    Disconnect {
+        #[command(flatten)]
+        database: DatabaseArgs,
+    },
     /// Run one turn of a team's entrypoint agent.
     Run {
         #[arg(long)]
@@ -114,6 +139,12 @@ enum Commands {
     /// opens this way, in a process of its own, so a damaged file costs nothing else.
     #[command(hide = true)]
     ReadDocument { path: PathBuf },
+    /// Write every fixed text agents are given, as `--prompt-overrides` leaves it, to
+    /// `<DIR>/<id>.md`, and list the ids with the placeholders each one fills. For the quality
+    /// bench: only a build with the `prompt-overrides` feature has this.
+    #[cfg(feature = "prompt-overrides")]
+    #[command(long_flag = "dump-prompt-blocks")]
+    DumpPromptBlocks { dir: PathBuf },
 }
 
 /// A durable registry with its cache already filled from the `runs` table, and every run the last
@@ -255,7 +286,23 @@ async fn main() -> Result<()> {
     if let Ok(program) = std::env::current_exe() {
         loomwatch_backend::documents::use_helper(program);
     }
-    match Cli::parse().command {
+    let cli = Cli::parse();
+    // Before anything gives an agent a prompt. A folder that holds anything but known blocks stops
+    // the start here.
+    #[cfg(feature = "prompt-overrides")]
+    if let Some(dir) = &cli.prompt_overrides
+        && matches!(
+            cli.command,
+            Commands::Serve { .. } | Commands::Run { .. } | Commands::DumpPromptBlocks { .. }
+        )
+    {
+        let replaced = loomwatch_backend::prompt_blocks::install(dir)?;
+        eprintln!(
+            "prompt overrides: {replaced} block(s) replaced from {}",
+            dir.display()
+        );
+    }
+    match cli.command {
         Commands::Serve {
             listen,
             teams_root,
@@ -282,6 +329,9 @@ async fn main() -> Result<()> {
                 "the run archive exposes exact execution evidence and requires a loopback listener (or --allow-container-listener behind a loopback-only published port)"
             );
             let state_dir = database.state_dir()?;
+            // `LibreOffice` kept the pages of decks and Word documents here until the reader drew
+            // them itself (ADR 0091): nothing reads them now.
+            let _ = std::fs::remove_dir_all(state_dir.join("pages"));
             let database = database.database()?;
             // Held until the process ends: one LoomWatch per run history file.
             let _claim = loomwatch_backend::db::claim(&database)?;
@@ -300,6 +350,8 @@ async fn main() -> Result<()> {
             // can start a run. Nothing is read or fetched here: the key is read when the first
             // agent starts, and the model list when it is first asked for.
             let ai = loomwatch_backend::ai::Ai::new(&state_dir);
+            // ADR 0106: choosing models is counted with every other model call.
+            ai.count_calls_in(opened.clone());
             loomwatch_backend::ai::install(ai.clone());
             // What the person told their agents about themselves (ADR 0074), which every session
             // reads when it opens. Read once here; the About you page changes it in memory too.
@@ -326,6 +378,39 @@ async fn main() -> Result<()> {
                 state_dir.clone(),
                 connected_tools.clone(),
             ));
+            // Every agent lives in My agents (ADR 0094): before anything moves a team onto them,
+            // a copy of every team file and agent file is kept in the state folder, once.
+            if let Some(folder) = loomwatch_backend::my_agents::back_up_once(
+                &state_dir,
+                &teams_root,
+            )
+            .with_context(|| {
+                format!(
+                    "failed to keep a copy of your teams in {} before moving them onto My agents",
+                    state_dir.display()
+                )
+            })? {
+                println!(
+                    "loomwatchd kept a copy of your teams and agents in {}",
+                    folder.display()
+                );
+            }
+            // Projects hold the work (ADR 0097): before the app moves each team into a project of
+            // its own, a copy of every team file is kept in the state folder, once.
+            if let Some(folder) = loomwatch_backend::projects::back_up_once(&state_dir, &teams_root)
+                .with_context(|| {
+                    format!(
+                        "failed to keep a copy of your teams in {} before moving them into \
+                             projects",
+                        state_dir.display()
+                    )
+                })?
+            {
+                println!(
+                    "loomwatchd kept a copy of your teams in {} before moving them into projects",
+                    folder.display()
+                );
+            }
             // Which team files may run (ADR 0048), kept outside the teams folder. Opened before
             // anything can start a run, and the first time, it approves the teams already there.
             let approvals =
@@ -340,6 +425,16 @@ async fn main() -> Result<()> {
             let address = listener.local_addr()?;
             println!("loomwatchd listening on http://{address}");
             let registry = recovered_registry(&opened).await;
+            // Changes left on a file that were waiting for their agent's turn when LoomWatch
+            // stopped wait on the file again, to be sent again (ADR 0107).
+            match loomwatch_backend::changes::ChangeStore::new(opened.db().clone())
+                .settle_after_restart()
+                .await
+            {
+                Ok(0) => {}
+                Ok(waiting) => println!("{waiting} changes left on files wait to be sent again"),
+                Err(error) => eprintln!("warning: could not settle changes left on files: {error}"),
+            }
             // Ctrl-C (and the launcher's stop) ends the daemon. The archive's writer may still
             // hold the last fraction of a second of events; they are written before it exits.
             tokio::spawn(flush_then_exit_on_signal(opened.clone()));
@@ -399,6 +494,7 @@ async fn main() -> Result<()> {
                     registry: registry.clone(),
                     listen: address,
                     ask_model: std::env::var("LOOMWATCH_ASK_MODEL").ok(),
+                    home: loomwatch_backend::platform::home_dir(),
                 },
             );
             // ADR 0052: says when a newer LoomWatch is out and how to install it. The check runs
@@ -407,6 +503,8 @@ async fn main() -> Result<()> {
             // daemon exit for it.
             let updates = loomwatch_backend::updates::Updates::from_env(&state_dir);
             updates.spawn_start_check();
+            // Pressed once this computer is connected to LoomWatch on another one (ADR 0102).
+            let switch = loomwatch_backend::devices::connected::switch();
             let updates_api = loomwatch_backend::updates::router(
                 updates.clone(),
                 registry.clone(),
@@ -415,6 +513,14 @@ async fn main() -> Result<()> {
             let pinned = loomwatch_backend::pinned::Pinned::open(&state_dir, &teams_root);
             loomwatch_backend::pinned::install(pinned.clone());
             let team_requests_archive = archive.clone();
+            let changes_archive = archive.clone();
+            // ADR 0105: what to ask the pinned agent next, under the island's box.
+            let suggestions = loomwatch_backend::suggestions::Suggestions::new(
+                pinned.clone(),
+                &teams_root,
+                archive.clone(),
+                Some(&state_dir),
+            );
             let mut app = loomwatch_backend::spa::router()
                 .merge(control.router())
                 .merge(api)
@@ -431,6 +537,7 @@ async fn main() -> Result<()> {
                 // ADR 0083: the agent pinned to the notch, messaged from the island; it may ask the
                 // person's teams, each started only when they press Start.
                 .merge(loomwatch_backend::pinned::router(pinned))
+                .merge(loomwatch_backend::suggestions::router(suggestions))
                 .merge(loomwatch_backend::team_requests::router(
                     team_requests_archive,
                     teams_root.clone(),
@@ -455,20 +562,67 @@ async fn main() -> Result<()> {
                     state_dir.clone(),
                     loomwatch_backend::platform::home_dir().unwrap_or_default(),
                 ));
+                // Changing a file in the reader, with a copy kept first to put it back (ADR 0107).
+                // Changes left on a file for its agents keep their copies in the same place.
+                let kept = loomwatch_backend::kept::Kept::open(&state_dir);
+                app = app.merge(loomwatch_backend::kept::router(kept.clone(), &teams_root));
+                app = app.merge(loomwatch_backend::changes::router(
+                    changes_archive,
+                    teams_root.clone(),
+                    registry.clone(),
+                    kept,
+                ));
+                // Other devices connected to this computer (ADR 0102): their door, on this
+                // computer's own address, which the person's own Tailscale brings them to; and
+                // the list and pairing codes. Never behind a container's published port.
+                let devices = loomwatch_backend::devices::Devices::open(&state_dir);
+                let door = match loomwatch_backend::devices::door_address(
+                    std::env::var("LOOMWATCH_DEVICES_LISTEN").ok().as_deref(),
+                ) {
+                    Ok(Some(door)) if listen.ip().is_loopback() => {
+                        if loomwatch_backend::devices::open_door(devices.clone(), door, address)
+                            .await
+                        {
+                            loomwatch_backend::devices::api::Door::Open(door)
+                        } else {
+                            loomwatch_backend::devices::api::Door::Unavailable
+                        }
+                    }
+                    Ok(_) => loomwatch_backend::devices::api::Door::TurnedOff,
+                    Err(why) => {
+                        eprintln!("warning: {why}");
+                        loomwatch_backend::devices::api::Door::Unavailable
+                    }
+                };
+                app = app.merge(loomwatch_backend::devices::api::router(devices, door));
+                // Connecting this computer to LoomWatch on another one: once connected, this
+                // LoomWatch stops for the app to start it again, showing the other computer.
+                app = app.merge(loomwatch_backend::devices::connected::api_router(
+                    state_dir.clone(),
+                    loomwatch_backend::devices::connected::KeyPlace::open(&state_dir),
+                    switch.clone(),
+                ));
             }
-            // After "Update and restart": stop taking requests, give the open ones a moment (the
-            // app's live streams never end by themselves), then exit with the status that has the
-            // launcher install the release and start LoomWatch again.
+            // After "Update and restart", or connecting to another computer: stop taking
+            // requests, give the open ones a moment (the app's live streams never end by
+            // themselves), then exit with the status that has the app start LoomWatch again.
             let stopping = updates.clone();
+            let switching = switch.clone();
             let serving = axum::serve(listener, app)
                 .with_graceful_shutdown(async move {
-                    stopping.restart_requested().await;
+                    tokio::select! {
+                        _ = stopping.restart_requested() => {}
+                        () = loomwatch_backend::devices::connected::switched(&switching) => {}
+                    }
                 })
                 .into_future();
             let served = tokio::select! {
                 outcome = serving => outcome,
                 () = async {
-                    updates.restart_requested().await;
+                    tokio::select! {
+                        _ = updates.restart_requested() => {}
+                        () = loomwatch_backend::devices::connected::switched(&switch) => {}
+                    }
                     tokio::time::sleep(loomwatch_backend::updates::STOP_GRACE).await;
                 } => Ok(()),
             };
@@ -477,6 +631,20 @@ async fn main() -> Result<()> {
             if updates.restarting() {
                 std::process::exit(loomwatch_backend::updates::EXIT_TO_UPDATE);
             }
+            if *switch.borrow() {
+                std::process::exit(loomwatch_backend::devices::connected::EXIT_TO_SWITCH);
+            }
+        }
+        Commands::Connect { listen, database } => {
+            let state_dir = database.state_dir()?;
+            loomwatch_backend::devices::connected::serve_connected(listen, &state_dir).await?;
+            std::process::exit(loomwatch_backend::devices::connected::EXIT_TO_SWITCH);
+        }
+        Commands::Disconnect { database } => {
+            let state_dir = database.state_dir()?;
+            let keys = loomwatch_backend::devices::connected::KeyPlace::open(&state_dir);
+            loomwatch_backend::devices::connected::disconnect(&state_dir, &keys).await?;
+            println!("This computer runs its own LoomWatch again.");
         }
         Commands::Run {
             team,
@@ -523,6 +691,12 @@ async fn main() -> Result<()> {
         }
         Commands::ReadDocument { path } => {
             println!("{}", loomwatch_backend::documents::answer(&path));
+        }
+        #[cfg(feature = "prompt-overrides")]
+        Commands::DumpPromptBlocks { dir } => {
+            for line in loomwatch_backend::prompt_blocks::dump(&dir)? {
+                println!("{line}");
+            }
         }
     }
     Ok(())

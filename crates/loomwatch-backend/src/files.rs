@@ -16,6 +16,10 @@
 //! chat: [`read`] answers its text — the file itself, or the words of a PDF, Word, Excel or
 //! `PowerPoint` file — and [`raw`] answers a picture or a recording as it is. Nothing is run here:
 //! the page shows a web page in a sandbox of its own.
+//!
+//! Some of those files can be changed in the reader too (ADR 0107): [`writable`] says which, and
+//! both answers carry the file's [`version_of`], which a change names so a file that changed since
+//! it was read is not written over. The writing is `crate::kept`'s.
 
 use std::path::{Component, Path, PathBuf};
 use std::process::Stdio;
@@ -24,6 +28,7 @@ use std::time::SystemTime;
 use axum::http::StatusCode;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest as _, Sha256};
 
 use crate::api::{ApiError, resolve_existing_team_path};
 
@@ -409,14 +414,21 @@ pub(crate) struct FileText {
     pub(crate) truncated: bool,
     pub(crate) size_bytes: u64,
     pub(crate) modified_at: Option<String>,
+    /// The version of the file read ([`version_of`]), which a change to it names (ADR 0107).
+    pub(crate) version: Option<String>,
+    /// It can be changed in the reader ([`writable`]), and all of it was read: a text cut at
+    /// [`READ_MAX_BYTES`] is never written back.
+    pub(crate) editable: bool,
 }
 
 /// The most text the reader is sent. A report, a page or a table is far smaller; a log can be
 /// larger, and its start is what fits.
 pub(crate) const READ_MAX_BYTES: usize = 2 * 1024 * 1024;
 
-/// The largest picture or recording [`raw`] answers.
-const RAW_MAX_BYTES: u64 = 50 * 1024 * 1024;
+/// The largest picture, data or font file [`raw`] answers: a page takes them in whole, and so does
+/// a part of a picture cut out to be asked about. A recording or a PDF of any size is answered, a
+/// part at a time (ADR 0091).
+const WHOLE_MAX_BYTES: u64 = 50 * 1024 * 1024;
 
 /// Kinds whose bytes are text the reader shows as they are.
 const TEXT_KINDS: &[&str] = &["markdown", "text", "web", "data", "code"];
@@ -533,10 +545,110 @@ pub(crate) fn read(teams_root: &Path, requested: &Path) -> Result<FileText, ApiE
         truncated,
         size_bytes: metadata.len(),
         modified_at: metadata.modified().ok().map(iso),
+        version: version_of(&resolved).ok(),
+        // A document's words are read out of it, cut or not; its bytes are what a change writes.
+        editable: (extracted || !truncated) && writable_file(teams_root, &resolved),
     })
 }
 
-/// The media type a picture or a recording is answered with, by its extension.
+/// Which version of a file this is: the SHA-256 of its bytes, as a team file's revision is. A
+/// change made in the reader names the version it was made on, so a file that changed on disk
+/// since — an agent wrote it again — is not written over (ADR 0107). Blocking.
+pub(crate) fn version_of(path: &Path) -> std::io::Result<String> {
+    let mut file = std::fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    std::io::copy(&mut file, &mut hasher)?;
+    Ok(format!("sha256:{:x}", hasher.finalize()))
+}
+
+/// Files the reader changes besides those it is sent as text ([`is_text`]), from their bytes
+/// (ADR 0107): a deck's words and speaker notes, a Word document's paragraphs, a workbook's cells.
+const WRITABLE_EXTENSIONS: &[&str] = &["pptx", "pptm", "docx", "docm", "xlsx", "xlsm"];
+
+/// The file `requested` names, if the reader may change it (ADR 0107): an existing file of a kind
+/// it changes ([`is_text`], [`WRITABLE_EXTENSIONS`]) in a place it may write ([`writable_place`]).
+/// Anything else is refused, saying why. Blocking: a path outside the teams root is checked against
+/// the folders the teams were given.
+pub(crate) fn writable(teams_root: &Path, requested: &Path) -> Result<PathBuf, ApiError> {
+    let resolved = existing(teams_root, requested)?;
+    let name = resolved.file_name().map_or_else(
+        || requested.display().to_string(),
+        |name| name.to_string_lossy().into_owned(),
+    );
+    if !writable_kind(&resolved) {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("{name} can't be changed in LoomWatch. Open it in its own app instead."),
+        ));
+    }
+    if !writable_place(teams_root, &resolved) {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            format!(
+                "LoomWatch changes only files your agents made and files in folders you gave a team, so it won't change {name}."
+            ),
+        ));
+    }
+    Ok(resolved)
+}
+
+/// [`writable`] for a file already resolved.
+fn writable_file(teams_root: &Path, resolved: &Path) -> bool {
+    writable_kind(resolved) && writable_place(teams_root, resolved)
+}
+
+fn writable_kind(path: &Path) -> bool {
+    is_text(path)
+        || extension(path)
+            .is_some_and(|extension| WRITABLE_EXTENSIONS.contains(&extension.as_str()))
+}
+
+/// Whether the reader is sent the file as its text: [`TEXT_KINDS`], and a table of comma or tab
+/// separated values.
+pub(crate) fn is_text(path: &Path) -> bool {
+    TEXT_KINDS.contains(&kind_of(path, false))
+        || matches!(extension(path).as_deref(), Some("csv" | "tsv"))
+}
+
+/// Whether the reader may write `resolved`, a canonical path (ADR 0107). Inside the teams root:
+/// only a file an agent made, in its own folder under a `.loomwatch/` beside its team file, and not
+/// what `LoomWatch` keeps there for it — its hidden folders, the copies of the files it was given
+/// (`knowledge/`), its notes (`AGENTS.md`) — as the app tells a made file (`fileRefs.ts`). So never
+/// a team file, a job or anything else `LoomWatch` keeps. Outside it: a file in a folder the person
+/// gave a team ([`given_folders`]), or a file they gave, outside any hidden folder in it.
+fn writable_place(teams_root: &Path, resolved: &Path) -> bool {
+    let named = |path: &Path| -> Option<Vec<String>> {
+        path.components()
+            .map(|part| match part {
+                Component::Normal(name) => name.to_str().map(str::to_owned),
+                _ => None,
+            })
+            .collect()
+    };
+    if let Ok(inside_root) = resolved.strip_prefix(teams_root) {
+        let Some(parts) = named(inside_root) else {
+            return false;
+        };
+        let Some(at) = parts.iter().position(|part| part == ".loomwatch") else {
+            return false;
+        };
+        let (before, inside) = (&parts[..at], &parts[at + 1..]);
+        return before.iter().all(|part| !part.starts_with('.'))
+            && inside.len() >= 2
+            && inside
+                .iter()
+                .all(|part| !part.starts_with('.') && part != "knowledge")
+            && inside.last().is_some_and(|name| name != "AGENTS.md");
+    }
+    given_folders(teams_root).iter().any(|folder| {
+        resolved.strip_prefix(folder).is_ok_and(|inside| {
+            named(inside).is_some_and(|parts| parts.iter().all(|part| !part.starts_with('.')))
+        })
+    })
+}
+
+/// The media type a picture, a recording, or the data or a font a web page loads beside it is
+/// answered with, by its extension.
 fn media_type(path: &Path) -> Option<&'static str> {
     Some(match extension(path)?.as_str() {
         "png" => "image/png",
@@ -547,23 +659,52 @@ fn media_type(path: &Path) -> Option<&'static str> {
         "bmp" => "image/bmp",
         "tif" | "tiff" => "image/tiff",
         "heic" => "image/heic",
+        // Drawn as its pages by the reader (ADR 0091), read a part at a time.
+        "pdf" => "application/pdf",
+        // Drawn by the reader itself as its slides or its pages (ADR 0091), from these bytes.
+        "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "pptm" => "application/vnd.ms-powerpoint.presentation.macroEnabled.12",
+        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "docm" => "application/vnd.ms-word.document.macroEnabled.12",
+        // A workbook, for the reader to change a cell in (ADR 0107).
+        "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "xlsm" => "application/vnd.ms-excel.sheet.macroEnabled.12",
         "mp3" => "audio/mpeg",
         "wav" => "audio/wav",
         "m4a" => "audio/mp4",
         "mp4" => "video/mp4",
         "mov" => "video/quicktime",
         "webm" => "video/webm",
+        // What a web page loads beside it (ADR 0091): its data and its fonts.
+        "csv" => "text/csv; charset=utf-8",
+        "tsv" => "text/tab-separated-values; charset=utf-8",
+        "json" | "topojson" => "application/json",
+        "geojson" => "application/geo+json",
+        "txt" => "text/plain; charset=utf-8",
+        "woff" => "font/woff",
+        "woff2" => "font/woff2",
+        "ttf" => "font/ttf",
+        "otf" => "font/otf",
         _ => return None,
     })
 }
 
-/// A picture or a recording as it is, with its media type, for the reader and for a web page's own
-/// pictures. Only those: a page, a script or a document is never answered as bytes, so nothing an
-/// agent wrote can run as this daemon's page. Blocking.
-pub(crate) fn raw(
-    teams_root: &Path,
-    requested: &Path,
-) -> Result<(&'static str, Vec<u8>), ApiError> {
+/// A file to answer as it is: where it is, its media type and its size.
+#[derive(Debug)]
+pub(crate) struct RawFile {
+    pub(crate) path: PathBuf,
+    pub(crate) media_type: &'static str,
+    pub(crate) size: u64,
+    /// Its [`version_of`], for a kind the reader changes: what a change to a deck's bytes names
+    /// (ADR 0107). Pictures, recordings and PDFs have none.
+    pub(crate) version: Option<String>,
+}
+
+/// A picture or a recording, to be answered as it is, for the reader and for a web page's own
+/// pictures and clips; the data and fonts a page loads beside it; and a PDF, a slide deck or a Word
+/// document, for the reader to draw. Only those: a page, a script or a text is never answered as
+/// bytes, so nothing an agent wrote can run as this daemon's page. The bytes are read by the route, all or the part a player asks for ([`wanted`]). Blocking.
+pub(crate) fn raw(teams_root: &Path, requested: &Path) -> Result<RawFile, ApiError> {
     let resolved = existing(teams_root, requested)?;
     let name = resolved.file_name().map_or_else(
         || requested.display().to_string(),
@@ -572,20 +713,101 @@ pub(crate) fn raw(
     let Some(media_type) = media_type(&resolved) else {
         return Err(unreadable(
             &name,
-            "only pictures and recordings are shown as they are",
+            "only pictures, recordings and the files a page uses are shown here",
         ));
     };
-    let size = std::fs::metadata(&resolved).map_or(0, |metadata| metadata.len());
-    if size > RAW_MAX_BYTES {
+    let size = std::fs::metadata(&resolved)
+        .map_err(|error| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("failed to read {name}: {error}"),
+            )
+        })?
+        .len();
+    // A recording and a PDF are read a part at a time, so any size will do.
+    let in_parts = media_type.starts_with("video/")
+        || media_type.starts_with("audio/")
+        || media_type == "application/pdf";
+    if !in_parts && size > WHOLE_MAX_BYTES {
         return Err(unreadable(&name, "it is larger than 50 MB"));
     }
-    let bytes = std::fs::read(&resolved).map_err(|error| {
-        ApiError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("failed to read {name}: {error}"),
-        )
-    })?;
-    Ok((media_type, bytes))
+    // Only a kind the reader changes: a page's pictures are not read twice for a version.
+    let version = if in_parts || !writable_kind(&resolved) {
+        None
+    } else {
+        version_of(&resolved).ok()
+    };
+    Ok(RawFile {
+        path: resolved,
+        media_type,
+        size,
+        version,
+    })
+}
+
+/// Whether `path` is a slide deck: a part of it is told by its slide, not its page.
+#[must_use]
+pub(crate) fn is_slides(path: &Path) -> bool {
+    matches!(
+        extension(path).as_deref(),
+        Some("pptx" | "pptm" | "ppt" | "odp" | "key")
+    )
+}
+
+/// Which bytes of a file of `size` bytes a `Range` header asks for (RFC 9110 §14.1.2). A player
+/// asks for a recording a part at a time, and Safari plays nothing it can't ask for so.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Wanted {
+    /// The whole file: no header, several ranges at once, or one written in a way not read here.
+    Whole,
+    /// Bytes `start` to `end`, both included.
+    Part { start: u64, end: u64 },
+    /// A range wholly past the end.
+    Unsatisfiable,
+}
+
+pub(crate) fn wanted(header: Option<&str>, size: u64) -> Wanted {
+    let Some(spec) = header.and_then(|value| value.trim().strip_prefix("bytes=")) else {
+        return Wanted::Whole;
+    };
+    if spec.contains(',') {
+        return Wanted::Whole;
+    }
+    let Some((first, last)) = spec.split_once('-') else {
+        return Wanted::Whole;
+    };
+    let (first, last) = (first.trim(), last.trim());
+    if first.is_empty() {
+        // The last `n` bytes.
+        let Ok(n) = last.parse::<u64>() else {
+            return Wanted::Whole;
+        };
+        if n == 0 || size == 0 {
+            return Wanted::Unsatisfiable;
+        }
+        return Wanted::Part {
+            start: size.saturating_sub(n),
+            end: size - 1,
+        };
+    }
+    let Ok(start) = first.parse::<u64>() else {
+        return Wanted::Whole;
+    };
+    if start >= size {
+        return Wanted::Unsatisfiable;
+    }
+    let end = if last.is_empty() {
+        size - 1
+    } else {
+        let Ok(end) = last.parse::<u64>() else {
+            return Wanted::Whole;
+        };
+        if end < start {
+            return Wanted::Whole;
+        }
+        end.min(size - 1)
+    };
+    Wanted::Part { start, end }
 }
 
 /// Open the file with its default app, or show it in its folder.
@@ -660,6 +882,18 @@ mod tests {
         assert_eq!(read.kind, "markdown");
         assert_eq!(read.text, "# Market\n\nSales grew.\n");
         assert!(!read.extracted && !read.truncated);
+        // The reader may change it (ADR 0107), naming this version.
+        assert!(read.editable);
+        assert_eq!(read.version, version_of(&report).ok());
+        assert!(
+            read.version
+                .as_deref()
+                .is_some_and(|version| version.starts_with("sha256:"))
+        );
+        // Not the notes LoomWatch writes for the agent.
+        let notes = workspace.join("AGENTS.md");
+        std::fs::write(&notes, "# Writer\n").expect("write notes");
+        assert!(!super::read(&root.0, &notes).expect("read notes").editable);
 
         let table = workspace.join("sales.csv");
         std::fs::write(&table, "month,sales\nMay,12\n").expect("write table");
@@ -677,6 +911,55 @@ mod tests {
         assert!(read.truncated);
         assert_eq!(read.text.len(), READ_MAX_BYTES - 1);
         assert!(!read.text.contains('\u{fffd}'));
+        // Only its start was sent, so it is never written back from the reader.
+        assert!(!read.editable);
+    }
+
+    /// **A deck an agent made is changed as its bytes (ADR 0107),** however many of its words the
+    /// reader is sent; a picture is never changed here, so it has no version to name.
+    #[test]
+    fn a_deck_is_changed_as_its_bytes_and_a_picture_not_at_all() {
+        let root = Root::new();
+        let workspace = root.0.join(".loomwatch/team/writer");
+        let ns = r#"xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships""#;
+        let rels = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+        let words = "word ".repeat(READ_MAX_BYTES / 5 + 1_000);
+        let deck = crate::test_support::zip_of(&[
+            (
+                "ppt/presentation.xml",
+                &format!(
+                    r#"<p:presentation {ns}><p:sldIdLst><p:sldId id="256" r:id="rId2"/></p:sldIdLst></p:presentation>"#
+                ),
+            ),
+            (
+                "ppt/_rels/presentation.xml.rels",
+                &format!(
+                    r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId2" Type="{rels}/slide" Target="slides/slide1.xml"/></Relationships>"#
+                ),
+            ),
+            (
+                "ppt/slides/slide1.xml",
+                &format!(
+                    "<p:sld {ns}><p:cSld><p:spTree><p:sp><p:txBody><a:p><a:r><a:t>{words}</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>"
+                ),
+            ),
+        ]);
+        let path = workspace.join("launch.pptx");
+        std::fs::write(&path, &deck).expect("write deck");
+        let read = super::read(&root.0, &path).expect("read deck");
+        assert!(
+            read.extracted && read.truncated,
+            "its words are cut for the reader"
+        );
+        assert!(read.editable);
+        assert_eq!(
+            raw(&root.0, &path).expect("raw deck").version,
+            version_of(&path).ok()
+        );
+
+        let chart = workspace.join("chart.png");
+        std::fs::write(&chart, b"png").expect("write picture");
+        assert_eq!(raw(&root.0, &chart).expect("raw picture").version, None);
     }
 
     #[test]
@@ -713,10 +996,20 @@ mod tests {
         let workspace = root.0.join(".loomwatch/team/writer");
         let picture = workspace.join("chart.svg");
         std::fs::write(&picture, "<svg/>").expect("write picture");
-        let (media_type, bytes) = raw(&root.0, &picture).expect("raw picture");
-        assert_eq!(media_type, "image/svg+xml");
-        assert_eq!(bytes, b"<svg/>");
-        for name in ["page.html", "app.js", "report.md"] {
+        let file = raw(&root.0, &picture).expect("raw picture");
+        assert_eq!(file.media_type, "image/svg+xml");
+        assert_eq!(file.size, 6);
+        assert_eq!(
+            file.path.file_name().and_then(|name| name.to_str()),
+            Some("chart.svg")
+        );
+        for name in [
+            "page.html",
+            "app.js",
+            "report.md",
+            "letter.doc",
+            "notes.xml",
+        ] {
             let file = workspace.join(name);
             std::fs::write(&file, "x").expect("write file");
             assert_eq!(
@@ -724,6 +1017,156 @@ mod tests {
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "{name}"
             );
+        }
+    }
+
+    /// **A part of a deck is told by its slide, of anything else by its page (ADR 0091).**
+    #[test]
+    fn a_deck_is_slides_and_nothing_else_is() {
+        for name in ["a.pptx", "a.PPTM", "a.ppt", "a.odp", "a.key"] {
+            assert!(is_slides(Path::new(name)), "{name}");
+        }
+        for name in ["a.docx", "a.pdf", "a.xlsx", "a.html", "pptx"] {
+            assert!(!is_slides(Path::new(name)), "{name}");
+        }
+    }
+
+    /// **A deck or a Word document is answered as it is, for the reader to draw (ADR 0091).** An
+    /// old `.ppt` or `.doc` is not: the reader draws neither, and opens them in their own app.
+    #[test]
+    fn answers_a_deck_or_a_word_document_for_the_reader_to_draw() {
+        let root = Root::new();
+        let workspace = root.0.join(".loomwatch/team/writer");
+        for (name, expected) in [
+            (
+                "deck.pptx",
+                Some("application/vnd.openxmlformats-officedocument.presentationml.presentation"),
+            ),
+            (
+                "deck.pptm",
+                Some("application/vnd.ms-powerpoint.presentation.macroEnabled.12"),
+            ),
+            (
+                "letter.docx",
+                Some("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+            ),
+            (
+                "letter.docm",
+                Some("application/vnd.ms-word.document.macroEnabled.12"),
+            ),
+            ("old.ppt", None),
+            ("old.doc", None),
+        ] {
+            let path = workspace.join(name);
+            std::fs::write(&path, "PK").expect("write file");
+            match expected {
+                Some(expected) => assert_eq!(raw(&root.0, &path).expect(name).media_type, expected),
+                None => assert_eq!(
+                    raw(&root.0, &path).unwrap_err().status,
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "{name}"
+                ),
+            }
+        }
+    }
+
+    /// **A page's data and fonts are answered as they are (ADR 0091).** A dashboard loads the sheet
+    /// beside it, whole, with the type a browser expects; past 50 MB it is refused, as a picture is.
+    #[test]
+    fn answers_the_data_and_fonts_a_page_loads_beside_it() {
+        let root = Root::new();
+        let workspace = root.0.join(".loomwatch/team/writer");
+        for (name, expected) in [
+            ("sales.csv", "text/csv; charset=utf-8"),
+            ("sales.tsv", "text/tab-separated-values; charset=utf-8"),
+            ("sales.json", "application/json"),
+            ("map.geojson", "application/geo+json"),
+            ("words.txt", "text/plain; charset=utf-8"),
+            ("brand.woff2", "font/woff2"),
+            ("brand.ttf", "font/ttf"),
+        ] {
+            let path = workspace.join(name);
+            std::fs::write(&path, "a,b\n1,2\n").expect("write data");
+            assert_eq!(raw(&root.0, &path).expect(name).media_type, expected);
+        }
+        let big = workspace.join("huge.csv");
+        std::fs::File::create(&big)
+            .and_then(|file| file.set_len(60 * 1024 * 1024))
+            .expect("a large file");
+        assert_eq!(
+            raw(&root.0, &big).unwrap_err().status,
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+    }
+
+    /// **A recording of any size is answered; a picture past 50 MB is not (ADR 0091).** A page
+    /// takes a picture in whole, but a player asks for a recording a part at a time.
+    #[test]
+    fn answers_a_recording_of_any_size_and_keeps_the_limit_for_pictures() {
+        let root = Root::new();
+        let workspace = root.0.join(".loomwatch/team/writer");
+        let big = 60 * 1024 * 1024;
+        for (name, answered) in [
+            ("talk.mp4", true),
+            ("song.mp3", true),
+            ("report.pdf", true),
+            ("huge.png", false),
+        ] {
+            let path = workspace.join(name);
+            std::fs::File::create(&path)
+                .and_then(|file| file.set_len(big))
+                .expect("a large file");
+            match raw(&root.0, &path) {
+                Ok(file) => {
+                    assert!(answered, "{name} answered");
+                    assert_eq!(file.size, big);
+                }
+                Err(error) => {
+                    assert!(!answered, "{name} refused: {}", error.message);
+                    assert!(
+                        error.message.contains("larger than 50 MB"),
+                        "{}",
+                        error.message
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn reads_which_bytes_a_player_asks_for() {
+        assert_eq!(wanted(None, 100), Wanted::Whole);
+        assert_eq!(
+            wanted(Some("bytes=10-19"), 100),
+            Wanted::Part { start: 10, end: 19 }
+        );
+        assert_eq!(
+            wanted(Some("bytes=90-"), 100),
+            Wanted::Part { start: 90, end: 99 }
+        );
+        assert_eq!(
+            wanted(Some("bytes=95-1000"), 100),
+            Wanted::Part { start: 95, end: 99 }
+        );
+        assert_eq!(
+            wanted(Some("bytes=-5"), 100),
+            Wanted::Part { start: 95, end: 99 }
+        );
+        assert_eq!(
+            wanted(Some("bytes=-500"), 100),
+            Wanted::Part { start: 0, end: 99 }
+        );
+        assert_eq!(wanted(Some("bytes=100-"), 100), Wanted::Unsatisfiable);
+        assert_eq!(wanted(Some("bytes=-0"), 100), Wanted::Unsatisfiable);
+        assert_eq!(wanted(Some("bytes=0-"), 0), Wanted::Unsatisfiable);
+        for whole in [
+            "bytes=1-2,5-6",
+            "items=0-9",
+            "bytes=x-9",
+            "bytes=9-3",
+            "bytes=5",
+        ] {
+            assert_eq!(wanted(Some(whole), 100), Wanted::Whole, "{whole}");
         }
     }
 

@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, X } from '../ui/icon'
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 
 import { placeCard, type Box } from '../../lib/tour/place'
@@ -31,7 +31,8 @@ interface Snapshot {
 function readScreen(): Screen | null {
   if (document.querySelector('[data-tour="workspace"]')) return 'workspace'
   if (document.querySelector('[data-tour="agents"]')) return 'agents'
-  if (document.querySelector('[data-tour="home"]')) return 'home'
+  // A project's room is part of Home for the guide: its teams are started there (ADR 0097).
+  if (document.querySelector('[data-tour="home"], [data-tour="room"]')) return 'home'
   return null
 }
 
@@ -45,8 +46,8 @@ function aheadOn(screen: Screen, index: number): number {
  * a team can be left behind like that: Your agents comes before both, so leaving it moves the guide on.
  */
 const RESUME = {
-  home: { title: 'Go to My team to carry on', body: 'The next step is on Home, where your teams are. Go to My team to carry on.', advance: 'next' },
-  workspace: { title: 'Open a team to carry on', body: 'The rest of the guide happens inside a team. Open one of your teams to carry on, or start again by creating a new team.', advance: 'next' },
+  home: { title: 'Go Home to carry on', body: 'The next step is on Home.', advance: 'next' },
+  workspace: { title: 'Open a team to carry on', body: 'The rest of the guide happens inside a team. Open a project and one of its teams, or press Start again.', advance: 'next' },
 } satisfies Partial<Record<Screen, TourStepView>>
 
 function shown(element: Element): boolean {
@@ -189,7 +190,7 @@ export function GettingStarted({ keyReady, keyLoading }: GettingStartedProps) {
         target={null}
         viewport={snapshot.viewport}
         actions={home
-          ? <a className="btn" href="/">My team</a>
+          ? <a className="btn" href="/">Home</a>
           : <button type="button" className="btn" onClick={() => goToStep('new-team')}>Start again</button>}
       />
     )
@@ -214,7 +215,7 @@ export function GettingStarted({ keyReady, keyLoading }: GettingStartedProps) {
     actions = <button type="button" className="btn btn-primary" data-autofocus onClick={() => endTour('finished')}>Finish</button>
   } else if (view.advance === 'action') {
     actions = <>
-      <span className="tour-waiting t-meta"><i aria-hidden="true" />Waiting for you</span>
+      <span className="tour-waiting t-meta"><i aria-hidden="true" />{view.waiting ?? 'Waiting for you'}</span>
       <button type="button" className="link tour-skip" onClick={() => skipFrom(index, context.current)}>Skip this step</button>
     </>
   } else {

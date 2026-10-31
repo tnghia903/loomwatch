@@ -6,14 +6,25 @@ import { AnswerDocument } from './AnswerDocument'
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 describe('a document answer, read beside the chat', () => {
-  it('is read in full, as written, and never runs HTML or loads remote images', async () => {
-    const { container } = render(<AnswerDocument by="Writer" streaming={false} text={'# Market report\n\n| Finding | Impact |\n|---|---|\n| Clear | Faster |\n\n<script>alert(1)</script>\n\n![tracking](https://example.com/pixel)'} />)
+  it('is read in full, as written, and never runs HTML or loads images', async () => {
+    const { container } = render(<AnswerDocument by="Writer" streaming={false} text={'# Market report\n\n| Finding | Impact |\n|---|---|\n| Clear | Faster |\n\n<script>alert(1)</script>\n\n![tracking](https://example.com/pixel)\n\n![chart](/Users/ana/out/chart.png)'} />)
     expect(await screen.findByRole('heading', { name: 'Market report', level: 1 })).toBeInTheDocument()
     expect(screen.getByRole('table')).toBeInTheDocument()
     expect(screen.getByText('Written by Writer')).toBeInTheDocument()
     expect(container.querySelector('script')).toBeNull()
     expect(container.querySelector('img')).toBeNull()
     expect(screen.getByText('[Image: tracking]')).toBeInTheDocument()
+    // A picture on this computer is shown only where the screen says where it is: the reader.
+    expect(screen.getByText('[Image: chart]')).toBeInTheDocument()
+  })
+
+  // A ChatGPT model's answer saved before the daemon took its citation marks out read
+  // "…in cash. [box]cite[box]turn2search1[box]".
+  it('drops the private citation marks a ChatGPT model wrote, keeping a link’s words', async () => {
+    const { container } = render(<AnswerDocument by="Cole" streaming={false} text={'The **$72.4B is largely non-cash accounting**. citeturn2search1\n\nSee cite3†the filing†sec.gov.'} />)
+    expect(await screen.findByText('$72.4B is largely non-cash accounting')).toBeInTheDocument()
+    expect(container.textContent).not.toMatch(/[-]|turn2search1/)
+    expect(container.textContent).toContain('See the filing.')
   })
 
   it('shows a claim’s mark as a tag and the links that close it as its sources', async () => {
@@ -72,6 +83,13 @@ describe('a document answer, read beside the chat', () => {
     // The bare name in code is not taken from the folder: it stays the agent's words.
     expect(screen.getAllByRole('button', { name: /LLM Prefill Guide\.html/ })).toHaveLength(1)
     expect(screen.getByText('LLM Prefill Guide.html', { selector: 'code' })).toBeInTheDocument()
+  })
+
+  it('opens a file the run wrote where the answer names it in plain words', async () => {
+    const page = '/Users/me/sutd-final-project/design/architecture.html'
+    render(<AnswerDocument by="Designer" streaming={false} touched={[page]} written={[page]} text={'Files are in /Users/me/sutd-final-project/design:\n\n- architecture.html'} />)
+    const chip = await screen.findByRole('button', { name: /architecture\.html/ })
+    expect(chip.getAttribute('title')?.split('\n')[0]).toBe(page)
   })
 
   it('says it is still being written', () => {

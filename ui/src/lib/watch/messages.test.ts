@@ -182,6 +182,43 @@ describe('messages between agents', () => {
     expect(reachedLine('limit', 'Checker')).toContain('as many teammates as the team allows already held a conversation')
   })
 
+  // ADR 0092: one of the person's other agents brought in from My agents is said once, the first time.
+  it('marks the first time a run brings in one of my agents, and only that time', () => {
+    seq = 0
+    const { messages } = projectRun([
+      bus(1, 'lead', 'a', 'dispatch', { agent: 'mine+researcher', task: 'Find three facts.' }),
+      settled(2, 'lead', 'a', { accepted: true, agent: 'mine+researcher', mode: 'dispatch', name: 'Researcher', from: { agent: 'researcher' } }),
+      bus(3, 'lead', 'b', 'dispatch', { agent: 'mine+researcher', task: 'And a fourth.' }),
+      settled(4, 'lead', 'b', { accepted: true, agent: 'mine+researcher', mode: 'dispatch', name: 'Researcher', from: { agent: 'researcher' }, continues: true }),
+      bus(5, 'lead', 'c', 'dispatch', { agent: 'writer', task: 'Write it up.' }),
+      settled(6, 'lead', 'c', { accepted: true, agent: 'writer', mode: 'dispatch' }),
+    ])
+    expect(messages.map((message) => [message.to, message.broughtIn])).toEqual([['mine+researcher', true], ['mine+researcher', undefined], ['writer', undefined]])
+  })
+
+  // The owner, 2026-10-25: an agent handed work replies in the chat, a teammate or one brought in.
+  it('answers each piece handed out with what its agent sent back, in whatever order they finish', () => {
+    seq = 0
+    const result = (seconds: number, agentId: string, task: string, outcome: Record<string, unknown>) =>
+      event(seconds, agentId, 'session_meta', { phase: 'delegated_result', mode: 'dispatch', for: 'lead', task, ...outcome }, loomwatch('delegated_result'))
+    const { messages } = projectRun([
+      bus(1, 'lead', 'a', 'dispatch', { agent: 'mine+researcher', task: 'Find the dates.' }),
+      settled(2, 'lead', 'a', { accepted: true, agent: 'mine+researcher', mode: 'dispatch', name: 'Researcher', from: { agent: 'researcher' } }),
+      bus(3, 'lead', 'b', 'dispatch', { agent: 'mine+researcher', task: 'Find the prices.' }),
+      settled(4, 'lead', 'b', { accepted: true, agent: 'mine+researcher', mode: 'dispatch', name: 'Researcher', from: { agent: 'researcher' }, fresh: 'busy' }),
+      bus(5, 'lead', 'c', 'dispatch', { agent: 'editor', task: 'Tighten it.' }),
+      settled(6, 'lead', 'c', { accepted: true, agent: 'editor', mode: 'dispatch' }),
+      result(7, 'mine+researcher', 'Find the prices.', { status: 'succeeded', reply: 'Prices: $4 and $9.' }),
+      result(8, 'mine+researcher', 'Find the dates.', { status: 'succeeded', reply: 'Dates: May 2 and May 9.' }),
+      result(9, 'editor', 'Tighten it.', { status: 'failed', error: 'It ran out of time.' }),
+    ])
+    expect(messages.map(({ text, state, reply }) => [text, state, reply?.from, reply?.text, reply?.failed])).toEqual([
+      ['Find the dates.', 'answered', 'mine+researcher', 'Dates: May 2 and May 9.', undefined],
+      ['Find the prices.', 'answered', 'mine+researcher', 'Prices: $4 and $9.', undefined],
+      ['Tighten it.', 'answered', 'editor', 'It ran out of time.', true],
+    ])
+  })
+
   it('ignores a harness echo of a bus call and bus tools that carry no message', () => {
     seq = 0
     const { messages } = projectRun([
@@ -502,7 +539,7 @@ describe('a check step in the chat', () => {
     const stopped = (seconds: number, payload: Record<string, unknown>) =>
       event(seconds, 'checker', 'session_meta', { phase: 'check_stopped', checked: 'writer', ...payload }, loomwatch('check_stopped'))
     const revised = (seconds: number, text: string) => [say(seconds, 'writer', text), event(seconds + 1, 'writer', 'turn_end', { stopReason: 'end_turn' })]
-    const question = 'Writer’s work still misses 1 check: the last round fixed none of them. Approve it as it is, or send it back with what to change.'
+    const question = 'Writer’s work still misses 1 check: the last round fixed none of them. Approve it as it is, or send it back to try again.'
     const messages = projectRun([
       checked(1, 1, [linked, short('not_met', '412 words')]),
       sentBack(2, { round: 1, problems: '' }),
@@ -544,6 +581,19 @@ describe('a check step in the chat', () => {
       event(21, 'checker', 'session_meta', { phase: 'check_stopped', checked: 'writer', round: 2, sent: 1, reason: 'rounds', exit: 'answer' }, loomwatch('check_stopped')),
     ]).messages
     expect(messages[1].text).toBe('**Not met**\n- Under 300 words — 330 words\n\n_It stopped after sending the work back once, as often as it may. The answer shows with this marked._')
+  })
+
+  // ADR 0098: a message that named its tries is answered in tries, the first work one of them.
+  it('says a loop the message gave its tries stopped after as many as you asked for', () => {
+    seq = 0
+    const messages = projectRun([
+      checked(1, 1, [short('not_met', '412 words')]),
+      sentBack(2, { round: 1, problems: '' }),
+      say(10, 'writer', 'Second draft.'), event(11, 'writer', 'turn_end', { stopReason: 'end_turn' }),
+      checked(20, 2, [short('not_met', '330 words')]),
+      event(21, 'checker', 'session_meta', { phase: 'check_stopped', checked: 'writer', round: 2, sent: 1, reason: 'rounds', exit: 'ask', tries: true }, loomwatch('check_stopped')),
+    ]).messages
+    expect(messages[1].text).toBe('**Not met**\n- Under 300 words — 330 words\n\n_It stopped after 2 tries, as many as you asked for. It asks you what to do._')
   })
 })
 

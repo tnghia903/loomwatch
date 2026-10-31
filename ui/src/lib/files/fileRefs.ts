@@ -1,4 +1,4 @@
-import { baseName, isAbsolutePath, pathFromFileUrl, splitPath } from './paths'
+import { baseName, isAbsolutePath, isWindowsPath, pathFromFileUrl, splitPath } from './paths'
 
 export { baseName }
 
@@ -7,9 +7,11 @@ export { baseName }
  * instead of a raw path (ADR 0026).
  *
  * Deliberately narrow: an absolute path whose last segment has an extension, written as inline
- * code, as a Markdown link, or as a `file://` URL — or a file name listed under such a folder
- * ([`withFolderPaths`]). Bare words and API routes ("/api/runs") are not files, and a false
- * positive would put an Open button on something that is not openable.
+ * code, as a Markdown link, or as a `file://` URL — or a file name listed under such a folder, or a
+ * file the run wrote, or one in an agent's own folder, named in plain words ([`withFolderPaths`]).
+ * Other bare words and API routes
+ * ("/api/runs") are not files, and a false positive would put an Open button on something that is
+ * not openable.
  */
 const EXTENSION = /\.([A-Za-z0-9]{1,8})$/
 
@@ -65,9 +67,9 @@ export function extensionOf(path: string): string {
 }
 
 const LABELS: Record<string, string> = {
-  doc: 'Word document', docx: 'Word document', odt: 'Document', pages: 'Pages document', rtf: 'Rich text',
-  xls: 'Spreadsheet', xlsx: 'Spreadsheet', ods: 'Spreadsheet', numbers: 'Numbers spreadsheet', csv: 'CSV table', tsv: 'Table',
-  ppt: 'Slides', pptx: 'Slides', odp: 'Slides', key: 'Keynote slides',
+  doc: 'Word document', docx: 'Word document', docm: 'Word document', odt: 'Document', pages: 'Pages document', rtf: 'Rich text',
+  xls: 'Spreadsheet', xlsx: 'Spreadsheet', xlsm: 'Spreadsheet', ods: 'Spreadsheet', numbers: 'Numbers spreadsheet', csv: 'CSV table', tsv: 'Table',
+  ppt: 'Slides', pptx: 'Slides', pptm: 'Slides', odp: 'Slides', key: 'Keynote slides',
   pdf: 'PDF',
   png: 'Image', jpg: 'Image', jpeg: 'Image', gif: 'Image', webp: 'Image', svg: 'Image', heic: 'Image',
   mp3: 'Audio', wav: 'Audio', m4a: 'Audio', mp4: 'Video', mov: 'Video', webm: 'Video',
@@ -81,6 +83,15 @@ const LABELS: Record<string, string> = {
 export function fileLabel(path: string): string {
   const extension = extensionOf(path)
   return LABELS[extension] ?? (extension ? `${extension.toUpperCase()} file` : 'File')
+}
+
+/** The file's kind inside a sentence, after `article`: "a Word document", "a PDF", "an image", but "slides". */
+export function fileKindIn(path: string, article: 'a' | 'the'): string {
+  const label = fileLabel(path)
+  // The names of apps, and kinds said by their letters, keep their capitals.
+  const kind = /^(Word|Pages|Numbers|Keynote|[A-Z]{2,})\b/.test(label) ? label : label.toLowerCase()
+  if (article === 'a' && /slides$/.test(kind)) return kind
+  return `${article === 'a' && /^[aeiou]/i.test(kind) ? 'an' : article} ${kind}`
 }
 
 const NOUNS: Array<[RegExp, string]> = [
@@ -139,10 +150,11 @@ export function folderWords(folder: string | null | undefined, path: string): st
 /**
  * Every distinct file a Markdown reply names, in the order it first names them. `touched` is what
  * the run's agents read or wrote ([`filesTouched`]) and `agentFolder` the one the answering agent
- * works in, for the names they give from their own folder.
+ * works in, for the names they give from their own folder; `written` is what they wrote
+ * ([`filesWritten`]), for the names they give in plain words.
  */
-export function fileRefsIn(markdown: string, touched: readonly string[] = [], agentFolder: string | null = null): string[] {
-  const text = withFolderPaths(markdown, touched, agentFolder)
+export function fileRefsIn(markdown: string, touched: readonly string[] = [], agentFolder: string | null = null, written: readonly string[] = []): string[] {
+  const text = withFolderPaths(markdown, touched, agentFolder, written)
   const found: string[] = []
   const add = (path: string | null) => {
     if (path && !found.includes(path)) found.push(path)
@@ -171,11 +183,24 @@ export function fileRefsIn(markdown: string, touched: readonly string[] = [], ag
  * — what the run's agents read or wrote — whose path ends with it. A file it made with a command
  * was never touched by name, so a link to one resolves under `agentFolder`, where the answering
  * agent works. A name in code is not taken from there: code names files the agent ran or quoted too.
+ *
+ * Agents also name what they made in plain words, with no code or link at all:
+ *
+ *     Files are in /Users/me/project/design:
+ *     - architecture.html
+ *
+ * Such a name, or its path, becomes a file only when it fits just one file in `written`, what the
+ * run's agents wrote: those are real files, so a word is never taken for one it isn't.
+ *
+ * A file an agent made with a command (`python make_deck.py`) was never written by name. Its full
+ * path in plain words becomes a file too when it is in an agent's own folder, where LoomWatch keeps
+ * the team's work ([`madeByAgent`]): what is there, the work made.
  */
-export function withFolderPaths(markdown: string, touched: readonly string[] = [], agentFolder: string | null = null): string {
+export function withFolderPaths(markdown: string, touched: readonly string[] = [], agentFolder: string | null = null, written: readonly string[] = []): string {
   const home = agentFolder && isAbsolutePath(agentFolder) ? agentFolder : null
   const lines = markdown.split('\n')
-  for (const passage of passagesOf(lines)) {
+  const passages = passagesOf(lines)
+  for (const passage of passages) {
     const folders: Array<{ at: number; path: string }> = []
     passage.forEach((index, order) => {
       for (const match of lines[index].matchAll(MENTION)) {
@@ -198,7 +223,99 @@ export function withFolderPaths(markdown: string, touched: readonly string[] = [
       })
     })
   }
+  const named = plainNames(written)
+  for (const index of passages.flat()) {
+    if (named) lines[index] = inPlainWords(lines[index], named)
+    // A path set off in bold or quotes may hold spaces; one in running words can't, as where it ends
+    // would be a guess. Each its own pass, so the first one's code spans are kept from the second.
+    lines[index] = inPlainWords(lines[index], setOffPaths)
+    lines[index] = inPlainWords(lines[index], madePaths)
+  }
   return lines.join('\n')
+}
+
+// What plain words may not be read inside: code, a link with its words, an HTML tag or a web address.
+const KEPT = /`[^`\n]*`|!?\[[^\]\n]*\]\([^)\n]*\)|<[^>\n]*>|[A-Za-z][A-Za-z0-9+.-]*:\/\/\S+/g
+
+/** A line with `resolve` applied to its plain words alone ([`KEPT`]). */
+function inPlainWords(line: string, resolve: (words: string) => string): string {
+  let out = ''
+  let at = 0
+  for (const match of line.matchAll(KEPT)) {
+    out += resolve(line.slice(at, match.index)) + match[0]
+    at = match.index + match[0].length
+  }
+  return out + resolve(line.slice(at))
+}
+
+// A full path without spaces, from `/` or a drive to an extension, standing alone as a name does
+// in `plainNames`.
+const FULL_PATH = /(^|[\s(["'“‘*])((?:\/|[A-Za-z]:[\\/])[^\s`'"()<>[\]*]*\.[A-Za-z0-9]{1,8})(?=$|[\s)\]"'”’*,;:!?]|\.(?:\s|$))/g
+
+/** Plain words with each full path to a file an agent made ([`madeByAgent`]) as a code span. */
+function madePaths(words: string): string {
+  return words.replace(FULL_PATH, (whole, before: string, path: string) => (madeByAgent(path) ? `${before}\`${path}\`` : whole))
+}
+
+// A full path set off as a whole, in bold or in quotes, spaces and all: `**/a/My deck.pptx**`.
+const SET_OFF_PATH = /(\*\*|"|“)((?:\/|[A-Za-z]:[\\/])[^\n`*"“”<>]*?\.[A-Za-z0-9]{1,8})(\*\*|"|”)/g
+const CLOSES: Record<string, string> = { '**': '**', '"': '"', '“': '”' }
+
+/** Plain words with each full path set off in bold or quotes, of a file an agent made, as a code span. */
+function setOffPaths(words: string): string {
+  return words.replace(SET_OFF_PATH, (whole, open: string, path: string, close: string) => (CLOSES[open] === close && madeByAgent(path) ? `${open}\`${path}\`${close}` : whole))
+}
+
+/**
+ * Whether a full path is of a file in an agent's own folder (`.loomwatch/<team>/<agent>/…`, the
+ * folder it works in, or `.loomwatch/<agent>/…` for an agent in no team), of a kind this module
+ * names. Not what LoomWatch keeps there for it: hidden folders (its skills), the copies of the files
+ * it was given, and its notes.
+ */
+function madeByAgent(path: string): boolean {
+  if (!filePathFrom(path) || !Object.hasOwn(LABELS, extensionOf(path))) return false
+  const parts = splitPath(path)
+  const at = parts.indexOf('.loomwatch')
+  const inside = at < 0 ? [] : parts.slice(at + 1)
+  return inside.length >= 2 && inside.every((part) => !part.startsWith('.') && part !== KNOWLEDGE_COPIES) && inside.at(-1) !== NOTES_FILE
+}
+
+/** Where an agent's folder keeps the full texts of the files it was given (`chosen_knowledge.rs`). */
+const KNOWLEDGE_COPIES = 'knowledge'
+/** The notes LoomWatch writes for the agent in its folder (`workspace.rs`). */
+const NOTES_FILE = 'AGENTS.md'
+
+/**
+ * Plain words with each name of a file in `written` (`architecture.html`,
+ * `design/architecture.html`, or its full path) as a code span of that file's full path, or `null`
+ * when the run wrote nothing. A name stands alone: not inside another word, an address, code or a
+ * link. A name two written files share stays words, unless given by its full path.
+ */
+function plainNames(written: readonly string[]): ((words: string) => string) | null {
+  const files = written.filter((path) => !path.includes('`'))
+  if (!files.length) return null
+  const longestFirst = (a: string, b: string) => b.length - a.length
+  const paths = [...files].sort(longestFirst).map(escapePattern).join('|')
+  const names = [...new Set(files.map((path) => baseName(path)))].sort(longestFirst).map(escapePattern).join('|')
+  // Before a name: the line's start, a space, or an opening bracket, quote or `*`. After it: the
+  // line's end, a space, closing punctuation, or a full stop that ends the sentence. Its full path
+  // first, which can hold spaces; else the name, with the folders before it.
+  const name = new RegExp(`(^|[\\s(\\["'“‘*])(${paths}|(?:[^\\s\`'"()<>\\[\\]*]*[\\\\/])?(?:${names}))(?=$|[\\s)\\]"'”’*,;:!?]|\\.(?:\\s|$))`, 'g')
+  return (words) => words.replace(name, (whole, before: string, said: string) => {
+    const path = isAbsolutePath(said) ? files.find((file) => samePath(file, said)) : touchedFile(said, files)
+    return path ? `${before}\`${path}\`` : whole
+  })
+}
+
+/** Whether two full paths name the same file, either separator, and on Windows in any case. */
+function samePath(a: string, b: string): boolean {
+  const fold = (part: string) => (isWindowsPath(a) ? part.toLowerCase() : part)
+  const [left, right] = [splitPath(a), splitPath(b)]
+  return left.length === right.length && left.every((part, index) => fold(part) === fold(right[index]))
+}
+
+function escapePattern(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 // A code span, a link target, or a bare `file://` URL — in one pass, so offsets on a line agree.

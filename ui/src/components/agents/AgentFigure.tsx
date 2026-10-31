@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type 
 import type { FigurePart } from '../../lib/library/figure'
 import { useTheme, type ResolvedTheme } from '../../lib/theme'
 import type { AllowSwitch } from '../../lib/team-file/types'
+import { InlineMarkdown } from '../ui/Markdown'
 import { placeFace, WorkbenchScene, type BenchAnchor, type BenchAnchors, type BenchFace, type BenchFaces, type BenchView } from './workbenchScene'
 
 export interface BenchLabel {
@@ -185,8 +186,8 @@ function Bench({ view, labels, open, onPart, onKey, onSkillDrop, skillMime, onFa
       />}
       {!ready && <p className="bench-loading t-meta">Setting up the bench…</p>}
       <div className="bench-faces" aria-hidden="true">
-        <div ref={face('name')} className="bench-face bench-face-name" style={{ '--chars': name.length } as CSSProperties}><p><b>{name}</b>{does && <span>{does}</span>}</p></div>
-        <div ref={face('job')} className={`bench-face bench-face-job${instructions ? '' : ' empty'}`}><p>{instructions || 'Nothing written yet.'}</p></div>
+        <div ref={face('name')} className="bench-face bench-face-name" style={{ '--chars': name.length } as CSSProperties}><p><b>{name}</b>{does && <span><InlineMarkdown clickable={false}>{does}</InlineMarkdown></span>}</p></div>
+        <div ref={face('job')} className={`bench-face bench-face-job${instructions ? '' : ' empty'}`}><p>{instructions ? <InlineMarkdown clickable={false}>{instructions}</InlineMarkdown> : 'Nothing written yet.'}</p></div>
         <div ref={face('app')} className={`bench-face bench-face-app${view.appName ? '' : ' empty'}`} style={{ '--chars': appWord.length } as CSSProperties}><p>{appWord}</p></div>
       </div>
       <div ref={bubble} className={`bench-thought${thinking && ready ? ' on' : ''}`} aria-hidden="true">

@@ -107,6 +107,8 @@ pub struct SeenRequest {
     pub tools: Vec<String>,
     /// The tools the provider would run itself.
     pub server_tools: ServerTools,
+    /// The tools are offered, but the model may not call one ([`ChatRequest::tools_off`]).
+    pub tools_off: bool,
 }
 
 impl SeenRequest {
@@ -285,6 +287,7 @@ impl Demo {
                     messages: request.messages.to_vec(),
                     tools: request.tools.iter().map(|tool| tool.name.clone()).collect(),
                     server_tools: request.server_tools,
+                    tools_off: request.tools_off,
                 };
                 script
                     .seen

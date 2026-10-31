@@ -1,4 +1,4 @@
-import { summarizeSchedule } from '../team-file/schedule'
+import { cronInWords, summarizeSchedule } from '../team-file/schedule'
 import { sendBackOf } from '../team-file/sendBack'
 import type { DeliverConfig, ScheduleConfig, SendBack } from '../team-file/types'
 
@@ -75,12 +75,9 @@ export function verbFor(agent: Pick<SentenceAgent, 'name' | 'role'>, final = fal
   return final ? 'finishes the answer' : 'does its part'
 }
 
-/** "Daily at 8:00 AM" → "Every day at 8:00 AM"; a cron the editor cannot express stays raw. */
+/** "Every day at 8:00 AM", "Every Monday at 9:00 AM"; a cron too rich for words stays raw. */
 export function scheduleWords(schedule: Partial<ScheduleConfig>): string {
-  const summary = summarizeSchedule(schedule)
-  if (summary.startsWith('Daily at ')) return `Every day at ${summary.slice('Daily at '.length)}`
-  if (summary.startsWith('Weekdays at ')) return `Every weekday at ${summary.slice('Weekdays at '.length)}`
-  return `On its schedule (${summary})`
+  return cronInWords(schedule.cron, true) ?? `On its schedule (${summarizeSchedule(schedule)})`
 }
 
 function reachableFrom(entrypoint: string, edges: SentenceInput['edges']): Set<string> {

@@ -1,9 +1,12 @@
-import { Check, ChevronDown, ChevronRight, CircleAlert, Square } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, CircleAlert, Square } from '../ui/icon'
 import { useId, useState, type CSSProperties } from 'react'
 
+import { plainWords } from '../../lib/chat/findWords'
 import { helpersLine, took, type HelperWork } from '../../lib/chat/helpers'
 import { useNow } from '../../lib/useNow'
 import { AvatarFace } from '../agents/AvatarFace'
+import { InlineMarkdown } from '../ui/Markdown'
+import { STATE_WORDS as WORDS } from '../../lib/state/words'
 
 /**
  * The helpers an agent brought in for a piece of work (ADR 0079), on the piece, under the line that
@@ -61,7 +64,7 @@ function HelperFace({ helper, hue, name, size = 22, numbered = true }: { helper:
   )
 }
 
-const STATE_WORDS: Record<HelperWork['state'], string> = { working: 'working', done: 'done', stopped: 'stopped', failed: 'couldn’t finish' }
+const STATE_WORDS: Record<HelperWork['state'], string> = { working: 'working', done: 'done', stopped: 'stopped', failed: WORDS.failed }
 
 function HelperRow({ helper, lead, hue, name, now, onShow, onStop }: { helper: HelperWork; lead: string; hue: number; name: string; now: number; onShow?: (messageId: string) => void; onStop?: (helperId: string) => Promise<void> }) {
   const [stopping, setStopping] = useState(false)
@@ -70,9 +73,9 @@ function HelperRow({ helper, lead, hue, name, now, onShow, onStop }: { helper: H
   return (
     <li className={`tc-helper ${helper.state}`}>
       <button type="button" className="tc-helper-row" onClick={() => onShow?.(helper.messageId)} disabled={!onShow}
-        aria-label={`${name}: ${helper.title}, ${STATE_WORDS[helper.state]}, ${steps}. Show what ${lead} asked it and what it sent back`}>
+        aria-label={`${name}: ${plainWords(helper.title)}, ${STATE_WORDS[helper.state]}, ${steps}. Show what ${lead} asked it and what it sent back`}>
         <HelperFace helper={helper} hue={hue} name={name} />
-        <span className="tc-helper-title">{helper.title}</span>
+        <span className="tc-helper-title"><InlineMarkdown clickable={false}>{helper.title}</InlineMarkdown></span>
         <span className="tc-helper-state" title={steps}>
           {helper.state === 'working' && <span className="chat-dots" aria-hidden="true"><i /><i /><i /></span>}
           {helper.state === 'done' && <Check size={12} aria-hidden="true" />}

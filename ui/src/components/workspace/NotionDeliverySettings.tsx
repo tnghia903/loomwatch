@@ -78,11 +78,11 @@ export function NotionDeliverySettings({ deliver, onChange, readOnly, teamName, 
 }
 
 /**
- * Whether a page would actually arrive, and where to fix it when it would not. Connections opens
- * from the menu, its one way in (ADR 0043), so this says where rather than linking a second time.
+ * Whether a page would actually arrive, and where to fix it when it would not. Connections is under
+ * You and nothing else on a team's page reaches it, so this links there (ADR 0043).
  */
 function ConnectionLine({ connection, on }: { connection: NotionConnection; on: boolean }) {
-  const link = (label: string) => <span className="output-send-link">{label} in Connections, from the menu.</span>
+  const link = (label: string) => <span className="output-send-link">{label} in <a className="link" href="/connections">Connections</a>.</span>
   if (connection.state === 'loading') return <p className="output-send-status t-meta" role="status">Checking your Notion connection…</p>
   if (connection.state === 'unavailable') return <p className="output-send-status t-meta" role="status">{connection.message}</p>
   if (connection.state === 'disconnected') {

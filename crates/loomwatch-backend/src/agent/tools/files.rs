@@ -4,6 +4,10 @@
 //! `read_file` reads more than text: a PDF, Word, Excel or `PowerPoint` file comes as its text,
 //! numbered and paged like any text, and a picture goes to a model that can see pictures
 //! ([`crate::documents`]).
+//!
+//! A document, CSV table or JSON file that `write_file` or `edit_file` changed is read back with
+//! the same readers, and the tool's answer says whether it opens and what it holds (ADR 0088), so
+//! an agent finds a file that won't open before the person does.
 
 use std::fmt::Write as _;
 use std::fs;
@@ -41,6 +45,8 @@ const MAX_MATCHES: usize = 200;
 const MAX_SEARCHED_BYTES: u64 = 2 * 1024 * 1024;
 /// Documents whose text is kept, so reading one in parts doesn't read the file again.
 const KEPT_DOCUMENTS: usize = 6;
+/// The largest file read back after it is written or edited. A larger one isn't checked.
+const MAX_CHECKED_BYTES: u64 = 10 * 1024 * 1024;
 
 /// A document's text as last read, with the size and change time it was read at.
 struct Kept {
@@ -98,9 +104,11 @@ pub(super) fn run(
             text("new_text"),
             input.get("replace_all").and_then(Value::as_bool) == Some(true),
         ),
-        Builtin::RunCommand | Builtin::UpdatePlan | Builtin::ReadToolOutput => {
-            Output::failed("Not a file tool.")
-        }
+        Builtin::RunCommand
+        | Builtin::UpdatePlan
+        | Builtin::ReadToolOutput
+        | Builtin::ReadPage
+        | Builtin::SearchWeb => Output::failed("Not a file tool."),
     }
 }
 
@@ -444,11 +452,15 @@ fn write(cwd: &Path, file: &Path, content: &str) -> Output {
     }
     let existed = file.exists();
     match fs::write(file, content) {
-        Ok(()) => Output::ok(format!(
-            "{} {shown_path} ({} bytes).",
-            if existed { "Replaced" } else { "Created" },
-            content.len()
-        )),
+        Ok(()) => checked(
+            format!(
+                "{} {shown_path} ({} bytes).",
+                if existed { "Replaced" } else { "Created" },
+                content.len()
+            ),
+            file,
+            true,
+        ),
         Err(error) => Output::failed(format!("{shown_path} couldn't be written: {error}")),
     }
 }
@@ -480,13 +492,281 @@ fn edit(cwd: &Path, file: &Path, old: &str, new: &str, all: bool) -> Output {
         text.replacen(old, new, 1)
     };
     match fs::write(file, changed) {
-        Ok(()) => Output::ok(format!(
-            "Edited {shown_path}: replaced {} occurrence{}.",
-            if all { count } else { 1 },
-            if all && count > 1 { "s" } else { "" }
-        )),
+        Ok(()) => checked(
+            format!(
+                "Edited {shown_path}: replaced {} occurrence{}.",
+                if all { count } else { 1 },
+                if all && count > 1 { "s" } else { "" }
+            ),
+            file,
+            false,
+        ),
         Err(error) => Output::failed(format!("{shown_path} couldn't be written: {error}")),
     }
+}
+
+/// What a write or edit says, `done`, and what reading the file back found: whether a document,
+/// CSV table or JSON file opens and what it holds, or why it doesn't. Plain text, and a file over
+/// [`MAX_CHECKED_BYTES`], aren't checked. The write stands whatever the check finds. `written`
+/// says the whole file came from `write_file`'s text.
+fn checked(done: String, file: &Path, written: bool) -> Output {
+    let mut text = done;
+    if let Some(found) = check(file, written) {
+        text.push_str(" Checked: ");
+        text.push_str(&found);
+    }
+    Output::ok(text)
+}
+
+fn check(file: &Path, written: bool) -> Option<String> {
+    let metadata = fs::metadata(file)
+        .ok()
+        .filter(|metadata| metadata.is_file() && metadata.len() <= MAX_CHECKED_BYTES)?;
+    let extension = file
+        .extension()
+        .map(|extension| extension.to_string_lossy().to_ascii_lowercase());
+    match extension.as_deref() {
+        Some("csv") => return Some(table(&fs::read_to_string(file).ok()?)),
+        Some("json") => return Some(json(&fs::read_to_string(file).ok()?)),
+        _ => {}
+    }
+    let kind = Kind::of(file).filter(|kind| kind.has_text())?;
+    Some(match document_text(file, &metadata) {
+        Ok(text) => format!("it opens as {}.", opened(kind, &text)),
+        Err(reason) if written && kind != Kind::Email => format!(
+            "it doesn't open. {reason} A {} file isn't text, so write_file can't make one.",
+            kind.label()
+        ),
+        Err(reason) => format!("it doesn't open. {reason}"),
+    })
+}
+
+/// What a document that opened is, as its reader's text shows it.
+fn opened(kind: Kind, text: &str) -> String {
+    // The number after "of" on the line the reader starts the first page, sheet or slide with.
+    let count = |first: &str| {
+        text.lines()
+            .find_map(|line| line.strip_prefix(first))
+            .and_then(|rest| {
+                let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+                digits.parse::<usize>().ok()
+            })
+    };
+    match kind {
+        Kind::Pdf => format!(
+            "a PDF of {}",
+            many(count("— Page 1 of ").unwrap_or(1), "page")
+        ),
+        Kind::PowerPoint => format!(
+            "a PowerPoint deck of {}",
+            many(count("Slide 1 of ").unwrap_or(1), "slide")
+        ),
+        Kind::Excel => {
+            let sheets = count("Sheet 1 of ").unwrap_or(1);
+            let each: Vec<&str> = (1..=sheets)
+                .filter_map(|index| {
+                    let start = format!("Sheet {index} of {sheets}: ");
+                    text.lines()
+                        .find_map(|line| line.strip_prefix(start.as_str()))
+                })
+                .collect();
+            format!(
+                "an Excel workbook of {}: {}",
+                many(sheets, "sheet"),
+                each.join("; ")
+            )
+        }
+        Kind::Word => {
+            let words = text
+                .split_whitespace()
+                .filter(|word| word.chars().any(char::is_alphanumeric))
+                .count();
+            format!("a Word document of {}", many(words, "word"))
+        }
+        Kind::Email => "an email".to_owned(),
+        Kind::Picture | Kind::OldOffice | Kind::Heic => format!("a {} file", kind.label()),
+    }
+}
+
+/// `count` of `thing`, with an `s` for more than one.
+fn many(count: usize, thing: &str) -> String {
+    format!("{count} {thing}{}", if count == 1 { "" } else { "s" })
+}
+
+/// A CSV file read as a spreadsheet app reads it: its rows and columns, the first row whose number
+/// of fields isn't the first row's, or the quote never closed. Blank lines aren't rows, and a row
+/// is named by the line it starts on.
+fn table(text: &str) -> String {
+    // Excel's "CSV UTF-8" starts with a byte-order mark, which isn't part of the first field.
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    // Each row's number of fields, and the line it starts on.
+    let mut rows: Vec<(usize, usize)> = Vec::new();
+    let mut fields = 1;
+    let mut row_started = false;
+    let mut field_start = true;
+    let mut quoted = false;
+    let mut line = 1;
+    let mut row_line = 1;
+    let mut quote_line = 1;
+    let mut chars = text.chars().peekable();
+    while let Some(letter) = chars.next() {
+        if quoted {
+            match letter {
+                '"' if chars.peek() == Some(&'"') => {
+                    chars.next();
+                }
+                '"' => quoted = false,
+                '\n' => line += 1,
+                _ => {}
+            }
+            continue;
+        }
+        match letter {
+            // A quote only opens a field: one inside it (`5" screen`) is a letter like any other.
+            '"' if field_start => {
+                quoted = true;
+                quote_line = line;
+                field_start = false;
+                row_started = true;
+            }
+            ',' => {
+                fields += 1;
+                field_start = true;
+                row_started = true;
+            }
+            '\n' => {
+                if row_started {
+                    rows.push((fields, row_line));
+                }
+                fields = 1;
+                field_start = true;
+                row_started = false;
+                line += 1;
+                row_line = line;
+            }
+            '\r' => {}
+            _ => {
+                field_start = false;
+                row_started = true;
+            }
+        }
+    }
+    if quoted {
+        return format!(
+            "it doesn't open as a table: the quote opened on line {quote_line} is never closed."
+        );
+    }
+    if row_started {
+        rows.push((fields, row_line));
+    }
+    let Some(&(columns, _)) = rows.first() else {
+        return "it has no rows.".to_owned();
+    };
+    let shape = format!(
+        "it opens as a table of {} and {}",
+        many(rows.len(), "row"),
+        many(columns, "column")
+    );
+    match rows.iter().find(|(count, _)| *count != columns) {
+        Some((count, line)) => format!(
+            "{shape}, but the row on line {line} has {} where the first row has {columns}.",
+            many(*count, "field")
+        ),
+        None => format!("{shape}."),
+    }
+}
+
+/// Whether a JSON file parses, and what it holds at the top. One with the comments and trailing
+/// commas that `tsconfig.json` and VS Code's settings allow is said to parse only that way, with
+/// why it isn't plain JSON, since a file such as `package.json` must be.
+fn json(text: &str) -> String {
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let holds = |value: &Value| match value {
+        Value::Object(keys) => format!("an object of {}", many(keys.len(), "key")),
+        Value::Array(items) => format!("a list of {}", many(items.len(), "item")),
+        _ => "one value".to_owned(),
+    };
+    let strict = match serde_json::from_str::<Value>(text) {
+        Ok(value) => return format!("it parses as JSON: {}.", holds(&value)),
+        Err(error) => error,
+    };
+    let plain = without_comments(text);
+    if plain == text {
+        return format!("it isn't valid JSON: {strict}.");
+    }
+    match serde_json::from_str::<Value>(&plain) {
+        Ok(value) => format!(
+            "it parses as JSON with comments ({}), which tsconfig.json and VS Code's settings \
+             allow, but not as plain JSON: {strict}.",
+            holds(&value)
+        ),
+        Err(error) => format!("it isn't valid JSON, even with comments: {error}."),
+    }
+}
+
+/// `text` without `//` and `/* */` comments and without a comma just before a closing bracket,
+/// strings left as they are. Every line stays where it was, so a parse error names the right line.
+fn without_comments(text: &str) -> String {
+    let mut bare = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    let mut in_string = false;
+    while let Some(letter) = chars.next() {
+        if in_string {
+            bare.push(letter);
+            match letter {
+                '\\' => bare.extend(chars.next()),
+                '"' => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+        match letter {
+            '"' => {
+                in_string = true;
+                bare.push(letter);
+            }
+            '/' if chars.peek() == Some(&'/') => {
+                if chars.by_ref().any(|next| next == '\n') {
+                    bare.push('\n');
+                }
+            }
+            '/' if chars.peek() == Some(&'*') => {
+                chars.next();
+                let mut last = ' ';
+                for next in chars.by_ref() {
+                    if last == '*' && next == '/' {
+                        break;
+                    }
+                    if next == '\n' {
+                        bare.push('\n');
+                    }
+                    last = next;
+                }
+            }
+            _ => bare.push(letter),
+        }
+    }
+    let letters: Vec<char> = bare.chars().collect();
+    let mut out = String::with_capacity(bare.len());
+    let mut in_string = false;
+    let mut escaped = false;
+    for (at, &letter) in letters.iter().enumerate() {
+        if in_string {
+            in_string = escaped || letter != '"';
+            escaped = !escaped && letter == '\\';
+        } else if letter == '"' {
+            in_string = true;
+        } else if letter == ','
+            && letters[at + 1..]
+                .iter()
+                .find(|next| !next.is_whitespace())
+                .is_some_and(|next| matches!(next, '}' | ']'))
+        {
+            continue;
+        }
+        out.push(letter);
+    }
+    out
 }
 
 #[cfg(test)]
@@ -780,6 +1060,194 @@ mod tests {
             heavy.text.contains("leave no room for one this large"),
             "{}",
             heavy.text
+        );
+    }
+
+    fn wrote(cwd: &Path, path: &str, content: &str) -> Output {
+        run(
+            Builtin::WriteFile,
+            &json!({"path": path, "content": content}),
+            cwd,
+        )
+    }
+
+    /// A table or a document written is read back, and the answer says what it holds or why it
+    /// doesn't open. The write stands either way.
+    #[test]
+    fn a_written_table_or_document_is_read_back() {
+        let folder = Folder::new();
+        let cwd = &folder.0;
+        let table = wrote(
+            cwd,
+            "sales.csv",
+            "Item,Cost\nTea,\"1,50\"\r\nCake,\"3\n00\"\n",
+        );
+        assert_eq!(
+            table.text,
+            "Created sales.csv (34 bytes). Checked: it opens as a table of 3 rows and 2 columns."
+        );
+        let ragged = wrote(cwd, "ragged.csv", "a,b\n\n1,2\n3,4,5\n");
+        assert!(!ragged.failed);
+        assert!(
+            ragged.text.ends_with(
+                "a table of 3 rows and 2 columns, but the row on line 4 has 3 fields where the \
+                 first row has 2."
+            ),
+            "{}",
+            ragged.text
+        );
+        // As Excel's "CSV UTF-8" saves one: a byte-order mark before a quoted first field.
+        let marked = wrote(cwd, "marked.csv", "\u{feff}\"Name, full\",Age\nBob,30\n");
+        assert!(
+            marked
+                .text
+                .ends_with("Checked: it opens as a table of 2 rows and 2 columns."),
+            "{}",
+            marked.text
+        );
+        let open = wrote(cwd, "open.csv", "a,b\n\"never closed,2\n");
+        assert!(
+            open.text.ends_with(
+                "Checked: it doesn't open as a table: the quote opened on line 2 is never closed."
+            ),
+            "{}",
+            open.text
+        );
+        assert!(!open.failed && cwd.join("open.csv").exists());
+
+        let pdf = String::from_utf8(minimal_pdf(&["First page", "Second page"])).unwrap();
+        let paged = wrote(cwd, "out/brief.pdf", &pdf);
+        assert!(
+            paged
+                .text
+                .ends_with("Checked: it opens as a PDF of 2 pages."),
+            "{}",
+            paged.text
+        );
+        let word = wrote(cwd, "report.docx", "# Report\n\nWritten as text.");
+        assert!(!word.failed && cwd.join("report.docx").exists());
+        assert!(
+            word.text
+                .contains("Checked: it doesn't open. report.docx isn't a Word file")
+                && word
+                    .text
+                    .ends_with("A Word file isn't text, so write_file can't make one."),
+            "{}",
+            word.text
+        );
+    }
+
+    /// A JSON file written or edited is parsed; one with the comments `tsconfig.json` allows is
+    /// said to parse only that way, with why it isn't plain JSON.
+    #[test]
+    fn a_written_json_file_is_parsed() {
+        let folder = Folder::new();
+        let cwd = &folder.0;
+        let settings = wrote(cwd, "settings.json", "{\"a\": 1, \"b\": [1, 2]}");
+        assert!(
+            settings
+                .text
+                .ends_with("Checked: it parses as JSON: an object of 2 keys."),
+            "{}",
+            settings.text
+        );
+        let broken = run(
+            Builtin::EditFile,
+            &json!({"path": "settings.json", "old_text": "1, \"b\"", "new_text": "1 \"b\""}),
+            cwd,
+        );
+        assert!(!broken.failed);
+        assert!(
+            broken.text.starts_with(
+                "Edited settings.json: replaced 1 occurrence. Checked: it isn't valid JSON: \
+                 expected `,` or `}` at line 1 column 9."
+            ),
+            "{}",
+            broken.text
+        );
+
+        let commented = wrote(
+            cwd,
+            "tsconfig.json",
+            "{\n  // Where the build goes.\n  \"outDir\": \"dist\", /* \"x\": 1, */\n  \"lib\": [\"a//b\",],\n}\n",
+        );
+        assert!(
+            commented.text.contains(
+                "Checked: it parses as JSON with comments (an object of 2 keys), which \
+                 tsconfig.json and VS Code's settings allow, but not as plain JSON: key must be a \
+                 string at line 2 column 3."
+            ),
+            "{}",
+            commented.text
+        );
+        let trailing = wrote(cwd, "package.json", "{\"name\": \"a\",}");
+        assert!(
+            trailing
+                .text
+                .contains("but not as plain JSON: trailing comma at line 1 column 14."),
+            "{}",
+            trailing.text
+        );
+        let marked = wrote(cwd, "marked.json", "\u{feff}[1, 2]");
+        assert!(
+            marked
+                .text
+                .ends_with("Checked: it parses as JSON: a list of 2 items."),
+            "{}",
+            marked.text
+        );
+    }
+
+    /// Plain text, and a file too large to read back at once, are written as they always were.
+    #[test]
+    fn plain_text_and_a_large_file_are_not_read_back() {
+        let folder = Folder::new();
+        let cwd = &folder.0;
+        assert_eq!(
+            wrote(cwd, "notes.md", "# Notes\n").text,
+            "Created notes.md (8 bytes)."
+        );
+        assert_eq!(
+            wrote(cwd, "page.html", "<p>Hi</p>").text,
+            "Created page.html (9 bytes)."
+        );
+        let size = usize::try_from(MAX_CHECKED_BYTES).unwrap() + 1;
+        let large = format!("[{}]", "1,".repeat(size / 2));
+        let said = wrote(cwd, "large.json", &large).text;
+        assert!(said.starts_with("Created large.json") && !said.contains("Checked"));
+    }
+
+    /// What a document that opens is said to hold, from the text its reader makes of it.
+    #[test]
+    fn a_document_that_opens_is_said_to_hold_its_pages_sheets_slides_or_words() {
+        let sheets = "Sheet 1 of 2: Budget (3 rows, 3 columns, from cell B2)\nItem\tCost\tPaid \
+                      on\nRent & fees\t1200.5\t2026-10-19\n\nSheet 2 of 2: Empty (empty)";
+        assert_eq!(
+            opened(Kind::Excel, sheets),
+            "an Excel workbook of 2 sheets: Budget (3 rows, 3 columns, from cell B2); Empty \
+             (empty)"
+        );
+        assert_eq!(
+            opened(
+                Kind::PowerPoint,
+                "Slide 1 of 3\nPlan\n\nSlide 2 of 3 (hidden)\n"
+            ),
+            "a PowerPoint deck of 3 slides"
+        );
+        assert_eq!(opened(Kind::Pdf, "One page only."), "a PDF of 1 page");
+        assert_eq!(
+            opened(Kind::Word, "# Plan\n- Hire two people\n\nOpen in Hanoi."),
+            "a Word document of 7 words"
+        );
+        let folder = Folder::new();
+        fs::write(
+            folder.0.join("plan.docx"),
+            docx("<w:p><w:r><w:t>Three words here</w:t></w:r></w:p>"),
+        )
+        .unwrap();
+        assert_eq!(
+            check(&folder.0.join("plan.docx"), false).as_deref(),
+            Some("it opens as a Word document of 3 words.")
         );
     }
 

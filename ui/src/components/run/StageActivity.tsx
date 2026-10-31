@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { ArrowRight, Check, ExternalLink, FileSearch, Globe, ListChecks, MessagesSquare, PencilLine, Sparkles, SquareTerminal, Wrench, type LucideIcon } from 'lucide-react'
+import { ArrowRight, Check, ExternalLink, FileSearch, Globe, ListChecks, MessagesSquare, PencilLine, Sparkles, SquareTerminal, Wrench, type IconComponent } from '../ui/icon'
 
 import type { WorkPhase } from '../../lib/library/figure'
 import { givenInFull, type RunCapability } from '../../lib/runs/capabilityEvidence'
@@ -15,7 +15,7 @@ import { SuppliedInstructions } from './SuppliedInstructions'
  * found on the web, its skills and whether it opened each, or the calls of that kind, each a way to
  * its record. Searches, pages and the programs that ran them share one web mark: one list, one mark.
  */
-const USE_ICONS: Readonly<Record<UseKind, LucideIcon>> = {
+const USE_ICONS: Readonly<Record<UseKind, IconComponent>> = {
   skill: Sparkles,
   web: Globe,
   page: Globe,

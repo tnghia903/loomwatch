@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { daemonFetch } from '../daemonFetch'
-import { safeFileStem } from '../files/paths'
+import { safeFileStem, splitPath } from '../files/paths'
 import { movedInPlace } from '../team-file/inPlace'
 import type { AgentAllow, AgentConfig } from '../team-file/types'
 import type { FigureChoice } from './figures'
@@ -48,6 +48,9 @@ export interface JobSpec {
   /** `false`: it does not bring in helpers for a big task (ADR 0079), and a team copies that as
       `allowRecruiting: false`. Absent, it may. */
   helpers?: false
+  /** `false`: it does not bring in other agents from My agents for a part no one on its team does
+      (ADR 0092), filled into a team as `allowMyAgents: false`. Absent, it may. */
+  bringsIn?: false
   /** Set by the daemon: which version this is. Absent means 1. */
   version?: number
   /** What changed in this version, in the operator's words. */
@@ -58,14 +61,6 @@ export interface JobSpec {
 
 /** A job's version number; a file written before versions existed is version 1. */
 export const versionOf = (job: Pick<JobSpec, 'version'>): number => job.version ?? 1
-
-/** One version of a saved job, newest first in `fetchJobVersions`. */
-export interface JobVersion {
-  version: number
-  savedAt?: string
-  note?: string
-  spec: JobSpec
-}
 
 /** A saved job as `GET /api/jobs` lists it. `file` is relative to the teams folder. */
 export interface SavedJob extends JobSpec {
@@ -117,21 +112,17 @@ export async function fetchJobs(): Promise<JobList | null> {
  */
 export async function saveJob(id: string, spec: JobSpec, { replace = false, expectedVersion }: { replace?: boolean; expectedVersion?: number } = {}): Promise<SavedJob> {
   const precondition: Record<string, string> = !replace ? { 'If-None-Match': '*' } : expectedVersion ? { 'If-Match': `"${expectedVersion}"` } : {}
+  // A job as `GET /api/jobs` listed it, changed and saved back (a team's edit to one of My agents is),
+  // still carries its `id` and `file`. The daemon sets those and refuses them in a body.
+  const { id: _id, file: _file, ...fields } = spec as Partial<SavedJob>
   const response = await daemonFetch(`/api/jobs/${encodeURIComponent(id)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...precondition },
-    body: JSON.stringify(spec),
+    body: JSON.stringify(fields),
   })
   if (!response.ok) throw await failure(response)
   window.dispatchEvent(new Event(JOBS_CHANGED_EVENT))
   return (await response.json()) as SavedJob
-}
-
-/** Every version of job `id`, newest first, each with its fields. */
-export async function fetchJobVersions(id: string): Promise<JobVersion[]> {
-  const response = await daemonFetch(`/api/jobs/${encodeURIComponent(id)}/versions`, { cache: 'no-store' })
-  if (!response.ok) throw await failure(response)
-  return ((await response.json()) as { versions: JobVersion[] }).versions
 }
 
 /** The folder agents' chats keep their one-agent teams in (`.jobs/.bench`), made when missing. */
@@ -139,6 +130,16 @@ export async function benchFolder(): Promise<string> {
   const response = await daemonFetch('/api/bench', { method: 'POST', cache: 'no-store' })
   if (!response.ok) throw await failure(response)
   return ((await response.json()) as { folder: string }).folder
+}
+
+/**
+ * Whose chat a team file is: `<id>` for `.jobs/.bench/<id>.yaml`, the one-agent team an agent's
+ * own chat keeps (the daemon's `pinned.rs` reads the same path back), or `null` for any other team.
+ */
+export function benchChatOwner(teamPath: string | null | undefined): string | null {
+  const names = splitPath(teamPath ?? '')
+  const [jobs, bench, file] = names.slice(-3)
+  return names.length >= 3 && jobs === '.jobs' && bench === '.bench' && /\.yaml$/.test(file) ? file.replace(/\.yaml$/, '') : null
 }
 
 /** Remove a saved job. Its file is moved to `.jobs/.removed/`, so it can be put back by hand. */
@@ -165,8 +166,14 @@ const ICON_WORDS: ReadonlyArray<readonly [RoleIcon, RegExp]> = [
   ['review', /\b(review|check|critic|qa|verif|audit|approv)/],
   ['edit', /\b(edit|proofread|polish|tighten|copyedit)/],
   ['research', /\b(research|search|find|source|scout|investigat)/],
-  ['analyse', /\b(analy[sz]|data|metric|number|statistic|spreadsheet)/],
-  ['design', /\b(design|slide|deck|visual|layout|diagram|ui\b)/],
+  ['slides', /\b(slides?|deck|presentation|powerpoint|pptx)\b/],
+  ['sheet', /\b(spreadsheet|workbook|excel|xlsx)\b/],
+  ['dashboard', /\bdashboards?\b/],
+  ['chart', /\b(charts?|graphs?|plots?)\b/],
+  ['video', /\b(videos?|clips?|voice-?over|animation)\b/],
+  ['document', /\b(word documents?|docx|pdfs?)\b/],
+  ['analyse', /\b(analy[sz]|data|metric|number|statistic)/],
+  ['design', /\b(design|visual|layout|diagram|ui\b)/],
   ['code', /\b(code|coder|develop|engineer|program|bug|test|refactor)/],
   ['write', /\b(write|writer|draft|author|copy|blog|post|notes?)\b/],
 ]
@@ -196,10 +203,10 @@ export function toolAllowOf(agent: Pick<AgentConfig, 'capabilities'>): Record<st
   return allow
 }
 
-/** A short line for a job saved without one: the first sentence of its instructions. */
+/** A short line for a job saved without one: the first sentence of its instructions, whole, with
+ * its Markdown; the palette's line cuts it, so a mark is never split. */
 function summary(instructions: string): string {
-  const first = instructions.trim().split(/(?<=[.!?])\s|\n/)[0] ?? ''
-  return first.length > 60 ? `${first.slice(0, 57).trimEnd()}…` : first
+  return instructions.trim().split(/(?<=[.!?])\s|\n/)[0] ?? ''
 }
 
 /** A saved job as a palette preset, placed like a built-in one, plus a link to this version. */
@@ -220,6 +227,7 @@ export function savedJobPreset(job: SavedJob): RolePreset {
     ...(job.doneWhen?.length ? { doneWhen: job.doneWhen } : {}),
     ...(allow ? { allow } : {}),
     ...(job.helpers === false ? { helpers: false as const } : {}),
+    ...(job.bringsIn === false ? { bringsIn: false as const } : {}),
     from: { agent: job.id, version: versionOf(job) },
   }
 }

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowRight } from 'lucide-react'
+import { ArrowRight } from '../ui/icon'
 import { capabilityEvidence, hadSkill } from '../../lib/runs/capabilityEvidence'
 import type { Evidence, RunEvent, RunPhase, RunProjection } from '../../lib/watch/events'
 import { cardActivity, linkedIn, asUse, USE_NAMES, WEB_KINDS, type Use, type UseKind } from '../../lib/watch/cardActivity'
@@ -8,7 +8,6 @@ import type { AllowSwitch } from '../../lib/team-file/types'
 import { SkillList, UseList, WebList, type FigureGlow, type SkillSummary } from './StageActivity'
 import { FlowLinkButton, TeamFlow, type FlowStage } from './TeamFlow'
 import type { AgentNode } from '../../lib/library/nodeFromDrop'
-import { useCanvasActions } from '../canvas/CanvasActionsContext'
 import { buildReceipt } from '../../lib/story/receipt'
 import { RunReceipt } from './RunReceipt'
 import { WeftBar } from './WeftBar'
@@ -18,6 +17,7 @@ import { skillName } from '../../lib/story/reads'
 import type { RunRecord } from '../../lib/runs/client'
 import { modelLabelForAgent } from '../../lib/models'
 import { useRunQuests } from './useRunQuests'
+import { stateLabel } from '../../lib/state/words'
 
 export interface DeliveryLaneProps {
   prompt: string
@@ -31,7 +31,13 @@ export interface DeliveryLaneProps {
   output: { text: string; producer: string | null }
   projection: RunProjection
   onInspectEvidence: (id: string) => void
-  onSelectAgent: (id: string) => void
+  /** The selected stage's "Agent details": its agent's settings. Absent where they are already on
+      the page (an agent's own Details, over its bench), so it isn't offered there. */
+  onSelectAgent?: (id: string) => void
+  /** "What was recorded": every record behind the run, for an expert. */
+  onShowRecorded?: () => void
+  /** "What it received": the handover an agent was given and the memory packet it was supplied. */
+  onShowReceived?: (agentId: string) => void
   /** The model each agent runs on, in words, by agent id. */
   harnessLabels?: ReadonlyMap<string, string>
   planned?: boolean
@@ -77,7 +83,7 @@ const plural = (count: number, one: string, many = `${one}s`) => `${count} ${cou
 /** Run phases as an operator would say them; the raw phase ids are daemon vocabulary. */
 const PHASE_WORDS: Partial<Record<string, string>> = {
   queued: 'Queued', starting: 'Starting', running: 'Running', succeeded: 'Finished',
-  partial: 'Finished with gaps', failed: 'Failed', cancelled: 'Stopped',
+  partial: 'Finished with gaps', failed: stateLabel('failed'), cancelled: stateLabel('stopped'),
 }
 
 /** Run is a reading surface. The saved team canvas remains the editing surface, and detailed
@@ -98,18 +104,18 @@ export function DeliveryLane({
   harnessLabels = new Map(),
   onInspectEvidence,
   onSelectAgent,
+  onShowRecorded,
+  onShowReceived,
   onAllow,
   focusAgentId = null,
   onRevealMessage,
   record = null,
   events = NO_EVENTS,
 }: DeliveryLaneProps) {
-  const [selectedId, setSelectedId] = useState<string | null>(output.producer)
+  const [selectedId, setSelectedId] = useState<string | null>(focusAgentId ?? output.producer)
   // The one list open from a stage's tray, and the skill whose receipt is open in it.
   const [openMark, setOpenMark] = useState<{ agentId: string; kind: UseKind } | null>(null)
   const [openSkill, setOpenSkill] = useState<string | null>(null)
-  const { inspectHandover, toggleProvenance } =
-    useCanvasActions()
   const selected =
     agents.find((node) => node.id === selectedId) ??
     agents.find((node) => node.id === output.producer) ??
@@ -187,6 +193,10 @@ export function DeliveryLane({
     setHonouredFocus(focusAgentId)
     if (focusAgentId) setSelectedId(focusAgentId)
   }
+  // …and brought into view, since its card can be below the receipt and the timeline.
+  useEffect(() => {
+    if (honouredFocus) document.getElementById(`delivery-stage-${honouredFocus}`)?.scrollIntoView?.({ block: 'nearest' })
+  }, [honouredFocus])
   // Stage motion follows the session, not a recorded status: a replay never shows work in motion.
   const live = mode === 'live' && !planned
   // While the run is watched, what each figure acts out moves with the clock between events too.
@@ -260,7 +270,7 @@ export function DeliveryLane({
                   : 'Select an agent to see its work'}
               </span>
               {/* Every record behind the cards, for an expert. */}
-              {!planned && <button className="delivery-link" onClick={toggleProvenance}>What was recorded <ArrowRight size={13} /></button>}
+              {!planned && onShowRecorded && <button className="delivery-link" onClick={onShowRecorded}>What was recorded <ArrowRight size={13} /></button>}
             </div>
             <TeamFlow
               asked={Boolean(prompt.trim())}
@@ -308,9 +318,9 @@ export function DeliveryLane({
                   open: openMark?.agentId === node.id ? openMark.kind : null,
                   extra: (
                     <>
-                      {(runtime?.hasPacket || runtime?.received) && <FlowLinkButton onClick={() => inspectHandover?.(node.id)}>What it received</FlowLinkButton>}
+                      {(runtime?.hasPacket || runtime?.received) && onShowReceived && <FlowLinkButton onClick={() => onShowReceived(node.id)}>What it received</FlowLinkButton>}
                       {/* The selected stage's way to its agent's settings: one on the screen, as before. */}
-                      {selected?.id === node.id && agent.kind !== 'operator' && <FlowLinkButton onClick={() => onSelectAgent(node.id)}>Agent details</FlowLinkButton>}
+                      {selected?.id === node.id && agent.kind !== 'operator' && onSelectAgent && <FlowLinkButton onClick={() => onSelectAgent(node.id)}>Agent details</FlowLinkButton>}
                     </>
                   ),
                 }

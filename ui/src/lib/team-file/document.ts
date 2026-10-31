@@ -90,6 +90,12 @@ export class TeamFileModel {
     this.doc.set('id', id)
   }
 
+  /** The project this team works in (ADR 0097), or none with `null`. */
+  setProject(id: string | null): void {
+    if (id) this.doc.set('project', id)
+    else this.doc.delete('project')
+  }
+
   setEntrypoint(agentId: string): void {
     this.doc.set('entrypoint', agentId)
   }
@@ -318,6 +324,36 @@ export class TeamFileModel {
   removeAgent(agentId: string): void {
     const index = this.requireAgentIndex(agentId)
     this.doc.deleteIn(['agents', index])
+  }
+
+  /**
+   * Take agent cards off the team as deleting them in Workflow does (§5.4): their connections go,
+   * an agent that checked one of them checks nothing, a removed first agent's place passes to the
+   * one agent left (to none when more are left), and the reply comes from the first agent once no
+   * connection is left. Returns the first agent after, and the agents that stopped checking.
+   */
+  removeAgentCards(ids: readonly string[]): { entrypoint: string | null; unchecked: string[]; droppedEdges: EdgeConfig[] } {
+    const removing = new Set(ids)
+    const before = this.snapshot()
+    const edges = before.edges ?? []
+    const remaining = (before.agents ?? []).filter((agent) => !removing.has(agent.id))
+    const droppedEdges = edges.filter((edge) => removing.has(edge.from) || removing.has(edge.to))
+    droppedEdges.forEach((edge) => this.removeEdge(edge.from, edge.to))
+    removing.forEach((id) => this.removeAgent(id))
+    const unchecked = remaining.filter((agent) => agent.checks && removing.has(agent.checks)).map((agent) => agent.id)
+    unchecked.forEach((id) => { this.setAgentField(id, 'checks', undefined); this.setAgentField(id, 'sendBack', undefined); this.setAgentField(id, 'sendBackOnce', undefined) })
+    let entrypoint = before.entrypoint || null
+    if (entrypoint !== null && removing.has(entrypoint)) {
+      // Unset must mean unset in the YAML too, not a dangling reference to the agent that left.
+      entrypoint = remaining.length === 1 ? remaining[0].id : null
+      if (entrypoint) this.setEntrypoint(entrypoint)
+      else this.clearEntrypoint()
+    }
+    if (before.responder) {
+      if (edges.length === droppedEdges.length && entrypoint) this.setResponder(entrypoint)
+      else if (removing.has(before.responder)) this.clearResponder()
+    }
+    return { entrypoint, unchecked, droppedEdges }
   }
 
   addEdge(edge: EdgeConfig): void {

@@ -4,10 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_MODEL } from '../../lib/ai/modelIds'
 import { forgetKeyStatus } from '../../lib/ai/useKeyStatus'
 import { forgetModels } from '../../lib/ai/useModels'
-import { EMPTY_THREAD, type AskThread, type ProposalCard, type ReviewNoteCard, type RunRequestCard } from '../../lib/ask/thread'
+import { EMPTY_THREAD, type AskThread, type ProposalCard, type ReviewNoteCard, type RunRequestCard, type RunStartedCard } from '../../lib/ask/thread'
 import type { AskController } from '../../lib/ask/useAsk'
 import type { CardActions } from './AskCards'
-import { AskButton } from './AskButton'
 import { AskPanel } from './AskPanel'
 
 const model = (id: string, name: string) => ({ id, name, contextLength: 200_000, inputPrice: 2, outputPrice: 10, free: false, reasoning: true })
@@ -47,11 +46,11 @@ function cards(overrides: Partial<CardActions> = {}): CardActions {
 }
 
 const TEAM = 'schemaVersion: 1\nid: brief\nname: Brief\nentrypoint: a\nagents:\n  - { id: a, name: Collector, role: Collect, model: m, spawn: { cmd: c, args: [], env: {}, cwd: "." } }\n  - { id: b, name: Writer, role: Write, model: m, spawn: { cmd: c, args: [], env: {}, cwd: "." } }\nedges:\n  - { from: a, to: b, layer: configured, kind: sequence, ts: "2026-10-02T00:00:00Z" }\n'
-const proposal: ProposalCard = { kind: 'proposal', id: 'p1', at: '2026-10-02T09:00:00Z', file: 'brief.yaml', name: 'Brief', isNew: true, summary: 'Gathers and writes.', yaml: TEAM, outcome: null, superseded: false }
+const proposal: ProposalCard = { kind: 'proposal', id: 'p1', at: '2026-10-02T09:00:00Z', file: 'brief.yaml', name: 'Brief', isNew: true, summary: 'Gathers and writes.', yaml: TEAM, agentNames: {}, outcome: null, superseded: false }
 const request: RunRequestCard = { kind: 'run-request', id: 'r1', file: 'brief.yaml', name: 'Brief', request: 'Today’s news', steps: 2, decision: null, runId: null }
 const note: ReviewNoteCard = { kind: 'review-note', id: 'n1', runId: 'run-1', file: 'brief.yaml', name: 'You', question: 'Approve the brief?', text: 'Approved. Keep it short.' }
 
-function threadWith(...cardsInTurn: (ProposalCard | RunRequestCard | ReviewNoteCard)[]): AskThread {
+function threadWith(...cardsInTurn: (ProposalCard | RunRequestCard | ReviewNoteCard | RunStartedCard)[]): AskThread {
   return {
     state: 'ready', error: null, appName: 'LoomWatch', appId: 'loomwatch', model: DEFAULT_MODEL,
     items: [
@@ -62,6 +61,25 @@ function threadWith(...cardsInTurn: (ProposalCard | RunRequestCard | ReviewNoteC
 }
 
 describe('AskPanel', () => {
+  it('shows what you typed and the request it drafted as Markdown, keeping your lines', async () => {
+    const thread = threadWith({ ...request, request: 'Today’s **AI** news\nfrom `feeds.txt`' })
+    thread.items[0] = { kind: 'person', id: 'm1', text: 'Make me a team that:\nhas two agents\n- gathers **news**\n- writes it up' }
+    render(<AskPanel ask={controller({ thread })} view="home" cards={cards()} />)
+    const yours = (await screen.findByText('news', { selector: 'strong' })).closest('.ask-you-said') as HTMLElement
+    expect(yours.querySelectorAll('li')).toHaveLength(2)
+    expect(yours.querySelectorAll('br')).toHaveLength(1)
+    const drafted = screen.getByText('AI', { selector: 'strong' }).closest('blockquote') as HTMLElement
+    expect(drafted.querySelector('code')).toHaveTextContent('feeds.txt')
+    expect(drafted.querySelector('br')).not.toBeNull()
+  })
+
+  it('shows the request of a run it started with its Markdown', async () => {
+    const started: RunStartedCard = { kind: 'run-started', id: 's1', runId: 'run-9', file: 'brief.yaml', request: 'Today’s **AI** news from `feeds.txt`' }
+    render(<AskPanel ask={controller({ thread: threadWith(started) })} view="home" cards={cards()} />)
+    const quote = (await screen.findByText('AI', { selector: 'strong' })).closest('blockquote') as HTMLElement
+    expect(quote.querySelector('code')).toHaveTextContent('feeds.txt')
+  })
+
   it('opens with what Ask can do and suggestions for where the person is, which send at a click', () => {
     const ask = controller()
     render(<AskPanel ask={ask} view="home" cards={cards()} />)
@@ -111,11 +129,17 @@ describe('AskPanel', () => {
     const { rerender } = render(<AskPanel ask={controller({ thread: threadWith(proposal) })} view="home" cards={actions} />)
     const card = screen.getByRole('article', { name: 'Proposed team: Brief' })
     expect(within(card).getByText('2 steps: Collector → Writer')).toBeInTheDocument()
+    // The getting-started guide follows Ask: the panel, a proposal still to show, then its Apply.
+    expect(card.closest('[data-tour="ask"]')).not.toBeNull()
+    expect(card).toHaveAttribute('data-tour', 'ask-proposal')
     fireEvent.click(within(card).getByRole('button', { name: /Show on canvas/ }))
     expect(actions.onShowProposal).toHaveBeenCalledWith('p1', proposal)
 
     rerender(<AskPanel ask={controller({ thread: threadWith(proposal) })} view="build" cards={{ ...actions, previewingId: 'p1' }} />)
-    fireEvent.click(within(screen.getByRole('article', { name: 'Proposed team: Brief' })).getByRole('button', { name: 'Apply' }))
+    const shown = screen.getByRole('article', { name: 'Proposed team: Brief' })
+    expect(shown).not.toHaveAttribute('data-tour')
+    expect(within(shown).getByRole('button', { name: 'Apply' })).toHaveAttribute('data-tour', 'apply-proposal')
+    fireEvent.click(within(shown).getByRole('button', { name: 'Apply' }))
     expect(actions.onApply).toHaveBeenCalled()
 
     rerender(<AskPanel ask={controller({ thread: threadWith({ ...proposal, outcome: 'applied' }) })} view="build" cards={actions} />)
@@ -180,14 +204,5 @@ describe('Choosing the model', () => {
   it('cannot be changed while a message is on its way', () => {
     render(<AskPanel ask={controller({ sending: true })} view="build" cards={cards()} />)
     expect(screen.getByRole('button', { name: 'Model: Claude Opus 5.5. Change' })).toBeDisabled()
-  })
-})
-
-describe('AskButton', () => {
-  it('says when the assistant is working, and whether the panel is open', () => {
-    const { rerender } = render(<AskButton ask={controller({ open: false, activity: 'Drafting the team' })} />)
-    expect(screen.getByRole('button', { name: 'Ask LoomWatch (Drafting the team)' })).toHaveAttribute('aria-pressed', 'false')
-    rerender(<AskButton ask={controller({ open: true })} />)
-    expect(screen.getByRole('button', { name: 'Ask LoomWatch' })).toHaveAttribute('aria-pressed', 'true')
   })
 })

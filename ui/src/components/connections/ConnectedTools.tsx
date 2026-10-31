@@ -3,10 +3,8 @@ import { useEffect, useRef, useState } from 'react'
 import { NOTION_TOOL_URL, actionCount, checkTool, keptInWords, removeTool, useConnectedTools, type ConnectedTool } from '../../lib/tools/client'
 import { ConnectTool } from '../tools/ConnectTool'
 import { ToolIcon } from '../tools/ToolIcon'
+import { InlineMarkdown } from '../ui/Markdown'
 import { NotionAnswers } from './NotionAnswers'
-
-/** The longest description of a call shown in the list. */
-const DESCRIPTION_CHARS = 140
 
 /**
  * `?tool=notion`: where the canvas sends you to connect Notion or choose the page answers go
@@ -17,7 +15,7 @@ const readAskedTool = () => new URLSearchParams(window.location.search).get('too
 /**
  * Connections' Tools section (ADR 0069): every tool connected in LoomWatch, what each offers, and
  * connecting, checking, signing in again or removing one. Which agent may use which tool is the
- * agent's own Tools block. Notion's card also says where teams' answers go, since its sign-in
+ * agent's own Tools it can use row. Notion's card also says where teams' answers go, since its sign-in
  * sends them and reads the pages agents are given (ADR 0070).
  */
 export function ConnectedTools() {
@@ -67,7 +65,7 @@ export function ConnectedTools() {
   return (
     <section className="e1 lw-settings-section" aria-labelledby="tools-heading" aria-busy={busy}>
       <h2 id="tools-heading" className="t-title">Tools</h2>
-      <p className="t-body lw-settings-quiet">A tool lets your agents use a service, such as Notion or Todoist. Connect it here, then give it to an agent in its Tools block. The agent asks you before each action it takes there, unless you always allow that action. Notion also lets LoomWatch send your teams’ answers to a page.</p>
+      <p className="t-body lw-settings-quiet">A tool lets your agents use a service, such as Notion or Todoist. Connect it here, then give it to an agent under Tools it can use. The agent asks you before each action it takes there, unless you always allow that action. Notion also lets LoomWatch send your teams’ answers to a page.</p>
       {error && <p role="alert" className="inline-error t-body"><span className="detail">{error}</span></p>}
       {notice && <p role="status" className="lw-notice t-meta">{notice}</p>}
       {tools.state === 'loading' && <p role="status" className="t-meta lw-settings-quiet">Loading tools…</p>}
@@ -84,7 +82,7 @@ export function ConnectedTools() {
             {tool.example && !tool.pending && <p className="t-meta">Try asking an agent: “{tool.example}”</p>}
             {tool.calls.length > 0 && <details>
               <summary>What it can do</summary>
-              <ul>{tool.calls.map((call) => <li key={call.name}><strong>{call.label}</strong>{call.readOnly ? ' · only reads' : ''}{call.description ? ` — ${call.description.length > DESCRIPTION_CHARS ? `${call.description.slice(0, DESCRIPTION_CHARS - 1).trimEnd()}…` : call.description}` : ''}</li>)}</ul>
+              <ul>{tool.calls.map((call) => <li key={call.name}><strong>{call.label}</strong>{call.readOnly ? ' · only reads' : ''}{call.description ? <span className="lw-call-desc"><InlineMarkdown>{call.description}</InlineMarkdown></span> : null}</li>)}</ul>
             </details>}
             {tool.notion && !tool.pending && <NotionAnswers choosing={choosingFor === tool.id} />}
             <div className="lw-settings-actions">
@@ -115,9 +113,9 @@ export function ConnectedTools() {
               setConnecting(null); setStart(null); tools.refresh(); setError('')
               if (tool.notion) {
                 setChoosingFor(tool.id)
-                setNotice(`${tool.name} is connected. Choose the page your teams’ answers go under, and give it to agents in their Tools block.`)
+                setNotice(`${tool.name} is connected. Choose the page your teams’ answers go under, and give it to agents under Tools it can use.`)
               } else {
-                setNotice(`${tool.name} is connected. Give it to an agent in its Tools block.`)
+                setNotice(`${tool.name} is connected. Give it to an agent under Tools it can use.`)
               }
             }}
           />
