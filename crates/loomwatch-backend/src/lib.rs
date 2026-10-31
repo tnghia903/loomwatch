@@ -35,7 +35,6 @@ pub mod message_done;
 pub mod my_agents;
 pub mod notebook_api;
 pub mod notion;
-pub mod office;
 pub mod operator;
 pub mod orientation;
 pub mod permissions;

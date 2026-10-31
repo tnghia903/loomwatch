@@ -90,8 +90,9 @@ instructions and tools.
   what changed is marked: a slide found anywhere before counts as moved, not changed. A Word document is laid
   out by `docx-preview` (`documentPage.ts`), its fonts given fallbacks and Word's Symbol bullets
   drawn as the marks they are. Pictures are kept in the page as data. The drawing code is loaded
-  only when such a file is first opened; a file it can't draw shows its words. `/api/files/pages`
-  (`office.rs`, the `LibreOffice` route the reader used before) is no longer asked by the app.
+  only when such a file is first opened; a file it can't draw shows its words. (The daemon used
+  to have `LibreOffice` make a PDF of them; the PDFs it kept in `<state>/pages/` are removed at
+  start.)
 - **Files sent in the chat** (`chat_files.rs`, ADR 0082) are kept in `<team>.files/chat/`, a
   folder `PermissionPolicy::for_run_agent` lets every agent of the team read. The run carries them
   on `RunLineage::files` (a note on `QueuedNote::files`), and they are listed by path under the

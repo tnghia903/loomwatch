@@ -329,8 +329,9 @@ async fn main() -> Result<()> {
                 "the run archive exposes exact execution evidence and requires a loopback listener (or --allow-container-listener behind a loopback-only published port)"
             );
             let state_dir = database.state_dir()?;
-            // Slides and Word documents the reader shows as their pages are kept here (ADR 0091).
-            loomwatch_backend::office::install(&state_dir);
+            // `LibreOffice` kept the pages of decks and Word documents here until the reader drew
+            // them itself (ADR 0091): nothing reads them now.
+            let _ = std::fs::remove_dir_all(state_dir.join("pages"));
             let database = database.database()?;
             // Held until the process ends: one LoomWatch per run history file.
             let _claim = loomwatch_backend::db::claim(&database)?;

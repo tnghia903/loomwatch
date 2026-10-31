@@ -617,7 +617,7 @@ impl ReplyTo {
         let slides = self
             .file
             .as_deref()
-            .is_some_and(|path| crate::office::is_slides(Path::new(path)));
+            .is_some_and(|path| crate::files::is_slides(Path::new(path)));
         let place = match (
             self.kind,
             self.at.as_ref().and_then(|at| at.described(slides)),

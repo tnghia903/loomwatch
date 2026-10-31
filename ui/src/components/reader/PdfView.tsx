@@ -13,9 +13,7 @@ const BOX_MIN_PX = 12
 const AHEAD = '600px'
 /** How far from the view a page's drawing is kept; past that it is let go of (its words are kept). */
 const FAR = '3000px'
-/** How long a wait is before `slowNote` is said. */
-const SLOW_MS = 10_000
-/** How long a PDF may take to open before its words are shown instead, unless told otherwise. */
+/** How long a PDF may take to open before its words are shown instead. */
 const OPEN_LIMIT_MS = 30_000
 /** How near a line of words a press may be and still mark words, not draw a box: beside it, or between lines. */
 const NEAR_WORDS_PX = { across: 16, down: 6 }
@@ -33,12 +31,6 @@ interface PdfViewProps {
   src: string
   /** The file's name, said while it opens. */
   name: string
-  /** What its pages are called: a deck's are slides. */
-  pageWord?: 'page' | 'slide'
-  /** How long it may take to open before its words are shown instead: a deck's PDF is made first. */
-  openLimit?: number
-  /** Said under "Reading" once the wait is long: why it may go on. */
-  slowNote?: string
   askable: boolean
   boxes: readonly PdfBox[]
   /** The parts of words asked about, by their words: each one's page is found and laid out. */
@@ -68,41 +60,32 @@ const isWhole = (at: BoxAt) => at.x === 0 && at.y === 0 && at.w === WHOLE && at.
 const NO_WANTED: readonly string[] = []
 
 /**
- * A PDF an agent made, drawn as its pages (ADR 0091), or the PDF of a slide deck's slides, which
- * LibreOffice makes (`/api/files/pages`), named by its slides. Its words lie over each page where they are,
+ * A PDF an agent made, drawn as its pages (ADR 0091). Its words lie over each page where they are,
  * so marking them is marking words, as in any file; a drag on a page where there are no words marks
  * a box on that page. On a page with a picture or a chart, Enter or a tap marks all of it, as on a
  * picture (a finger otherwise scrolls). Each box asked about stays drawn on its page, the smaller
  * over the larger, with the bubble of every agent asked at its corner, which opens the answer.
  */
-export function PdfView({ src, name, pageWord = 'page', openLimit = OPEN_LIMIT_MS, slowNote, askable, boxes, wanted = NO_WANTED, marking, asking, open, onMarked, onOpen, onDrawn, onFailed, onPages, onWanted, onPictures, onPictured }: PdfViewProps) {
+export function PdfView({ src, name, askable, boxes, wanted = NO_WANTED, marking, asking, open, onMarked, onOpen, onDrawn, onFailed, onPages, onWanted, onPictures, onPictured }: PdfViewProps) {
   const view = useRef<HTMLDivElement>(null)
   const [pdf, setPdf] = useState<{ src: string; file: PdfFile; ratios: number[] } | null>(null)
   const [width, setWidth] = useState(0)
   // The pages that show a picture or a chart, found as each is drawn.
   const [pictured, setPictured] = useState<ReadonlySet<number>>(new Set())
-  const told = useRef({ onFailed, onDrawn, onPictured, onPages, onWanted, openLimit })
-  useEffect(() => { told.current = { onFailed, onDrawn, onPictured, onPages, onWanted, openLimit } }, [onFailed, onDrawn, onPictured, onPages, onWanted, openLimit])
+  const told = useRef({ onFailed, onDrawn, onPictured, onPages, onWanted })
+  useEffect(() => { told.current = { onFailed, onDrawn, onPictured, onPages, onWanted } }, [onFailed, onDrawn, onPictured, onPages, onWanted])
   useEffect(() => {
     if (!pdf) return
     onPictures?.((at) => pdf.file.picture(at))
     return () => onPictures?.(null)
   }, [pdf, onPictures])
 
-  // A wait long enough to look stuck says why it may go on.
-  const [slowFor, setSlowFor] = useState<string | null>(null)
-  const slow = slowFor === src
-  useEffect(() => {
-    const timer = window.setTimeout(() => setSlowFor(src), SLOW_MS)
-    return () => window.clearTimeout(timer)
-  }, [src])
-
   // Open it, and lay every page out at the shape of the first until each is drawn.
   useEffect(() => {
     let live = true
     let opened: PdfFile | null = null
     // One that never opens shows its words, rather than "Reading" for good.
-    const late = window.setTimeout(() => { if (live) { live = false; told.current.onFailed() } }, told.current.openLimit)
+    const late = window.setTimeout(() => { if (live) { live = false; told.current.onFailed() } }, OPEN_LIMIT_MS)
     openPdf(src).then(async (file) => {
       opened = file
       if (!live) { file.close(); return }
@@ -287,7 +270,7 @@ export function PdfView({ src, name, pageWord = 'page', openLimit = OPEN_LIMIT_M
   const markWhole = (holder: HTMLElement) => {
     const page = Number(holder.dataset.page)
     const at: BoxAt = { ...wholeBox(), page }
-    onMarked({ text: boxLabel(at, `${pageWord} ${page}`), at, rect: boxOnScreen(at, holder.getBoundingClientRect()) })
+    onMarked({ text: boxLabel(at, `page ${page}`), at, rect: boxOnScreen(at, holder.getBoundingClientRect()) })
   }
   const down = (event: PointerEvent<HTMLDivElement>) => {
     const target = event.target as Element
@@ -355,7 +338,7 @@ export function PdfView({ src, name, pageWord = 'page', openLimit = OPEN_LIMIT_M
       return
     }
     const at: BoxAt = { ...boxBetween(drawing.from, to), page: drawing.page }
-    onMarked({ text: boxLabel(at, `${pageWord} ${drawing.page}`), at, rect: boxOnScreen(at, box) })
+    onMarked({ text: boxLabel(at, `page ${drawing.page}`), at, rect: boxOnScreen(at, box) })
   }
   const key = (event: KeyboardEvent<HTMLSpanElement>) => {
     if (event.key !== 'Enter' && event.key !== ' ') return
@@ -365,7 +348,7 @@ export function PdfView({ src, name, pageWord = 'page', openLimit = OPEN_LIMIT_M
   }
 
   // Said as the reader says it while it reads the file, so the wait reads as one.
-  if (!pdf || pdf.src !== src) return <p className="rd-loading" role="status">Reading {name}…{slow && slowNote ? <><br />{slowNote}</> : null}</p>
+  if (!pdf || pdf.src !== src) return <p className="rd-loading" role="status">Reading {name}…</p>
   const live = drawing && !drawing.touch ? { ...boxBetween(drawing.from, drawing.to), page: drawing.page } : null
   // The larger drawn first, so a smaller box and its bubbles sit over a larger one.
   const drawn = [...boxes].sort((a, b) => b.at.w * b.at.h - a.at.w * a.at.h)
@@ -375,10 +358,10 @@ export function PdfView({ src, name, pageWord = 'page', openLimit = OPEN_LIMIT_M
         const number = index + 1
         return (
           <div key={number} className={`rd-pdf-page${askable ? ' askable' : ''}`} data-page={number} style={{ aspectRatio: `1 / ${ratio}` } as CSSProperties}
-            onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={() => setDrawing(null)} aria-label={`${pageWord === 'slide' ? 'Slide' : 'Page'} ${number}`} role="group">
+            onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={() => setDrawing(null)} aria-label={`Page ${number}`} role="group">
             <canvas aria-hidden="true" />
             {/* A page with a picture or a chart can be asked about from the keyboard, as a picture can. */}
-            {askable && pictured.has(number) && <span className="rd-pdf-target" role="button" tabIndex={0} aria-label={`Ask about ${pageWord} ${number}`} onKeyDown={key} />}
+            {askable && pictured.has(number) && <span className="rd-pdf-target" role="button" tabIndex={0} aria-label={`Ask about page ${number}`} onKeyDown={key} />}
             <div className="rd-pdf-text" />
             {drawn.filter((each) => each.at.page === number).map((each) => (
               <div key={each.id} className={`rd-box ${each.look}${each.id === asking ? ' asking' : ''}${isWhole(each.at) ? ' whole' : ''}`} data-part={each.id} style={boxStyle(each.at)}>

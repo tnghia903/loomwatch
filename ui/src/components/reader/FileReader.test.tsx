@@ -1468,9 +1468,8 @@ describe('a PDF in the reader', () => {
       expect(page).toContain('Slide 2')
       expect(page).toContain('Sales grew.')
       expect(page).toContain('North leads.')
-      // Its bytes, from the daemon; never LibreOffice's PDF of it, nor PDF.js.
+      // Its bytes, from the daemon, drawn here: not a PDF of it in PDF.js.
       expect(asks('/api/files/raw')).toEqual([expect.stringMatching(/^\/api\/files\/raw\?path=.*deck\.pptx&v=0$/)])
-      expect(asks('/api/files/pages')).toEqual([])
       expect(vi.mocked(openPdf)).not.toHaveBeenCalled()
       // Its layout, not the words alone.
       expect(screen.queryByText(/These are the words of the slides/)).toBeNull()
@@ -1500,7 +1499,6 @@ describe('a PDF in the reader', () => {
       const frame = await frameOf()
       expect(frame.getAttribute('srcdoc')).toContain('<p>Dear team,</p><p>Sales grew.</p>')
       expect(asks('/api/files/raw')).toEqual([expect.stringMatching(/^\/api\/files\/raw\?path=.*letter\.docx&v=0$/)])
-      expect(asks('/api/files/pages')).toEqual([])
       expect(screen.queryByText(/These are the words of the Word document/)).toBeNull()
       expect(screen.getByRole('button', { name: 'Pick a part of the page to ask about' })).toBeInTheDocument()
     })

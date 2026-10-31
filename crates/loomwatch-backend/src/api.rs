@@ -221,7 +221,6 @@ pub fn router_with_archive(
         // ADR 0077: a file read inside LoomWatch, to ask about a part of it.
         .route("/api/files/read", get(get_file_read))
         .route("/api/files/raw", get(get_file_raw))
-        .route("/api/files/pages", get(get_file_pages))
         .route("/api/jobs", get(get_jobs))
         .route(
             "/api/jobs/{id}",
@@ -437,21 +436,6 @@ async fn get_file_raw(
 ) -> Result<Response, ApiError> {
     let teams_root = state.teams_root.clone();
     let file = tokio::task::spawn_blocking(move || crate::files::raw(&teams_root, &query.path))
-        .await
-        .map_err(|error| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))??;
-    file_answer(file, &headers).await
-}
-
-/// A slide deck or a Word document as its pages (ADR 0091): the PDF `LibreOffice` makes of it,
-/// answered as `raw` answers a PDF. The first time, it waits for `LibreOffice`; after, until the
-/// file changes, the PDF is kept.
-async fn get_file_pages(
-    State(state): State<ApiState>,
-    headers: HeaderMap,
-    Query(query): Query<TeamPath>,
-) -> Result<Response, ApiError> {
-    let teams_root = state.teams_root.clone();
-    let file = tokio::task::spawn_blocking(move || crate::files::pages(&teams_root, &query.path))
         .await
         .map_err(|error| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))??;
     file_answer(file, &headers).await
@@ -3161,52 +3145,6 @@ mod tests {
         assert_eq!(deck.headers()[header::CONTENT_DISPOSITION], "attachment");
         let clip = ask("talk.mp4").await.expect("response");
         assert!(clip.headers().get(header::CONTENT_DISPOSITION).is_none());
-    }
-
-    /// **A deck or a Word document is answered as its pages (ADR 0091),** the PDF `LibreOffice`
-    /// made of it, as a PDF is: to be saved, a part at a time. Other files are not.
-    #[tokio::test]
-    async fn pages_answers_a_deck_as_the_pdf_of_its_pages() {
-        let root = TempDirectory::new();
-        let workspace = root.0.join(".loomwatch").join("team").join("writer");
-        fs::create_dir_all(&workspace).expect("create workspace");
-        fs::write(workspace.join("deck.pptx"), b"slides").expect("write deck");
-        fs::write(workspace.join("report.pdf"), b"%PDF-1.7\n").expect("write pdf");
-        let canonical = crate::platform::canonicalize(&root.0).expect("canonical root");
-        let deck = canonical.join(".loomwatch/team/writer/deck.pptx");
-        // Laid out before: kept, so LibreOffice isn't run here.
-        let kept = crate::office::kept_for(&deck);
-        fs::create_dir_all(kept.parent().expect("a folder")).expect("create the pages folder");
-        fs::write(&kept, b"%PDF-1.7 the slides").expect("write the pages");
-        let ask = |path: &Path, range: Option<&str>| {
-            let mut request = Request::builder()
-                .uri(format!("/api/files/pages?path={}", path.display()))
-                .header(header::HOST, "localhost");
-            if let Some(range) = range {
-                request = request.header(header::RANGE, range);
-            }
-            test_router(&root.0).oneshot(request.body(Body::empty()).expect("request"))
-        };
-        let pages = ask(&deck, None).await.expect("response");
-        assert_eq!(pages.status(), StatusCode::OK);
-        assert_eq!(pages.headers()[header::CONTENT_TYPE], "application/pdf");
-        assert_eq!(pages.headers()[header::CONTENT_DISPOSITION], "attachment");
-        let body = pages.into_body().collect().await.expect("body").to_bytes();
-        assert_eq!(&body[..], b"%PDF-1.7 the slides");
-        let part = ask(&deck, Some("bytes=0-7")).await.expect("response");
-        assert_eq!(part.status(), StatusCode::PARTIAL_CONTENT);
-        // A file that isn't a deck or a document is refused before LibreOffice is looked for.
-        let pdf = ask(&canonical.join(".loomwatch/team/writer/report.pdf"), None)
-            .await
-            .expect("response");
-        assert_eq!(pdf.status(), StatusCode::UNPROCESSABLE_ENTITY);
-        let said = pdf.into_body().collect().await.expect("body").to_bytes();
-        assert!(
-            String::from_utf8_lossy(&said).contains("only slides and documents are shown here"),
-            "{}",
-            String::from_utf8_lossy(&said)
-        );
-        let _ = fs::remove_file(&kept);
     }
 
     /// **A recording is answered a part at a time (ADR 0091).** Safari plays only what it can ask
