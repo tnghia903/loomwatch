@@ -971,7 +971,9 @@ It depends on how each agent's model is paid:
   receipt shows the exact cost it reported.
 
 **Usage**, under **You**, shows what LoomWatch used on each over the last 30 days, with a link to
-where you see the exact figure.
+where you see the exact figure. It shows your agents' work apart from LoomWatch's help, such as Ask,
+checking answers and the suggestions at the notch, and lets you turn off the suggestions and Let
+AI choose there.
 
 </details>
 

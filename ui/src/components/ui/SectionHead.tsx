@@ -12,6 +12,8 @@ export interface SectionHeadProps {
   explain?: ReactNode
   /** Shown after the title, inside the heading: a count. */
   children?: ReactNode
+  /** Shown before the title, inside the heading: a mark that says whose it is. */
+  lead?: ReactNode
 }
 
 /**
@@ -19,11 +21,11 @@ export interface SectionHeadProps {
  * sentences that say why live here, so a newcomer can still read them and nobody else has to.
  * The button sits beside the heading, not in it, so the heading's name stays its title.
  */
-export function SectionHead({ title, className = '', as: Tag = 'div', explain, page = false, children }: SectionHeadProps) {
+export function SectionHead({ title, className = '', as: Tag = 'div', explain, page = false, children, lead }: SectionHeadProps) {
   const [open, setOpen] = useState(false)
   const id = useId()
   // The space keeps the title and a count apart when read aloud or copied ("My skills 25").
-  const heading = <>{title}{children && <>{' '}{children}</>}</>
+  const heading = <>{lead}{title}{children && <>{' '}{children}</>}</>
   if (!explain) return <Tag className={className}>{heading}</Tag>
   return (
     <>

@@ -49,7 +49,7 @@ const ROLE_CHARS: usize = 400;
 /// How much of its own instructions an agent answering in the chat is given.
 const OWN_ROLE_CHARS: usize = 6_000;
 /// What the read's session is recorded as.
-const READER_ID: &str = "reader";
+pub(crate) const READER_ID: &str = "reader";
 /// What the reader is told it is, in place of the base prompt every team agent gets.
 const READER_PROMPT: &str = "You read one message sent to a LoomWatch team's chat, as a \
      thoughtful colleague on that team would, and say what it needs. Answer in exactly the format \

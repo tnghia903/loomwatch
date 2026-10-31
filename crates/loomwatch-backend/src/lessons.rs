@@ -65,7 +65,7 @@ pub(crate) const MAX_FEEDBACK_CHARS: usize = 2_000;
 const LEARNER_PROMPT: &str = "You keep the lessons a LoomWatch agent learns from the person's \
      feedback on its work. Reply with JSON only.";
 /// What the learner's session is recorded as.
-const LEARNER_ID: &str = "learner";
+pub(crate) const LEARNER_ID: &str = "learner";
 
 /// Where a lesson came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
