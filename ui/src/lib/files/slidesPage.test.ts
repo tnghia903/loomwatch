@@ -12,12 +12,39 @@ const slide = (elements: Element[], extra: Partial<Slide> = {}): Slide => ({ fil
 const deck = (slides: Slide[]): ParsedDeck => ({ size: { width: 960, height: 540 }, slides })
 /** The drawn page, read back as a document. */
 const drawn = (parsed: ParsedDeck, name = 'deck.pptx', marks?: Parameters<typeof slidesPage>[3]) => new DOMParser().parseFromString(slidesPage(parsed, name, undefined, marks), 'text/html')
+/** The page in a frame of its own, as the reader shows it, its script run. */
+function live(parsed: ParsedDeck, marks?: Parameters<typeof slidesPage>[3], { placed = false } = {}) {
+  const page = drawn(parsed, 'deck.pptx', marks)
+  const holder = document.createElement('iframe')
+  document.body.appendChild(holder)
+  const inner = holder.contentWindow! as Window & typeof globalThis
+  const doc = holder.contentDocument!
+  doc.head.innerHTML = page.head.innerHTML
+  doc.body.innerHTML = page.body.innerHTML
+  inner.scrollTo = () => {}
+  // jsdom lays nothing out: each part is where the deck puts it, in points, the slide at their scale.
+  if (placed) {
+    inner.HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+      const [left, top, width, height] = this.classList.contains('lw-frame') ? [0, 0, 960, 540] : ['left', 'top', 'width', 'height'].map((side) => parseFloat(this.style.getPropertyValue(side)) || 0)
+      return { left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) } as DOMRect
+    }
+  }
+  new inner.Function(page.querySelector('script')!.textContent!)()
+  const shown = () => [...doc.querySelectorAll<HTMLElement>('.lw-slide')].filter((section) => !section.hidden).map((section) => section.querySelector('h2')!.textContent)
+  const steps = () => [...doc.querySelectorAll('.lw-slide:not([hidden]) .lw-step')].map((step) => step.getAttribute('aria-current'))
+  const said = () => [...doc.querySelectorAll('.lw-slide:not([hidden]) .lw-said')].map((part) => part.textContent)
+  const press = (key: string, extra: KeyboardEventInit = {}) => inner.dispatchEvent(new inner.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...extra }))
+  const told = () => doc.getElementById('lw-told')!.textContent
+  return { inner, doc, shown, steps, said, press, told, done: () => holder.remove() }
+}
+const p = (said: string) => `<p>${said}</p>`
 
 describe('a slide deck drawn as a page', () => {
-  it('draws each slide at its own size, under its number, scaled to the page, with its notes open under it', () => {
+  it('draws each slide at its own size, under its number, scaled to the page, one at a time, with its notes under it', () => {
     const page = drawn(deck([slide([words('<p>One</p>')], { note: '<p>Say hello.</p>' }), slide([words('<p>Two</p>')])]), 'Q3 <review>.pptx')
     expect(page.title).toBe('Q3 <review>.pptx')
-    expect([...page.querySelectorAll('h2')].map((heading) => heading.textContent)).toEqual(['Slide 1', 'Slide 2'])
+    expect([...page.querySelectorAll('h2')].map((heading) => heading.textContent)).toEqual(['Slide 1 of 2', 'Slide 2 of 2'])
+    expect([...page.querySelectorAll('section')].map((section) => section.hidden)).toEqual([false, true])
     // A part picked on a slide is named by the heading it is under.
     expect(page.querySelector('section')!.getAttribute('aria-labelledby')).toBe(page.querySelector('h2')!.id)
     const canvas = page.querySelector<HTMLElement>('.lw-canvas')!
@@ -31,8 +58,13 @@ describe('a slide deck drawn as a page', () => {
     const notes = page.querySelectorAll('section')[0].querySelector('.lw-notes')!
     expect(notes.querySelector('h3')!.textContent).toBe('Notes, slide 1')
     expect(notes.querySelector('.lw-hidden')!.textContent).toBe(', slide 1')
-    expect(notes.querySelector('.lw-notes-words')!.textContent).toBe('Say hello.')
-    expect(page.querySelectorAll('section')[1].querySelector('.lw-notes')).toBeNull()
+    expect(notes.querySelector('.lw-step-words')!.textContent).toBe('Say hello.')
+    // Notes of one step have nothing to walk.
+    expect(notes.querySelector('.lw-knots')).toBeNull()
+    // A slide with no notes has no notes heading, only the buttons that walk on.
+    expect(page.querySelectorAll('section')[1].querySelector('.lw-notes-label')).toBeNull()
+    expect(page.querySelectorAll('section')[1].querySelectorAll('.lw-walk-turn button')).toHaveLength(2)
+    expect(drawn(deck([slide([])])).querySelector('h2')!.textContent).toBe('Slide 1')
   })
 
   it('draws a strip of every slide beside them, a button for each, and none for a deck of one slide', () => {
@@ -41,16 +73,159 @@ describe('a slide deck drawn as a page', () => {
     expect(strip.getAttribute('aria-label')).toBe('Slides')
     expect([...strip.querySelectorAll('button')].map((thumb) => thumb.getAttribute('aria-label'))).toEqual(['Slide 1', 'Slide 2', 'Slide 3'])
     expect(strip.querySelector('.lw-thumb-paper')!.getAttribute('style')).toBe('aspect-ratio:960/540')
-    // Its copies of the slides are drawn in by the page's script, inert, and it follows the slide in view.
-    const script = page.querySelector('script')!.textContent!
-    expect(script).toContain("copy.setAttribute('inert','')")
-    expect(script).toContain("t.setAttribute('aria-current','true')")
-    expect(script).toContain('scrollIntoView')
-    // The frame takes its size after the page loads: the slide in view is found again on a resize.
-    expect(script).toContain("addEventListener('resize',function(){draw();follow();})")
     const single = drawn(deck([slide([])]))
     expect(single.querySelector('.lw-strip')).toBeNull()
+    expect(single.querySelector('.lw-turn')).toBeNull()
     expect(single.querySelector('.lw-reader')!.classList.contains('single')).toBe(true)
+
+    // At work: each copy of a slide is drawn in, inert and named by nothing, and a press on one
+    // shows its slide, ringed in the strip; the buttons at the top go a slide either way.
+    const page2 = live(deck([slide([words('<p>One</p>')]), slide([words('<p>Two</p>', { id: 'second' })]), slide([])]))
+    try {
+      const thumbs = [...page2.doc.querySelectorAll<HTMLButtonElement>('.lw-thumb')]
+      const copies = thumbs.map((thumb) => thumb.querySelector('.lw-thumb-paper .lw-canvas'))
+      expect(copies.map((copy) => [copy?.hasAttribute('inert'), copy?.getAttribute('aria-hidden')])).toEqual([[true, 'true'], [true, 'true'], [true, 'true']])
+      expect(copies[1]!.querySelector('[id]')).toBeNull()
+      expect(page2.shown()).toEqual(['Slide 1 of 3'])
+      const before = page2.doc.querySelector<HTMLButtonElement>('.lw-slide-before')!
+      const after = page2.doc.querySelector<HTMLButtonElement>('.lw-slide-after')!
+      expect([before.disabled, after.disabled]).toEqual([true, false])
+      thumbs[2]!.click()
+      expect(page2.shown()).toEqual(['Slide 3 of 3'])
+      expect(thumbs.map((thumb) => thumb.getAttribute('aria-current'))).toEqual([null, null, 'true'])
+      expect([before.disabled, after.disabled]).toEqual([false, true])
+      expect(page2.told()).toBe('Slide 3 of 3')
+      before.click()
+      expect(page2.shown()).toEqual(['Slide 2 of 3'])
+    } finally {
+      page2.done()
+    }
+  })
+
+  it('walks a slide’s notes a step at a time, the parts each step is about lit, then on to the next slide', () => {
+    const lanes = slide([words(p('Batch (offline)')), words(p('Query (online)'), { left: 400 }), words(p('Footer'), { top: 400 })], {
+      note: [p('Walk it left to right.'), p(''), p('Batch (offline): the batch lane first.'), p(''), p('Query (online): then the query lane.')].join(''),
+    })
+    const page = live(deck([lanes, slide([words(p('Close'))], { note: p('Close.') }), slide([])]))
+    try {
+      const first = page.doc.querySelector('.lw-slide')!
+      const canvas = first.querySelector('.lw-canvas')!
+      const dots = first.querySelector('.lw-step-dots')!
+      const knots = () => [...first.querySelectorAll('.lw-step-dot')].map((dot) => (dot.classList.contains('lw-now') ? 'now' : dot.classList.contains('lw-past') ? 'past' : 'to come'))
+      const walk = () => [...first.querySelectorAll<HTMLButtonElement>('.lw-walk-turn button')].map((button) => [button.getAttribute('aria-label'), button.title, button.disabled])
+      expect(first.querySelectorAll('.lw-step-dot')).toHaveLength(3)
+      expect([page.steps(), knots(), dots.getAttribute('aria-label')]).toEqual([['step', null, null], ['now', 'to come', 'to come'], 'Step 1 of 3'])
+      // The buttons say where they go: back from the deck's first step, nowhere.
+      expect(walk()).toEqual([['Previous slide', 'Previous slide (←)', true], ['Next step', 'Next step (→)', false]])
+      // A step about no part lights none, and nothing steps back.
+      expect([page.said(), canvas.classList.contains('lw-saying')]).toEqual([[], false])
+
+      page.press('ArrowRight')
+      expect([page.steps(), knots(), page.said()]).toEqual([[null, 'step', null], ['past', 'now', 'to come'], ['Batch (offline)']])
+      expect([dots.getAttribute('aria-label'), dots.getAttribute('style')]).toEqual(['Step 2 of 3', '--lw-walked: 0.5;'])
+      expect(walk()).toEqual([['Previous step', 'Previous step (←)', false], ['Next step', 'Next step (→)', false]])
+      expect(canvas.classList.contains('lw-saying')).toBe(true)
+      expect(page.told()).toBe('Step 2 of 3')
+      first.querySelector<HTMLButtonElement>('.lw-step-next')!.click()
+      expect([page.steps(), page.said()]).toEqual([[null, null, 'step'], ['Query (online)']])
+      // From the slide's last step, the next is a slide.
+      expect(walk()[1]).toEqual(['Next slide', 'Next slide (→)', false])
+
+      // After the last step, the next slide; back, the last step of the slide before.
+      page.press('ArrowRight')
+      expect([page.shown(), page.steps(), page.told()]).toEqual([['Slide 2 of 3'], ['step'], 'Slide 2 of 3'])
+      page.press('ArrowLeft')
+      expect([page.shown(), page.steps(), page.said()]).toEqual([['Slide 1 of 3'], [null, null, 'step'], ['Query (online)']])
+
+      // A step pressed is said; one pointed at lights its parts until the pointer leaves.
+      const items = [...first.querySelectorAll<HTMLElement>('.lw-step')]
+      items[0]!.click()
+      expect([page.steps(), page.said()]).toEqual([['step', null, null], []])
+      items[1]!.dispatchEvent(new page.inner.MouseEvent('mouseenter'))
+      expect(page.said()).toEqual(['Batch (offline)'])
+      items[1]!.dispatchEvent(new page.inner.MouseEvent('mouseleave'))
+      expect(page.said()).toEqual([])
+      // A part pressed on the slide goes to the step about it.
+      canvas.querySelectorAll<HTMLElement>('.lw-el')[1]!.querySelector<HTMLElement>('p')!.click()
+      expect(page.steps()).toEqual([null, null, 'step'])
+      canvas.querySelectorAll<HTMLElement>('.lw-el')[2]!.click()
+      expect(page.steps()).toEqual([null, null, 'step'])
+
+      // While the Pick switch is on, the keys and a press are the Pick switch's.
+      page.doc.documentElement.classList.add('lw-picking')
+      page.press('ArrowLeft')
+      items[0]!.click()
+      expect(page.steps()).toEqual([null, null, 'step'])
+      page.doc.documentElement.classList.remove('lw-picking')
+      // So is a key the page has already taken, and one with Shift held, which marks words.
+      page.inner.addEventListener('keydown', (event) => event.preventDefault(), { capture: true, once: true })
+      page.press('ArrowLeft')
+      page.press('ArrowLeft', { shiftKey: true })
+      expect(page.steps()).toEqual([null, null, 'step'])
+
+      // Page Down and Up, Home and End go by slides.
+      page.press('PageDown')
+      expect(page.shown()).toEqual(['Slide 2 of 3'])
+      page.press('End')
+      expect([page.shown(), page.steps()]).toEqual([['Slide 3 of 3'], []])
+      // A slide with no notes still has the walk's buttons; at the deck's end, there is no next.
+      const last = [...page.doc.querySelectorAll<HTMLButtonElement>('.lw-slide:not([hidden]) .lw-walk-turn button')]
+      expect(last.map((button) => [button.getAttribute('aria-label'), button.disabled])).toEqual([['Previous slide', false], ['Next slide', true]])
+      page.press('ArrowRight')
+      expect(page.shown()).toEqual(['Slide 3 of 3'])
+      last[0]!.click()
+      expect([page.shown(), page.steps()]).toEqual([['Slide 2 of 3'], ['step']])
+      page.press('End')
+      page.press('Home')
+      expect([page.shown(), page.steps()]).toEqual([['Slide 1 of 3'], ['step', null, null]])
+    } finally {
+      page.done()
+    }
+  })
+
+  it('rings each part a step is about, a little out from it, and parts that touch in one ring', () => {
+    const near = slide([words(p('Batch lane'), { width: 290 }), words(p('Snapshot export'), { left: 330, width: 100 }), words(p('Evidence gate'), { left: 700, width: 100 })], {
+      note: [p('Batch lane: the snapshot export.'), p(''), p('Batch lane, then the evidence gate.')].join(''),
+    })
+    const page = live(deck([near]), undefined, { placed: true })
+    try {
+      const rings = () => [...page.doc.querySelectorAll<HTMLElement>('.lw-ring')].map((ring) => [ring.style.left, ring.style.top, ring.style.width, ring.style.height])
+      // Two parts 6 points apart: one ring round both.
+      expect(page.said()).toEqual(['Batch lane', 'Snapshot export'])
+      expect(rings()).toEqual([['32px', '68px', '402px', '116px']])
+      page.press('ArrowRight')
+      expect(rings()).toEqual([['32px', '68px', '298px', '116px'], ['696px', '68px', '108px', '116px']])
+    } finally {
+      page.done()
+    }
+  })
+
+  it('lights a table’s row when a step is about it, its other rows stepped back', () => {
+    const cell = (text: string) => ({ text: `<p>${text}</p>`, borders: {} })
+    const table = { type: 'table', id: 'tb', ...box, borders: {}, data: [
+      [cell('Factor'), cell('What we do')],
+      [cell('Data boundary'), cell('Company data stays in Azure')],
+      [cell('Cost control'), cell('A monthly budget with an alert')],
+    ] } as unknown as Element
+    const note = [p('Each row is a requirement.'), p(''), p('1. Data boundary: data only in Azure.'), p('2. Cost: a monthly budget and an alert.')].join('')
+    const keys = [...drawn(deck([slide([table], { note })])).querySelectorAll('td')].map((td) => td.getAttribute('data-lw-part'))
+    // The first row and the first column name the others: each cell is in its row and its column.
+    expect(keys).toEqual([null, '0c1', '0r1', '0r1 0c1', '0r2', '0r2 0c1'])
+    const page = live(deck([slide([table], { note })]))
+    try {
+      const kept = () => [...page.doc.querySelectorAll('.lw-keep')].map((cell) => cell.textContent)
+      page.press('ArrowRight')
+      expect(page.said()).toEqual(['Data boundary', 'Company data stays in Azure'])
+      // A lit row is read under the column names, which stay whole.
+      expect(kept()).toEqual(['Factor', 'What we do'])
+      page.press('ArrowRight')
+      expect(page.said()).toEqual(['Cost control', 'A monthly budget with an alert'])
+      page.press('ArrowLeft')
+      page.press('ArrowLeft')
+      expect([page.said(), kept()]).toEqual([[], []])
+    } finally {
+      page.done()
+    }
   })
 
   it('marks what changed since the deck was last seen: the slide in the strip and by its number with the agent’s face, the parts, the notes', () => {
@@ -69,18 +244,25 @@ describe('a slide deck drawn as a page', () => {
     const mark = first.querySelector('h2 .lw-change-mark')!
     expect([mark.getAttribute('role'), mark.getAttribute('aria-label'), mark.getAttribute('title')]).toEqual(['img', 'Changed since you last looked', 'Changed since you last looked'])
     expect(mark.querySelector('img')!.getAttribute('src')).toBe(face)
-    expect(first.querySelector('h2')!.textContent).toBe('Slide 1')
+    expect(first.querySelector('h2')!.textContent).toBe('Slide 1 of 3')
     expect([...first.querySelectorAll('.lw-canvas > .lw-el')].map((part) => part.classList.contains('lw-changed'))).toEqual([false, true])
     const notes = page.querySelectorAll('section')[1].querySelector('.lw-notes')!
     expect(notes.querySelector('h3 .lw-change-mark')).not.toBeNull()
     expect(notes.querySelector('h3')!.textContent).toBe('Notes, slide 2')
     expect(page.querySelectorAll('section')[2].querySelector('.lw-change-mark')).toBeNull()
     expect(thumbs[0].getAttribute('title')).toBe('Changed since you last looked')
-    // The page opens at the first slide that changed; the stitch is the change's mark, a dashed outline Pick's.
+    // The stitch is the change's mark, a dashed outline Pick's.
     expect(page.querySelectorAll('section')[0].classList.contains('changed')).toBe(true)
     const html = slidesPage(after, 'deck.pptx', undefined, { changes: deckChanges(deckSeen(before), deckSeen(after)), face })
-    expect(html).toContain("document.querySelector('.lw-slide.changed')")
     expect(html).not.toMatch(/\.lw-changed\{outline/)
+    // The page opens at the first slide that changed, ringed in the strip.
+    const later = deck([slide([]), slide([words('<p>New</p>')]), slide([])])
+    const opened = drawn(later, 'deck.pptx', { changes: deckChanges(deckSeen(deck([slide([]), slide([]), slide([])])), deckSeen(later)), face })
+    expect([...opened.querySelectorAll('section')].map((section) => section.hidden)).toEqual([true, false, true])
+    expect([...opened.querySelectorAll('.lw-thumb')].map((thumb) => thumb.getAttribute('aria-current'))).toEqual([null, 'true', null])
+    expect(opened.querySelector<HTMLButtonElement>('.lw-slide-before')!.disabled).toBe(false)
+    // The agent's face is beside the step being said.
+    expect(slidesPage(deck([slide([], { note: p('Hi') })]), 'deck.pptx', undefined, { changes: null, face })).toContain(`.lw-step-face{flex-shrink:0;width:20px;height:22px;background:url("${face}")`)
     // A face that isn't a picture's data is never put in the page.
     const odd = drawn(after, 'deck.pptx', { changes: deckChanges(deckSeen(before), deckSeen(after)), face: 'https://example.com/face.png' })
     expect(odd.querySelector('img')).toBeNull()
@@ -89,16 +271,33 @@ describe('a slide deck drawn as a page', () => {
   it('names nothing in the page as the reader’s own marks in it do, so their styles never reach the slides', () => {
     const before = deck([slide([words('<p>A</p>')], { note: '<p>n</p>' }), slide([], { fill: { type: 'color', value: '#111111' } })])
     const after = deck([slide([words('<p>B</p>')], { note: '<p>m</p>' }), slide([words('<p>C</p>')], { fill: { type: 'color', value: '#111111' } })])
-    const page = drawn(after, 'deck.pptx', { changes: deckChanges(deckSeen(before), deckSeen(after)), face: 'data:image/webp;base64,UklGRg==' })
-    const ours = new Set([...page.querySelectorAll('[class]')].flatMap((element) => [...element.classList]).filter((name) => name.startsWith('lw-')))
+    const page = live(after, { changes: deckChanges(deckSeen(before), deckSeen(after)), face: 'data:image/webp;base64,UklGRg==' })
+    // What the page's own script names too, as a step is said, and its styles.
+    page.press('ArrowRight')
+    const named = [...page.doc.querySelectorAll('[class]')].flatMap((element) => [...element.classList])
+    const style = page.doc.querySelector('style')!.textContent!
+    // The slides' styles step around the reader's own marks in the words (`lw-mark`, `lw-slot`) and
+    // answer to the Pick switch's mark on the page (`lw-picking`); they never set them.
+    const answered = new Set(['lw-picking', 'lw-mark', 'lw-slot'])
+    const styled = style.match(/\.lw-[a-z-]+/g)!.map((name) => name.slice(1)).filter((name) => !answered.has(name))
+    page.done()
+    const ours = new Set([...named, ...styled].filter((name) => name.startsWith('lw-')))
+    expect(named.filter((name) => answered.has(name))).toEqual([])
+    // And a rule reaching into a step's words leaves the reader's marks and bubbles as it draws them.
+    const intoWords = [...style.matchAll(/([^{}]*\.lw-step-words [^{}]*)\{/g)].map((rule) => rule[1]!)
+    expect(intoWords.length).toBeGreaterThan(1)
+    expect(intoWords.filter((selector) => !/:not\([^)]*\.lw-slot,\.lw-slot \*\)/.test(selector) && !/ (p\+p|li\+li|br|p)\b/.test(selector))).toEqual([])
+    expect(ours.has('lw-said')).toBe(true)
     const theirs = new Set(PAGE_BRIDGE.match(/\.lw-[a-z-]+/g)!.map((name) => name.slice(1)))
     expect(ours.size).toBeGreaterThan(10)
     expect([...ours].filter((name) => theirs.has(name))).toEqual([])
   })
 
-  it('draws a change on a dark slide in bright gold, on a light one in the paper’s gold', () => {
-    const dark = drawn(deck([slide([words('<p>x</p>')], { fill: { type: 'color', value: '#1F2937' } }), slide([words('<p>y</p>')])]))
-    expect([...dark.querySelectorAll('.lw-canvas')].map((canvas) => canvas.classList.contains('lw-dark-slide'))).toEqual([true, false])
+  it('draws a change and a ring in whichever gold stands out more on the slide: bright on dark and mid-tone slides, the paper’s on light ones', () => {
+    const fills = ['#1F2937', '#4472C4', '#7F7F7F', '#FFFFFF', '#EEF0F3', '#A5A5A5']
+    const page = drawn(deck(fills.map((value) => slide([words('<p>x</p>')], { fill: { type: 'color', value } }))))
+    // Office's blue and a mid grey are where the paper gold all but vanishes (1.1:1, 1.3:1).
+    expect([...page.querySelectorAll('.lw-canvas')].map((canvas) => canvas.classList.contains('lw-dark-slide'))).toEqual([true, true, true, false, false, false])
   })
 
   it('reads a slide’s words as the deck does: breaking spaces, spacing as a share of a line, fonts that fall back alike', () => {
@@ -143,12 +342,12 @@ describe('a slide deck drawn as a page', () => {
   })
 
   it('lays the slides on the reader’s own ground, its words in the reader’s colours, and nothing there but colours', () => {
-    const page = slidesPage(deck([slide([], { note: '<p>Hi</p>' }), slide([])]), 'deck.pptx', { ground: '#08080A', ink: '#F5F3EE', label: '#A9A59C', accent: '#E9C46A', paperAccent: '#8A6A16' })
+    const page = slidesPage(deck([slide([], { note: '<p>Hi</p>' }), slide([])]), 'deck.pptx', { ground: '#08080A', ink: '#F5F3EE', label: '#A9A59C', accent: '#E9C46A', accentDim: '#8C7130', paperAccent: '#8A6A16' })
     expect(page).toContain('html{background:#08080A}')
     expect(page).toContain('color:#F5F3EE')
     expect(page).toMatch(/\.lw-slide-number\{[^}]*color:#A9A59C/)
     expect(page).toMatch(/\.lw-thumb\[aria-current="true"\] \.lw-thumb-paper\{box-shadow:0 0 0 2px #E9C46A\}/)
-    const odd = slidesPage(deck([slide([])]), 'deck.pptx', { ground: 'red;}</style><script>', ink: 'oklch(0.2 0.01 90)', label: '', accent: '', paperAccent: '' })
+    const odd = slidesPage(deck([slide([])]), 'deck.pptx', { ground: 'red;}</style><script>', ink: 'oklch(0.2 0.01 90)', label: '', accent: '', accentDim: '', paperAccent: '' })
     expect(odd).toContain('html{background:#FAF8F3}')
     expect(odd).toContain('color:oklch(0.2 0.01 90)')
     expect(odd).not.toContain('</style><script>')

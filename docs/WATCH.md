@@ -187,10 +187,20 @@ and sent a sharp picture of the box. A PDF that can't be shown as its pages show
 A PowerPoint deck is shown as its slides, and a Word document as its pages, drawn by LoomWatch
 itself: nothing else needs to be on the computer, and they open at once. Mark their words, or press
 the Pick switch and click any part of a slide or a page (a box, a table, a chart) to ask about it.
-Each slide sits under its number, and a picked picture, shape or chart is named by its slide. A
-slide's speaker notes are open under it: mark their words to ask about them, as any words. A strip
-of every slide runs down the left when the reader is wide enough: press one to go to it, and the
-one in view is ringed. When the deck has changed since you last looked at it (for example, after
+A deck shows one slide at a time, under its number ("Slide 6 of 13"); a picked picture, shape or
+chart is named by its slide. Under the slide, its
+speaker notes are walked a step at a time: the paragraphs between empty lines are the steps, the
+one being said shown in full beside the agent's figure and the others a line each. The parts of
+the slide that step talks about are ringed in gold and the slide's other words fade back, so you
+see which part each note is about; a dot for each step shows how far you have come. A step is tied to a part only when it clearly says that part's own
+words (a list that goes through a table row by row lights each row in turn); a step that matches
+no part lights none. → under the slide (or the → key) goes to the next step, then the next slide,
+and ← back; press a step to go to it, point at one to light its parts, or press a part of the slide
+to go to the step about it. Page Up, Page Down, Home and End go by slides. While the Pick switch is on,
+the whole slide is shown and a press picks. Mark the notes' words to ask about them, as any words.
+A strip of every slide runs down the left when the reader is wide enough: press one to go to it,
+and the one shown is ringed. In a narrow reader the strip folds away and ‹ › at the top go a slide
+either way. When the deck has changed since you last looked at it (for example, after
 you ask an agent to change it), it opens at the first slide that changed. Each changed slide has a
 gold dashed line under it in the strip and beside its number, with the face of the agent whose
 file it is, and a short gold dashed line marks each part and each set of notes that changed. A deck or a document LoomWatch can't draw shows only its words,

@@ -81,9 +81,13 @@ instructions and tools.
   marked and any part is picked as on that page. A deck is read by `pptxtojson`, after
   `deckStyles.ts` writes onto each slide what it takes from its master (its placeholders' bullets,
   and PowerPoint's default table style, which a deck names but rarely carries), and drawn by
-  `slidesPage.ts`: each slide at its own size in points under a "Slide n" heading, scaled to the
-  frame's width, its charts drawn from the numbers the deck keeps for them, its speaker notes open
-  under it, and a strip of inert copies of the slides beside them. `deckSeen.ts` fingerprints each
+  `slidesPage.ts`: one slide shown at a time, at its own size in points under a "Slide n of m"
+  heading, scaled to the frame, its charts drawn from the numbers the deck keeps for them, and a
+  strip of inert copies of the slides beside it. Its speaker notes are walked as steps
+  (`noteSteps.ts`): a step is tied to the slide's parts whose own words it clearly says, weighted
+  by how few of the slide's parts have each word, a table counting by its rows and columns, with
+  no model involved; the page's own script rings the parts of the step being said and fades the
+  slide's other words. `deckSeen.ts` fingerprints each
   slide, part and note (numbering left out, as a script that writes the deck again renumbers it)
   and keeps the version last shown in the browser's local storage (the latest 40 decks); a later
   version is compared with it, or, while the deck is open, with the version on screen before, and
