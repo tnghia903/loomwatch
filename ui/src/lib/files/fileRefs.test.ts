@@ -116,6 +116,54 @@ describe('fileRefsIn', () => {
     expect(withFolderPaths('See /a/x`y.md.', [], null, ['/a/x`y.md'])).toBe('See /a/x`y.md.')
   })
 
+  it('finds a file an agent made in its own folder where the reply gives its full path in plain words', () => {
+    const maker = '/Users/me/LoomWatch/teams/.loomwatch/slide-deck-prep-team/presentation-maker'
+    const deck = `${maker}/EKIS_Presentation_2026-11-05.pptx`
+    // The shape of a real Presentation maker reply (run 5d07bc73): `python make_deck.py` made the
+    // deck, so the only file the run wrote by name is the script.
+    const script = [`${maker}/build/make_deck.py`]
+    const reply = `The deck is ready, unchanged since last round:\n**${deck}**\n\nIts notes cite the files in \`/Users/me/sutd-final-project/\`.`
+    expect(fileRefsIn(reply, script, maker, script)).toEqual([deck])
+    expect(withFolderPaths(reply, script, maker, script).split('\n')[1]).toBe(`**\`${deck}\`**`)
+    // Whoever answers: the checker names the maker's deck, at the end of a sentence, or in brackets.
+    expect(fileRefsIn(`Checked ${deck}.`, [], '/Users/me/LoomWatch/teams/.loomwatch/slide-deck-prep-team/checker')).toEqual([deck])
+    expect(fileRefsIn(`The deck (${deck}) has 13 slides.`)).toEqual([deck])
+    // In a folder of its own there, and on Windows.
+    expect(fileRefsIn(`Saved ${maker}/out/notes.md, as asked.`)).toEqual([`${maker}/out/notes.md`])
+    const plan = 'C:\\Users\\ana\\LoomWatch\\teams\\.loomwatch\\launch\\writer\\plan.docx'
+    expect(fileRefsIn(`Done: ${plan}`)).toEqual([plan])
+    // An agent in no team works in `.loomwatch/<agent>`.
+    expect(fileRefsIn('See /Users/me/teams/.loomwatch/writer/notes.md.')).toEqual(['/Users/me/teams/.loomwatch/writer/notes.md'])
+  })
+
+  it('finds a full path with spaces when the reply sets it off in bold or quotes', () => {
+    const deck = '/Users/John Smith/LoomWatch/teams/.loomwatch/review/maker/Q3 Report.pptx'
+    expect(fileRefsIn(`The deck is ready: **${deck}**`)).toEqual([deck])
+    expect(withFolderPaths(`Saved “${deck}” for you.`)).toBe(`Saved “\`${deck}\`” for you.`)
+    const plan = 'C:\\Users\\John Smith\\LoomWatch\\teams\\.loomwatch\\launch\\writer\\Launch plan.docx'
+    expect(fileRefsIn(`Done: "${plan}"`)).toEqual([plan])
+    // In running words, where it ends would be a guess; and the marks around it must match.
+    expect(fileRefsIn(`The deck is ready: ${deck} for Thursday`)).toEqual([])
+    expect(fileRefsIn(`**${deck}" and more`)).toEqual([])
+  })
+
+  it('leaves a full path in plain words alone outside an agent’s own folder, or not something it made', () => {
+    const maker = '/teams/.loomwatch/news/writer'
+    // Read from the person's own folders, or no file at all.
+    expect(fileRefsIn('Read /Users/me/brief/budget.md and /Users/me/sutd/report.docx first.', [], maker)).toEqual([])
+    expect(fileRefsIn(`See ${maker}/build and ${maker}/draft.`, [], maker)).toEqual([])
+    // LoomWatch's own files there: hidden folders, the copies of what it was given, its notes file.
+    expect(fileRefsIn(`${maker}/.agents/skills/deck/SKILL.md ${maker}/knowledge/brief.md ${maker}/AGENTS.md`, [], maker)).toEqual([])
+    // LoomWatch's folder itself holds no agent's work.
+    expect(fileRefsIn('See /teams/.loomwatch/notes.md.', [], maker)).toEqual([])
+    // A kind of file the reader doesn't name, a path that climbs out, inside a word or an address.
+    expect(fileRefsIn(`Ran ${maker}/build/make_deck.py and ${maker}/../../secret.md.`, [], maker)).toEqual([])
+    expect(fileRefsIn(`~${maker}/a.md x${maker}/b.md https://example.com${maker}/c.html`, [], maker)).toEqual([])
+    // Code and fenced blocks stay as they are.
+    const kept = `\`\`\`\n${maker}/deck.pptx\n\`\`\``
+    expect(withFolderPaths(kept, [], maker)).toBe(kept)
+  })
+
   it('leaves plain words alone unless they name just one file the run wrote', () => {
     const written = ['/a/design/architecture.html', '/a/one/README.md', '/a/two/README.md']
     const read = ['/a/brief/budget.md', ...written]

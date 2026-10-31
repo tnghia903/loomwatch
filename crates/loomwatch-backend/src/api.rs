@@ -508,9 +508,10 @@ async fn file_answer(
     {
         response.headers_mut().insert(header::CONTENT_RANGE, value);
     }
-    // The reader draws a PDF itself; a browser sent to it saves it rather than show it as a page
-    // of this daemon, where its own viewer would read whatever the agent put in it.
-    if file.media_type == "application/pdf" {
+    // The reader draws a PDF, a deck and a Word document itself; a browser sent to one saves it
+    // rather than show it as a page of this daemon, where its own viewer would read whatever the
+    // agent put in it.
+    if file.media_type == "application/pdf" || file.media_type.starts_with("application/vnd.") {
         response.headers_mut().insert(
             header::CONTENT_DISPOSITION,
             header::HeaderValue::from_static("attachment"),
@@ -3124,8 +3125,8 @@ mod tests {
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
     }
 
-    /// **A PDF is answered for the reader to draw, and for a browser to save (ADR 0091).** Sent to it
-    /// directly, a browser saves it rather than show it as a page of this daemon.
+    /// **A PDF or a deck is answered for the reader to draw, and for a browser to save (ADR 0091).**
+    /// Sent to it directly, a browser saves it rather than show it as a page of this daemon.
     #[tokio::test]
     async fn raw_answers_a_pdf_to_be_saved_never_shown_as_a_page_here() {
         let root = TempDirectory::new();
@@ -3133,6 +3134,7 @@ mod tests {
         fs::create_dir_all(&workspace).expect("create workspace");
         fs::write(workspace.join("report.pdf"), b"%PDF-1.7\n").expect("write pdf");
         fs::write(workspace.join("talk.mp4"), b"mp4").expect("write recording");
+        fs::write(workspace.join("deck.pptx"), b"PK").expect("write deck");
         let canonical = crate::platform::canonicalize(&root.0).expect("canonical root");
         let ask = |name: &str| {
             let request = Request::builder()
@@ -3153,6 +3155,10 @@ mod tests {
         assert_eq!(pdf.headers()[header::CONTENT_TYPE], "application/pdf");
         assert_eq!(pdf.headers()[header::CONTENT_DISPOSITION], "attachment");
         assert_eq!(pdf.headers()[header::ACCEPT_RANGES], "bytes");
+        // A deck the reader draws too.
+        let deck = ask("deck.pptx").await.expect("response");
+        assert_eq!(deck.status(), StatusCode::OK);
+        assert_eq!(deck.headers()[header::CONTENT_DISPOSITION], "attachment");
         let clip = ask("talk.mp4").await.expect("response");
         assert!(clip.headers().get(header::CONTENT_DISPOSITION).is_none());
     }

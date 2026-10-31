@@ -18,6 +18,8 @@ interface PageFrameProps {
   path: string
   name: string
   html: string
+  /** A deck or a Word document LoomWatch drew: paper on the reader's ground, not a page on a sheet. */
+  drawn?: boolean
   /** The asks about parts of the page, marked in it with their bubbles, and the part in the message box. */
   marks: { parts: readonly PageMark[]; asking: string | null }
   /** The Pick switch is on: a click on the page marks the part under it (ADR 0091). */
@@ -45,7 +47,7 @@ interface PageFrameProps {
  * coordinates; the parts asked about go back the same way, and so do the files beside it that the
  * page asks for as it runs, read inside its own folder.
  */
-export function PageFrame({ path, name, html, marks, picking, pickKeys, onMarked, onParts, onOpen, onEscape, onHover, cleared, onPointing }: PageFrameProps) {
+export function PageFrame({ path, name, html, drawn = false, marks, picking, pickKeys, onMarked, onParts, onOpen, onEscape, onHover, cleared, onPointing }: PageFrameProps) {
   const frame = useRef<HTMLIFrameElement>(null)
   const page = useRef(path)
   useEffect(() => { page.current = path }, [path])
@@ -139,5 +141,5 @@ export function PageFrame({ path, name, html, marks, picking, pickKeys, onMarked
   const shown = doc?.html === html ? doc.ready : null
   return shown === null
     ? <p className="rd-loading" role="status">Setting up the page…</p>
-    : <iframe ref={frame} className="rd-frame" title={`The page ${name}`} sandbox={PAGE_SANDBOX} srcDoc={shown} referrerPolicy="no-referrer" />
+    : <iframe ref={frame} className={`rd-frame${drawn ? ' drawn' : ''}`} title={`The page ${name}`} sandbox={PAGE_SANDBOX} srcDoc={shown} referrerPolicy="no-referrer" />
 }

@@ -184,9 +184,17 @@ answer. A PDF is shown as its pages, and you mark its words as in any file. Drag
 a chart on a page to mark a box there; to mark all of a page with one, press Tab until the page is
 ringed, then Enter (or tap it, on a touch screen). The agent is told the page and where the box is,
 and sent a sharp picture of the box. A PDF that can't be shown as its pages shows only its words.
-A PowerPoint deck is shown as its slides, and a Word document as its pages, in the same way when
-LibreOffice is on the computer; the first time, they can take up to two minutes to show. Without
-LibreOffice, they show only their words. A CSV or TSV file and an Excel workbook are shown as a sheet: a workbook's
+A PowerPoint deck is shown as its slides, and a Word document as its pages, drawn by LoomWatch
+itself: nothing else needs to be on the computer, and they open at once. Mark their words, or press
+the Pick switch and click any part of a slide or a page (a box, a table, a chart) to ask about it.
+Each slide sits under its number, and a picked picture, shape or chart is named by its slide. A
+slide's speaker notes are open under it: mark their words to ask about them, as any words. A strip
+of every slide runs down the left when the reader is wide enough: press one to go to it, and the
+one in view is ringed. When the deck has changed since you last looked at it (for example, after
+you ask an agent to change it), it opens at the first slide that changed. Each changed slide has a
+gold dashed line under it in the strip and beside its number, with the face of the agent whose
+file it is, and a short gold dashed line marks each part and each set of notes that changed. A deck or a document LoomWatch can't draw shows only its words,
+and an old `.ppt` or `.doc` opens in its own app. A CSV or TSV file and an Excel workbook are shown as a sheet: a workbook's
 sheets behind tabs, the first row as the column names, the rows numbered. Drag across any cells to ask about them,
 or press (or drag across) column names or row numbers for whole columns or rows; from the keyboard,
 Enter on a column's name or a row's number does the same, and ⌘C copies the marked cells. The agent

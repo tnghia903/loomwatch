@@ -552,6 +552,11 @@ fn media_type(path: &Path) -> Option<&'static str> {
         "heic" => "image/heic",
         // Drawn as its pages by the reader (ADR 0091), read a part at a time.
         "pdf" => "application/pdf",
+        // Drawn by the reader itself as its slides or its pages (ADR 0091), from these bytes.
+        "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "pptm" => "application/vnd.ms-powerpoint.presentation.macroEnabled.12",
+        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "docm" => "application/vnd.ms-word.document.macroEnabled.12",
         "mp3" => "audio/mpeg",
         "wav" => "audio/wav",
         "m4a" => "audio/mp4",
@@ -581,9 +586,9 @@ pub(crate) struct RawFile {
 }
 
 /// A picture or a recording, to be answered as it is, for the reader and for a web page's own
-/// pictures and clips; and the data and fonts a page loads beside it. Only those: a page, a script
-/// or a document is never answered as bytes, so nothing an agent wrote can run as this daemon's
-/// page. The bytes are read by the route, all or the part a player asks for ([`wanted`]). Blocking.
+/// pictures and clips; the data and fonts a page loads beside it; and a PDF, a slide deck or a Word
+/// document, for the reader to draw. Only those: a page, a script or a text is never answered as
+/// bytes, so nothing an agent wrote can run as this daemon's page. The bytes are read by the route, all or the part a player asks for ([`wanted`]). Blocking.
 pub(crate) fn raw(teams_root: &Path, requested: &Path) -> Result<RawFile, ApiError> {
     let resolved = existing(teams_root, requested)?;
     let name = resolved.file_name().map_or_else(
@@ -858,7 +863,7 @@ mod tests {
             "page.html",
             "app.js",
             "report.md",
-            "letter.docx",
+            "letter.doc",
             "notes.xml",
         ] {
             let file = workspace.join(name);
@@ -868,6 +873,45 @@ mod tests {
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "{name}"
             );
+        }
+    }
+
+    /// **A deck or a Word document is answered as it is, for the reader to draw (ADR 0091).** An
+    /// old `.ppt` or `.doc` is not: the reader draws neither, and opens them in their own app.
+    #[test]
+    fn answers_a_deck_or_a_word_document_for_the_reader_to_draw() {
+        let root = Root::new();
+        let workspace = root.0.join(".loomwatch/team/writer");
+        for (name, expected) in [
+            (
+                "deck.pptx",
+                Some("application/vnd.openxmlformats-officedocument.presentationml.presentation"),
+            ),
+            (
+                "deck.pptm",
+                Some("application/vnd.ms-powerpoint.presentation.macroEnabled.12"),
+            ),
+            (
+                "letter.docx",
+                Some("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+            ),
+            (
+                "letter.docm",
+                Some("application/vnd.ms-word.document.macroEnabled.12"),
+            ),
+            ("old.ppt", None),
+            ("old.doc", None),
+        ] {
+            let path = workspace.join(name);
+            std::fs::write(&path, "PK").expect("write file");
+            match expected {
+                Some(expected) => assert_eq!(raw(&root.0, &path).expect(name).media_type, expected),
+                None => assert_eq!(
+                    raw(&root.0, &path).unwrap_err().status,
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "{name}"
+                ),
+            }
         }
     }
 

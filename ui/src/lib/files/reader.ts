@@ -35,12 +35,12 @@ const FORMATS: Array<[RegExp, ReaderFormat]> = [
   [/^(txt|log)$/, 'text'],
   // A PDF is drawn as its pages, its words over them (ADR 0091); its words alone if it can't be.
   [/^pdf$/, 'pdf'],
-  // A slide deck is drawn as its slides, from the PDF LibreOffice makes of it (ADR 0091); its words
-  // alone where it can't be. An old .ppt or a LibreOffice deck has no words LoomWatch reads, so
-  // without LibreOffice it would show nothing: it opens in its own app.
+  // A slide deck is drawn by LoomWatch itself as its slides (ADR 0091, lib/files/drawnPage.ts); its
+  // words alone where it can't be. An old .ppt or a LibreOffice deck is drawn by neither, and has no
+  // words LoomWatch reads: it opens in its own app.
   [/^(pptx|pptm)$/, 'slides'],
-  // A Word document is drawn as its pages in the same way. An old .doc, an .odt or an .rtf has no
-  // words LoomWatch reads either: it opens in its own app.
+  // A Word document is drawn as its pages in the same way. An old .doc, an .odt or an .rtf is not:
+  // it opens in its own app.
   [/^(docx|docm)$/, 'document'],
   [/^(png|jpe?g|gif|webp|svg|bmp)$/, 'picture'],
   [/^(mp3|wav|m4a|mp4|mov|webm)$/, 'media'],
@@ -64,14 +64,9 @@ export async function readFile(path: string, signal?: AbortSignal): Promise<File
   return (await response.json()) as FileText
 }
 
-/** Where a picture or a recording is answered as it is. */
+/** Where a picture, a recording, or a deck or Word document to draw, is answered as it is. */
 export function rawFileUrl(path: string): string {
   return `/api/files/raw?path=${encodeURIComponent(path)}`
-}
-
-/** Where a slide deck or a Word document is answered as the PDF of its pages (ADR 0091). */
-export function pagesFileUrl(path: string): string {
-  return `/api/files/pages?path=${encodeURIComponent(path)}`
 }
 
 /** A file to read, and who to ask about it: the agent whose work named it, in that piece of work. */

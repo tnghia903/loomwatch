@@ -77,5 +77,8 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
+    // Node would take the deck reader's UMD build, as its package names no exports: tests use the
+    // module the app is built from.
+    alias: { pptxtojson: fileURLToPath(new URL('./node_modules/pptxtojson/dist/index.js', import.meta.url)) },
   },
 })

@@ -96,6 +96,10 @@
 .rd-scroll-frame { overflow: hidden; padding: 12px; background: color-mix(in srgb, var(--color-ink) 4%, var(--color-ground)); }
 .rd-frame { display: block; width: 100%; height: 100%; border: 0; border-radius: 8px; background: var(--color-white); box-shadow: 0 0 0 1px var(--color-hairline), 0 10px 30px color-mix(in srgb, var(--lw-ink-950) 10%, transparent); }
 .rd-scroll-frame .rd-loading { margin: 40px auto; }
+/* A deck or a Word document LoomWatch draws: its paper lies on the reader's own ground, as a PDF's
+   pages do, with no sheet around it. */
+.rd-scroll-frame.drawn { padding: 0; background: var(--color-ground); }
+.rd-frame.drawn { border-radius: 0; box-shadow: none; background: var(--color-ground); }
 
 /* A picture on a light check, so a transparent one shows where it ends. */
 .rd-picture { box-sizing: border-box; display: grid; place-items: center; min-height: 100%; margin: 0; padding: 24px;
