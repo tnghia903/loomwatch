@@ -563,7 +563,8 @@ mod tests {
             place.root.join("research.yaml"),
             format!(
                 "schemaVersion: 1\nid: research\nentrypoint: researcher\nagents:\n  - id: researcher\n    model: openai/gpt-5.5\n    spawn:\n      cwd: \"{}\"\n",
-                given.display()
+                // `/`-separated: YAML's double quotes read a Windows path's `\` as an escape.
+                crate::test_support::sh_path(&given)
             ),
         )
         .expect("team file");
