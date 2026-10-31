@@ -28,5 +28,9 @@
   <key>NSRemindersUsageDescription</key><string>Allow only if the work you gave your agents needs your reminders.</string>
   <key>NSContactsUsageDescription</key><string>Allow only if the work you gave your agents needs your contacts.</string>
   <key>NSPhotoLibraryUsageDescription</key><string>Allow only if the work you gave your agents needs your photos.</string>
+  <!-- Holding Control-Option-Space writes what the person says into the box at the notch (ADR 0083).
+       Only the app listens: agents' commands are kept off the microphone (agent/sandbox.rs). -->
+  <key>NSMicrophoneUsageDescription</key><string>LoomWatch listens only while you hold Control-Option-Space, and writes what you say in the box for your agent. Nothing is sent until you press Return.</string>
+  <key>NSSpeechRecognitionUsageDescription</key><string>LoomWatch turns what you say into words for your agent while you hold Control-Option-Space.</string>
 </dict>
 </plist>

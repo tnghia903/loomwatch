@@ -27,6 +27,9 @@ mod progress;
 mod island;
 #[cfg(target_os = "macos")]
 mod notch_panel;
+// Listening while ⌃⌥Space is held, for the box at the notch.
+#[cfg(target_os = "macos")]
+mod listen;
 // The editing keys of the box at the notch, in a main menu nobody sees.
 #[cfg(target_os = "macos")]
 mod edit_keys;

@@ -752,10 +752,10 @@ work, and the right side empty until there is something to say. Unticking **Show
 writes `<state dir>/app-notch-off`, closes every panel, stops watching the pointer and gives
 ⌃⌥Space back; the face is in the menu bar instead until it is ticked again. `loomwatchd` reads the
 same file to answer `notchShown` with the pin, so My agents says to turn the notch on rather than
-promise ⌃⌥Space. The box writes to the agent pinned to the notch, else the first of My agents;
-switching it to another (Tab, or one of the figures beside it) or sending to one not yet pinned pins
-that one (`PUT /api/pinned-agent`, kept in `<state dir>/pinned.json` by `pinned.rs`), so the box
-and the island share one agent. Its figure opens its workbench under the box: the builder's 3D
+promise ⌃⌥Space. The box writes to the agent pinned to the notch, else the first of My agents,
+which sending to pins (`PUT /api/pinned-agent`, kept in `<state dir>/pinned.json` by `pinned.rs`),
+so the box and the island share one agent. It is the one agent at the notch: another is pinned in
+My agents, and Tab moves on in the box as anywhere. Its figure opens its workbench under the box: the builder's 3D
 bench (`AgentFigure`, read only, always in the island's dark), from the same view and labels the
 builder makes (`components/agents/benchOf.tsx`), acting out the agent's newest run in its chat. It
 loads with three.js only once the page is under way: the screen the pointer is on sets it up out of
@@ -763,8 +763,8 @@ sight once the pointer has been there a few seconds (`ISLAND_WAITS.benchSetUp`),
 opens, where setting it up froze the box (over a second the first time after an update, while
 `WebKit` compiled its shaders again), and keeps it for a while after the pointer leaves
 (`ISLAND_WAITS.benchKept`). It moves into the box as the box opens and out again as it closes, set
-up once (`useBenchHost`), so it is there at once under the box and when the message goes; switched
-to another agent, the box hands the same bench that agent (`WorkbenchScene.set(view, another)`),
+up once (`useBenchHost`), so it is there at once under the box and when the message goes; with
+another agent pinned, the box hands the same bench that agent (`WorkbenchScene.set(view, another)`),
 put in place as it is rather than set up again. After a message is sent, the box gives way to the
 agent at its workbench for a moment (`ISLAND_WAITS.bench`), and at a notch for as long as the
 pointer stays on it; without a notch it then tucks into a pill at the top of the screen, the agent
@@ -777,6 +777,34 @@ at a little desk, whose workbench opens while it is pointed at. For the agent in
   the front. `AppKit` finds what ⌘V, ⌘C, ⌘X, ⌘A, ⌘Z and ⇧⌘Z do in the app's main menu, so the app
   has one that nobody sees, with only an Edit menu in it (`edit_keys.rs`): ⌘Q, ⌘W or ⌘H meant for
   the app in front still find nothing in `LoomWatch`;
+- ⌃⌥Space held past `island::HOLD_TO_LISTEN` (600 ms, so a slow press only opens the box) listens instead (`listen.rs`): Carbon reports
+  the keys coming up too, and while they are held `AVAudioEngine`'s microphone feeds macOS's speech
+  recognition (`SFSpeechRecognizer`, on this Mac where the language allows), whose words go to the
+  page as they come (`ToPage::Heard`) with how loud it hears (`ToPage::Level`). The page writes them
+  into the box after whatever was typed; let go, they wait there to be read and sent like typed
+  words. A press while the box is open closes it only once the keys come up before that, so holding
+  never closes it. Only the app is signed with the microphone entitlement
+  (`packaging/macos/LoomWatch-app.entitlements`), never `loomwatchd`, and the command sandbox denies
+  `device-microphone`, so an agent's command can't use the microphone the person allowed for
+  talking. The first hold asks macOS for the microphone and, once that is allowed, speech
+  recognition (`ToPage::CantListen`, `asked`); refused, the box says which and opens System Settings
+  there (`FromPage::Settings`). A Mac with no microphone says so (`noMicrophone`); listening stops
+  after `LONGEST_LISTEN` with the keys still held and says so (`longest`); a hold that hears nothing
+  says so too. Words still to come after letting go are dropped once the box is sent or written in;
+- under the box, what the person may ask next (ADR 0105, `suggestions.rs`,
+  `GET /api/pinned-agent/suggestions`): next steps from the agent's newest answer, written once for
+  that answer by a small model on the source the model of the agent's chat is paid from (its
+  `.jobs/.bench/<id>.yaml`, which for an agent saved with no model holds the one the app chose for
+  what is connected): on a `ChatGPT` plan, the plan's quick model (the fast tier's in
+  `schemas/model-tiers.json`) when the plan offers it, else that same model; an agent on a free model
+  writes with it
+  (`Provider::once`, no tools, the model named with its source, as a plan and a Claude key read
+  it), while the answer is younger than `NEXT_STEPS_FOR` and the
+  person hasn't written since; then what the person asked it more than once, without files.
+  Pressing one only puts it in the box. The page asks only while the box is open, so next steps are
+  written only for answers someone reaches for the box after, and again while they are being
+  written. Each call is counted in `model_calls` (`call_kind` `next_steps`) under the agent's chat,
+  so the Usage page shows it;
 - its answer is read whole before Copy can take it, and Copy carries it twice: as HTML
   (`island/answerHtml.ts`, loaded only then) for apps that paste formatting, and as plain text
   whose links keep their addresses. In the app, Copy writes both to the clipboard

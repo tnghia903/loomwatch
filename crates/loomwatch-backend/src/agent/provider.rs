@@ -13,7 +13,7 @@ use super::chatgpt::ChatGptPlan;
 use super::demo::Demo;
 use super::error::CallError;
 use super::openrouter::{OpenRouter, through_messages};
-use crate::ai::Source;
+use crate::ai::{ModelRef, Source};
 
 /// One message of the conversation, in the agent's own order. It is append-only: a model that
 /// signs its reasoning (Claude's "preserved thinking") refuses a history whose earlier turns were
@@ -319,6 +319,21 @@ impl Completion {
     }
 }
 
+/// Where a call nobody watches being written streams to: nowhere ([`Provider::once`]).
+struct Quiet;
+
+impl DeltaSink for Quiet {
+    fn text<'a>(&'a self, _text: &'a str) -> BoxFuture<'a, Result<(), CallError>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn reasoning<'a>(&'a self, _text: &'a str) -> BoxFuture<'a, Result<(), CallError>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn server_tool(&self) {}
+}
+
 /// Where a provider sends the text as it streams in, so the operator watches it being written.
 pub(crate) trait DeltaSink: Send + Sync {
     fn text<'a>(&'a self, text: &'a str) -> BoxFuture<'a, Result<(), CallError>>;
@@ -429,6 +444,48 @@ impl Provider {
                 completion = demo.complete(request, deltas) => completion,
                 () = cancel.cancelled() => Err(CallError::Cancelled),
             },
+        }
+    }
+
+    /// One question, with no tools and no conversation before it: `system` says the job, `user`
+    /// carries what it is about. The reply's words and what the call used, or why there were none,
+    /// in words. `model` goes as a team file names it, with its source (`chatgpt:gpt-6.1-sol`): a
+    /// plan or a Claude key reads a bare name as an `OpenRouter` one, and refuses it.
+    pub(crate) async fn once(
+        &self,
+        model: &ModelRef,
+        system: &str,
+        user: &str,
+        max_tokens: u32,
+    ) -> Result<Completion, String> {
+        let model = model.to_string();
+        let messages = [
+            Message::System {
+                content: system.to_owned(),
+            },
+            Message::User {
+                content: user.to_owned(),
+                pictures: Vec::new(),
+            },
+        ];
+        let key = format!("once-{}", uuid::Uuid::new_v4().simple());
+        let request = ChatRequest {
+            model: &model,
+            effort: Some("low"),
+            messages: &messages,
+            tools: &[],
+            server_tools: ServerTools::default(),
+            max_tokens,
+            tools_off: false,
+            session_key: &key,
+            agent_id: "",
+        };
+        // Nobody stops it: it ends with the reply, or fails.
+        let (_stop, never) = watch::channel(false);
+        match self.complete(&request, &Quiet, &Cancel::new(never)).await {
+            Ok(completion) => Ok(completion),
+            Err(CallError::Cancelled) => Err("it was stopped".to_owned()),
+            Err(CallError::Failed(error)) => Err(error.to_string()),
         }
     }
 

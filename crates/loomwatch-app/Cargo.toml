@@ -82,6 +82,36 @@ objc2-web-kit = { version = "0.3", default-features = false, features = [
   "WKWebView",
   "WKWebViewConfiguration",
 ] }
+# Holding ⌃⌥Space to talk to the agent at the notch: macOS's own speech recognition, the
+# microphone it hears through, and asking the person for both.
+objc2-speech = { version = "0.3", default-features = false, features = [
+  "std",
+  "block2",
+  "objc2-avf-audio",
+  "SFSpeechRecognitionRequest",
+  "SFSpeechRecognitionResult",
+  "SFSpeechRecognitionTask",
+  "SFSpeechRecognitionTaskHint",
+  "SFSpeechRecognizer",
+  "SFTranscription",
+] }
+objc2-avf-audio = { version = "0.3", default-features = false, features = [
+  "std",
+  "block2",
+  "AVAudioBuffer",
+  "AVAudioEngine",
+  "AVAudioFormat",
+  "AVAudioIONode",
+  "AVAudioNode",
+  "AVAudioTime",
+  "AVAudioTypes",
+] }
+objc2-av-foundation = { version = "0.3", default-features = false, features = [
+  "std",
+  "block2",
+  "AVCaptureDevice",
+  "AVMediaFormat",
+] }
 
 [target.'cfg(windows)'.dependencies]
 # Start at login (the Run key) and the PATH a new sign-in would have.
@@ -110,10 +140,10 @@ objc2-core-graphics = { version = "0.3", default-features = false, features = [
   "CGRemoteOperation",
 ] }
 
-# The workspace's lints, except that `unsafe` code is denied rather than forbidden, so that the one
-# module that calls `AppKit` and `WebKit` for the island at the notch (`notch_panel.rs`, ADR 0083)
-# can allow it for itself, as can the test of the editing keys there. Everything else in the
-# workspace still forbids it.
+# The workspace's lints, except that `unsafe` code is denied rather than forbidden, so that the
+# module that calls `AppKit` and `WebKit` for the island at the notch (`notch_panel.rs`, ADR 0083),
+# and the one that listens while ⌃⌥Space is held (`listen.rs`), can allow it for themselves, as can
+# the test of the editing keys there. Everything else in the workspace still forbids it.
 [lints.rust]
 unsafe_code = "deny"
 

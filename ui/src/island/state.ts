@@ -68,6 +68,8 @@ export interface IslandState {
   /** A message to it is being written: the list stays open, wherever the pointer goes, until it is
       sent, put away with Escape, or a click lands elsewhere. */
   composing: boolean
+  /** ⌃⌥Space is held and the app listens: what is said writes itself into the box. */
+  listening: boolean
   /** Without a notch, after a message from the box: its agent's work shows in a pill until it
       answers, or a click lands elsewhere; pointing at the pill opens its workbench. */
   following: boolean
@@ -140,6 +142,7 @@ export function initialIsland(now: number, inApp: boolean): IslandState {
     pinned: null,
     box: null,
     composing: false,
+    listening: false,
     following: false,
     bench: false,
     peeking: false,
@@ -277,6 +280,17 @@ function fromApp(s: IslandState, message: FromApp): IslandState {
       return markSeen(s, message.runs)
     case 'dropped':
       // The files come as a drop of their own, once the page's picker has them (`pickFiles`).
+      return s
+    case 'listen':
+      // Held, ⌃⌥Space has opened the box already; should it have been put away since, listening
+      // opens it again, for the words to go into.
+      if (!message.on) return { ...s, listening: false }
+      if (!s.box) return s
+      return { ...(s.composing ? s : openToWrite(s)), listening: true }
+    case 'heard':
+    case 'level':
+    case 'cantListen':
+      // The words, the loudness and what stopped it are the page's (`useIsland`).
       return s
   }
 }

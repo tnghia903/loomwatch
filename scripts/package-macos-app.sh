@@ -55,12 +55,15 @@ plutil -lint -s "$app/Contents/Info.plist"
 if [ -n "${MACOS_SIGN_IDENTITY:-}" ]; then
   # Inside out: the helper programs first, then the app around them. Under the hardened runtime,
   # macOS asks before agents work in another app only for programs entitled to send Apple Events.
+  # Only the app itself may use the microphone, to listen while ⌃⌥Space is held at the notch;
+  # loomwatchd, which runs the agents' commands, may not.
   entitlements=$root/packaging/macos/LoomWatch.entitlements
+  app_entitlements=$root/packaging/macos/LoomWatch-app.entitlements
   codesign --force --options runtime --timestamp --sign "$MACOS_SIGN_IDENTITY" \
     "$app/Contents/MacOS/loomwatch-osascript"
   codesign --force --options runtime --timestamp --entitlements "$entitlements" \
     --sign "$MACOS_SIGN_IDENTITY" "$app/Contents/MacOS/loomwatchd"
-  codesign --force --options runtime --timestamp --entitlements "$entitlements" \
+  codesign --force --options runtime --timestamp --entitlements "$app_entitlements" \
     --sign "$MACOS_SIGN_IDENTITY" "$app"
 else
   codesign --force --deep --sign - "$app"

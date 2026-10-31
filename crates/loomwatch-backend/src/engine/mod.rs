@@ -211,7 +211,7 @@ static OPENROUTER: LazyLock<tokio::sync::Mutex<KeptConnection>> =
     LazyLock::new(tokio::sync::Mutex::default);
 
 /// The provider `model` runs on: its own source's, never another's.
-async fn provider_for(model: &ModelRef) -> Result<Provider, AppReportedError> {
+pub(crate) async fn provider_for(model: &ModelRef) -> Result<Provider, AppReportedError> {
     match model.source {
         Source::OpenRouter => {}
         Source::Anthropic => return claude_provider().await,

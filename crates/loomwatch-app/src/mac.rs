@@ -294,6 +294,8 @@ struct Island {
     agent: Option<String>,
     /// The left button is held in another app: a drag of something may be under way.
     pressing: bool,
+    /// ⌃⌥Space going down and coming up: pressed, it opens the box; held, it listens.
+    hold: island::Hold,
 }
 
 impl Island {
@@ -312,6 +314,7 @@ impl Island {
             next_check: Instant::now(),
             agent: None,
             pressing: false,
+            hold: island::Hold::default(),
         })
     }
 
@@ -320,6 +323,32 @@ impl Island {
     fn compose(&mut self) {
         if self.agent.is_some() {
             self.panel.compose();
+        }
+    }
+
+    /// ⌃⌥Space went down (`down`) or came up: it opens the box or puts it away, and held, the box
+    /// listens until it is let go (`island::Hold`). With no agent there is nothing to open or to
+    /// write to.
+    fn shortcut(&mut self, down: bool) {
+        let now = Instant::now();
+        let does = if down {
+            if self.agent.is_none() {
+                return;
+            }
+            self.hold.pressed(now, self.panel.writing())
+        } else {
+            self.hold.released(now)
+        };
+        self.act(does);
+    }
+
+    fn act(&mut self, does: island::HoldDoes) {
+        match does {
+            island::HoldDoes::Compose => self.compose(),
+            island::HoldDoes::Listen => self.panel.listen(),
+            island::HoldDoes::StopListening => self.panel.stop_listening(),
+            island::HoldDoes::HeldTooLong => self.panel.held_too_long(),
+            island::HoldDoes::Nothing => {}
         }
     }
 
@@ -343,19 +372,33 @@ impl Island {
         if self.pressing {
             self.pressing = self.panel.poll_drag();
         }
+        let now = Instant::now();
+        let does = self.hold.tick(now);
+        self.act(does);
+        self.panel.tick_listening(now);
         if Instant::now() >= self.next_check {
             self.panel.tick();
             self.next_check = Instant::now() + ISLAND_CHECK;
         }
     }
 
-    /// With no island there is nothing to check, until a drag begun before it went ends.
+    /// With no island there is nothing to check, until a drag begun before it went ends. While
+    /// ⌃⌥Space is held, or the box listens, sooner.
     fn wakes_at(&self) -> Option<Instant> {
-        if self.pressing {
-            Some(self.next_check.min(Instant::now() + DRAG_CHECK))
+        let now = Instant::now();
+        let checks = if self.pressing {
+            Some(self.next_check.min(now + DRAG_CHECK))
         } else {
             self.panel.any_island().then_some(self.next_check)
-        }
+        };
+        [
+            checks,
+            self.hold.wakes_at(),
+            self.panel.listening_wakes_at(now),
+        ]
+        .into_iter()
+        .flatten()
+        .min()
     }
 
     /// What the island's page, the pointer and the screens ask of the app. `origin` is
@@ -378,9 +421,12 @@ impl Island {
                 FromPage::Agent { name } => self.agent = name,
                 FromPage::Copy { text, html } => NotchPanels::copy(&text, html.as_deref()),
                 FromPage::Seen { runs } => panel.seen(from, &runs),
+                FromPage::Settings { pane } => NotchPanels::open_settings(&pane),
             },
             IslandEvent::PageGone { from } => panel.page_gone(from),
-            IslandEvent::Shortcut => self.compose(),
+            IslandEvent::Shortcut => self.shortcut(true),
+            IslandEvent::ShortcutUp => self.shortcut(false),
+            IslandEvent::Heard(heard) => panel.heard(heard),
             IslandEvent::PressStarted => {
                 self.pressing = true;
                 panel.press_started();

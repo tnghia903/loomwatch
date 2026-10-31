@@ -501,6 +501,13 @@ async fn main() -> Result<()> {
             let pinned = loomwatch_backend::pinned::Pinned::open(&state_dir, &teams_root);
             loomwatch_backend::pinned::install(pinned.clone());
             let team_requests_archive = archive.clone();
+            // ADR 0105: what to ask the pinned agent next, under the island's box.
+            let suggestions = loomwatch_backend::suggestions::Suggestions::new(
+                pinned.clone(),
+                &teams_root,
+                archive.clone(),
+                Some(&state_dir),
+            );
             let mut app = loomwatch_backend::spa::router()
                 .merge(control.router())
                 .merge(api)
@@ -517,6 +524,7 @@ async fn main() -> Result<()> {
                 // ADR 0083: the agent pinned to the notch, messaged from the island; it may ask the
                 // person's teams, each started only when they press Start.
                 .merge(loomwatch_backend::pinned::router(pinned))
+                .merge(loomwatch_backend::suggestions::router(suggestions))
                 .merge(loomwatch_backend::team_requests::router(
                     team_requests_archive,
                     teams_root.clone(),
