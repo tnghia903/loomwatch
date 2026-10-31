@@ -226,6 +226,9 @@ export function withFolderPaths(markdown: string, touched: readonly string[] = [
   const named = plainNames(written)
   for (const index of passages.flat()) {
     if (named) lines[index] = inPlainWords(lines[index], named)
+    // A path set off in bold or quotes may hold spaces; one in running words can't, as where it ends
+    // would be a guess. Each its own pass, so the first one's code spans are kept from the second.
+    lines[index] = inPlainWords(lines[index], setOffPaths)
     lines[index] = inPlainWords(lines[index], madePaths)
   }
   return lines.join('\n')
@@ -254,10 +257,20 @@ function madePaths(words: string): string {
   return words.replace(FULL_PATH, (whole, before: string, path: string) => (madeByAgent(path) ? `${before}\`${path}\`` : whole))
 }
 
+// A full path set off as a whole, in bold or in quotes, spaces and all: `**/a/My deck.pptx**`.
+const SET_OFF_PATH = /(\*\*|"|“)((?:\/|[A-Za-z]:[\\/])[^\n`*"“”<>]*?\.[A-Za-z0-9]{1,8})(\*\*|"|”)/g
+const CLOSES: Record<string, string> = { '**': '**', '"': '"', '“': '”' }
+
+/** Plain words with each full path set off in bold or quotes, of a file an agent made, as a code span. */
+function setOffPaths(words: string): string {
+  return words.replace(SET_OFF_PATH, (whole, open: string, path: string, close: string) => (CLOSES[open] === close && madeByAgent(path) ? `${open}\`${path}\`${close}` : whole))
+}
+
 /**
  * Whether a full path is of a file in an agent's own folder (`.loomwatch/<team>/<agent>/…`, the
- * folder it works in), of a kind this module names. Not what LoomWatch keeps there for it: hidden
- * folders (its skills), the copies of the files it was given, and its notes.
+ * folder it works in, or `.loomwatch/<agent>/…` for an agent in no team), of a kind this module
+ * names. Not what LoomWatch keeps there for it: hidden folders (its skills), the copies of the files
+ * it was given, and its notes.
  */
 function madeByAgent(path: string): boolean {
   if (!filePathFrom(path) || !Object.hasOwn(LABELS, extensionOf(path))) return false

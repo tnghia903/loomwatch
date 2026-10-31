@@ -132,6 +132,19 @@ describe('fileRefsIn', () => {
     expect(fileRefsIn(`Saved ${maker}/out/notes.md, as asked.`)).toEqual([`${maker}/out/notes.md`])
     const plan = 'C:\\Users\\ana\\LoomWatch\\teams\\.loomwatch\\launch\\writer\\plan.docx'
     expect(fileRefsIn(`Done: ${plan}`)).toEqual([plan])
+    // An agent in no team works in `.loomwatch/<agent>`.
+    expect(fileRefsIn('See /Users/me/teams/.loomwatch/writer/notes.md.')).toEqual(['/Users/me/teams/.loomwatch/writer/notes.md'])
+  })
+
+  it('finds a full path with spaces when the reply sets it off in bold or quotes', () => {
+    const deck = '/Users/John Smith/LoomWatch/teams/.loomwatch/review/maker/Q3 Report.pptx'
+    expect(fileRefsIn(`The deck is ready: **${deck}**`)).toEqual([deck])
+    expect(withFolderPaths(`Saved “${deck}” for you.`)).toBe(`Saved “\`${deck}\`” for you.`)
+    const plan = 'C:\\Users\\John Smith\\LoomWatch\\teams\\.loomwatch\\launch\\writer\\Launch plan.docx'
+    expect(fileRefsIn(`Done: "${plan}"`)).toEqual([plan])
+    // In running words, where it ends would be a guess; and the marks around it must match.
+    expect(fileRefsIn(`The deck is ready: ${deck} for Thursday`)).toEqual([])
+    expect(fileRefsIn(`**${deck}" and more`)).toEqual([])
   })
 
   it('leaves a full path in plain words alone outside an agent’s own folder, or not something it made', () => {
@@ -141,6 +154,8 @@ describe('fileRefsIn', () => {
     expect(fileRefsIn(`See ${maker}/build and ${maker}/draft.`, [], maker)).toEqual([])
     // LoomWatch's own files there: hidden folders, the copies of what it was given, its notes file.
     expect(fileRefsIn(`${maker}/.agents/skills/deck/SKILL.md ${maker}/knowledge/brief.md ${maker}/AGENTS.md`, [], maker)).toEqual([])
+    // LoomWatch's folder itself holds no agent's work.
+    expect(fileRefsIn('See /teams/.loomwatch/notes.md.', [], maker)).toEqual([])
     // A kind of file the reader doesn't name, a path that climbs out, inside a word or an address.
     expect(fileRefsIn(`Ran ${maker}/build/make_deck.py and ${maker}/../../secret.md.`, [], maker)).toEqual([])
     expect(fileRefsIn(`~${maker}/a.md x${maker}/b.md https://example.com${maker}/c.html`, [], maker)).toEqual([])
