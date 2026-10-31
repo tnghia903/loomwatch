@@ -1883,8 +1883,10 @@ describe('reactions', () => {
     // Nobody is there to reach: no Reply under LoomWatch's own answer.
     expect(within(talk).queryByRole('button', { name: /Reply to LoomWatch/ })).toBeNull()
     // Folded while it works, the piece says what happened in one line, and not as your answer.
-    fireEvent.click(screen.getByRole('button', { name: 'Hide what they said' }))
-    expect(screen.getByText('Nobody answered “Which region?” in time, so Writer went on with its best guess')).toBeInTheDocument()
+    fireEvent.click(await screen.findByRole('button', { expanded: true, name: /replies/ }))
+    await waitFor(() => expect(document.querySelector('.tc-decided')).not.toBeNull())
+    expect(document.querySelector('.tc-decided')).toHaveTextContent('Nobody answered “Which region?” in time, so Writer went on with its best guess')
+    expect(document.querySelector('.tc-decided .chat-bubble')).toBeNull()
     expect(screen.queryByText(/your answer to/)).toBeNull()
   })
 

@@ -8717,6 +8717,7 @@ pub(crate) mod tests {
                     park_note: "Solo is waiting for your answer".into(),
                     send_back_available: true,
                     question_id: None,
+                    expires_at: None,
                     check: Some(CheckWait {
                         checked: "solo".into(),
                         rounds: 1,
@@ -8822,6 +8823,7 @@ pub(crate) mod tests {
                     park_note: "Solo is waiting for your answer".into(),
                     send_back_available: true,
                     question_id: None,
+                    expires_at: None,
                     check: None,
                 },
             )

@@ -401,6 +401,18 @@ describe('a check step in the chat', () => {
     expect(screen.queryByText(/loomwatch:check/)).toBeNull()
   })
 
+  // ADR 0090: when nobody answered a routine's question in time, LoomWatch answered for you, under
+  // the same face as its own check, with no Reply: nobody is there to reach.
+  it('shows the answer LoomWatch gave when nobody answered as LoomWatch’s, under its face', () => {
+    const question = message({ id: 'question:e40', kind: 'question', from: 'editor', to: 'operator', text: 'Which market?', seq: 40, state: 'answered', reply: answer('loomwatch:app', 'Nobody answered your question within 12 hours.', 45, { seq: 45, noAnswer: true }) })
+    setup([question], { onReply: vi.fn() })
+    const answered = msg(/LoomWatch to Editor/)
+    expect(within(answered).getByRole('img', { name: 'LoomWatch' })).toHaveAttribute('title', 'Nobody answered in time, so LoomWatch answered for you')
+    expect(within(answered).getByRole('img', { name: 'LoomWatch' }).querySelector('svg.lw-face')).not.toBeNull()
+    expect(within(answered).queryByRole('button', { name: /^Reply to/ })).toBeNull()
+    expect(screen.queryByText(/loomwatch:app/)).toBeNull()
+  })
+
   it('quotes the work each round checked: the handover first, then the revision', () => {
     const work = message({ id: 'handover:e5', kind: 'handover', to: 'editor', text: '### Work from Writer\n\nFirst draft.', handedBy: { from: ['writer'], via: [] }, seq: 5, offsetMs: 30_000, ts: at(30) })
     const stillLong = message({ ...allMetAgain, text: 'Still long.', check: { round: 2, items: items(['met', 'not_met']), readable: true, sentBack: false, problems: 'Still long.' } })
