@@ -58,7 +58,9 @@ agents:
   is the offline demo model: it answers with fixed text and calls no model, so it needs no key.
 - **`followsSuggestion: true`** says the agent's `model` follows the model LoomWatch suggests for
   it (ADR 0072). An agent added in the app starts that way. When its configuration changes there,
-  LoomWatch moves `model` to the new suggestion and shows what it was, with Undo. Picking any other
+  LoomWatch moves `model` to the new suggestion and shows what it was, with Undo. Its
+  `thinkingEffort` moves too, to the one suggested for that kind of work, unless you set it by
+  hand. Picking any other
   model in its model list takes the line out, and the model stays as picked. A run always uses
   `model`, so a file edited elsewhere keeps its model until the agent is next changed in the app.
 - **`thinkingEffort`** says how hard the model reasons: `none`, `minimal`, `low`, `medium`, `high`,

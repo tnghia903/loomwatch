@@ -9,13 +9,18 @@
 // With Let AI choose on, an agent the free reading can't place moves by AI's reading of its
 // configuration (lib/ai/reading.ts), one per settled configuration. If AI can't read it, its model
 // stays where it is rather than moving by a guess.
+//
+// Its thinking effort moves with it to the one its suggestion gives (ADR 0062), on a model that
+// reasons, while the effort is still the one its last suggestion gave: an effort set by hand stays.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+import { modelEfforts } from '../ai/efforts'
 import { type ModelTier, OFFLINE_MODEL, openRouterEquivalent, parseModelRef, tierModel } from '../ai/modelIds'
 import { readingOf, useReadingStatus } from '../ai/reading'
 import { connectedSources } from '../ai/sources'
 import { useAiStatus, useKeyStatus } from '../ai/useKeyStatus'
+import { useModels } from '../ai/useModels'
 import { type SetupReading, needsReading, setupOf } from './agentSetup'
 import { suggestModel } from './modelSuggestion'
 import type { AgentConfig } from './types'
@@ -29,6 +34,8 @@ export const MOVE_SHOWN_MS = 30_000
 export interface ModelMove {
   from: string
   to: string
+  /** The effort it had when the effort moved too, '' for the model's own; absent when it stayed. */
+  fromEffort?: string
 }
 
 const NO_MOVES: ReadonlyMap<string, ModelMove> = new Map()
@@ -77,14 +84,15 @@ export function useModelFollowing({ team, agents, responder, editable, move, pin
   agents: readonly AgentConfig[]
   responder: string | null
   editable: boolean
-  /** Moves a following agent's model, and it keeps following. */
-  move: (agentId: string, model: string) => void
-  /** Puts `model` back and stops the agent following: Undo. */
-  pin: (agentId: string, model: string) => void
+  /** Moves a following agent's model, and its effort when `effort` is given ('' for the model's own). */
+  move: (agentId: string, model: string, effort?: string) => void
+  /** Puts `model` back, with its effort when given, and stops the agent following: Undo. */
+  pin: (agentId: string, model: string, effort?: string) => void
 }): ModelFollowing {
   const status = useReadingStatus()
   const key = useKeyStatus()
   const ai = useAiStatus()
+  const { catalog } = useModels()
   // The ways of paying connected: when one connects or goes, following agents' suggestions move.
   const sources = ai ? connectedSources(ai).join(' ') : ''
   const ready = status !== null && key !== null && ai !== null
@@ -100,14 +108,18 @@ export function useModelFollowing({ team, agents, responder, editable, move, pin
   const fresh = useRef(new Set<string>())
   // Each agent waiting for its configuration to settle: the signature it waits on, and its timer.
   const timers = useRef(new Map<string, { signature: string; timer: ReturnType<typeof setTimeout> }>())
-  const latest = useRef({ team, agents, responder, aiChooses, sources, move, pin, moves })
-  useEffect(() => { latest.current = { team, agents, responder, aiChooses, sources, move, pin, moves } })
+  // Each following agent's effort as its suggestion last gave it: while its effort is that one, the
+  // effort follows too.
+  const given = useRef(new Map<string, string>())
+  const latest = useRef({ team, agents, responder, aiChooses, sources, move, pin, moves, ai, catalog })
+  useEffect(() => { latest.current = { team, agents, responder, aiChooses, sources, move, pin, moves, ai, catalog } })
 
   // Another team: nothing carries over.
   useEffect(() => {
     seen.current = null
     known.current = new Set()
     fresh.current = new Set()
+    given.current = new Map()
     for (const { timer } of timers.current.values()) clearTimeout(timer)
     timers.current.clear()
   }, [team])
@@ -137,13 +149,22 @@ export function useModelFollowing({ team, agents, responder, editable, move, pin
     const isNew = fresh.current.delete(id)
     const now = latest.current
     const current = now.agents.find((each) => each.id === id) as AgentConfig
-    const { model: to, tier } = suggestModel({ agent: current, team: { agents: now.agents, responder: now.responder }, reading })
-    if (!current.model || to === current.model || !mayMoveBetween(current.model, to, tier)) return
+    const { model: suggested, tier, effort } = suggestModel({ agent: current, team: { agents: now.agents, responder: now.responder }, reading })
+    const had = current.thinkingEffort ?? ''
+    const effortFollows = isNew || had === given.current.get(id)
+    given.current.set(id, effort)
+    if (!current.model) return
+    const to = mayMoveBetween(current.model, suggested, tier) ? suggested : current.model
+    const thinks = modelEfforts(to, now.ai, now.catalog).levels.length > 0
+    const moveEffort = effortFollows && thinks && effort !== had
+    if (to === current.model && !moveEffort) return
     const from = current.model
-    now.move(id, to)
+    if (moveEffort) now.move(id, to, effort)
+    else now.move(id, to)
     if (isNew) return
     const madeIn = now.team
-    setShown((before) => ({ team: madeIn, moves: new Map(before.team === madeIn ? before.moves : NO_MOVES).set(id, { from, to }) }))
+    const made: ModelMove = moveEffort ? { from, to, fromEffort: had } : { from, to }
+    setShown((before) => ({ team: madeIn, moves: new Map(before.team === madeIn ? before.moves : NO_MOVES).set(id, made) }))
     setTimeout(() => setShown((before) => {
       if (before.team !== madeIn || before.moves.get(id)?.to !== to) return before
       const next = new Map(before.moves)
@@ -155,6 +176,7 @@ export function useModelFollowing({ team, agents, responder, editable, move, pin
   useEffect(() => {
     if (!ready || !editable) return
     const following = agents.filter(follows)
+    for (const agent of agents) if (!follows(agent)) given.current.delete(agent.id)
     if (!seen.current) {
       // As it opened, except an agent whose model a plan connected since pays for: it moves below.
       seen.current = new Map(following.filter((agent) => !paidAnotherWay(agent, agents, responder)).map((agent) => [agent.id, followSignature(agent, agents, responder, aiChooses, sources)]))
@@ -166,6 +188,8 @@ export function useModelFollowing({ team, agents, responder, editable, move, pin
       fresh.current.add(agent.id)
     }
     for (const agent of following) {
+      // As it opened, or as it started following: picking its suggestion gave it that effort.
+      if (!given.current.has(agent.id)) given.current.set(agent.id, suggestModel({ agent, team: { agents, responder } }).effort)
       const signature = followSignature(agent, agents, responder, aiChooses, sources)
       const waiting = timers.current.get(agent.id)
       // Already followed, or already waiting on this very configuration: a render isn't a change.
@@ -178,7 +202,8 @@ export function useModelFollowing({ team, agents, responder, editable, move, pin
   const undo = useCallback((agentId: string) => {
     const move = latest.current.moves.get(agentId)
     if (!move) return
-    latest.current.pin(agentId, move.from)
+    if (move.fromEffort === undefined) latest.current.pin(agentId, move.from)
+    else latest.current.pin(agentId, move.from, move.fromEffort)
     setShown((before) => {
       const next = new Map(before.moves)
       next.delete(agentId)

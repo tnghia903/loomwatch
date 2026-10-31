@@ -49,7 +49,7 @@ export interface TeamAgentsProps {
   onAdd?: (job: SavedJob) => void
   /** A model picked for a team's own agent, and whether it now follows its suggestion (ADR 0072).
       Absent: the pick only sets its model. */
-  onPickModel?: (agentId: string, model: string, follow: boolean) => void
+  onPickModel?: (agentId: string, model: string, follow: boolean, effort?: string) => void
   /** Agents whose model just moved with their configuration, and Undo. */
   modelMoves?: ReadonlyMap<string, ModelMove>
   onUndoModelMove?: (agentId: string) => void
@@ -113,8 +113,8 @@ export function TeamAgents({ agents, responder, selected, onSelect, teamName, te
       {agent && !agent.from && <OwnAgent key={agent.id} agent={agent} team={{ agents, responder }} teamPath={teamPath} editable={editable} skills={skills} skillsLoading={skillsLoading} onEdit={onEdit} knowledge={knowledge} onShowWorkflow={onShowWorkflow}
         following={{
           follows: agent.followsSuggestion === true,
-          moved: modelMoves.get(agent.id) && { from: (modelMoves.get(agent.id) as ModelMove).from, onUndo: () => onUndoModelMove?.(agent.id) },
-          onPick: (model, follow) => { if (!editable) return; if (onPickModel) onPickModel(agent.id, model, follow); else onEdit(agent.id, 'model', model) },
+          moved: modelMoves.get(agent.id) && { from: (modelMoves.get(agent.id) as ModelMove).from, fromEffort: (modelMoves.get(agent.id) as ModelMove).fromEffort, onUndo: () => onUndoModelMove?.(agent.id) },
+          onPick: (model, follow, effort) => { if (!editable) return; if (onPickModel) onPickModel(agent.id, model, follow, effort); else onEdit(agent.id, 'model', model) },
         }} />}
     </div>
   )

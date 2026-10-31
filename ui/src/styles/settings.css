@@ -224,6 +224,8 @@
   box-shadow: 0 0 0 2px var(--color-panel-solid);
 }
 .model-row .name { grid-area: name; white-space: normal; overflow-wrap: anywhere; }
+/* The suggestion's thinking effort wraps as one piece, never "high" on one line and "effort" on the next. */
+.model-row .model-row-effort { white-space: nowrap; }
 .model-row .aside { grid-area: aside; align-self: start; padding-top: 2px; }
 .model-row-detail { grid-area: detail; min-width: 0; color: var(--color-ink-3); }
 .model-row-why { color: var(--color-ink-2); }
