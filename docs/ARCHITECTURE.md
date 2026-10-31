@@ -75,14 +75,18 @@ instructions and tools.
   `function_call_output`, and on OpenRouter in a user message after the tool results. Every file
   is read in a short-lived `loomwatchd read-document` process with a time limit, so a damaged file
   costs nothing else. The same reader gives knowledge files their text.
-- **Slides and Word documents as their pages** (`office.rs`, ADR 0091): the reader shows a deck as
-  its slides, and a Word document as its pages, by asking `/api/files/pages`, which has `LibreOffice` (found by
-  `platform::office_program`: on the search path as `soffice` or `libreoffice`, or where its
-  installers and Homebrew put it) turn the file into a PDF, headless, with a profile of its own in
-  `<state>/pages/profile`, one file at a time, for at most two minutes, in a process group ended
-  whole if it takes longer. The PDF is kept in `<state>/pages/`, named by the file's path, size and
-  last change, so a file is laid out once until it changes; the route answers it as `raw` answers
-  a PDF. Without `LibreOffice` the route answers 404 and the reader shows the file's words.
+- **Slides and Word documents drawn by the reader** (`ui/src/lib/files/drawnPage.ts`, ADR 0091): the
+  reader takes a `.pptx` or `.docx` as bytes from `/api/files/raw` and draws it itself, in the
+  browser, as a web page shown in the same sandboxed frame as a page an agent made, so its words are
+  marked and any part is picked as on that page. A deck is read by `pptxtojson`, after
+  `deckStyles.ts` writes onto each slide what it takes from its master (its placeholders' bullets,
+  and PowerPoint's default table style, which a deck names but rarely carries), and drawn by
+  `slidesPage.ts`: each slide at its own size in points under a "Slide n" heading, scaled to the
+  frame's width, its charts drawn from the numbers the deck keeps for them. A Word document is laid
+  out by `docx-preview` (`documentPage.ts`), its fonts given fallbacks and Word's Symbol bullets
+  drawn as the marks they are. Pictures are kept in the page as data. The drawing code is loaded
+  only when such a file is first opened; a file it can't draw shows its words. `/api/files/pages`
+  (`office.rs`, the `LibreOffice` route the reader used before) is no longer asked by the app.
 - **Files sent in the chat** (`chat_files.rs`, ADR 0082) are kept in `<team>.files/chat/`, a
   folder `PermissionPolicy::for_run_agent` lets every agent of the team read. The run carries them
   on `RunLineage::files` (a note on `QueuedNote::files`), and they are listed by path under the

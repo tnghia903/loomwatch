@@ -19,7 +19,8 @@ import { figureStill } from '../../lib/library/figures'
 import { wearerOf } from '../../lib/chat/helpers'
 import { TeamFiguresContext } from '../agents/figureContext'
 import { useFigurePictures } from './useFigurePictures'
-import { FileOriginContext, pagesFileUrl, rawFileUrl, readerFormat, type FileToRead } from '../../lib/files/reader'
+import { FileOriginContext, rawFileUrl, readerFormat, type FileToRead } from '../../lib/files/reader'
+import { useDrawnPage } from '../../lib/files/drawnPage'
 import { useFileActions } from '../../lib/files/useFile'
 import { useFileText } from '../../lib/files/useFileText'
 import { relativeTime } from '../../lib/format'
@@ -76,11 +77,6 @@ const MEDIA_HINT_KEY = 'loomwatch.readerHint.media'
 const PICK_HINT_KEY = 'loomwatch.readerHint.pick'
 /** And for a PDF's pages, where a drag over a picture or a chart marks a box. */
 const PDF_HINT_KEY = 'loomwatch.readerHint.pdf'
-/**
- * How long a slide deck or a Word document may take to open as its pages before its words are shown
- * instead: the first time, LibreOffice makes its PDF (at most two minutes, `office.rs`).
- */
-const MADE_OPEN_LIMIT_MS = 150_000
 /** How long "Updated" stays lit after the file changed on disk. */
 const UPDATED_MS = 2_400
 /** The ask bubble's size before it has been measured. */
@@ -132,12 +128,12 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
   const [view, setView] = useState<'page' | 'code'>('page')
   // A PDF that PDF.js couldn't open is shown by its words, as before (ADR 0091).
   const [pdfFailed, setPdfFailed] = useState<string | null>(null)
-  // A slide deck or a Word document is shown as the PDF LibreOffice makes of its pages, as a PDF is
-  // (ADR 0091).
-  const madeIntoPages = format === 'slides' || format === 'document'
-  const asPages = format === 'pdf' || madeIntoPages
+  // A slide deck or a Word document is drawn by LoomWatch itself as a page of its slides or pages,
+  // shown as a web page an agent made is (ADR 0091); its words alone where it can't be drawn.
+  const drawnKind = format === 'slides' || format === 'document' ? format : null
+  const drawn = useDrawnPage(drawnKind ? path : null, drawnKind, baseName(path), String(content.changes))
+  const asPages = format === 'pdf'
   const pdfPages = asPages && pdfFailed !== path
-  const pageWord = format === 'slides' ? 'slide' : 'page'
   // Whether one of its pages shows a picture or a chart: only then does its tip speak of boxes.
   const [pdfPictured, setPdfPictured] = useState<string | null>(null)
   const pdfPicture = useRef<((at: BoxAt & { page: number }) => Promise<Blob | null>) | null>(null)
@@ -146,7 +142,8 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
   const [pdfCount, setPdfCount] = useState<{ path: string; pages: number } | null>(null)
   const [pdfFound, setPdfFound] = useState<{ path: string; pages: ReadonlyMap<string, number | null> } | null>(null)
   const pdfOn = pdfPages && pdfFound?.path === path ? pdfFound.pages : null
-  const shown = format === 'page' && view === 'code' ? 'code' : format
+  const shown = format === 'page' && view === 'code' ? 'code' : drawn?.html ? 'page' : format
+  const pageHtml = drawn?.html ?? text
   // Any part of every kind the reader draws can be asked about (ADR 0077, ADR 0091).
   const askable = Boolean(onAsk && from)
   // Views that mark their parts themselves, by pointer, rather than by selecting words: a picture
@@ -625,7 +622,7 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
   const actions = useFileActions(path)
   const modifiedAt = content.file?.modifiedAt ?? content.modifiedAt
   const meta = [
-    content.file?.extracted && shown !== 'sheet' && !pdfPages ? `Words from ${fileKindIn(path, 'a')}` : fileLabel(path),
+    content.file?.extracted && shown !== 'sheet' && shown !== 'page' && !pdfPages ? `Words from ${fileKindIn(path, 'a')}` : fileLabel(path),
     content.file ? formatBytes(content.file.sizeBytes) : null,
     modifiedAt ? `changed ${relativeTime(new Date(modifiedAt))}` : null,
   ].filter(Boolean).join(' · ')
@@ -683,7 +680,7 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
   let body: ReactNode
   // A PDF's own pages come first: the words the daemon reads out of it are only for when they can't
   // be drawn, and a PDF of pictures or scanned pages has none to read.
-  if (content.error && !pdfPages) body = <div className="rd-failed" role="alert"><p>{content.error}</p></div>
+  if (content.error && !pdfPages && !drawn?.html) body = <div className="rd-failed" role="alert"><p>{content.error}</p></div>
   else if (format === 'picture') body = (
     <div ref={page} className="rd-page rd-as-picture">
       <PictureView src={`${rawFileUrl(path)}&v=${encodeURIComponent(modifiedAt ?? '')}`} alt={fileTitle(fileName)} askable={askable} asking={asking} marking={marked?.at?.kind === 'box' ? marked.at : null} onMarked={setMarked}
@@ -703,18 +700,17 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
     // version read. Its words are marked as any file's are; a drag on a page where there are none
     // marks a box there (ADR 0091).
     <div key={content.changes} ref={page} className="rd-page rd-as-pdf" onClick={openAt}>
-      <PdfView src={`${madeIntoPages ? pagesFileUrl(path) : rawFileUrl(path)}&v=${encodeURIComponent(modifiedAt ?? '')}`} name={fileName} askable={askable}
-        pageWord={pageWord} openLimit={madeIntoPages ? MADE_OPEN_LIMIT_MS : undefined}
-        slowNote={madeIntoPages ? 'The first time can take a minute or two.' : undefined} asking={asking} open={answerShown ? partId(answerShown) : null} wanted={texts}
+      <PdfView src={`${rawFileUrl(path)}&v=${encodeURIComponent(modifiedAt ?? '')}`} name={fileName} askable={askable}
+        asking={asking} open={answerShown ? partId(answerShown) : null} wanted={texts}
         marking={marked?.at?.kind === 'box' ? marked.at : null} onMarked={setMarked} onOpen={openPlace} onDrawn={measure} onFailed={() => setPdfFailed(path)} onPictures={takePdfPictures} onPictured={() => setPdfPictured(path)}
         onPages={(pages) => setPdfCount({ path, pages })} onWanted={(pages) => setPdfFound({ path, pages })}
         boxes={places.flatMap((id) => { const at = atOf(id); return at?.kind === 'box' && at.page ? [{ id, at, look: wordsLookOf([id]) }] : [] })} />
     </div>
   )
-  else if (text === null) body = <p className="rd-loading" role="status">Reading {fileName}…</p>
-  else if (shown === 'page') body = <PageFrame path={path} name={fileName} html={text} marks={pageMarks} picking={picking} pickKeys={pickKeys} onMarked={setMarked} onParts={takeParts} onOpen={setAnswerFor} onEscape={escapePage} cleared={cleared}
+  else if (shown === 'page' && pageHtml !== null) body = <PageFrame path={path} name={fileName} html={pageHtml} marks={pageMarks} picking={picking} pickKeys={pickKeys} onMarked={setMarked} onParts={takeParts} onOpen={setAnswerFor} onEscape={escapePage} cleared={cleared}
     onPointing={setPointedAt}
     onHover={(key, at, now) => { const passage = key ? mine.find((item) => askKey(item) === key) : undefined; if (key && passage && hasCard(passage)) cardAt(key, at, now); else cardAt('', null, now) }} />
+  else if (text === null || (drawnKind && !drawn)) body = <p className="rd-loading" role="status">Reading {fileName}…</p>
   else if (cellsView && sheets) body = (
     // Drawn afresh when the file changes. Words asked about in a table before it could be marked by
     // its cells are still marked in them (lib/files/partMarks.ts).
@@ -726,9 +722,9 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
   )
   else body = (
     // Drawn afresh when the file changes, never updated around the marks in it (lib/files/partMarks.ts).
-    <div key={content.changes} ref={page} className={`tc-document-page rd-page rd-as-${asPages ? 'document' : shown}${shown === 'markdown' ? ' delivery-response' : ''}`} onClick={openAt}>
+    <div key={content.changes} ref={page} className={`tc-document-page rd-page rd-as-${asPages || drawnKind ? 'document' : shown}${shown === 'markdown' ? ' delivery-response' : ''}`} onClick={openAt}>
       {shown === 'markdown' ? <MarkdownPictures.Provider value={besideFile}><Markdown>{withFolderPaths(text)}</Markdown></MarkdownPictures.Provider>
-          : asPages ? <DocumentView text={text} />
+          : asPages || drawnKind ? <DocumentView text={text} />
             : <CodeView text={text} language={shown === 'code' && format === 'page' ? 'html' : extensionOf(path)} />}
     </div>
   )
@@ -767,7 +763,7 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
         <span className="visually-hidden" role="status">{actions.said}</span>
         {pickable && <span className="visually-hidden" role="status">{picking ? pointedAt : ''}</span>}
       </header>
-      {((content.file?.extracted && shown !== 'sheet' && !pdfPages) || (content.file?.truncated && !pdfPages)) && (
+      {((content.file?.extracted && shown !== 'sheet' && shown !== 'page' && !pdfPages) || (content.file?.truncated && shown !== 'page' && !pdfPages)) && (
         <p className="rd-note">
           {content.file.extracted && shown !== 'sheet'
             ? `These are the words of ${fileKindIn(path, 'the')}, as your agents read them, without the layout. Open the file in its own app to see how it looks.`
@@ -776,7 +772,7 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
         </p>
       )}
       {pdfPages && pdfCount?.path === path && pdfCount.pages > MOST_PAGES && (
-        <p className="rd-note">Only the first {MOST_PAGES} {pageWord}s are shown here. Open it in its own app for the rest.</p>
+        <p className="rd-note">Only the first {MOST_PAGES} pages are shown here. Open it in its own app for the rest.</p>
       )}
       {cellsView && sheets && sheets.length > 1 && <div ref={setSheetBar} className="rd-sheet-bar" />}
       <div ref={stage} className="rd-stage">
@@ -795,7 +791,7 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
           slot, slot.dataset.part,
         ))}
         {askable && marked && place && from && askee && (
-          <div ref={bubble} className={`rd-ask${place.below ? ' below' : ''}${listing ? ' listing' : ''}${pdfPages ? ' on-paper' : ''}`} style={{ top: place.top, left: place.left }} role="toolbar" aria-label={`Ask ${name(askee)} about the ${marked.at?.kind === 'cells' ? 'cells' : marked.at?.kind === 'time' ? 'moment' : marked.at?.kind === 'element' ? marked.at.what : marked.at?.kind === 'box' && marked.at.page && isWholeBox(marked.at) ? pageWord : marked.at ? 'part' : 'words'} you marked`} onMouseDown={(event) => event.preventDefault()}>
+          <div ref={bubble} className={`rd-ask${place.below ? ' below' : ''}${listing ? ' listing' : ''}${pdfPages ? ' on-paper' : ''}`} style={{ top: place.top, left: place.left }} role="toolbar" aria-label={`Ask ${name(askee)} about the ${marked.at?.kind === 'cells' ? 'cells' : marked.at?.kind === 'time' ? 'moment' : marked.at?.kind === 'element' ? marked.at.what : marked.at?.kind === 'box' && marked.at.page && isWholeBox(marked.at) ? 'page' : marked.at ? 'part' : 'words'} you marked`} onMouseDown={(event) => event.preventDefault()}>
             <button type="button" className="rd-ask-main" onClick={() => ask()} title={`Ask ${name(askee)} about this`}>
               <AvatarFace key={askee} id={askee} hue={hue(askee)} size={24} fontSize={9} text={initials(name(askee))} className="rd-ask-face" />
               <span>Ask</span>

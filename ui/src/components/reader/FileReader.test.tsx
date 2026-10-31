@@ -52,6 +52,27 @@ vi.mock('../../lib/files/pdf', async (real) => ({
   }),
 }))
 
+// The deck and Word parsers stand in, each drawing two parts; `drawState.fail` has them fail to read the file.
+const drawState = vi.hoisted(() => ({ fail: false }))
+vi.mock('pptxtojson', () => ({
+  parse: vi.fn(async () => {
+    if (drawState.fail) throw new Error('not a deck')
+    const words = (id: string, said: string) => ({
+      type: 'text', id, name: 'Title', left: 40, top: 40, width: 800, height: 60, rotate: 0, isFlipH: false, isFlipV: false, isVertical: false,
+      content: `<p><span style="font-size: 28pt;font-family: Calibri;">${said}</span></p>`, vAlign: 'up', wrap: true,
+      borderColor: '', borderWidth: 0, borderType: 'solid', borderStrokeDasharray: '0', fill: { type: 'color', value: '' }, order: 1,
+    })
+    return { size: { width: 960, height: 540 }, slides: [words('1', 'Sales grew.'), words('2', 'North leads.')].map((element) => ({ fill: { type: 'color', value: '#FFFFFF' }, layoutElements: [], elements: [element], note: '' })) }
+  }),
+}))
+vi.mock('../../lib/files/deckStyles', () => ({ withInheritedStyles: async (bytes: ArrayBuffer) => bytes }))
+vi.mock('docx-preview', () => ({
+  renderAsync: vi.fn(async (_bytes: unknown, body: HTMLElement) => {
+    if (drawState.fail) throw new Error('not a document')
+    body.innerHTML = '<div class="docx-wrapper"><section class="docx"><p>Dear team,</p><p>Sales grew.</p></section></div>'
+  }),
+}))
+
 const REPORT = '/teams/.loomwatch/market/writer/market-report.md'
 const respond = (status: number, body: unknown) => Promise.resolve(new Response(JSON.stringify(body), { status }))
 const read = (overrides: Record<string, unknown> = {}) => ({
@@ -509,9 +530,9 @@ describe('reading a file an agent made', () => {
     expect(within(answerCard()!).getByRole('button', { name: 'Show it in the chat' })).toHaveTextContent('Show it in the chat')
   })
 
-  it('says a document’s words are its text without its layout, when its pages can’t be made', async () => {
-    // As without LibreOffice (ADR 0091): a Word document is otherwise shown as its pages.
-    pdfState.fail = true
+  it('says a document’s words are its text without its layout, when its pages can’t be drawn', async () => {
+    // A Word document is otherwise drawn as its pages (ADR 0091).
+    drawState.fail = true
     try {
       answer = (url) => (url.startsWith('/api/files/read') ? respond(200, read({ path: '/w/brief.docx', name: 'brief.docx', kind: 'document', text: 'Brief\n\nWe sell tea.', extracted: true })) : respond(404, {}))
       renderReader({ file: { path: '/w/brief.docx', runId: 'run-1', from: 'writer' } })
@@ -519,8 +540,9 @@ describe('reading a file an agent made', () => {
       expect(screen.getByText(/Words from a Word document/)).toBeInTheDocument()
       expect(document.querySelector('.rd-doc-heading')).toHaveTextContent('Brief')
       expect(screen.getByText('We sell tea.')).toBeInTheDocument()
+      expect(document.querySelector('iframe')).toBeNull()
     } finally {
-      pdfState.fail = false
+      drawState.fail = false
     }
   })
 
@@ -1420,90 +1442,67 @@ describe('a PDF in the reader', () => {
     expect(screen.queryByText('The words you marked have changed.')).toBeNull()
   })
 
-  describe('a slide deck, shown as the PDF LibreOffice makes of it', () => {
+  describe('a slide deck or a Word document, drawn by LoomWatch itself', () => {
     const DECK = '/teams/.loomwatch/market/writer/deck.pptx'
+    const LETTER = '/teams/.loomwatch/market/writer/letter.docx'
+    const asks = (url: string) => vi.mocked(fetch).mock.calls.map(([input]) => String(input)).filter((asked) => asked.startsWith(url))
     beforeEach(() => {
       answer = (url) => (url.startsWith('/api/files/read')
-        ? respond(200, read({ path: DECK, name: 'deck.pptx', kind: 'document', text: 'Slide 1\n\nSales grew.\n\nSlide 2\n\nNorth leads.', extracted: true }))
-        : respond(200, { path: DECK, exists: true, isDir: false, sizeBytes: 9_000, modifiedAt: '2026-10-19T01:00:00Z', kind: 'document', folder: null, openable: true }))
+        ? respond(200, url.includes('letter') ? read({ path: LETTER, name: 'letter.docx', kind: 'document', text: 'Dear team,\n\nSales grew.', extracted: true })
+          : read({ path: DECK, name: 'deck.pptx', kind: 'document', text: 'Slide 1\n\nSales grew.\n\nSlide 2\n\nNorth leads.', extracted: true }))
+        : url.startsWith('/api/files/raw') ? Promise.resolve(new Response(new Uint8Array([80, 75]), { status: 200 }))
+          : respond(200, { path: DECK, exists: true, isDir: false, sizeBytes: 9_000, modifiedAt: '2026-10-19T01:00:00Z', kind: 'document', folder: null, openable: true }))
+    })
+    const frameOf = () => waitFor(() => {
+      const element = document.querySelector('iframe')
+      if (!element?.contentWindow) throw new Error('no frame yet')
+      return element
     })
 
-    it('is drawn as its slides, from the PDF of them, each part named by its slide', async () => {
+    it('draws a deck as a page of its slides, from its own bytes, each slide under its number, and a part picked on it asked about', async () => {
       const { onAsk } = renderReader({ file: { path: DECK, runId: 'run-1', from: 'writer' } })
-      await waitFor(() => expect(screen.getAllByRole('group', { name: /^Slide \d$/ })).toHaveLength(2))
-      expect(vi.mocked(openPdf).mock.calls).toEqual([[expect.stringMatching(/^\/api\/files\/pages\?path=.*deck\.pptx&v=/)]])
-      // Not the words alone, as a deck was shown before.
+      const frame = await frameOf()
+      const page = frame.getAttribute('srcdoc') ?? ''
+      expect(page).toContain('Slide 1')
+      expect(page).toContain('Slide 2')
+      expect(page).toContain('Sales grew.')
+      expect(page).toContain('North leads.')
+      // Its bytes, from the daemon; never LibreOffice's PDF of it, nor PDF.js.
+      expect(asks('/api/files/raw')).toEqual([expect.stringMatching(/^\/api\/files\/raw\?path=.*deck\.pptx&v=0$/)])
+      expect(asks('/api/files/pages')).toEqual([])
+      expect(vi.mocked(openPdf)).not.toHaveBeenCalled()
+      // Its layout, not the words alone.
       expect(screen.queryByText(/These are the words of the slides/)).toBeNull()
-      await waitFor(() => expect(page(2)).toHaveTextContent('Page 2 says sales grew.'))
-      fireEvent.pointerDown(page(2), { button: 0, pointerId: 2, clientX: 400, clientY: 0 })
-      fireEvent.pointerMove(page(2), { pointerId: 2, clientX: 800, clientY: 300 })
-      fireEvent.pointerUp(page(2), { pointerId: 2, clientX: 800, clientY: 300 })
+      expect(screen.getByText(/^Slides ·/)).toBeInTheDocument()
+      // Any part of a slide is picked, as on a page an agent made.
+      expect(screen.getByRole('button', { name: 'Pick a part of the page to ask about' })).toBeInTheDocument()
+      const at = { kind: 'element', what: 'part', path: 'section > div > div > div' }
+      act(() => { window.dispatchEvent(new MessageEvent('message', { data: { lw: 'reader', type: 'thing', what: 'part', path: at.path, text: 'The part “Sales grew.”', rect: { top: 40, bottom: 90, left: 20, right: 320 } }, source: frame.contentWindow })) })
       fireEvent.click(await screen.findByRole('button', { name: 'Explain' }))
-      await waitFor(() => expect(onAsk).toHaveBeenCalledWith(expect.objectContaining({ text: 'The top right of slide 2', at: { kind: 'box', x: 5000, y: 0, w: 5000, h: 5000, page: 2 } }), EXPLAIN_WORDS, 'writer', [expect.any(File)]))
-      // All of a slide, from the keyboard.
-      fireEvent.keyDown(await screen.findByRole('button', { name: 'Ask about slide 1' }), { key: 'Enter' })
-      expect(await screen.findByRole('toolbar', { name: 'Ask Writer about the slide you marked' })).toBeInTheDocument()
+      expect(onAsk).toHaveBeenCalledWith(expect.objectContaining({ kind: 'passage', text: 'The part “Sales grew.”', file: DECK, at }), EXPLAIN_WORDS, 'writer')
     })
 
-    it('waits longer for its slides than a PDF is waited for, as LibreOffice makes them first', async () => {
-      vi.useFakeTimers({ shouldAdvanceTime: true })
-      pdfState.hang = true
-      renderReader({ file: { path: DECK, runId: 'run-1', from: 'writer' } })
-      await waitFor(() => expect(document.querySelector('.rd-as-pdf .rd-loading')).toHaveTextContent(/^Reading deck\.pptx…$/))
-      // Nothing to mark yet: the tip waits for the slides.
-      expect(screen.queryByText('Mark any words')).toBeNull()
-      // A long wait says why it may go on.
-      await act(async () => { vi.advanceTimersByTime(10_000) })
-      expect(document.querySelector('.rd-as-pdf .rd-loading')).toHaveTextContent('Reading deck.pptx…The first time can take a minute or two.')
-      await act(async () => { vi.advanceTimersByTime(50_000) })
-      expect(document.querySelector('.rd-as-pdf .rd-loading')).toHaveTextContent(/^Reading deck\.pptx…/)
-      await act(async () => { vi.advanceTimersByTime(100_000) })
-      expect(await screen.findByText('North leads.')).toBeInTheDocument()
+    it('draws a Word document as a page of its pages, from its own bytes', async () => {
+      renderReader({ file: { path: LETTER, runId: 'run-1', from: 'writer' } })
+      const frame = await frameOf()
+      expect(frame.getAttribute('srcdoc')).toContain('<p>Dear team,</p><p>Sales grew.</p>')
+      expect(asks('/api/files/raw')).toEqual([expect.stringMatching(/^\/api\/files\/raw\?path=.*letter\.docx&v=0$/)])
+      expect(asks('/api/files/pages')).toEqual([])
+      expect(screen.queryByText(/These are the words of the Word document/)).toBeNull()
+      expect(screen.getByRole('button', { name: 'Pick a part of the page to ask about' })).toBeInTheDocument()
     })
 
-    it('shows its words when its slides can’t be made, as without LibreOffice', async () => {
-      pdfState.fail = true
-      renderReader({ file: { path: DECK, runId: 'run-1', from: 'writer' } })
-      expect(await screen.findByText(/These are the words of the slides, as your agents read them/)).toBeInTheDocument()
-      expect(screen.getByText('North leads.')).toBeInTheDocument()
-      expect(document.querySelector('.rd-pdf-page')).toBeNull()
+    it('shows a deck’s words when it can’t be drawn', async () => {
+      drawState.fail = true
+      try {
+        renderReader({ file: { path: DECK, runId: 'run-1', from: 'writer' } })
+        expect(await screen.findByText(/These are the words of the slides, as your agents read them/)).toBeInTheDocument()
+        expect(screen.getByText('North leads.')).toBeInTheDocument()
+        expect(document.querySelector('iframe')).toBeNull()
+      } finally {
+        drawState.fail = false
+      }
     })
-  })
-
-  it('shows a Word document as the PDF LibreOffice makes of its pages, waited for as a deck is', async () => {
-    const LETTER = '/teams/.loomwatch/market/writer/letter.docx'
-    answer = (url) => (url.startsWith('/api/files/read')
-      ? respond(200, read({ path: LETTER, name: 'letter.docx', kind: 'document', text: 'Dear team,\n\nSales grew.', extracted: true }))
-      : respond(200, { path: LETTER, exists: true, isDir: false, sizeBytes: 9_000, modifiedAt: '2026-10-19T01:00:00Z', kind: 'document', folder: null, openable: true }))
-    const { onAsk } = renderReader({ file: { path: LETTER, runId: 'run-1', from: 'writer' } })
-    await waitFor(() => expect(screen.getAllByRole('group', { name: /^Page \d$/ })).toHaveLength(2))
-    expect(vi.mocked(openPdf).mock.calls).toEqual([[expect.stringMatching(/^\/api\/files\/pages\?path=.*letter\.docx&v=/)]])
-    expect(screen.queryByText(/These are the words of the Word document/)).toBeNull()
-    await waitFor(() => expect(page(2)).toHaveTextContent('Page 2 says sales grew.'))
-    fireEvent.pointerDown(page(2), { button: 0, pointerId: 2, clientX: 400, clientY: 0 })
-    fireEvent.pointerMove(page(2), { pointerId: 2, clientX: 800, clientY: 300 })
-    fireEvent.pointerUp(page(2), { pointerId: 2, clientX: 800, clientY: 300 })
-    fireEvent.click(await screen.findByRole('button', { name: 'Explain' }))
-    await waitFor(() => expect(onAsk).toHaveBeenCalledWith(expect.objectContaining({ text: 'The top right of page 2', file: LETTER }), EXPLAIN_WORDS, 'writer', [expect.any(File)]))
-    // Its words are marked as any file's are.
-    await mark('Page 1 says sales grew.')
-    fireEvent.click(screen.getByRole('button', { name: 'Ask' }))
-    expect(onAsk).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'passage', text: 'Page 1 says sales grew.', file: LETTER }), undefined, 'writer')
-  })
-
-  it('waits for a Word document’s pages as for a deck’s, saying why after a while', async () => {
-    const LETTER = '/teams/.loomwatch/market/writer/letter.docx'
-    answer = (url) => (url.startsWith('/api/files/read')
-      ? respond(200, read({ path: LETTER, name: 'letter.docx', kind: 'document', text: 'Dear team,\n\nSales grew.', extracted: true }))
-      : respond(200, { path: LETTER, exists: true, isDir: false, sizeBytes: 9_000, modifiedAt: '2026-10-19T01:00:00Z', kind: 'document', folder: null, openable: true }))
-    vi.useFakeTimers({ shouldAdvanceTime: true })
-    pdfState.hang = true
-    renderReader({ file: { path: LETTER, runId: 'run-1', from: 'writer' } })
-    await waitFor(() => expect(document.querySelector('.rd-as-pdf .rd-loading')).toHaveTextContent(/^Reading letter\.docx…$/))
-    await act(async () => { vi.advanceTimersByTime(60_000) })
-    expect(document.querySelector('.rd-as-pdf .rd-loading')).toHaveTextContent('Reading letter.docx…The first time can take a minute or two.')
-    await act(async () => { vi.advanceTimersByTime(100_000) })
-    expect(await screen.findByText('Sales grew.')).toBeInTheDocument()
   })
 
   it('says under the file’s name that only its first 500 pages are shown', async () => {
