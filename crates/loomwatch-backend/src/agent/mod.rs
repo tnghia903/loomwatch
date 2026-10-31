@@ -61,7 +61,7 @@ pub use provider::{
 };
 pub use sandbox::use_own_programs;
 pub use session::{
-    CancelHandle, HostAsk, HostTools, MAX_PICTURE_BYTES, MAX_PICTURES, NoHostTools, Session,
+    Asks, CancelHandle, HostAsk, HostTools, MAX_PICTURE_BYTES, MAX_PICTURES, NoHostTools, Session,
     SessionConfig, Snapshot, StopReason, ToolSet, TurnEnd, WORK,
 };
 pub use skills::{SkillEntry, SkillIndex, index_skills};

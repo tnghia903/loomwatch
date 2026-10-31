@@ -692,9 +692,22 @@ Every agent in a run works with LoomWatch's own tools:
   file you can, so asking before each one is the only check. For an agent allowed the web, a Python
   script's page requests go out as `LoomWatch/<version> (+https://loomwatch.github.io/)` rather
   than Python's own name, which some sites refuse; a name the script sets itself still wins.
-- **The web**, only for an agent with `allow.web: true`: OpenRouter's web search and page fetch.
-  OpenRouter runs them, and the run shows each search and each page read. An agent without the
-  switch has no web tools.
+- **The web**, for an agent with `allow.web: true`: OpenRouter's web search and page fetch.
+  OpenRouter runs them, and the run shows each search and each page read.
+- **The web, asked for**, for an agent without `allow.web` (ADR 0104): `search_web` and
+  `read_page`, as edits and commands still have their tools when their switch is off. The agent is
+  told they ask first, so it reaches for them rather than for a command. Each asks you ("Research
+  lead wants to use the web", with the search or the address), and your yes gives that agent the
+  web search and page fetch above, and its commands the network, until the run ends: one search is
+  rarely enough, so a web request has one **Allow**, and an Allow from the tray, the notch or a
+  phone counts the same. **Always allow** turns `allow.web` on. `read_page` reads a link you wrote in your message, or in
+  a note while the run works, without asking: LoomWatch fetches it, as a web page's words, a PDF's
+  text or plain text. A link in a file, a page, a teammate's brief or another team's request is
+  not yours, so it asks, and an agent can't send what it read anywhere without your yes. A redirect
+  from a site on the internet to one on your computer or network isn't followed, and an address of
+  the agent's own on your computer or network is never read. A page that builds its words with
+  script reads as empty. On a Mac, a command that reaches for the network while the web is off is
+  answered with why it couldn't, even when it printed nothing.
 - **Its plan**: `update_plan`, plus `read_tool_output` for reading the rest of a long output that
   was set aside.
 - **Tools you connected and gave it** (`kind: tool`): each action named `<tool>__<action>`, such as
@@ -725,9 +738,9 @@ allow:
   commands: false # run commands
 ```
 
-Every switch defaults to `false`, and an absent block means all off. `web` decides whether the
-agent has web tools at all. `edits` and `commands` decide whether a file change or a command runs
-without asking. An agent whose `spawn.cwd` holds its own team file (`cwd: .`) works in its
+Every switch defaults to `false`, and an absent block means all off. A switch decides whether a
+search or page read, a file change or a command runs without asking; off, the agent still has the
+tool, is told it asks first, and you answer each time (ADR 0104). An agent whose `spawn.cwd` holds its own team file (`cwd: .`) works in its
 prepared folder, so neither an edit nor a command reaches the team files. An operator node takes no
 `allow:`.
 

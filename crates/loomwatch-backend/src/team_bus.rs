@@ -114,6 +114,9 @@ struct TeamBusState {
     /// The person's agents brought in from My agents in this run, by id (`mine+<id>`), each as it
     /// was saved when it was first brought in ([`crate::bring_in`], ADR 0092).
     guests: std::sync::Mutex<BTreeMap<String, AgentConfig>>,
+    /// The links the operator wrote in the run's message (ADR 0104): every agent the bus starts may
+    /// read them with `read_page` without asking.
+    links: std::sync::Mutex<Vec<String>>,
 }
 
 /// The agent working alone that may bring in helpers, and what its helpers work with: its own
@@ -414,8 +417,23 @@ impl TeamBus {
             copies: std::sync::Mutex::new(BTreeMap::new()),
             next_copy: AtomicU64::new(1),
             guests: std::sync::Mutex::new(BTreeMap::new()),
+            links: std::sync::Mutex::new(Vec::new()),
         });
         Ok(Self { state })
+    }
+
+    /// Let every agent the bus starts read `links`, which the operator wrote (ADR 0104).
+    pub(crate) fn allow_links(&self, links: &[String]) {
+        let mut held = self
+            .state
+            .links
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for link in links {
+            if !held.contains(link) {
+                held.push(link.clone());
+            }
+        }
     }
 
     /// Let `home.lead` bring in helpers for the rest of the run, when it may
@@ -2525,6 +2543,13 @@ impl TeamBus {
             &cwd,
             &delivery,
         );
+        // Copied out first: the lock is never held across the lessons' read below.
+        let links = self
+            .state
+            .links
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
         let spec = ProcessSpec {
             cmd: agent.spawn.cmd.clone(),
             args: agent.spawn.args.clone(),
@@ -2532,6 +2557,7 @@ impl TeamBus {
             cwd,
             tools: delivery.tools,
             pictures: Vec::new(),
+            links,
             permissions: Some(permissions),
             // A helper asks the same person its run does (ADR 0040).
             asker: crate::permissions::PermissionAsker::for_run(
@@ -4022,6 +4048,7 @@ mod tests {
             asker: None,
             lessons: Vec::new(),
             pictures: Vec::new(),
+            links: Vec::new(),
         }
     }
 

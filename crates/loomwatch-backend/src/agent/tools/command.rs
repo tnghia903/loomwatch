@@ -40,6 +40,11 @@ pub(crate) const USER_AGENT: &str = concat!(
     " (+https://loomwatch.github.io/)"
 );
 
+/// What a command that reached for the network is followed by when the agent may not use the web.
+const OFF_NETWORK: &str = "\n(The sandbox kept this command off the network: this agent may not \
+                           use the web. Use read_page or search_web for the web: they ask the \
+                           person first when they need to.)";
+
 /// How commands run for one agent.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct CommandSettings {
@@ -131,10 +136,26 @@ pub(super) async fn run(input: &Value, context: &Context<'_>) -> Output {
     if out.len() >= MAX_OUTPUT_BYTES || err.len() >= MAX_OUTPUT_BYTES {
         text.push_str("\n… the command printed more than 2 MB; the rest was cut.");
     }
+    answer(command, status, text, context)
+}
+
+/// What the agent is told of a command that ended: its output, and why the sandbox stopped it.
+fn answer(
+    command: &str,
+    status: std::io::Result<std::process::ExitStatus>,
+    mut text: String,
+    context: &Context<'_>,
+) -> Output {
+    // A command that reached for the network can still end well, `curl -s … | head` with nothing
+    // printed, so the agent is told whatever the exit code (ADR 0104).
+    let offline = sandbox::keeps_off_network(command, context.command);
     match status {
         Ok(status) if status.success() => {
             if text.trim().is_empty() {
                 "The command finished with no output.".clone_into(&mut text);
+            }
+            if offline {
+                text.push_str(OFF_NETWORK);
             }
             Output::ok(text)
         }
@@ -142,7 +163,9 @@ pub(super) async fn run(input: &Value, context: &Context<'_>) -> Output {
             let code = status
                 .code()
                 .map_or_else(|| "a signal".to_owned(), |code| format!("exit code {code}"));
-            if sandbox::denied(&text, context.cwd, context.command) {
+            if offline {
+                text.push_str(OFF_NETWORK);
+            } else if sandbox::denied(&text, context.cwd, context.command) {
                 text.push_str(
                     "\n(The sandbox blocked this: commands may change files only in the work \
                      folder, and reach the network only when this agent may use the web.)",
@@ -374,6 +397,8 @@ mod tests {
             cancel: &cancel,
             command: &settings,
             pictures: super::super::Pictures::default(),
+            links: &[],
+            web: false,
         };
         let done = run(
             &script(
@@ -432,6 +457,8 @@ mod tests {
             cancel: &cancel,
             command: &settings,
             pictures: super::super::Pictures::default(),
+            links: &[],
+            web: false,
         };
         let note = "(The sandbox blocked this";
         let home = std::env::var("HOME").unwrap();
@@ -459,6 +486,63 @@ mod tests {
             "{}",
             locked.text
         );
+    }
+
+    /// ADR 0104: a quiet `curl -s … | head` the sandbox kept off the network ends well and prints
+    /// nothing, as the owner's Research lead's did; the agent is told why and what to use instead.
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn on_a_mac_a_command_kept_off_the_network_says_so_even_when_it_ends_well() {
+        let folder = Folder::new();
+        let (port, _heard) = names_heard();
+        let quiet = format!("curl -s http://127.0.0.1:{port}/paper | head -c 300");
+        let offline = run_in(&folder, false, &serde_json::json!({ "command": quiet })).await;
+        assert!(!offline.failed, "{}", offline.text);
+        assert_eq!(
+            offline.text,
+            format!("The command finished with no output.{OFF_NETWORK}")
+        );
+        let loud = format!("curl -sS http://127.0.0.1:{port}/paper");
+        let failed = run_in(&folder, false, &serde_json::json!({ "command": loud })).await;
+        assert!(failed.failed, "{}", failed.text);
+        assert!(failed.text.ends_with(OFF_NETWORK), "{}", failed.text);
+        assert!(
+            !failed.text.contains("(The sandbox blocked this"),
+            "said once"
+        );
+        let online = run_in(&folder, true, &serde_json::json!({ "command": quiet })).await;
+        assert_eq!(online.text, "ok", "{}", online.text);
+        let local = run_in(
+            &folder,
+            false,
+            &serde_json::json!({ "command": "echo hello" }),
+        )
+        .await;
+        assert_eq!(local.text, "hello\n");
+    }
+
+    #[test]
+    fn a_command_that_reaches_the_network_is_told_from_its_words() {
+        for networked in [
+            "curl -s https://arxiv.org/abs/2609.03874 | head",
+            "/usr/bin/curl -o p.pdf x",
+            "wget x",
+            "cd docs && git clone git@github.com:a/b.git",
+            "pip3 install requests",
+            "npm ci",
+            "python3 -c 'import urllib.request; urllib.request.urlopen(\"http://x\")'",
+        ] {
+            assert!(sandbox::reaches_network(networked), "{networked}");
+        }
+        for offline in [
+            "ls -la",
+            "git status",
+            "npm test",
+            "python3 make.py",
+            "grep -r curlew notes",
+        ] {
+            assert!(!sandbox::reaches_network(offline), "{offline}");
+        }
     }
 
     /// An agent's `osascript` is `LoomWatch`'s own once there is one (ADR 0087).
@@ -501,6 +585,8 @@ mod tests {
             cancel: &cancel,
             command: &settings,
             pictures: super::super::Pictures::default(),
+            links: &[],
+            web: false,
         };
         run(input, &context).await
     }
@@ -607,6 +693,8 @@ mod tests {
             cancel: &cancel,
             command: &settings,
             pictures: super::super::Pictures::default(),
+            links: &[],
+            web: false,
         };
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(500)).await;

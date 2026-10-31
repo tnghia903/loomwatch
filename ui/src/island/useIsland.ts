@@ -9,7 +9,7 @@ import { benchChatOwner, fetchJobs, type SavedJob } from '../lib/library/jobs'
 import { fetchPinnedAgent, pinAgent } from '../lib/library/pinned'
 import { crewOf, type CrewAgent } from '../lib/rail/teamCrews'
 import { answerPermission, fetchRecentRuns, fetchRun, type RunRecord } from '../lib/runs/client'
-import { PERMISSION_SAID } from '../lib/runs/permissionRequests'
+import { permissionSaid } from '../lib/runs/permissionRequests'
 import { answerTeamRequest, fetchTeamRequests, type TeamRequest } from '../lib/runs/teamRequests'
 import type { Ticket } from '../lib/story/needsYou'
 import { fetchTeamFile } from '../lib/team-file/client'
@@ -447,7 +447,7 @@ export function useIsland(): Island {
     answerPermission(team.runId, ticket.requestId, decision)
       .then(() => {
         // Say what it did, then let the card go and drop the next question.
-        setSaid({ ticket: ticket.id, text: PERMISSION_SAID[decision] })
+        setSaid({ ticket: ticket.id, text: permissionSaid(decision, ticket.switch) })
         window.setTimeout(() => {
           setSaid(null)
           dispatch({ type: 'answered', ticket: ticket.id })

@@ -32,6 +32,17 @@ describe('a permission ticket in the tray (ADR 0040)', () => {
     fireEvent.keyDown(screen.getByRole('dialog'), { key: 'd' })
     expect(onPermission).toHaveBeenLastCalledWith(ticket, 'deny')
   })
+
+  // ADR 0104: a yes to the web is for the rest of the run, so it has one Allow, and says so.
+  it('answers a request for the web with one Allow, for the rest of the run', async () => {
+    const web: Ticket = { ...ticket, switch: 'web' }
+    const onPermission = vi.fn(() => Promise.resolve())
+    render(<NeedsYouTray tickets={[web]} working={0} onAnswer={vi.fn()} onPermission={onPermission} onDismiss={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: /1 needs you/ }))
+    expect(screen.queryByRole('button', { name: 'Allow for this run' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /^Allow\s*A$/ }))
+    expect(await screen.findByText('Researcher: Allowed for the rest of the run.')).toBeInTheDocument()
+  })
 })
 
 describe('opened from a Review on Home (ADR 0097)', () => {

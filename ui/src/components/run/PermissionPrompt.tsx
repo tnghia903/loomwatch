@@ -105,6 +105,7 @@ export function PermissionActions({ runId, request, team = false, onAlwaysAllow,
   const [writing, setWriting] = useState<'edit' | 'answer' | null>(null)
   const [text, setText] = useState('')
   const fieldId = useId()
+  const webAsk = !request.tool && request.switch === 'web'
 
   const answer = async (decision: PermissionDecision, words?: string) => {
     onDecide?.()
@@ -144,7 +145,9 @@ export function PermissionActions({ runId, request, team = false, onAlwaysAllow,
             ? <input id={fieldId} className="input mono" value={text} maxLength={MAX_PERMISSION_TEXT} spellCheck={false} autoFocus onChange={(event) => setText(event.target.value)} />
             : <textarea id={fieldId} className="input" rows={3} value={text} maxLength={MAX_PERMISSION_TEXT} autoFocus placeholder="For example: use the copy in notes.md instead" onChange={(event) => setText(event.target.value)} />}
           <span className="hint t-meta">{changing
-            ? `${request.name} runs it as you wrote it, this once.`
+            ? webAsk
+              ? `${request.name} reads it as you wrote it, and may use the web until this run ends.`
+              : `${request.name} runs it as you wrote it, this once.`
             : `Nothing runs. ${request.name} reads your answer and carries on.`}</span>
         </div>
         <div className="permission-acts">
@@ -158,8 +161,10 @@ export function PermissionActions({ runId, request, team = false, onAlwaysAllow,
     <>
       <p className="permission-note">{request.name} is paused until you answer. {permissionDeadline(request.expiresAt, now)}</p>
       <div className="permission-acts">
-        <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void answer('allow_once')}>Allow</button>
-        <button type="button" className="btn" disabled={busy} onClick={() => void answer('allow_run')} title={`Allow every ${request.title.toLowerCase()} request from ${request.name} until this run ends`}>Allow for this run</button>
+        {/* A yes to the web is for the rest of the run (ADR 0104): one search is rarely enough, so
+            the web has one Allow, and it says so. */}
+        <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void answer(webAsk ? 'allow_run' : 'allow_once')} title={webAsk ? `${request.name} may use the web until this run ends` : undefined}>Allow</button>
+        {!webAsk && <button type="button" className="btn" disabled={busy} onClick={() => void answer('allow_run')} title={`Allow every ${request.title.toLowerCase()} request from ${request.name} until this run ends`}>Allow for this run</button>}
         {team && (
           <button type="button" className="btn" disabled={busy} onClick={() => void answer('allow_team')} title={`Allow ${request.title} for every agent in this run, without asking, until the run ends. Other tools still ask.`}>Allow for the whole team</button>
         )}

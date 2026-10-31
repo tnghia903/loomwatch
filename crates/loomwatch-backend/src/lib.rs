@@ -209,6 +209,10 @@ pub struct RunLineage {
     /// Files the operator's message was sent with (ADR 0082): every agent the run starts is told
     /// where they are, under its task, and the agent it starts with is shown the pictures.
     pub files: Vec<chat_files::ChatFile>,
+    /// The links the operator wrote in the message that starts the run (ADR 0104): every agent the
+    /// run starts may read them with `read_page` without asking. Empty for a run another team's
+    /// agent asked for, whose words aren't the operator's.
+    pub links: Vec<String>,
     /// A one-agent turn (ADR 0051): the one agent this run executes. It starts there, stops after
     /// it, and its reply is the run's answer.
     pub only: Option<String>,
@@ -638,6 +642,8 @@ async fn run_team_mode(
     .await;
     // The lead is the agent the message reaches first: it is shown its pictures (ADR 0082).
     spec.pictures = chat_files::pictures(&lineage.files);
+    // Every agent of the run may read the links in the message (ADR 0104).
+    spec.links.clone_from(&lineage.links);
 
     let process = AgentRun::spawn(&spec)
         .with_context(|| format!("failed to spawn ACP harness for agent {}", agent.id))?;
@@ -655,6 +661,7 @@ async fn run_team_mode(
         bus.offer_helpers(home);
     }
     let_the_part_asked_ask_teammates(&bus, lineage);
+    bus.allow_links(&lineage.links);
     let connection = bus.connection(&agent.id).await?;
     let model_selector = agent.model_selector();
     // A team-mode run has no stage boundary: its entrypoint is one long turn, so the last turn of
@@ -755,6 +762,7 @@ async fn run_pipeline_mode(
     )?;
     let _teardown = bus.abort_on_drop();
     let_the_part_asked_ask_teammates(&bus, lineage);
+    bus.allow_links(&lineage.links);
 
     // Boxed for the same reason `run` boxes this function: the stages' loop holds every stage's
     // handed material, live sessions and check rounds, and on Windows its future is over Clippy's
@@ -934,6 +942,8 @@ async fn run_pipeline_nodes(
         if first_executed {
             spec.pictures = chat_files::pictures(&lineage.files);
         }
+        // Every stage may read the links in the message (ADR 0104).
+        spec.links.clone_from(&lineage.links);
         let mut node_prompt = stage_task(
             team,
             agent_id,
@@ -1618,6 +1628,12 @@ impl<'a> Work<'a> {
                 notes
                     .iter()
                     .flat_map(|note| chat_files::pictures(&note.files)),
+            );
+            // A note is the operator's own words: its links may be read too (ADR 0104).
+            session.process.allow_links(
+                notes
+                    .iter()
+                    .flat_map(|note| agent::tools::links_written_in(&note.text)),
             );
             reply = session
                 .process
@@ -2492,6 +2508,7 @@ fn agent_process_spec(
         asker,
         lessons: Vec::new(),
         pictures: Vec::new(),
+        links: Vec::new(),
     }
 }
 
@@ -2550,6 +2567,7 @@ fn node_process_spec(
             asker: None,
             lessons: Vec::new(),
             pictures: Vec::new(),
+            links: Vec::new(),
         },
         skills,
         delivery,
@@ -4765,6 +4783,8 @@ async fn check_the_answer(
             &checker,
         )
         .map(permissions::PermissionAsker::reading_only),
+        // It checks the work against the pages the operator linked as the agents could read them.
+        links: lineage.links.clone(),
         ..crate::control::ask_spec(work_folder)
     };
     let mut context = TeamSessionContext {
@@ -10560,6 +10580,7 @@ mod tests {
                 None,
             )),
             files: Vec::new(),
+            links: Vec::new(),
         };
         let outcome = run_pipeline_mode(
             &team,
@@ -10711,6 +10732,7 @@ mod tests {
                 reply: None,
                 only: None,
                 own_output: false,
+                links: Vec::new(),
                 replayed_directions: BTreeMap::new(),
                 team_revision: Some("sha256:one".to_owned()),
                 start_at: Some("b".to_owned()),

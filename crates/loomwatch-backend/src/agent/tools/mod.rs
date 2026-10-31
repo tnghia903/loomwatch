@@ -1,5 +1,5 @@
-//! The tools a built-in agent can call itself: files in its folder, commands, its plan, and the
-//! long tool outputs it set aside.
+//! The tools a built-in agent can call itself: files in its folder, commands, its plan, the long
+//! tool outputs it set aside, and the pages at links the person wrote.
 //!
 //! Each tool says up front what it will touch ([`Prepared`]), so the session can ask
 //! [`Permissions`](super::Permissions) with the exact paths or command before anything happens.
@@ -8,6 +8,7 @@
 
 mod command;
 mod files;
+mod link;
 
 use std::path::{Component, Path, PathBuf};
 
@@ -18,6 +19,7 @@ use super::provider::{Cancel, Picture, ToolSpec};
 use crate::prompt_blocks::Block;
 
 pub(crate) use command::CommandSettings;
+pub(crate) use link::{is_among as is_link_among, written_in as links_written_in};
 
 // What each tool says it does, read each time the agent picks a tool.
 pub(crate) const LIST_FILES: Block = Block::new(
@@ -70,6 +72,17 @@ pub(crate) const READ_TOOL_OUTPUT: Block = Block::new(
     "tool.read_tool_output",
     "Read more of a long tool output that was set aside, by the id the shortened output named.",
 );
+/// For an agent whose web switch is off (ADR 0104): the web, asked for.
+pub(crate) const READ_PAGE: Block = Block::new(
+    "tool.read_page",
+    "Read the web page, PDF or text at an address. A link the person wrote to you is read at once; \
+     any other address asks the person first, and their yes lets you use the web from then on.",
+);
+pub(crate) const SEARCH_WEB: Block = Block::new(
+    "tool.search_web",
+    "Search the web. This asks the person first; their yes gives you web search and page reading \
+     from your next step.",
+);
 
 /// A built-in tool.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,6 +95,8 @@ pub(crate) enum Builtin {
     RunCommand,
     UpdatePlan,
     ReadToolOutput,
+    ReadPage,
+    SearchWeb,
 }
 
 /// What a tool call will do, worked out before it is allowed.
@@ -141,10 +156,14 @@ pub(crate) struct Context<'a> {
     pub cancel: &'a Cancel,
     pub command: &'a CommandSettings,
     pub pictures: Pictures,
+    /// The links the person wrote, which `read_page` reads without asking (ADR 0104).
+    pub links: &'a [String],
+    /// The agent may use the web, so `read_page` reads any address.
+    pub web: bool,
 }
 
 impl Builtin {
-    pub(crate) const ALL: [Self; 8] = [
+    pub(crate) const ALL: [Self; 10] = [
         Self::ListFiles,
         Self::ReadFile,
         Self::SearchFiles,
@@ -153,6 +172,8 @@ impl Builtin {
         Self::RunCommand,
         Self::UpdatePlan,
         Self::ReadToolOutput,
+        Self::ReadPage,
+        Self::SearchWeb,
     ];
 
     pub(crate) fn name(self) -> &'static str {
@@ -165,6 +186,8 @@ impl Builtin {
             Self::RunCommand => "run_command",
             Self::UpdatePlan => "update_plan",
             Self::ReadToolOutput => "read_tool_output",
+            Self::ReadPage => "read_page",
+            Self::SearchWeb => "search_web",
         }
     }
 
@@ -176,7 +199,11 @@ impl Builtin {
     pub(crate) fn only_reads(self) -> bool {
         matches!(
             self,
-            Self::ListFiles | Self::ReadFile | Self::SearchFiles | Self::ReadToolOutput
+            Self::ListFiles
+                | Self::ReadFile
+                | Self::SearchFiles
+                | Self::ReadToolOutput
+                | Self::ReadPage
         )
     }
 
@@ -294,6 +321,28 @@ impl Builtin {
                     "additionalProperties": false,
                 }),
             ),
+            Self::ReadPage => (
+                READ_PAGE,
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "url": {"type": "string", "description": "The page's address, with http:// or https://."},
+                    },
+                    "required": ["url"],
+                    "additionalProperties": false,
+                }),
+            ),
+            Self::SearchWeb => (
+                SEARCH_WEB,
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "What to search for."},
+                    },
+                    "required": ["query"],
+                    "additionalProperties": false,
+                }),
+            ),
         };
         ToolSpec {
             name: self.name().to_owned(),
@@ -386,6 +435,21 @@ impl Builtin {
                 locations: Vec::new(),
                 needs_permission: false,
             },
+            // The web, as its switch decides: the session lets a link the person wrote through, and
+            // anything once the agent may use the web.
+            Self::ReadPage => needs(
+                ToolKind::Fetch,
+                format!("Read {}", one_line(required_str(input, "url")?, 200)),
+                Vec::new(),
+            ),
+            Self::SearchWeb => needs(
+                ToolKind::Fetch,
+                format!(
+                    "Search the web: {}",
+                    one_line(required_str(input, "query")?, 200)
+                ),
+                Vec::new(),
+            ),
         })
     }
 
@@ -409,7 +473,8 @@ impl Builtin {
                 .unwrap_or_else(|error| Output::failed(format!("The tool stopped: {error}")))
             }
             Self::RunCommand => Box::pin(command::run(input, context)).await,
-            Self::UpdatePlan | Self::ReadToolOutput => {
+            Self::ReadPage => Box::pin(link::run(input, context)).await,
+            Self::UpdatePlan | Self::ReadToolOutput | Self::SearchWeb => {
                 Output::failed("This tool is answered by the session.")
             }
         }

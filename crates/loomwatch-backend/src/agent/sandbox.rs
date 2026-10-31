@@ -236,6 +236,43 @@ pub(crate) fn denied(output: &str, cwd: &Path, settings: &CommandSettings) -> bo
     cfg!(target_os = "macos") && blocked(output, &writable(cwd, settings), settings.network)
 }
 
+/// Whether the sandbox kept `command` off the network it reaches for (ADR 0104): the agent may not
+/// use the web, and the command names a web address or a program that downloads. The sandbox
+/// tells the command nothing, and `curl -s` prints nothing, so this is read from the command line.
+pub(crate) fn keeps_off_network(command: &str, settings: &CommandSettings) -> bool {
+    cfg!(target_os = "macos")
+        && !settings.network
+        && Path::new(SANDBOX_EXEC).exists()
+        && reaches_network(command)
+}
+
+/// Whether `command` names a web address or a program that goes to the network.
+pub(crate) fn reaches_network(command: &str) -> bool {
+    let command = command.to_ascii_lowercase();
+    if command.contains("http://") || command.contains("https://") {
+        return true;
+    }
+    let words: Vec<&str> = command
+        .split(|c: char| c.is_whitespace() || matches!(c, ';' | '|' | '&' | '(' | ')'))
+        .filter(|word| !word.is_empty())
+        .map(|word| word.rsplit('/').next().unwrap_or(word))
+        .collect();
+    let programs = ["curl", "wget", "ssh", "scp", "rsync", "ping", "nc", "ftp"];
+    let fetching = [
+        ("git", ["clone", "fetch", "pull", "push"].as_slice()),
+        ("pip", &["install", "download"]),
+        ("pip3", &["install", "download"]),
+        ("npm", &["install", "i", "ci"]),
+        ("brew", &["install", "update", "upgrade"]),
+    ];
+    words.iter().enumerate().any(|(at, word)| {
+        programs.contains(word)
+            || fetching.iter().any(|(program, actions)| {
+                word == program && words.get(at + 1).is_some_and(|next| actions.contains(next))
+            })
+    })
+}
+
 /// The folders the profile lets a command change, as a command may print them: as given and with
 /// links resolved (`/tmp` is `/private/tmp`).
 fn writable(cwd: &Path, settings: &CommandSettings) -> Vec<String> {

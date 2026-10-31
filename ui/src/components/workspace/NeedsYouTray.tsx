@@ -3,7 +3,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent
 
 import { plainWords } from '../../lib/chat/findWords'
 import type { PermissionDecision, SpendDecision } from '../../lib/runs/client'
-import { PERMISSION_SAID } from '../../lib/runs/permissionRequests'
+import { permissionSaid } from '../../lib/runs/permissionRequests'
 import { historyRunUrl } from '../../lib/runs/history'
 import { ago, APPROVAL_TEXT, type Ticket } from '../../lib/story/needsYou'
 import { goToRun } from '../agents/route'
@@ -150,7 +150,7 @@ export function NeedsYouTray({ tickets, working, onAnswer, onPermission, onSpend
     setError(null)
     try {
       await onPermission(ticket, decision)
-      setSaid(`${ticket.asker}: ${PERMISSION_SAID[decision]}`)
+      setSaid(`${ticket.asker}: ${permissionSaid(decision, ticket.switch)}`)
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught))
     } finally {
@@ -244,7 +244,8 @@ export function NeedsYouTray({ tickets, working, onAnswer, onPermission, onSpend
                     {ticket.kind === 'question' && <button type="button" className={main(index)} onClick={() => startReply(ticket)}>Answer…<kbd>R</kbd></button>}
                     {ticket.kind === 'permission' && onPermission && <>
                       <button type="button" className={main(index)} disabled={busy === ticket.id} onClick={() => void decide(ticket, 'allow_once')}><Check size={13} aria-hidden="true" />Allow<kbd>A</kbd></button>
-                      <button type="button" className="btn" disabled={busy === ticket.id} onClick={() => void decide(ticket, 'allow_run')}>Allow for this run</button>
+                      {/* A yes to the web is already for the rest of the run (ADR 0104). */}
+                      {ticket.switch !== 'web' && <button type="button" className="btn" disabled={busy === ticket.id} onClick={() => void decide(ticket, 'allow_run')}>Allow for this run</button>}
                       {ticket.team && <button type="button" className="btn" disabled={busy === ticket.id} onClick={() => void decide(ticket, 'allow_team')}>Allow for the whole team</button>}
                       <button type="button" className="btn" disabled={busy === ticket.id} onClick={() => void decide(ticket, 'deny')}>Deny<kbd>D</kbd></button>
                     </>}

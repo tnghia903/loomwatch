@@ -468,6 +468,7 @@ pub(crate) fn ask_spec(workspace: PathBuf) -> ProcessSpec {
         asker: None,
         lessons: Vec::new(),
         pictures: Vec::new(),
+        links: Vec::new(),
     }
 }
 

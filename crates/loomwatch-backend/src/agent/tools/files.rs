@@ -104,9 +104,11 @@ pub(super) fn run(
             text("new_text"),
             input.get("replace_all").and_then(Value::as_bool) == Some(true),
         ),
-        Builtin::RunCommand | Builtin::UpdatePlan | Builtin::ReadToolOutput => {
-            Output::failed("Not a file tool.")
-        }
+        Builtin::RunCommand
+        | Builtin::UpdatePlan
+        | Builtin::ReadToolOutput
+        | Builtin::ReadPage
+        | Builtin::SearchWeb => Output::failed("Not a file tool."),
     }
 }
 
