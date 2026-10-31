@@ -46,6 +46,9 @@ let holdRunReads: Promise<void> | null = null
 let sessionEvents: Record<string, Record<string, unknown>[]> = {}
 /** While set, reading a run's events waits for it. */
 let holdEventReads: Promise<void> | null = null
+/** What the daemon suggests asking the pinned agent next, and how many times it was asked. */
+let suggested: { suggestions: unknown[]; writing: boolean } | null = null
+let suggestionReads = 0
 
 /** One of a run's events, as the archive returns it, just now. */
 function runEvent(runId: string, seq: number, agentId: string, kind: string, payload: Record<string, unknown>) {
@@ -82,6 +85,8 @@ beforeEach(() => {
   holdRunReads = null
   sessionEvents = {}
   holdEventReads = null
+  suggested = null
+  suggestionReads = 0
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     if (url.startsWith('/api/runs?')) return json(runs)
@@ -102,6 +107,10 @@ beforeEach(() => {
       return json({ agent: pinnedAgent, notchShown: true })
     }
     if (url === '/api/pinned-agent') return json({ agent: pinnedAgent })
+    if (url === '/api/pinned-agent/suggestions') {
+      suggestionReads += 1
+      return suggested ? json(suggested) : json({ error: 'not found' }, 404)
+    }
     if (url.startsWith('/api/team-requests?')) return json(requests)
     if (url.startsWith('/api/team-requests/') && init?.method === 'POST') {
       const id = decodeURIComponent(url.split('/').at(-1)!)
@@ -1016,7 +1025,7 @@ describe('the box: any of My agents, and its workbench', () => {
     expect(within(container).getByRole('status', { name: 'Drop it here for Maya' })).toBeTruthy()
   })
 
-  it('switches to another of My agents with Tab, or a click on its figure, before anything is written; the message pins the one it goes to', async () => {
+  it('writes only to the agent pinned at the notch: no other agents beside its name, and Tab moves on as anywhere', async () => {
     pinnedAgent = 'maya'
     jobs = [maya, writer]
     const { container } = render(<Island />)
@@ -1025,29 +1034,212 @@ describe('the box: any of My agents, and its workbench', () => {
     tellPage({ kind: 'compose' })
     const field = await within(container).findByRole('textbox', { name: 'Message Maya' })
     expect(container.querySelector('.island-box-name')?.textContent).toBe('Maya')
-    // Tab is the box's: the next agent, not the next button. Option-Tab still moves on.
-    expect(fireEvent.keyDown(field, { key: 'Tab', altKey: true })).toBe(true)
-    expect(fireEvent.keyDown(field, { key: 'Tab' })).toBe(false)
-    await within(container).findByRole('textbox', { name: 'Message Writer' })
-    expect(container.querySelector('.island-box-name')?.textContent).toBe('Writer')
-    // Only for this message: nothing is pinned yet, and ⌃⌥Space still opens with Maya.
-    expect(pins).toEqual([])
-    expect(toApp.filter((message) => (message as { kind: string }).kind === 'agent').at(-1)).toEqual({ kind: 'agent', name: 'Maya' })
-    // Back by its figure among the others; Shift-Tab goes the other way round.
-    fireEvent.click(within(container).getByRole('button', { name: 'Message Maya instead' }))
-    const toMaya = await within(container).findByRole('textbox', { name: 'Message Maya' })
-    fireEvent.keyDown(toMaya, { key: 'Tab', shiftKey: true })
-    const box = await within(container).findByRole('textbox', { name: 'Message Writer' })
-    // Once something is written, Tab moves on as anywhere: a habit Tab must not change who gets it.
-    fireEvent.change(box, { target: { value: 'Draft the invite' } })
-    expect(fireEvent.keyDown(box, { key: 'Tab' })).toBe(true)
-    expect(within(container).getByRole('textbox', { name: 'Message Writer' })).toBe(box)
-    fireEvent.submit(box.closest('form')!)
+    // Writer is in My agents but not at the notch: nothing here switches the box to it.
+    expect(within(container).queryByRole('button', { name: /Writer/ })).toBeNull()
+    expect(container.querySelector('.island-box-head img')).toBeNull()
+    // Tab isn't the box's: it moves on, as it does anywhere, and the box still writes to Maya.
+    expect(fireEvent.keyDown(field, { key: 'Tab' })).toBe(true)
+    expect(within(container).getByRole('textbox', { name: 'Message Maya' })).toBe(field)
+    fireEvent.change(field, { target: { value: 'What is on my calendar today?' } })
+    fireEvent.submit(field.closest('form')!)
     await waitFor(() => expect(messages).toHaveLength(1))
-    expect(messages[0]).toMatchObject({ teamPath: '.jobs/.bench/writer.yaml', text: 'Draft the invite', to: { kind: 'agent', agent: 'writer' } })
-    // The message pinned Writer: the box opens with the agent last written to.
-    expect(pins).toEqual(['writer'])
-    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Writer' }))
+    expect(messages[0]).toMatchObject({ teamPath: '.jobs/.bench/maya.yaml', to: { kind: 'agent', agent: 'maya' } })
+  }, 15_000)
+
+  it('holding ⌃⌥Space, it listens: it says so, what is heard writes itself in after what was typed, and let go, the words wait for Send', async () => {
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
+    tellPage({ kind: 'compose' })
+    const field = await within(container).findByRole('textbox', { name: 'Message Maya' }) as HTMLInputElement
+    // Before anything is written, beside its name: how to talk to it instead.
+    const hint = within(container).getByLabelText('Hold Control-Option-Space to talk to Maya')
+    expect(hint.textContent).toBe('hold⌃⌥Space')
+    fireEvent.change(field, { target: { value: 'Book the ' } })
+    expect(within(container).queryByLabelText('Hold Control-Option-Space to talk to Maya')).toBeNull()
+
+    tellPage({ kind: 'listen', on: true })
+    const row = container.querySelector('.island-pinned')!
+    expect(row.classList.contains('is-listening')).toBe(true)
+    expect(within(container).getByRole('status', { name: '' }).textContent).toBe('listening')
+    // How loud it hears stands in Send's place, and only the bars are told.
+    expect(within(container).queryByRole('button', { name: 'Send' })).toBeNull()
+    const bars = container.querySelector<HTMLElement>('.island-loudness')!
+    tellPage({ kind: 'level', level: 0.6 })
+    expect(bars.style.getPropertyValue('--level')).toBe('0.60')
+    tellPage({ kind: 'level', level: 7 })
+    expect(bars.style.getPropertyValue('--level')).toBe('1.00')
+    // Each time, every word heard so far, after what was typed.
+    tellPage({ kind: 'heard', text: 'train to', done: false })
+    expect(field.value).toBe('Book the train to')
+    tellPage({ kind: 'heard', text: 'train to Kyoto on Friday', done: false })
+    expect(field.value).toBe('Book the train to Kyoto on Friday')
+    // The newest words are the ones in view: the box shows its end.
+    expect(field.selectionStart).toBe(field.value.length)
+
+    tellPage({ kind: 'listen', on: false })
+    tellPage({ kind: 'heard', text: 'train to Kyoto on Friday.', done: true })
+    expect(field.value).toBe('Book the train to Kyoto on Friday.')
+    expect(row.classList.contains('is-listening')).toBe(false)
+    expect(container.querySelector('.island-loudness')).toBeNull()
+    // Let go, nothing went: the words wait in the box to be read and put right, and Send is back.
+    expect(messages).toHaveLength(0)
+    expect(within(container).getByRole('button', { name: 'Send' })).toBeTruthy()
+    // Words heard after the last are in change nothing.
+    tellPage({ kind: 'heard', text: 'stray', done: false })
+    expect(field.value).toBe('Book the train to Kyoto on Friday.')
+    fireEvent.submit(field.closest('form')!)
+    await waitFor(() => expect(messages).toHaveLength(1))
+    expect(messages[0]).toMatchObject({ text: 'Book the train to Kyoto on Friday.' })
+  }, 15_000)
+
+  it('words still on their way after letting go never bring back a message sent, or undo a word put right', async () => {
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
+    tellPage({ kind: 'compose' })
+    const field = await within(container).findByRole('textbox', { name: 'Message Maya' }) as HTMLInputElement
+    tellPage({ kind: 'listen', on: true })
+    tellPage({ kind: 'heard', text: 'Book the train', done: false })
+    tellPage({ kind: 'listen', on: false })
+    // Put right before the last words are in: they don't undo it.
+    fireEvent.change(field, { target: { value: 'Book the plane' } })
+    tellPage({ kind: 'heard', text: 'Book the train.', done: true })
+    expect(field.value).toBe('Book the plane')
+    // Sent before the last words are in: they don't bring it back.
+    tellPage({ kind: 'listen', on: true })
+    tellPage({ kind: 'heard', text: 'to Kyoto', done: false })
+    tellPage({ kind: 'listen', on: false })
+    fireEvent.submit(field.closest('form')!)
+    await waitFor(() => expect(messages).toHaveLength(1))
+    expect(messages[0]).toMatchObject({ text: 'Book the plane to Kyoto' })
+    tellPage({ kind: 'heard', text: 'to Kyoto.', done: true })
+    // Opened again, the box is empty.
+    tellPage({ kind: 'clickOutside' })
+    tellPage({ kind: 'compose' })
+    const again = await within(container).findByRole('textbox', { name: /Maya/ }) as HTMLInputElement
+    expect(again.value).toBe('')
+  }, 15_000)
+
+  it('a hold that hears nothing says so', async () => {
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
+    tellPage({ kind: 'compose' })
+    await within(container).findByRole('textbox', { name: 'Message Maya' })
+    tellPage({ kind: 'listen', on: true })
+    tellPage({ kind: 'listen', on: false })
+    tellPage({ kind: 'heard', text: '', done: true })
+    expect(within(container).getByText('Nothing was heard. Hold ⌃⌥Space while you speak, or type instead.')).toBeTruthy()
+    // Heard the next time, it goes.
+    tellPage({ kind: 'listen', on: true })
+    expect(within(container).queryByText('Nothing was heard. Hold ⌃⌥Space while you speak, or type instead.')).toBeNull()
+  }, 15_000)
+
+  it('held while the box is away, listening opens it for the words to go into', async () => {
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
+    tellPage({ kind: 'listen', on: true })
+    const field = await within(container).findByRole('textbox', { name: 'Message Maya' }) as HTMLInputElement
+    tellPage({ kind: 'heard', text: 'What is on today?', done: true })
+    expect(field.value).toBe('What is on today?')
+  }, 15_000)
+
+  it('says why it could not listen, with System Settings a press away where a switch there puts it right', async () => {
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
+    tellPage({ kind: 'compose' })
+    await within(container).findByRole('textbox', { name: 'Message Maya' })
+    tellPage({ kind: 'cantListen', why: 'microphone' })
+    expect(within(container).getByRole('alert').textContent).toBe('The microphone is off for LoomWatch. Turn it on, then hold ⌃⌥Space again.')
+    fireEvent.click(within(container).getByRole('button', { name: 'Open System Settings' }))
+    expect(toApp).toContainEqual({ kind: 'settings', pane: 'microphone' })
+    tellPage({ kind: 'cantListen', why: 'speech' })
+    fireEvent.click(within(container).getByRole('button', { name: 'Open System Settings' }))
+    expect(toApp).toContainEqual({ kind: 'settings', pane: 'speech' })
+    // macOS asking is no problem: there is nothing to put right, only to hold again.
+    tellPage({ kind: 'cantListen', why: 'asked' })
+    expect(within(container).queryByRole('alert')).toBeNull()
+    expect(within(container).getByText('Allow LoomWatch when macOS asks, then hold ⌃⌥Space again.')).toBeTruthy()
+    expect(within(container).queryByRole('button', { name: 'Open System Settings' })).toBeNull()
+    // Holding again, it goes; so does what is said once the box is put away.
+    tellPage({ kind: 'listen', on: true })
+    expect(within(container).queryByText('Allow LoomWatch when macOS asks, then hold ⌃⌥Space again.')).toBeNull()
+    tellPage({ kind: 'listen', on: false })
+    tellPage({ kind: 'cantListen', why: 'unavailable' })
+    expect(within(container).getByText('Your Mac can’t turn speech into words right now. Type instead, or try again later.')).toBeTruthy()
+    tellPage({ kind: 'compose' })
+    await waitFor(() => expect(within(container).queryByRole('textbox', { name: 'Message Maya' })).toBeNull())
+    tellPage({ kind: 'compose' })
+    await within(container).findByRole('textbox', { name: 'Message Maya' })
+    expect(within(container).queryByText('Your Mac can’t turn speech into words right now. Type instead, or try again later.')).toBeNull()
+  }, 15_000)
+
+  it('suggests what to ask next under the box: pressing one puts it in the box to change or send, and nothing goes until it is sent', async () => {
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    // Its next steps are still being written as the box opens: the page asks again in a moment.
+    suggested = { suggestions: [], writing: true }
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
+    // Nothing is asked for, or written, until the box is opened.
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    expect(suggestionReads).toBe(0)
+    tellPage({ kind: 'compose' })
+    const field = await within(container).findByRole('textbox', { name: 'Message Maya' }) as HTMLInputElement
+    await waitFor(() => expect(suggestionReads).toBeGreaterThan(0))
+    expect(within(container).queryByRole('group', { name: 'Ask Maya' })).toBeNull()
+    suggested = { suggestions: [{ text: 'Draft a reply to Ana', kind: 'next' }, { text: 'Check my availability', kind: 'again' }, { text: 'Not one', kind: 'other' }, { text: ' ', kind: 'next' }], writing: false }
+    const group = await within(container).findByRole('group', { name: 'Ask Maya' }, { timeout: ISLAND_WAITS.suggestionReread + 2_000 })
+    expect(within(group).getAllByRole('button').map((button) => button.textContent)).toEqual(['Draft a reply to Ana', 'Check my availability'])
+
+    fireEvent.click(within(group).getByRole('button', { name: 'Draft a reply to Ana' }))
+    expect(field.value).toBe('Draft a reply to Ana')
+    expect(messages).toHaveLength(0)
+    // With something in the box they step aside, and come back once it is empty.
+    expect(within(container).queryByRole('group', { name: 'Ask Maya' })).toBeNull()
+    fireEvent.change(field, { target: { value: '' } })
+    expect(within(container).getByRole('group', { name: 'Ask Maya' })).toBeTruthy()
+    // So they do while it listens, keeping their room, so the island doesn't shrink as it starts.
+    tellPage({ kind: 'listen', on: true })
+    expect(within(container).queryByRole('group', { name: 'Ask Maya' })).toBeNull()
+    expect(container.querySelector('.island-next.is-away[aria-hidden="true"]')).toBeTruthy()
+    tellPage({ kind: 'heard', text: 'Draft', done: false })
+    expect(container.querySelector('.island-next.is-away')).toBeTruthy()
+    tellPage({ kind: 'listen', on: false })
+    tellPage({ kind: 'heard', text: '', done: true })
+    tellPage({ kind: 'listen', on: false })
+    fireEvent.click(within(container).getByRole('button', { name: 'Check my availability' }))
+    fireEvent.submit(field.closest('form')!)
+    await waitFor(() => expect(messages).toHaveLength(1))
+    expect(messages[0]).toMatchObject({ text: 'Check my availability' })
+  }, 15_000)
+
+  it('outside the Mac app, where nothing listens, says nothing about holding a key to talk', async () => {
+    delete window.webkit
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    const { container } = render(<Island />)
+    tellPage({ kind: 'place', notch: { width: 188, height: 32 }, menuBar: 32 })
+    // Maya stands beside the notch once the page has read who is pinned.
+    await waitFor(() => expect(container.querySelector('.island-head img')).toBeTruthy())
+    tellPage({ kind: 'compose' })
+    await within(container).findByRole('textbox', { name: 'Message Maya' })
+    expect(within(container).queryByLabelText('Hold Control-Option-Space to talk to Maya')).toBeNull()
+    expect(container.querySelector('.island-talk')).toBeNull()
   }, 15_000)
 
   it('⌃⌥Space gives the box the keyboard without scrolling the island, which would lift its agent’s row out of the top', async () => {
@@ -1070,7 +1262,7 @@ describe('the box: any of My agents, and its workbench', () => {
     }
   }, 15_000)
 
-  it('draws a switch to another agent: the one it was ducks and the new one pops up with its name, and the same workbench takes it', async () => {
+  it('draws another agent pinned while the box is open: the one it was ducks and the new one pops up with its name, and the same workbench takes it', async () => {
     await import('./BenchCard')
     pinnedAgent = 'maya'
     jobs = [maya, writer]
@@ -1083,10 +1275,12 @@ describe('the box: any of My agents, and its workbench', () => {
     // Opening the box draws no switch.
     expect(container.querySelector('.is-coming, .is-leaving')).toBeNull()
     const mayaStill = container.querySelector('.island-bench-toggle img')!.getAttribute('src')
-    fireEvent.keyDown(field, { key: 'Tab' })
-    await within(container).findByRole('textbox', { name: 'Message Writer' })
+    // Writer is pinned in My agents: the island reads it on its next look.
+    expect(field).toBeTruthy()
+    pinnedAgent = 'writer'
+    await within(container).findByRole('textbox', { name: 'Message Writer' }, { timeout: ISLAND_WAITS.poll + 2_000 })
     const toggle = within(container).getByRole('button', { name: 'See Writer’s workbench' })
-    // Maya ducks, Writer pops up in her place, his name rises, and she joins the others.
+    // Maya ducks, and Writer pops up in her place with his name.
     expect(toggle.querySelector('.island-switch.is-leaving')).toBeTruthy()
     expect(toggle.querySelector('.island-switch.is-coming')).toBeTruthy()
     const leaving = toggle.querySelector<HTMLElement>('.island-switch.is-leaving')!
@@ -1097,7 +1291,6 @@ describe('the box: any of My agents, and its workbench', () => {
     expect([cascaded(leaving, 'translate', DESKTOP, islandRules), cascaded(leaving, 'transition', DESKTOP, islandRules)]).toEqual(['0 150%', 'translate var(--t-quick) var(--ease-in)'])
     expect(cascaded(coming, 'animation', DESKTOP, islandRules)).toMatch(/^island-pop-up /)
     expect(container.querySelector('.island-box-name')?.textContent).toBe('Writer')
-    expect(within(container).getByRole('button', { name: 'Message Maya instead' }).classList.contains('is-coming')).toBe(true)
     // With motion reduced, the swap is at once: the one it was is gone, not ducking.
     expect(cascaded(leaving, 'display', { ...DESKTOP, reducedMotion: true }, islandRules)).toBe('none')
     // The same workbench, set up once, now Writer's.
@@ -1188,22 +1381,6 @@ describe('the box: any of My agents, and its workbench', () => {
     })
     expect(team.previousElementSibling?.classList.contains('island-bench-slot')).toBe(true)
     expect(cascaded(team, 'border-top', DESKTOP, islandRules)).toBe('1px solid var(--color-hairline)')
-  }, 15_000)
-
-  it('opens as it was when put away unsent: what was chosen was only for that message', async () => {
-    pinnedAgent = 'maya'
-    jobs = [maya, writer]
-    const { container } = render(<Island />)
-    place()
-    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
-    tellPage({ kind: 'compose' })
-    fireEvent.keyDown(await within(container).findByRole('textbox', { name: 'Message Maya' }), { key: 'Tab' })
-    await within(container).findByRole('textbox', { name: 'Message Writer' })
-    tellPage({ kind: 'clickOutside' })
-    await waitFor(() => expect(view(container)).not.toBe('list'))
-    tellPage({ kind: 'compose' })
-    expect(await within(container).findByRole('textbox', { name: 'Message Maya' })).toBeTruthy()
-    expect(pins).toEqual([])
   }, 15_000)
 
   it('opens its agent’s workbench from its figure, to look at, in the island’s own dark; Escape folds it first', async () => {

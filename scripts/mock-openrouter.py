@@ -20,6 +20,8 @@ Replies are scripted from what the request says, so a run exercises real tool ca
                                          or in bullets, one about the person ("aboutYou") when they
                                          ask for Vietnamese, else no edits; an agent whose
                                          instructions hold the bullets lesson answers in three bullets
+- the next steps after an answer (ADR 0105) -> three short requests, the first naming the answer's
+                                         first bold words
 - the read of what a message says done looks like (ADR 0098) -> its "at most <n> words" and
                                          "<n> tries", quoted, else NONE
 - "at most <n> words" in the task     -> a draft <n> + 16 words long, and one 10 words under the
@@ -207,6 +209,13 @@ def plan(body):
     if "## What you have learned" in system and "keep it to three short bullets" in system:
         return ("text", "- First point, short.\n- Second point, short.\n- Third point, short.")
 
+    # ADR 0105: the next steps after an answer, for the buttons under the notch's box. The first
+    # names the answer's first bold words, so a trial shows they follow the answer.
+    if "You guess what a person will ask their AI assistant next" in system:
+        answer = latest.split("The assistant answered:", 1)[-1]
+        bold = re.search(r"\*\*([^*]{2,40})\*\*", answer)
+        about = bold.group(1) if bold else "that"
+        return ("text", json.dumps({"next": [f"Tell me more about {about}", "Make it shorter", "What should I do next?"]}))
     # ADR 0098: the read of what a message says done looks like quotes its limit and its tries.
     if "list what it says the finished work must satisfy" in system:
         said = latest.split("<message>", 1)[-1].split("</message>", 1)[0]

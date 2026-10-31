@@ -428,13 +428,21 @@ to see what your teams are doing, and click **⋯** there for LoomWatch's menu. 
 keep open; closing the browser tab leaves LoomWatch running until you choose **Quit LoomWatch** in
 that menu. Then follow [Try your first run](#try-your-first-run).
 
-To message one of your agents from any app, press **⌃⌥Space** (Control-Option-Space), or choose
-**Message** and its name at the top of LoomWatch's menu. A box opens at the top middle of the screen
-you are on; **Tab** switches to another of your agents, and its figure opens its workbench. When you
+To message an agent from any app, press **⌃⌥Space** (Control-Option-Space), or choose **Message**
+and its name at the top of LoomWatch's menu. A box opens at the top middle of the screen you are on,
+for the agent pinned to the notch; to put another there, open its menu in My agents and choose
+**Pin to the notch**. Its figure opens its workbench. Hold **⌃⌥Space** instead to talk to it: what
+you say writes itself into the box, and once you let go you can read it, fix a word and press
+**Return** to send. The first time, macOS asks whether LoomWatch may use the microphone, then speech
+recognition: allow both, then hold **⌃⌥Space** again. Your agents never get the microphone. Under
+the box are a few things you might ask next: next steps from the agent's last answer, and what you
+ask it again and again. Press one to put it in the box. The next steps are written when you open
+the box after an answer, by a small model on the same account the agent runs on: on a ChatGPT plan
+that uses the plan, an agent on a free model writes them with that model, and on OpenRouter or a
+Claude key each costs a little, shown in **Usage** with the agent's other costs. When you
 send, the agent shows at its workbench for a moment, then waits at the top of the screen while it
 works: point at it to watch. Its answer drops down there: the copy button at its top right keeps
-its headings, lists and links when you paste, and **Open in LoomWatch** shows it whole. The box opens
-with the agent you last wrote to.
+its headings, lists and links when you paste, and **Open in LoomWatch** shows it whole.
 
 To hand it a file, a picture, an email from Mail, a link or some text, drag it to the top middle of
 the screen, and the box opens to take it, or press **+** at the start of the box's message field to

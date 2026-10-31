@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- LoomWatch.app and loomwatchd under the hardened runtime (scripts/package-macos-app.sh): agents'
-     commands may send Apple Events, so macOS asks the person before they work in another app. -->
+<!-- loomwatchd under the hardened runtime (scripts/package-macos-app.sh): agents' commands may send
+     Apple Events, so macOS asks the person before they work in another app. LoomWatch.app has these
+     and the microphone (LoomWatch-app.entitlements); loomwatchd never has the microphone. -->
 <plist version="1.0">
 <dict>
   <key>com.apple.security.automation.apple-events</key>

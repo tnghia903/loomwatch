@@ -63,6 +63,21 @@ export function IntakeJobs({ island }: { island: Island }) {
   )
 }
 
+/** What the person may want to ask it next, under its box: the next steps from its last answer,
+    and what they ask it again and again. Pressing one puts it in the box, to change or send as
+    anything typed; nothing goes until it is sent. Pressing keeps the keyboard in the box. Out of
+    sight (`away`), they keep their room. */
+export function Suggestions({ island, away = false }: { island: Island; away?: boolean }) {
+  if (!island.suggestions.length) return null
+  return (
+    <span className={`island-jobs island-next${away ? ' is-away' : ''}`} role="group" aria-label={`Ask ${island.box?.name ?? 'it'}`} aria-hidden={away || undefined} inert={away || undefined}>
+      {island.suggestions.map((suggestion) => (
+        <button key={suggestion.text} type="button" className="island-chip" onPointerDown={(event) => event.preventDefault()} onClick={() => island.suggest(suggestion.text)}>{suggestion.text}</button>
+      ))}
+    </span>
+  )
+}
+
 /** A picture drawn from the file itself, with no request; its address is let go once it is out. */
 function Picture({ file, unreadable }: { file: File; unreadable: () => void }) {
   const picture = useRef<HTMLImageElement>(null)

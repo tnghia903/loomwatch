@@ -4,8 +4,8 @@
 //!
 //! `AppKit` and `WebKit` have no safe Rust interface for what the island needs: a panel above the
 //! menu bar that takes the keyboard only while a message to the pinned agent is written, a web
-//! view with no background, and messages from the page. So this module, and only this one in the
-//! workspace, calls them directly. Everything it decides is in `crate::island`, where it is
+//! view with no background, and messages from the page. So this module calls them directly, as
+//! only `crate::listen` does besides, for the microphone. Everything it decides is in `crate::island`, where it is
 //! tested; what is left here is placing the panels, passing the pointer, and carrying messages.
 #![allow(unsafe_code)]
 
@@ -43,7 +43,8 @@ use objc2_web_kit::{
 };
 use tray_icon::menu::{ContextMenu, Menu};
 
-use crate::island::{self, FromPage, Rect, Screen, ToPage};
+use crate::island::{self, CantListen, FromPage, Rect, Screen, ToPage};
+use crate::listen::{Heard, Hearing};
 
 /// What the panels hear, for the app's event loop.
 #[derive(Debug)]
@@ -66,8 +67,11 @@ pub enum IslandEvent {
     /// The left button went down, or up, in another app: a drag may begin, or ends.
     PressStarted,
     PressEnded,
-    /// ⌃⌥Space, from any app.
+    /// ⌃⌥Space, from any app, going down; and coming up (`ShortcutUp`), so that holding it listens.
     Shortcut,
+    ShortcutUp,
+    /// What the box heard while ⌃⌥Space was held.
+    Heard(Heard),
 }
 
 type Sender = Rc<dyn Fn(IslandEvent)>;
@@ -104,6 +108,9 @@ pub struct NotchPanels {
     /// The screen, space and frontmost-app observers and their notification centres, taken out as
     /// the panels go.
     observers: Vec<Observer>,
+    /// While ⌃⌥Space is held, and until the last words are in after it is let go: the box listening,
+    /// and the number of the island it writes into.
+    hearing: Option<(u32, Hearing)>,
 }
 
 type Observer = (
@@ -131,6 +138,7 @@ impl NotchPanels {
             listening: None,
             observers: observers(&send),
             send,
+            hearing: None,
         }
     }
 
@@ -374,6 +382,129 @@ impl NotchPanels {
         if let Some(island) = self.live_island() {
             island.take_keyboard();
             island.send(&ToPage::Compose);
+        }
+    }
+
+    /// Whether the box is open on any screen: a message is being written there, and its panel has
+    /// the keyboard.
+    pub fn writing(&self) -> bool {
+        self.islands
+            .iter()
+            .any(|island| island.panel.ivars().keyboard.get())
+    }
+
+    /// ⌃⌥Space has been held long enough: the box on the live screen listens, and its page hears
+    /// that it does, or why it can't.
+    pub fn listen(&mut self) {
+        self.hearing = None;
+        let Some(id) = self.live_island().map(|island| island.id) else {
+            return;
+        };
+        let send = Rc::clone(&self.send);
+        match Hearing::start(move |heard| send(IslandEvent::Heard(heard))) {
+            Ok(hearing) => {
+                self.hearing = Some((id, hearing));
+                self.tell(id, &ToPage::Listen { on: true });
+            }
+            Err(why) => self.tell(id, &ToPage::CantListen { why }),
+        }
+    }
+
+    /// ⌃⌥Space was let go, or held too long: the microphone stops, and the box no longer listens.
+    /// The last words follow (`heard`).
+    pub fn stop_listening(&mut self) {
+        let Some((id, hearing)) = self.hearing.as_mut() else {
+            return;
+        };
+        if !hearing.listening() {
+            return;
+        }
+        hearing.stop(Instant::now());
+        let id = *id;
+        self.tell(id, &ToPage::Listen { on: false });
+    }
+
+    /// ⌃⌥Space is still held when listening has gone on as long as it may: it stops, and the page
+    /// says so, so a long message isn't cut off without a word.
+    pub fn held_too_long(&mut self) {
+        let Some(id) = self.hearing.as_ref().map(|(id, _)| *id) else {
+            return;
+        };
+        self.stop_listening();
+        self.tell(
+            id,
+            &ToPage::CantListen {
+                why: CantListen::Longest,
+            },
+        );
+    }
+
+    /// The recognizer's words, for the page that listens; the last of them end the hearing.
+    pub fn heard(&mut self, heard: Heard) {
+        let Some((id, hearing)) = self.hearing.as_ref() else {
+            return;
+        };
+        let id = *id;
+        let (text, done) = match heard {
+            Heard::Words { text, done } => (text, done),
+            // Stopped with no more words, while held or after: those heard are the last.
+            Heard::Ended => (hearing.words(), true),
+        };
+        // The recognizer gave its last words while still held, as after about a minute: the
+        // microphone stops with it.
+        if done
+            && let Some((_, mut hearing)) = self.hearing.take()
+            && hearing.listening()
+        {
+            hearing.stop(Instant::now());
+            self.tell(id, &ToPage::Listen { on: false });
+        }
+        self.tell(id, &ToPage::Heard { text, done });
+    }
+
+    /// While the box listens, its page hears how loud the microphone is; once let go, the words
+    /// heard so far are the last if no more have come in time.
+    pub fn tick_listening(&mut self, now: Instant) {
+        let Some((id, hearing)) = self.hearing.as_ref() else {
+            return;
+        };
+        let id = *id;
+        if hearing.listening() {
+            let level = hearing.level();
+            self.tell(id, &ToPage::Level { level });
+        } else if hearing.waited(now) {
+            let text = hearing.words();
+            self.hearing = None;
+            self.tell(id, &ToPage::Heard { text, done: true });
+        }
+    }
+
+    /// When the box listening next has something to say: how loud, while it listens; the last
+    /// words, once let go.
+    pub fn listening_wakes_at(&self, now: Instant) -> Option<Instant> {
+        let (_, hearing) = self.hearing.as_ref()?;
+        if hearing.listening() {
+            Some(now + island::LOUDNESS_EVERY)
+        } else {
+            hearing.waits_until()
+        }
+    }
+
+    /// Open Settings, from a page that couldn't listen: System Settings at the microphone, or at
+    /// speech recognition (`island::settings_address`). Any other page is refused.
+    pub fn open_settings(pane: &str) {
+        let Some(address) = island::settings_address(pane) else {
+            return;
+        };
+        if let Some(url) = NSURL::URLWithString(&NSString::from_str(address)) {
+            NSWorkspace::sharedWorkspace().openURL(&url);
+        }
+    }
+
+    /// A message for one island's page, by its number.
+    fn tell(&mut self, id: u32, message: &ToPage) {
+        if let Some(island) = self.island(id) {
+            island.send(message);
         }
     }
 
@@ -1204,14 +1335,20 @@ impl Drop for Shortcut {
 }
 
 /// ⌃⌥Space from any app (`island::SHORTCUT_KEY`), through Carbon's hot keys: a shortcut that works
-/// whichever app is in front, without asking for Accessibility. `None`, and a line in the log,
-/// when another app holds it.
+/// whichever app is in front, without asking for Accessibility, heard going down and coming up.
+/// `None`, and a line in the log, when another app holds it.
 fn register_shortcut(send: &Sender) -> Option<Shortcut> {
     let held: Box<Sender> = Box::new(Rc::clone(send));
-    let pressed = EventTypeSpec {
-        class: KEYBOARD_EVENTS,
-        kind: HOT_KEY_PRESSED,
-    };
+    let kinds = [
+        EventTypeSpec {
+            class: KEYBOARD_EVENTS,
+            kind: HOT_KEY_PRESSED,
+        },
+        EventTypeSpec {
+            class: KEYBOARD_EVENTS,
+            kind: HOT_KEY_RELEASED,
+        },
+    ];
     let id = EventHotKeyId {
         signature: u32::from_be_bytes(*b"LWnt"),
         id: 1,
@@ -1225,8 +1362,8 @@ fn register_shortcut(send: &Sender) -> Option<Shortcut> {
         let installed = InstallEventHandler(
             target,
             shortcut_pressed,
-            1,
-            &raw const pressed,
+            kinds.len(),
+            kinds.as_ptr(),
             std::ptr::from_ref::<Sender>(&held)
                 .cast_mut()
                 .cast::<c_void>(),
@@ -1260,15 +1397,20 @@ fn register_shortcut(send: &Sender) -> Option<Shortcut> {
     })
 }
 
-/// Carbon calls this for ⌃⌥Space.
+/// Carbon calls this for ⌃⌥Space, going down and coming up.
 unsafe extern "C" fn shortcut_pressed(
     _call: *mut c_void,
-    _event: *mut c_void,
+    event: *mut c_void,
     data: *mut c_void,
 ) -> i32 {
-    // SAFETY: `data` is the `Sender` boxed in `register_shortcut`, alive until the handler goes.
-    let send = unsafe { &*data.cast::<Sender>() };
-    send(IslandEvent::Shortcut);
+    // SAFETY: `data` is the `Sender` boxed in `register_shortcut`, alive until the handler goes,
+    // and `event` the hot key event Carbon is handling.
+    let (send, kind) = unsafe { (&*data.cast::<Sender>(), GetEventKind(event)) };
+    send(if kind == HOT_KEY_RELEASED {
+        IslandEvent::ShortcutUp
+    } else {
+        IslandEvent::Shortcut
+    });
     0
 }
 
@@ -1284,9 +1426,10 @@ struct EventHotKeyId {
     id: u32,
 }
 
-/// `kEventClassKeyboard` ('keyb') and `kEventHotKeyPressed`.
+/// `kEventClassKeyboard` ('keyb'), `kEventHotKeyPressed` and `kEventHotKeyReleased`.
 const KEYBOARD_EVENTS: u32 = u32::from_be_bytes(*b"keyb");
 const HOT_KEY_PRESSED: u32 = 5;
+const HOT_KEY_RELEASED: u32 = 6;
 
 type EventHandler = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void) -> i32;
 
@@ -1302,6 +1445,7 @@ unsafe extern "C" {
         handler_ref: *mut *mut c_void,
     ) -> i32;
     fn RemoveEventHandler(handler_ref: *mut c_void) -> i32;
+    fn GetEventKind(event: *mut c_void) -> u32;
     fn RegisterEventHotKey(
         key_code: u32,
         modifiers: u32,

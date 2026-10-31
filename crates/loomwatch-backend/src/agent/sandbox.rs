@@ -2,10 +2,13 @@
 //!
 //! macOS's Seatbelt (`/usr/bin/sandbox-exec`) is what `OpenAI`'s Codex CLI uses for the same job
 //! (`codex-rs/sandboxing`, Apache-2.0). Codex starts from "deny everything" and lists hundreds of
-//! exceptions; this profile starts from "allow" and takes away the two things a newcomer's agent
-//! must not do by accident:
+//! exceptions; this profile starts from "allow" and takes away the things a newcomer's agent must
+//! not do by accident:
 //! - change files outside its work folder (and temporary and cache folders, which tools need);
-//! - reach the network, unless the agent is allowed the web.
+//! - reach the network, unless the agent is allowed the web;
+//! - use the microphone. macOS counts an agent's command as `LoomWatch`, and `LoomWatch` may be
+//!   allowed the microphone so the box at the notch can listen while ⌃⌥Space is held: that
+//!   permission is the person's, for talking, never an agent's.
 //!
 //! Every command is also approved before it runs, so the sandbox is the second line, not the
 //! first. Other systems run commands without it for now.
@@ -68,6 +71,7 @@ fn profile(network: bool, extra: usize) -> String {
     let mut profile = String::from(
         "(version 1)\n\
          (allow default)\n\
+         (deny device-microphone)\n\
          (deny file-write*)\n\
          (allow file-write*\n  \
            (subpath (param \"WORK\"))\n  \
@@ -370,6 +374,13 @@ mod tests {
         assert!(profile(true, 2).contains("WRITABLE_1"));
     }
 
+    #[test]
+    fn the_profile_keeps_every_command_off_the_microphone() {
+        for (network, extra) in [(false, 0), (true, 0), (true, 2)] {
+            assert!(profile(network, extra).contains("(deny device-microphone)\n"));
+        }
+    }
+
     const WORK: &str = "/Users/me/Library/Application Support/LoomWatch/agents/coby";
 
     fn folders() -> Vec<String> {
@@ -611,6 +622,37 @@ mod tests {
         assert_eq!(
             printed,
             expected,
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    /// macOS's own check of a sandbox, asked from inside one: the microphone is refused, and the
+    /// camera, which the profile leaves alone, is not. It is asked through Python, which comes with
+    /// Apple's command line tools; on a Mac without them there is nothing to ask with.
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn on_a_mac_a_command_is_refused_the_microphone() {
+        let tools = std::process::Command::new("/usr/bin/xcode-select")
+            .arg("-p")
+            .output();
+        if !tools.is_ok_and(|tools| tools.status.success()) {
+            eprintln!("skipped: no command line tools, so no Python to ask the sandbox with");
+            return;
+        }
+        let base = std::env::temp_dir().join(format!("loomwatch-sandbox-{}", uuid::Uuid::new_v4()));
+        let work = base.join("work");
+        std::fs::create_dir_all(&work).unwrap();
+        let script = "/usr/bin/python3 -c 'import ctypes, os; check = ctypes.CDLL(None).sandbox_check; \
+                      print(check(os.getpid(), b\"device-microphone\", 0), \
+                      check(os.getpid(), b\"device-camera\", 0))'";
+        let mut command =
+            wrap(script, &work, &CommandSettings::default()).expect("macOS has sandbox-exec");
+        let output = command.current_dir(&work).output().await.unwrap();
+        let _ = std::fs::remove_dir_all(&base);
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "1 0\n",
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );

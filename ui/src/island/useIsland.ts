@@ -20,6 +20,8 @@ import type { Intake } from './intake'
 import { pinnedNow, pinnedWorking, sendToPinned, type PinnedNow } from './pinned'
 import { wakesAt } from './popouts'
 import { initialIsland, islandReducer, viewOf, type IslandAction, type IslandState, type IslandViewName } from './state'
+import { fetchSuggestions, type Suggestion } from './suggestions'
+import { loudness, withHeard, type Loudness, type TalkProblem } from './talk'
 import { copyText, tucked, type TeamNow, type Tucked } from './teams'
 import { ISLAND_WAITS } from './waits'
 
@@ -73,14 +75,23 @@ export interface Island {
   pointerOnDrop: (over: boolean) => void
   /** The agent pinned to the notch, beside it at rest. */
   pinned: PinnedNow | null
-  /** The agent the box writes to (one chosen in it, else the pinned one, else the first of My
-      agents), and writing to it:
-      the message so far, whether it is at work (a message then joins its turn), and what sending
-      did. */
+  /** The agent the box writes to (the pinned one, else the first of My agents, which a message
+      pins), and writing to it: the message so far, whether it is at work (a message then joins its
+      turn), and what sending did. */
   box: PinnedNow | null
-  /** My agents, to switch the box to for this message; sending pins the one it went to. */
+  /** My agents, by id: the one the box wrote to before another was pinned is drawn as it goes. */
   agents: readonly SavedJob[]
-  choose: (id: string) => void
+  /** ⌃⌥Space can be held to talk: the page is in the Mac app, which listens. */
+  canTalk: boolean
+  /** ⌃⌥Space is held and the app listens, how loud it hears, and why it could not listen last. */
+  listening: boolean
+  loudness: Loudness
+  talkProblem: TalkProblem | null
+  /** System Settings, where the microphone or speech recognition is turned on for LoomWatch. */
+  openSettings: (pane: 'microphone' | 'speech') => void
+  /** What the person may want to ask it next, and putting one in the box, to change or send. */
+  suggestions: readonly Suggestion[]
+  suggest: (text: string) => void
   /** Its newest run in its chat, which its workbench acts out while it works. */
   boxRecord: RunRecord | null
   /** Its workbench, open under the box, or folded away; opened from the pill, the box opens too. */
@@ -174,6 +185,19 @@ export function useIsland(): Island {
   const toldSeen = useRef(new Set<string>())
   // Files the app took from a drop go as a drop does (`drop`, below), as it is now.
   const dropping = useRef<(intake: Intake) => void>(() => {})
+  // Talking: what is heard goes after what was written before ⌃⌥Space was held (`heardAfter`),
+  // until the last words of that hold are in, or until the box is sent or written in: the last
+  // words come a moment after letting go, and must not bring back a message sent, or undo a word
+  // put right.
+  const [level] = useState(loudness)
+  const [talkProblem, setTalkProblem] = useState<TalkProblem | null>(null)
+  const written = useRef('')
+  useEffect(() => { written.current = draft }, [draft])
+  const heardAfter = useRef<string | null>(null)
+  const typeDraft = useCallback((text: string) => {
+    heardAfter.current = null
+    setDraft(text)
+  }, [])
   useEffect(() => {
     const stop = listen((message) => {
       if (message.kind === 'seen') for (const run of message.runs) toldSeen.current.add(run)
@@ -181,11 +205,42 @@ export function useIsland(): Island {
         pickFiles((files) => dropping.current({ files, link: null, text: null }))
         return
       }
+      if (message.kind === 'listen') {
+        level.set(0)
+        if (message.on) {
+          setTalkProblem(null)
+          heardAfter.current = written.current
+        }
+      }
+      if (message.kind === 'heard') {
+        if (heardAfter.current === null) return
+        setDraft(withHeard(heardAfter.current, message.text))
+        if (!message.done) return
+        // A hold that ends with nothing heard says so, rather than leaving the box as it was.
+        if (!message.text.trim()) setTalkProblem('nothing')
+        heardAfter.current = null
+        return
+      }
+      if (message.kind === 'level') {
+        level.set(message.level)
+        return
+      }
+      if (message.kind === 'cantListen') {
+        setTalkProblem(message.why)
+        return
+      }
       dispatch({ type: 'app', message })
     })
     tellApp({ kind: 'ready' })
     return stop
-  }, [])
+  }, [level])
+  // What stopped talking is said until the box is put away.
+  const writing = state.composing
+  const [wasWriting, setWasWriting] = useState(writing)
+  if (writing !== wasWriting) {
+    setWasWriting(writing)
+    if (!writing) setTalkProblem(null)
+  }
   // Results looked at here leave the other screens' islands too.
   const seen = state.seen
   useEffect(() => {
@@ -208,24 +263,15 @@ export function useIsland(): Island {
   useEffect(() => { if (listOpen) readSaved() }, [readSaved, listOpen])
   const pinned = useMemo(() => pinnedNow(pinnedId ?? null, saved), [pinnedId, saved])
   useEffect(() => { dispatch({ type: 'pinned', pinned }) }, [pinned])
-  // The box opens with the pinned agent; with none pinned, with the first of My agents. Another
-  // can be chosen while it is open, for this message: sending pins the one it went to, so the box
-  // opens with the agent last written to. Put away unsent, it opens as before.
-  const opens = useMemo(() => pinned ?? pinnedNow(saved[0]?.id ?? null, saved), [pinned, saved])
-  const [chosenId, setChosenId] = useState<string | null>(null)
-  const [wasOpen, setWasOpen] = useState(listOpen)
-  if (listOpen !== wasOpen) {
-    setWasOpen(listOpen)
-    if (!listOpen) setChosenId(null)
-  }
-  const box = useMemo(() => (chosenId ? pinnedNow(chosenId, saved) : null) ?? opens, [chosenId, saved, opens])
+  // The box writes to the pinned agent, the one agent at the notch; with none pinned, to the first
+  // of My agents, and sending pins it. Another is pinned in My agents.
+  const box = useMemo(() => pinned ?? pinnedNow(saved[0]?.id ?? null, saved), [pinned, saved])
   useEffect(() => { dispatch({ type: 'box', box }) }, [box])
   // The app hears whom the box opens with, so ⌃⌥Space and Message in its menu have a box to open.
-  const opensName = opens?.name ?? null
+  const opensName = box?.name ?? null
   useEffect(() => {
     if (pinnedId !== undefined) tellApp({ kind: 'agent', name: opensName })
   }, [pinnedId, opensName])
-  const choose = useCallback((id: string) => setChosenId(id), [])
   // A drop goes in once its files are sorted (`sortDropped`): what the box's agent can't open
   // stays out, and the box says why. Files already waiting count toward the ten a message carries.
   const boxName = box?.name ?? null
@@ -353,6 +399,8 @@ export function useIsland(): Island {
   const send = useCallback((job?: string) => {
     const text = (job ?? draft).trim()
     if (!text || !box || sending) return
+    // What is still to be heard from a hold let go a moment ago stays out of the box: this is sent.
+    heardAfter.current = null
     // The words fold from where they are written: the field's place now, before sending disables it.
     const input = document.querySelector('.island-field')
     const field = input?.getBoundingClientRect()
@@ -470,6 +518,35 @@ export function useIsland(): Island {
   const { notch, menuBar } = state.app
   const boxPath = box?.chatPath ?? null
   const boxRecord = useMemo(() => newestIn(state.records, boxPath), [state.records, boxPath])
+
+  // What to suggest asking it next: read only while the box is open, and again as an answer comes
+  // in, so next steps are written for an answer only when the person reaches for the box after it.
+  // While they are being written, read again in a moment.
+  const [suggested, setSuggested] = useState<readonly Suggestion[]>([])
+  const boxId = box?.id ?? null
+  const writingNow = state.composing
+  const readFor = `${boxId}\n${boxRecord?.finishedAt ?? ''}\n${writingNow}`
+  const [rereads, setRereads] = useState({ for: readFor, count: 0 })
+  if (rereads.for !== readFor) setRereads({ for: readFor, count: 0 })
+  const reread = rereads.count
+  useEffect(() => {
+    if (!boxId || !writingNow) return
+    const stop = new AbortController()
+    let again: number | undefined
+    fetchSuggestions(stop.signal).then(({ suggestions, writing }) => {
+      setSuggested(suggestions)
+      if (writing && reread < ISLAND_WAITS.suggestionRereads) again = window.setTimeout(() => setRereads((now) => ({ ...now, count: now.count + 1 })), ISLAND_WAITS.suggestionReread)
+    }, () => {})
+    return () => {
+      stop.abort()
+      window.clearTimeout(again)
+    }
+  }, [boxId, writingNow, readFor, reread])
+  const suggest = useCallback((text: string) => {
+    typeDraft(text)
+    compose(true)
+  }, [typeDraft, compose])
+
   return {
     view,
     teams,
@@ -496,7 +573,13 @@ export function useIsland(): Island {
     pinned,
     box,
     agents: saved,
-    choose,
+    canTalk: inApp(),
+    listening: state.listening,
+    loudness: level,
+    talkProblem,
+    openSettings: useCallback((pane: 'microphone' | 'speech') => tellApp({ kind: 'settings', pane }), []),
+    suggestions: suggested,
+    suggest,
     boxRecord,
     bench: state.bench,
     setBench: useCallback((on: boolean) => dispatch({ type: 'bench', on }), []),
@@ -506,7 +589,7 @@ export function useIsland(): Island {
     }, [compose]),
     composing: state.composing,
     draft,
-    setDraft,
+    setDraft: typeDraft,
     pinnedWorking: box ? pinnedWorking(state.records, box) : false,
     sending,
     uploaded,
