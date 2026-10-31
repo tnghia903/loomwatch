@@ -88,6 +88,7 @@ const FRESH_MS = 1_400
 /** The answer's size before it has been measured. */
 const ANSWER_GUESS = { width: 360, height: 96 }
 const NO_PASSAGES: readonly AskedPassage[] = []
+const NO_PICTURES: readonly string[] = []
 const NO_TEAM: readonly string[] = []
 const NO_FACES: readonly AgentFacts[] = []
 /** Teammates' faces shown in the bubble beside the one asked; past this the rest are a list away. */
@@ -136,7 +137,13 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
   // Its paper lies on the reader's own ground, in the theme shown now.
   const { resolved: theme } = useTheme()
   const look = useMemo(() => (drawnKind ? readerLook(theme) : null), [drawnKind, theme])
-  const drawn = useDrawnPage(drawnKind ? path : null, drawnKind, baseName(path), String(content.changes), look ?? PAPER_LOOK)
+  // A slide that changed since it was last seen shows the face of the agent whose file it is.
+  const figures = useContext(TeamFiguresContext)
+  const figureOf = (id: string) => figures.get(id) ?? figures.get(wearerOf(id)) ?? null
+  const maker = drawnKind === 'slides' && from ? figureOf(from) : null
+  const makerPicture = useFigurePictures(maker ? [figureStill(maker)] : NO_PICTURES)
+  const face = maker ? makerPicture.get(figureStill(maker)) ?? null : null
+  const drawn = useDrawnPage(drawnKind ? path : null, drawnKind, baseName(path), String(content.changes), look ?? PAPER_LOOK, face)
   // Until it is drawn, or can't be, it is neither its pages nor only its words.
   const drawing = drawnKind !== null && !drawn
   const asPages = format === 'pdf'
@@ -641,8 +648,6 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
   }, [path, modifiedAt])
   // A web page marks its own parts (lib/files/pageFrame.ts), told how each looks and handed its
   // agent's figure as a picture it can show.
-  const figures = useContext(TeamFiguresContext)
-  const figureOf = (id: string) => figures.get(id) ?? figures.get(wearerOf(id)) ?? null
   const pictures = useFigurePictures(shown === 'page' ? mine.flatMap((passage) => { const figure = figureOf(bubbleAgent(passage)); return figure ? [figureStill(figure)] : [] }) : [])
   const pageMarksSaid = JSON.stringify({
     // Words, and the things in the page asked about (ADR 0091), each known by its part's id.

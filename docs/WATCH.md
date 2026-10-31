@@ -188,7 +188,11 @@ A PowerPoint deck is shown as its slides, and a Word document as its pages, draw
 itself: nothing else needs to be on the computer, and they open at once. Mark their words, or press
 the Pick switch and click any part of a slide or a page (a box, a table, a chart) to ask about it.
 Each slide sits under its number, and a picked picture, shape or chart is named by its slide. A
-deck's speaker notes fold away under each slide. A deck or a document LoomWatch can't draw shows only its words,
+slide's speaker notes are open under it: mark their words to ask about them, as any words. A strip
+of every slide runs beside them (on a wide enough reader): press one to go to it, and the one in
+view is ringed. When the deck changes after you last looked at it (an agent you asked changed it,
+say), each slide that changed carries the gold stitch in the strip and the face of the agent whose
+file it is, and on the slide the parts and notes that changed are outlined. A deck or a document LoomWatch can't draw shows only its words,
 and an old `.ppt` or `.doc` opens in its own app. A CSV or TSV file and an Excel workbook are shown as a sheet: a workbook's
 sheets behind tabs, the first row as the column names, the rows numbered. Drag across any cells to ask about them,
 or press (or drag across) column names or row numbers for whole columns or rows; from the keyboard,

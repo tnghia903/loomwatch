@@ -1,5 +1,6 @@
 import type { Chart, Element, Fill, Image, LineEnd, Shadow, Shape, Slide, Table, TableCell, Text } from 'pptxtojson'
 
+import type { DeckChanges } from './deckSeen'
 import { lookOf, PAPER_LOOK, type PageLook } from './pageLook'
 
 /** A slide deck as `pptxtojson` reads it out of a `.pptx`. */
@@ -8,6 +9,15 @@ export interface ParsedDeck {
   size: { width: number; height: number }
 }
 
+/** What the slides show of their changes: what changed since they were last seen, and the face of the agent whose file it is. */
+export interface SlideMarks {
+  changes: DeckChanges | null
+  /** A picture of the agent's figure, as data. */
+  face: string | null
+}
+
+const NO_MARKS: SlideMarks = { changes: null, face: null }
+
 /**
  * A slide deck drawn inside LoomWatch as a web page of its slides, one under another (ADR 0091), so
  * the reader shows it as it shows a page an agent made: its words marked and asked about, any part
@@ -15,20 +25,62 @@ export interface ParsedDeck {
  *
  * Each slide is drawn at its own size in points, every part where the deck puts it, and the whole
  * slide scaled to the reader's width by the page's own script. Each slide sits under a heading,
- * "Slide 3", so a part picked on it is named by the slide it is on; its speaker notes fold away
- * under it.
+ * "Slide 3", so a part picked on it is named by the slide it is on, with its speaker notes open
+ * under it, to read and to ask about as any words. Beside the slides, a strip of every slide
+ * (`stripHtml`) goes to one and shows which is in view; a slide that changed since the deck was
+ * last seen carries the gold stitch there, with the face of the agent whose file it is, and its
+ * changed parts and notes are outlined.
  */
-export function slidesPage(deck: ParsedDeck, name: string, look: PageLook = PAPER_LOOK): string {
+export function slidesPage(deck: ParsedDeck, name: string, look: PageLook = PAPER_LOOK, marks: SlideMarks = NO_MARKS): string {
   const width = positive(deck.size.width, 960)
   const height = positive(deck.size.height, 540)
-  const slides = deck.slides.map((slide, index) => slideHtml(slide, index + 1, width, height)).join('\n')
+  const shown = lookOf(look)
+  const slides = deck.slides.map((slide, index) => slideHtml(slide, index + 1, width, height, marks.changes)).join('\n')
+  // A deck of one slide has nothing to go to.
+  const strip = deck.slides.length > 1 ? stripHtml(deck.slides.length, width, height, marks) : ''
   return [
     '<!doctype html>',
     '<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">',
-    `<title>${escapeHtml(name)}</title><style>${deckStyle(lookOf(look))}</style></head>`,
-    `<body><main class="lw-deck">${slides}</main>`,
-    `<script>${fitScript(width)}</script></body></html>`,
+    `<title>${escapeHtml(name)}</title><style>${deckStyle(shown)}</style></head>`,
+    `<body><div class="lw-reader${strip ? '' : ' single'}">${strip}<main class="lw-deck">${slides}</main></div>`,
+    `<script>${fitScript(width)}${strip ? stripScript(width) : ''}</script></body></html>`,
   ].join('')
+}
+
+/** The gold stitch, a dashed line: what changed. */
+const stitch = (className: string, label: string | null) => `<svg class="${className}" viewBox="0 0 40 4" preserveAspectRatio="none"${label ? ` role="img" aria-label="${label}"` : ' aria-hidden="true"'}><path d="M1 2H39" stroke="currentColor" stroke-width="1.6" stroke-dasharray="3 2.5" stroke-linecap="round" vector-effect="non-scaling-stroke"/></svg>`
+
+/**
+ * A strip of every slide, each a small copy of it (`stripScript` draws them in), its number beside
+ * it. A press goes to the slide; the one in view is ringed. A changed slide has the stitch under it
+ * and the face of the agent whose file it is at its corner.
+ */
+function stripHtml(count: number, width: number, height: number, marks: SlideMarks): string {
+  const face = isPicture(marks.face ?? undefined) ? `<img class="lw-thumb-face" src="${escapeHtml(marks.face!)}" alt="">` : ''
+  const thumbs = Array.from({ length: count }, (_, index) => {
+    const number = index + 1
+    const changed = marks.changes?.slides.has(index) ?? false
+    return `<button type="button" class="lw-thumb${changed ? ' changed' : ''}" data-slide="${number}" aria-label="Slide ${number}${changed ? ', changed since you last looked' : ''}">`
+      + `<span class="lw-thumb-number" aria-hidden="true">${number}</span>`
+      + `<span class="lw-thumb-sheet"><span class="lw-thumb-paper" style="aspect-ratio:${num(width)}/${num(height)}"></span>`
+      + `${changed ? `${stitch('lw-thumb-stitch', null)}${face}` : ''}</span></button>`
+  })
+  return `<nav class="lw-strip" aria-label="Slides">${thumbs.join('')}</nav>`
+}
+
+/**
+ * The strip at work: each slide copied in small (inert: a copy is never marked, picked or found),
+ * a press scrolling to its slide, and the slide nearest the top of the view ringed, the strip kept
+ * scrolled to it.
+ */
+function stripScript(width: number): string {
+  const pixels = (width * (4 / 3)).toFixed(3)
+  return `(function(){var strip=document.querySelector('.lw-strip');if(!strip)return;var thumbs=[].slice.call(strip.querySelectorAll('.lw-thumb')),slides=[].slice.call(document.querySelectorAll('.lw-slide')),current=-1;`
+    + `function draw(){thumbs.forEach(function(thumb,i){var paper=thumb.querySelector('.lw-thumb-paper'),canvas=slides[i]&&slides[i].querySelector('.lw-canvas');if(!paper||!canvas)return;var copy=paper.querySelector('.lw-canvas');if(!copy){copy=canvas.cloneNode(true);[].forEach.call(copy.querySelectorAll('[id]'),function(e){e.removeAttribute('id');});copy.setAttribute('aria-hidden','true');copy.setAttribute('inert','');paper.appendChild(copy);}copy.style.transform='scale('+(paper.clientWidth/${pixels})+')';});}`
+    + `function mark(i){if(i===current)return;current=i;thumbs.forEach(function(t,j){if(j===i)t.setAttribute('aria-current','true');else t.removeAttribute('aria-current');});var t=thumbs[i];if(t&&(t.offsetTop<strip.scrollTop||t.offsetTop+t.offsetHeight>strip.scrollTop+strip.clientHeight))strip.scrollTop=t.offsetTop-16;}`
+    + `function follow(){var best=0;for(var i=0;i<slides.length;i++){if(slides[i].getBoundingClientRect().top<=innerHeight*0.4)best=i;}mark(best);}`
+    + `thumbs.forEach(function(thumb,i){thumb.addEventListener('click',function(){if(slides[i])slides[i].scrollIntoView({block:'start'});});});`
+    + `addEventListener('scroll',follow,{passive:true});addEventListener('resize',draw);draw();follow();})();`
 }
 
 /**
@@ -39,7 +91,7 @@ export function slidesPage(deck: ParsedDeck, name: string, look: PageLook = PAPE
 function fitScript(width: number): string {
   // Points to CSS pixels: 96 to 72.
   const pixels = width * (4 / 3)
-  return `(function(){var root=document.documentElement;function fit(){var deck=document.querySelector('.lw-deck');if(!deck)return;root.style.setProperty('--lw-k',String(Math.max(0.1,deck.clientWidth/${pixels.toFixed(3)})));}`
+  return `(function(){var root=document.documentElement;function fit(){var frame=document.querySelector('.lw-frame');if(!frame)return;root.style.setProperty('--lw-k',String(Math.max(0.1,frame.clientWidth/${pixels.toFixed(3)})));}`
     + `function shrink(){Array.prototype.forEach.call(document.querySelectorAll('.lw-shrink'),function(words){var box=words.parentElement,zoom=1;while(box.scrollHeight>box.clientHeight+1&&zoom>0.3){zoom-=0.05;words.style.zoom=String(zoom);}});}`
     + `addEventListener('resize',fit);fit();shrink();})();`
 }
@@ -47,9 +99,27 @@ function fitScript(width: number): string {
 /** The page around the slides: the reader's ground, and each slide paper on it, as a PDF's pages are. */
 const deckStyle = (look: PageLook) => [
   `html{background:${look.ground}}`,
-  `body{margin:0;padding:24px;color:${look.ink};font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}`,
-  '.lw-deck{max-width:1600px;margin:0 auto;display:flex;flex-direction:column;gap:40px}',
-  `.lw-slide-number{margin:0 0 8px;font-size:12px;font-weight:500;color:${look.label};letter-spacing:.02em}`,
+  `body{margin:0;color:${look.ink};font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}`,
+  '.lw-reader{display:grid;grid-template-columns:124px minmax(0,1fr);align-items:start}',
+  '.lw-reader.single{grid-template-columns:minmax(0,1fr)}',
+  `.lw-strip{position:sticky;top:0;height:100vh;box-sizing:border-box;overflow-y:auto;padding:20px 12px 20px 8px;display:flex;flex-direction:column;gap:14px;border-right:1px solid color-mix(in srgb,${look.ink} 12%,transparent);-webkit-user-select:none;user-select:none}`,
+  `.lw-thumb{display:grid;grid-template-columns:16px minmax(0,1fr);gap:6px;align-items:start;margin:0;padding:0;border:0;background:none;color:${look.label};font:500 11px/1.3 inherit;text-align:right;cursor:pointer}`,
+  `.lw-thumb[aria-current="true"]{color:${look.ink}}`,
+  `.lw-thumb:focus-visible{outline:2px solid ${look.accent};outline-offset:3px;border-radius:2px}`,
+  '.lw-thumb-sheet{position:relative;display:flex;flex-direction:column;gap:5px}',
+  '.lw-thumb-paper{position:relative;display:block;overflow:hidden;background:#fff;border-radius:2px;box-shadow:0 1px 2px rgba(0,0,0,.24)}',
+  `.lw-thumb[aria-current="true"] .lw-thumb-paper{box-shadow:0 0 0 2px ${look.accent}}`,
+  '.lw-thumb-paper .lw-canvas{position:absolute;left:0;top:0;transform-origin:0 0;pointer-events:none}',
+  `.lw-thumb-stitch{display:block;width:100%;height:4px;color:${look.accent}}`,
+  '.lw-thumb-face{position:absolute;top:-8px;right:-8px;width:18px;height:18px;object-fit:contain}',
+  '@media (max-width:560px){.lw-reader{grid-template-columns:minmax(0,1fr)}.lw-strip{display:none}}',
+  '.lw-deck{box-sizing:border-box;width:100%;max-width:1600px;margin:0 auto;padding:24px;display:flex;flex-direction:column;gap:40px}',
+  `.lw-slide-number{display:flex;align-items:center;gap:8px;margin:0 0 8px;font-size:12px;font-weight:500;color:${look.label};letter-spacing:.02em}`,
+  `.lw-slide-number .lw-stitch{width:28px;height:4px;color:${look.accent}}`,
+  // What changed, outlined: on the paper in a gold dark enough for white, beside it in the reader's.
+  '.lw-canvas .lw-changed{outline:2.5pt dashed #8A6A16;outline-offset:3pt}',
+  `.lw-notes.lw-changed{outline:1.5px dashed ${look.accent};outline-offset:6px;border-radius:2px}`,
+  '.lw-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}',
   '.lw-frame{position:relative;overflow:hidden;background:#fff;border-radius:4px;box-shadow:0 1px 3px rgba(0,0,0,.12),0 12px 32px rgba(0,0,0,.14)}',
   '.lw-canvas{position:relative;transform:scale(var(--lw-k,1));transform-origin:0 0;overflow:hidden;font-family:Calibri,Carlito,"Helvetica Neue",Arial,sans-serif;color:#000}',
   '.lw-canvas p{margin:0}',
@@ -69,18 +139,31 @@ const deckStyle = (look: PageLook) => [
   '.lw-chart{position:absolute;inset:0;width:100%;height:100%}',
   '.lw-chart text{font-family:Calibri,Carlito,"Helvetica Neue",Arial,sans-serif}',
   '.lw-media{border:1pt dashed #6E6862;border-radius:4pt}',
-  '.lw-notes{margin-top:10px;font-size:13px;line-height:1.5}',
-  `.lw-notes summary{cursor:pointer;color:${look.label};font-size:12px}`,
-  '@media (pointer:coarse){.lw-notes summary{min-height:44px;display:flex;align-items:center}}',
-  '.lw-notes p{margin:4px 0}',
+  '.lw-notes{margin-top:14px;max-width:72ch;font-size:14px;line-height:1.55;overflow-wrap:anywhere}',
+  `.lw-notes-label{margin:0 0 4px;font-size:12px;font-weight:500;color:${look.label}}`,
+  // The notes read in the reader's own words, whatever colour the deck gave them on its white page.
+  '.lw-notes-words *{color:inherit!important;background:transparent!important}',
+  '.lw-notes-words p{margin:4px 0}',
 ].join('')
 
-function slideHtml(slide: Slide, number: number, width: number, height: number): string {
-  const parts = [...(slide.layoutElements ?? []), ...(slide.elements ?? [])].map((element) => elementHtml(element, number)).join('')
-  const notes = slide.note?.trim() ? `<details class="lw-notes"><summary>Notes</summary>${textContent(slide.note)}</details>` : ''
+function slideHtml(slide: Slide, number: number, width: number, height: number, changes: DeckChanges | null): string {
+  const index = number - 1
+  const changedParts = changes?.parts.get(index)
+  const layout = (slide.layoutElements ?? []).map((element) => elementHtml(element, number)).join('')
+  // The slide's own parts that changed are outlined; its master's are never what an agent changed.
+  const own = (slide.elements ?? []).map((element, at) => {
+    const drawn = elementHtml(element, number)
+    return changedParts?.has(at) ? drawn.replace('class="lw-el', 'class="lw-el lw-changed') : drawn
+  }).join('')
+  const parts = layout + own
+  // Its notes, open, under their own heading, which names the slide for a part picked in them.
+  const notes = slide.note?.trim()
+    ? `<div class="lw-notes${changes?.notes.has(index) ? ' lw-changed' : ''}"><h3 class="lw-notes-label">Notes<span class="lw-hidden">, slide ${number}</span></h3><div class="lw-notes-words">${textContent(slide.note)}</div></div>`
+    : ''
+  const changed = changes?.slides.has(index) ? stitch('lw-stitch', 'changed since you last looked') : ''
   const id = `lw-slide-${number}`
   // The frame keeps the slide's shape at any scale; the canvas inside is the slide at its own size.
-  return `<section class="lw-slide" aria-labelledby="${id}"><h2 class="lw-slide-number" id="${id}">Slide ${number}</h2>`
+  return `<section class="lw-slide" aria-labelledby="${id}"><h2 class="lw-slide-number" id="${id}">Slide ${number}${changed}</h2>`
     + `<div class="lw-frame" style="aspect-ratio:${num(width)}/${num(height)}">`
     + `<div class="lw-canvas" style="width:${pt(width)};height:${pt(height)};${backgroundOf(slide.fill, '#ffffff')}">${parts}</div></div>${notes}</section>`
 }

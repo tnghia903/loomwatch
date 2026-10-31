@@ -63,7 +63,7 @@ vi.mock('pptxtojson', () => ({
       content: `<p><span style="font-size: 28pt;font-family: Calibri;">${said}</span></p>`, vAlign: 'up', wrap: true,
       borderColor: '', borderWidth: 0, borderType: 'solid', borderStrokeDasharray: '0', fill: { type: 'color', value: '' }, order: 1,
     })
-    return { size: { width: 960, height: 540 }, slides: [words('1', 'Sales grew.'), words('2', 'North leads.')].map((element) => ({ fill: { type: 'color', value: '#FFFFFF' }, layoutElements: [], elements: [element], note: '' })) }
+    return { size: { width: 960, height: 540 }, slides: [words('1', 'Sales grew.'), words('2', 'North leads.')].map((element, index) => ({ fill: { type: 'color', value: '#FFFFFF' }, layoutElements: [], elements: [element], note: index === 0 ? '<p>Say the pain points come from the sponsor.</p>' : '' })) }
   }),
 }))
 vi.mock('../../lib/files/deckStyles', () => ({ withInheritedStyles: async (bytes: ArrayBuffer) => bytes }))
@@ -1481,6 +1481,18 @@ describe('a PDF in the reader', () => {
       act(() => { window.dispatchEvent(new MessageEvent('message', { data: { lw: 'reader', type: 'thing', what: 'part', path: at.path, text: 'The part “Sales grew.”', rect: { top: 40, bottom: 90, left: 20, right: 320 } }, source: frame.contentWindow })) })
       fireEvent.click(await screen.findByRole('button', { name: 'Explain' }))
       expect(onAsk).toHaveBeenCalledWith(expect.objectContaining({ kind: 'passage', text: 'The part “Sales grew.”', file: DECK, at }), EXPLAIN_WORDS, 'writer')
+    })
+
+    it('draws a strip of the slides beside them and their notes under them, and asks about words marked in the notes', async () => {
+      const { onAsk } = renderReader({ file: { path: DECK, runId: 'run-1', from: 'writer' } })
+      const frame = await frameOf()
+      const page = new DOMParser().parseFromString(frame.getAttribute('srcdoc') ?? '', 'text/html')
+      expect([...page.querySelectorAll('.lw-strip button')].map((thumb) => thumb.getAttribute('aria-label'))).toEqual(['Slide 1', 'Slide 2'])
+      expect(page.querySelector('.lw-notes')!.textContent).toBe('Notes, slide 1Say the pain points come from the sponsor.')
+      // Marked in the page like any words: the pill asks about them.
+      act(() => { window.dispatchEvent(new MessageEvent('message', { data: { lw: 'reader', type: 'selection', text: 'the pain points come from the sponsor', rect: { top: 420, bottom: 440, left: 40, right: 320 } }, source: frame.contentWindow })) })
+      fireEvent.click(await screen.findByRole('button', { name: 'Ask' }))
+      expect(onAsk).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'passage', text: 'the pain points come from the sponsor', file: DECK }), undefined, 'writer')
     })
 
     it('draws a Word document as a page of its pages, from its own bytes', async () => {

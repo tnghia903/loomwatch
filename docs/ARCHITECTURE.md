@@ -82,7 +82,12 @@ instructions and tools.
   `deckStyles.ts` writes onto each slide what it takes from its master (its placeholders' bullets,
   and PowerPoint's default table style, which a deck names but rarely carries), and drawn by
   `slidesPage.ts`: each slide at its own size in points under a "Slide n" heading, scaled to the
-  frame's width, its charts drawn from the numbers the deck keeps for them. A Word document is laid
+  frame's width, its charts drawn from the numbers the deck keeps for them, its speaker notes open
+  under it, and a strip of inert copies of the slides beside them. `deckSeen.ts` fingerprints each
+  slide, part and note (numbering left out, as a script that writes the deck again renumbers it)
+  and keeps the version last shown in the browser's local storage (the latest 40 decks); a later
+  version is compared with it, or, while the deck is open, with the version on screen before, and
+  what changed is marked: a slide found anywhere before counts as moved, not changed. A Word document is laid
   out by `docx-preview` (`documentPage.ts`), its fonts given fallbacks and Word's Symbol bullets
   drawn as the marks they are. Pictures are kept in the page as data. The drawing code is loaded
   only when such a file is first opened; a file it can't draw shows its words. `/api/files/pages`

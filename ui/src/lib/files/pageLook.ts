@@ -7,17 +7,19 @@ export interface PageLook {
   ground: string
   ink: string
   label: string
+  /** Gold as a line or a ring: the slide shown now, and what changed. */
+  accent: string
 }
 
 /** The light theme's ground and words (tokens.css), where the reader's own can't be read. */
-export const PAPER_LOOK: PageLook = { ground: '#FAF8F3', ink: '#17150F', label: '#56524A' }
+export const PAPER_LOOK: PageLook = { ground: '#FAF8F3', ink: '#17150F', label: '#56524A', accent: '#8A6A16' }
 /** The dark theme's, likewise. */
-export const DARK_LOOK: PageLook = { ground: '#08080A', ink: '#F5F3EE', label: '#A9A59C' }
+export const DARK_LOOK: PageLook = { ground: '#08080A', ink: '#F5F3EE', label: '#A9A59C', accent: '#E9C46A' }
 
 /** The look given, each colour a colour or else `fallback`'s. */
 export function lookOf(look: Partial<PageLook> | null | undefined, fallback: PageLook = PAPER_LOOK): PageLook {
   const pick = (key: keyof PageLook) => cssColour(look?.[key]) || fallback[key]
-  return { ground: pick('ground'), ink: pick('ink'), label: pick('label') }
+  return { ground: pick('ground'), ink: pick('ink'), label: pick('label'), accent: pick('accent') }
 }
 
 /** A colour as the app's styles write one, if it is one: never anything else in a style. */
