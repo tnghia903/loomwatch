@@ -1,4 +1,4 @@
-import { Fragment, type ReactNode } from 'react'
+import { Fragment, type MouseEvent, type ReactNode } from 'react'
 
 import { otherTeams, type Room, type RoomTeam } from '../../lib/projects/studio'
 import { markOf, type FigureOf } from '../../lib/projects/studioUi'
@@ -55,10 +55,19 @@ function StateShape({ state }: { state: RoomTeam['state'] }) {
   return <span className="room-card-noshape" aria-hidden="true" />
 }
 
-/** A team on one line, the whole line opening its chat: on a room's card, and under "Not in a project". */
-export function TeamLine({ team, figureOf }: { team: RoomTeam; figureOf: FigureOf }) {
+/**
+ * A team on one line, the whole line opening its chat: on a room's card, and under "Not in a
+ * project". In a team's name menu it opens on the tab on screen instead, and marks the team open.
+ */
+export function TeamLine({ team, figureOf, href = teamHref(team.path, 'chat'), current = false, onClick }: {
+  team: RoomTeam
+  figureOf: FigureOf
+  href?: string
+  current?: boolean
+  onClick?: (event: MouseEvent<HTMLAnchorElement>) => void
+}) {
   return (
-    <a className="room-card-team" href={teamHref(team.path, 'chat')}>
+    <a className="room-card-team" href={href} aria-current={current ? 'page' : undefined} onClick={onClick}>
       <StateShape state={team.state} />
       <span className="room-card-team-words">
         <b>{team.name}</b>

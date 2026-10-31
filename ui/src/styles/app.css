@@ -786,6 +786,26 @@ button.thread-node:hover svg, button.thread-node:focus-visible svg { color: var(
 .pop-empty { padding: var(--sp-3) var(--sp-4); color: var(--color-ink-3); }
 .pop-inline { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); color: var(--color-ink-2); }
 .pop-inline .btn { height: 24px; }
+/* The other teams in a team's name menu (TeamSwitch): each on its line from Projects, by project.
+   A row's state words are coloured (gold waiting, red stopped), so its hover is a lighter mix than a
+   menu row's, which keeps them at AA in both themes, and the open team is a gold line, not a fill. */
+.team-switch { border-bottom: 1px solid var(--color-hairline); }
+.team-switch-list { max-height: min(360px, 50vh); }
+.team-switch-group + .team-switch-group { margin-top: var(--sp-2); }
+.team-switch-head { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3) 2px; color: var(--color-ink-3); }
+/* Square, as on Projects: at this size the mark's rounding drew a status dot. */
+.team-switch-head .project-mark { border-radius: 2px; }
+.team-switch-head span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.team-switch ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.team-switch .room-card-team { min-height: 44px; padding: 4px var(--sp-3); border-radius: var(--r-sm); }
+.team-switch .room-card-team:hover { background: color-mix(in srgb, var(--color-accent) 6%, var(--color-panel-solid)); }
+.team-switch .room-card-team:hover b { text-decoration: none; }
+.team-switch .room-card-team[aria-current='page'] { box-shadow: inset 0 0 0 1px var(--color-accent-dim); }
+/* Inside the list's scroll, where an outline drawn outside the line would be cut off. */
+.team-switch .room-card-team:focus-visible { outline-offset: -2px; }
+/* The question on its line, its answers together under it: a long team name never strands Cancel. */
+.team-switch-leave { flex-wrap: wrap; border-bottom: 1px solid var(--color-hairline); }
+.team-switch-leave > span { flex: 1 0 100%; }
 .lw-palette { width: min(560px, calc(100vw - 32px)); left: 50%; top: 22%; transform: translateX(-50%); }
 /* Fixed, so a dialog sits in the window wherever its page is scrolled (Home scrolls inside itself), and
    its scrim covers the rail too, so nothing beside a dialog stays clickable. */

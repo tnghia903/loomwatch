@@ -152,6 +152,7 @@ import { askedInChat, type AskedPassage } from '../lib/files/passage'
 import { baseName } from '../lib/files/paths'
 import { registerAskToggle, showAsk } from './frame/frameStore'
 import { openTeam } from '../lib/team-file/useTeamList'
+import { useLeaveTeam } from '../lib/team-file/leaveTeam'
 import { FileOriginContext, FileReaderContext, readerFormat, type FileToRead } from '../lib/files/reader'
 import { useFilesFound } from '../lib/files/useFile'
 import { lookupFile } from '../lib/files/client'
@@ -269,6 +270,8 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   // Only a change to the shared setup reaches them; a schedule, delivery or Brief stays this place's.
   const setupChanged = useMemo(() => setupDiffers(doc.loadedYaml, doc.yamlPreview), [doc.loadedYaml, doc.yamlPreview])
   const alsoIn = useMemo(() => (setupChanged ? places?.others.flatMap((place) => (place.project ? [place.project] : [])) ?? [] : []), [places, setupChanged])
+  // Another team, from the name chip's menu: once this one's changes are saved or dropped.
+  const leaveTeam = useLeaveTeam(doc.saveState, doc.save, doc.reloadFromDisk)
   const { jobs: savedJobs, loaded: savedJobsLoaded } = useSavedJobs()
   // ADR 0092: the person's other agents a run may bring in, named and drawn as in My agents.
   const guests = useMemo(() => guestsOf(savedJobs, doc.nodes.map((node) => node.data.agent.name || node.id)), [savedJobs, doc.nodes])
@@ -408,6 +411,19 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     else then()
   }, [agentsView])
   const closeBench = useCallback(() => leaveBench(showWorkflow), [leaveBench, showWorkflow])
+  // Another team, picked from the name's menu with an agent's workbench open: the workbench asks
+  // first, then closes, and the move waits for that, so nothing it held still holds the page.
+  const afterBench = useRef<(() => void) | null>(null)
+  const [benchClosed, setBenchClosed] = useState(0)
+  useEffect(() => {
+    const then = afterBench.current
+    afterBench.current = null
+    then?.()
+  }, [benchClosed])
+  const beforeOtherTeam = useCallback((then: () => void) => {
+    if (!agentsView) { then(); return }
+    leaveBench(() => { showWorkflow(); afterBench.current = then; setBenchClosed((count) => count + 1) })
+  }, [agentsView, leaveBench, showWorkflow])
   // §15.2.1: the configured graph's positions are the document's, so what is left here is
   // presentation-only: where the operator dragged Build's docked Prompt and Output cards.
   const [overlayPositions, setOverlayPositions] = useState<Record<string, { x: number; y: number }>>({})
@@ -2771,6 +2787,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
             onSave={() => void doc.save()} onSaveCopy={() => setSaveCopyOpen(true)} onReload={() => void doc.reloadFromDisk()} onDiscard={() => void doc.reloadFromDisk()}
             onRename={editable ? doc.renameTeam : undefined} onDelete={doc.saveState !== 'new' && !doc.fileGone ? () => setDeleteTeamOpen(true) : undefined}
             onSelectProblem={selectProblem} problemsOpen={problemsOpen} onProblemsOpenChange={setProblemsOpen}
+            teams={{ view: runView || runSetup ? 'chat' : 'workflow', runs: needsYou.records, leave: leaveTeam, before: beforeOtherTeam }}
           />
           {doc.diskNotice && <p className="lw-notice t-meta" style={{ margin: 0 }}>{doc.diskNotice}</p>}
           {doc.entrypointProblem && doc.entrypointProblem.candidates.length > 0 && editable && <EntrypointProblemBar problem={doc.entrypointProblem} onPromote={doc.promoteEntrypoint} />}

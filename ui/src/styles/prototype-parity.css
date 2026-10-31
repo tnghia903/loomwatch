@@ -63,12 +63,12 @@
 @media(max-width:767px) { .lw-shell .workspace-chrome>.workspace-view-tabs { grid-column:1; } }
 .lw-shell .workspace-chrome>div:has(.lw-chip) { grid-column:1; grid-row:1; justify-self:start; width:330px; max-width:100%; min-width:0; }
 /* Below ~1180px that column is too narrow for the team name beside a Save or Review button, so the
-   header gives the chip room: slimmer tabs, no chevron (the whole
-   chip opens the switcher). What still does not fit is truncated, and the chip's tooltip has it. */
+   header gives the chip room: slimmer tabs and a slimmer chip. Its chevron stays: the name's menu is
+   how to reach another team, and without it the name read as a caption. What still does not fit is
+   truncated, and the chip's tooltip has it. */
 @media (min-width:768px) and (max-width:1180px) {
   .lw-shell .workspace-view-tabs button { min-width:80px; }
   .lw-shell .workspace-chrome .lw-chip { padding:0 8px; }
-  .lw-shell .workspace-chrome .lw-chip .chev { display:none; }
   /* Plain text lines: as flex containers they clipped mid-letter instead of ending in an ellipsis. */
   .lw-shell .workspace-chrome .lw-chip :is(.chip-l1,.chip-l2) { display:block; }
 }

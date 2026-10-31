@@ -815,12 +815,18 @@ at a little desk, whose workbench opens while it is pointed at. For the agent in
   registers (`registerAskToggle`), or Home's when it has none. One poll of the run registry serves
   the dock and every screen (`useRunRecords` in `lib/story/useNeedsYou.ts`). A screen's own header
   holds only what is its own; About you, Connections and Usage are You's tabs (`YouTabs`).
-- **Teams open in place:** going to another team (a room, the dock's Home or Projects, Back and
-  Forward) changes the address without a page load (`ui/src/lib/team-file/teamPage.ts`). The next
-  team's file is read first, then the team's own part of the page, canvas included, starts fresh
-  under a new React key, as it would on a load. The frame and the app's own data (what waits on
-  you, the teams, your saved agents, the schema's checker) stay, and the dock follows the address
-  (`MOVED_EVENT`). With changes not saved, the move is a page load, so the browser asks first.
+- **Teams open in place:** going to another team (a room, the dock's Home or Projects, the team
+  name's menu, Back and Forward) changes the address without a page load
+  (`ui/src/lib/team-file/teamPage.ts`). The next team's file is read first, then the team's own
+  part of the page, canvas included, starts fresh under a new React key, as it would on a load. The
+  frame and the app's own data (what waits on you, the teams, your saved agents, the schema's
+  checker) stay, and the dock follows the address (`MOVED_EVENT`). With changes not saved, the move
+  is a page load, so the browser asks first. The team name's menu (`TeamSwitch` in
+  `DocumentSwitcher`) lists every team by project and opens one on the tab on screen. An open
+  agent's workbench with changes asks its own question first; then, with the team's changes not
+  saved, the menu asks the same question for the team (Save, Don't save, Cancel), and the page moves
+  in place once the save or the re-read has landed (`useLeaveTeam` in
+  `ui/src/lib/team-file/leaveTeam.ts`).
 - **Look and feel:** eye-catching and minimal. Few primary surfaces, one obvious action per
   screen, progressive disclosure of everything else. A run is drawn as Prompt → Run → agents →
   evidence → Output, projected from archived events, never from prose.

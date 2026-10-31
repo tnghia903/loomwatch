@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { RunRecord } from '../runs/client'
 import type { ProjectEntry } from './client'
-import { deskItems, otherTeams, rankRooms, roomsOf, seatWords, shownSeats, studioLayout, teamShapeOf, type Room, type TeamShape } from './studio'
+import { deskItems, findTeams, looseProjects, otherTeams, rankRooms, roomsOf, seatWords, shownSeats, studioLayout, teamGroups, teamShapeOf, type Room, type TeamShape } from './studio'
 
 const PIPELINE = `schemaVersion: 1
 id: gate
@@ -170,5 +170,54 @@ describe('the studio (ADR 0097)', () => {
     const seats = Array.from({ length: 6 }, (_, index) => ({ kind: 'agent' as const, id: `${index}`, name: `${index}`, state: 'ready' as const, away: null }))
     expect(shownSeats(seats)).toMatchObject({ more: 2 })
     expect(shownSeats(seats).shown).toHaveLength(4)
+  })
+})
+
+// A team's name menu lists the other teams to go to: there was no way to another team's chat from a
+// team's page once the rail went (round 3), short of Projects and back in.
+describe('the teams a team page moves to', () => {
+  const team = (path: string, name: string, project: string | null, agents: string[] = []): TeamShape => ({
+    path, name, project, schedule: null, seats: agents.map((agent) => ({ kind: 'agent' as const, id: agent.toLowerCase(), name: agent })),
+  })
+  const shapes = [
+    team('home/chores.yaml', 'Chores', 'home', ['Planner']),
+    team('sutd/deck.yaml', 'Slide deck prep', 'sutd', ['Presentation maker', 'Checker']),
+    team('sutd/notes.yaml', 'Lecture notes', 'sutd', ['Note taker']),
+    team('old/archive.yaml', 'Archive', 'old'),
+    team('loose.yaml', 'Odd jobs', null, ['Helper']),
+  ]
+  const projects = [
+    project('home', ['home/chores.yaml'], { name: 'Home' }),
+    project('sutd', ['sutd/deck.yaml', 'sutd/notes.yaml'], { name: 'SUTD' }),
+    project('old', ['old/archive.yaml'], { name: 'Old', putAway: true }),
+    project('empty', [], { name: 'Empty' }),
+  ]
+  const rooms = roomsOf([...projects, ...looseProjects(['loose.yaml'], [{ path: 'loose.yaml', name: 'Odd jobs', agentCount: 1 }])], shapes, [], '/Users/me/LoomWatch/teams')
+  const names = (groups: ReturnType<typeof teamGroups>) => groups.map((group) => [group.name, group.teams.map((one) => one.name)])
+
+  it('puts the open team’s project first, then the others, then the teams in no project, and leaves out a put-away or empty project', () => {
+    expect(names(teamGroups(rooms, 'sutd/notes.yaml', null))).toEqual([
+      ['SUTD', ['Slide deck prep', 'Lecture notes']],
+      ['Home', ['Chores']],
+      ['Not in a project', ['Odd jobs']],
+    ])
+  })
+
+  // In the running app the open team has its full path; the projects list teams under the folder.
+  it('finds the open team by its full path as well as its path under the teams folder', () => {
+    const full = teamGroups(rooms, '/Users/me/LoomWatch/teams/sutd/deck.yaml', '/Users/me/LoomWatch/teams')
+    expect(full[0]).toMatchObject({ id: 'sutd', name: 'SUTD' })
+    expect(teamGroups(rooms, '/Users/me/LoomWatch/teams/home/chores.yaml', '/Users/me/LoomWatch/teams')[0]).toMatchObject({ id: 'home' })
+  })
+
+  it('keeps a put-away project when the open team is in it', () => {
+    expect(names(teamGroups(rooms, 'old/archive.yaml', null))[0]).toEqual(['Old', ['Archive']])
+  })
+
+  it('finds a team by its name or by one of its agents’, and drops the groups left empty', () => {
+    expect(names(findTeams(teamGroups(rooms, 'sutd/deck.yaml', null), 'notes'))).toEqual([['SUTD', ['Lecture notes']]])
+    expect(names(findTeams(teamGroups(rooms, 'sutd/deck.yaml', null), 'HELPER'))).toEqual([['Not in a project', ['Odd jobs']]])
+    expect(findTeams(teamGroups(rooms, 'sutd/deck.yaml', null), 'nobody')).toEqual([])
+    expect(findTeams(teamGroups(rooms, 'sutd/deck.yaml', null), '  ')).toHaveLength(3)
   })
 })
