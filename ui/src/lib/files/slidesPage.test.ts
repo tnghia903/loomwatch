@@ -185,6 +185,25 @@ describe('a slide deck drawn as a page', () => {
     }
   })
 
+  it('fits the page to the window and scrolls only the notes, so the slide and the walk’s buttons stay put as steps open', () => {
+    const page = live(deck([slide([words(p('One'))], { note: p('First.') + p('Second.') }), slide([])]))
+    try {
+      const style = (selector: string) => page.inner.getComputedStyle(page.doc.querySelector(selector)!)
+      const deckBox = style('.lw-deck')
+      expect([deckBox.height, deckBox.overflowY]).toEqual([`${page.inner.innerHeight}px`, 'auto'])
+      // The slide and the notes take what is left of the window, never more, down to the list of steps.
+      for (const part of ['.lw-stage', '.lw-slide:not([hidden])', '.lw-slide:not([hidden]) .lw-notes']) expect([part, style(part).display, style(part).minHeight]).toEqual([part, 'flex', '0px'])
+      const steps = style('.lw-slide:not([hidden]) .lw-steps')
+      expect([steps.overflowY, steps.flexGrow, steps.flexShrink]).toEqual(['auto', '1', '1'])
+      // A step keeps its height in a list shorter than its steps, which scrolls instead.
+      expect(style('.lw-slide:not([hidden]) .lw-step').flexShrink).toBe('0')
+      // A slide not shown stays hidden, its own display notwithstanding.
+      expect(style('.lw-slide[hidden]').display).toBe('none')
+    } finally {
+      page.done()
+    }
+  })
+
   it('rings each part a step is about, a little out from it, and parts that touch in one ring', () => {
     const near = slide([words(p('Batch lane'), { width: 290 }), words(p('Snapshot export'), { left: 330, width: 100 }), words(p('Evidence gate'), { left: 700, width: 100 })], {
       note: [p('Batch lane: the snapshot export.'), p(''), p('Batch lane, then the evidence gate.')].join(''),

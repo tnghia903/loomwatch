@@ -339,13 +339,15 @@ const deckStyle = (look: PageLook, width: number, height: number, marks: SlideMa
   '.lw-thumb-mark{display:flex;align-items:center;gap:4px}',
   `.lw-thumb-stitch{display:block;flex:1;min-width:0;height:4px;color:${look.accent}}`,
   '.lw-thumb-face{flex-shrink:0;width:16px;height:16px;object-fit:contain}',
-  // Room under the notes for the reader's tip about asking, which floats there.
-  '.lw-deck{box-sizing:border-box;min-width:0;padding:16px 24px 96px}',
+  // The page is the window's height and only the notes scroll, so the slide and the walk's arrows
+  // stay where they are as a step opens. Where the window is too short for that, the page scrolls.
+  '.lw-deck{box-sizing:border-box;display:flex;flex-direction:column;height:100vh;overflow-y:auto;min-width:0;padding:16px 24px}',
   // The slide as wide as the page lets it be, and no taller than leaves its notes' first lines in view.
-  `.lw-stage{position:relative;width:min(100%,max(320px,calc((100vh - 280px) * ${num(width)} / ${num(height)})));margin:0 auto}`,
+  `.lw-stage{position:relative;display:flex;flex-direction:column;flex:1 1 0;min-height:0;width:min(100%,max(320px,calc((100vh - 280px) * ${num(width)} / ${num(height)})));margin:0 auto}`,
+  '.lw-slide:not([hidden]){display:flex;flex-direction:column;flex:1 1 0;min-height:0}',
   // Where the strip is shown it goes to any slide; where it is folded away, ‹ › at the top do.
   '.lw-turn{position:absolute;top:0;right:0;display:none;gap:6px}',
-  '@media (max-width:560px){.lw-reader{grid-template-columns:minmax(0,1fr)}.lw-strip{display:none}.lw-deck{padding:12px 12px 104px}.lw-turn{display:flex}.lw-reader .lw-slide-number{padding-right:84px}}',
+  '@media (max-width:560px){.lw-reader{grid-template-columns:minmax(0,1fr)}.lw-strip{display:none}.lw-deck{padding:12px}.lw-turn{display:flex}.lw-reader .lw-slide-number{padding-right:84px}}',
   '@media (max-width:560px) and (pointer:coarse){.lw-reader .lw-slide-number{min-height:44px;padding-right:100px}}',
   `.lw-turn button,.lw-walk-turn button{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;margin:0;padding:0;border:1px solid color-mix(in srgb,${look.ink} 18%,transparent);border-radius:999px;background:none;color:${look.ink};cursor:pointer}`,
   `.lw-turn button:not(:disabled):hover,.lw-walk-turn button:not(:disabled):hover{border-color:color-mix(in srgb,${look.ink} 40%,transparent)}`,
@@ -395,7 +397,12 @@ const deckStyle = (look: PageLook, width: number, height: number, marks: SlideMa
   '.lw-chart{position:absolute;inset:0;width:100%;height:100%}',
   '.lw-chart text{font-family:Calibri,Carlito,"Helvetica Neue",Arial,sans-serif}',
   '.lw-media{border:1pt dashed #6E6862;border-radius:4pt}',
-  '.lw-notes{margin-top:14px;font-size:14px;line-height:1.55;overflow-wrap:anywhere}',
+  '.lw-notes{display:flex;flex-direction:column;flex:1 1 0;min-height:0;margin-top:14px;font-size:14px;line-height:1.55;overflow-wrap:anywhere}',
+  // Room at the end of the notes for the reader's tip about asking, which floats there.
+  '.lw-steps,.lw-note-lines{flex:1 1 0;min-height:72px;overflow-y:auto;overscroll-behavior:contain;padding-bottom:80px}',
+  '@media (max-width:560px){.lw-steps,.lw-note-lines{padding-bottom:92px}}',
+  // A step keeps its own height in a list shorter than its steps, which scrolls instead.
+  '.lw-step{flex-shrink:0}',
   '.lw-notes-head{display:flex;align-items:center;gap:12px;min-height:32px;margin:0 0 6px}',
   `.lw-notes-label{display:flex;align-items:center;gap:8px;margin:0;font-size:12px;font-weight:500;color:${look.label}}`,
   // A dot for each step on a line, the stretch walked gold: behind filled, the one being said
