@@ -519,13 +519,21 @@ fn together(next: Vec<String>, again: Vec<Suggestion>) -> Vec<Suggestion> {
 }
 
 /// The small model that writes next steps for an agent on `model`: on the same source, so the
-/// answer goes nowhere it has not been. On a `ChatGPT` plan, the agent's own model: a call costs the
-/// plan's allowance, not dollars, and the plan has that model. An agent on a model that costs
-/// nothing (`free`) writes with it, so choosing a free model never brings a charge. The offline
-/// demo and test stand-ins write with themselves.
-fn writer_for(model: &ModelRef, free: bool) -> ModelRef {
+/// answer goes nowhere it has not been. On a `ChatGPT` plan, the plan's quick model (the fast tier's
+/// in [`crate::ai::MODEL_TIERS`]) when the plan offers it (`plan_offers`, by its name there): a call
+/// costs the plan's allowance, not dollars, and a quick model spends less of it on a short job; else
+/// the agent's own model, which the plan has. An agent on a model that costs nothing (`free`) writes
+/// with it, so choosing a free model never brings a charge. The offline demo and test stand-ins
+/// write with themselves.
+fn writer_for(model: &ModelRef, free: bool, plan_offers: &dyn Fn(&str) -> bool) -> ModelRef {
     match model.source {
-        Source::ChatGpt => model.clone(),
+        Source::ChatGpt => crate::ai::MODEL_TIERS
+            .by_source
+            .get(&Source::ChatGpt)
+            .and_then(|tiers| tiers.get("fast"))
+            .map(|fast| ModelRef::parse(fast))
+            .filter(|fast| fast.source == Source::ChatGpt && plan_offers(&fast.id))
+            .unwrap_or_else(|| model.clone()),
         Source::OpenRouter if free => model.clone(),
         Source::Anthropic => ModelRef {
             source: Source::Anthropic,
@@ -588,7 +596,18 @@ async fn next_steps(
     answer: &Answer,
 ) -> Result<(Vec<String>, Call), String> {
     let reply = answer.reply.as_deref().unwrap_or_default();
-    let writer = writer_for(model, costs_nothing(model).await);
+    let offered: Vec<String> = crate::ai::installed()
+        .map(|ai| {
+            ai.chatgpt_status()
+                .models
+                .into_iter()
+                .map(|listed| listed.slug)
+                .collect()
+        })
+        .unwrap_or_default();
+    let writer = writer_for(model, costs_nothing(model).await, &|slug| {
+        offered.iter().any(|listed| listed == slug)
+    });
     let provider = crate::engine::provider_for(&writer)
         .await
         .map_err(|error| error.to_string())?;
@@ -802,7 +821,7 @@ mod tests {
     #[test]
     fn writes_on_the_agents_own_source_with_a_small_model_and_keeps_a_plan_agent_on_its_plan() {
         let writer = |model: &str| {
-            let writer = writer_for(&ModelRef::parse(model), false);
+            let writer = writer_for(&ModelRef::parse(model), false, &|_| false);
             (writer.source, writer.id)
         };
         assert_eq!(
@@ -822,15 +841,37 @@ mod tests {
             (Source::OpenRouter, OFFLINE_MODEL.to_owned())
         );
         // An agent on a free model writes with it, never with one that charges.
-        let free = writer_for(&ModelRef::parse("google/gemma-4:free"), true);
+        let free = writer_for(&ModelRef::parse("google/gemma-4:free"), true, &|_| false);
         assert_eq!(
             (free.source, free.id.as_str()),
             (Source::OpenRouter, "google/gemma-4:free")
         );
         // A plan or a key's own source is never moved for it.
         assert_eq!(
-            writer_for(&ModelRef::parse("chatgpt:gpt-5.6-terra"), true).source,
+            writer_for(&ModelRef::parse("chatgpt:gpt-5.6-terra"), true, &|_| false).source,
             Source::ChatGpt
+        );
+    }
+
+    /// On a `ChatGPT` plan, next steps are written with the plan's quick model, which spends less
+    /// of the plan's allowance on a short job, when the plan offers it; else the agent's own.
+    #[test]
+    fn a_plan_agent_writes_with_the_plans_quick_model_when_the_plan_offers_it() {
+        let cole = ModelRef::parse("chatgpt:gpt-5.6-terra");
+        let quick = ModelRef::parse(&crate::ai::MODEL_TIERS.by_source[&Source::ChatGpt]["fast"]);
+        assert_eq!(quick.source, Source::ChatGpt);
+        assert_ne!(quick, cole);
+        assert_eq!(writer_for(&cole, false, &|slug| slug == quick.id), quick);
+        // A plan that doesn't list it keeps the agent's own model, which it has.
+        assert_eq!(
+            writer_for(&cole, false, &|slug| slug == "gpt-5.6-terra"),
+            cole
+        );
+        // Another source's agent is never moved onto the plan by it.
+        let sonnet = ModelRef::parse("anthropic:claude-sonnet-5-5");
+        assert_eq!(
+            writer_for(&sonnet, false, &|_| true).source,
+            Source::Anthropic
         );
     }
 
@@ -1160,7 +1201,7 @@ mod tests {
                 (model.source, model.id.as_str()),
                 (Source::ChatGpt, "gpt-6.1-sol")
             );
-            assert_eq!(writer_for(&model, false), model);
+            assert_eq!(writer_for(&model, false, &|_| false), model);
         }
     }
 

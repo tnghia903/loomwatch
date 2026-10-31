@@ -791,7 +791,9 @@ at a little desk, whose workbench opens while it is pointed at. For the agent in
   `GET /api/pinned-agent/suggestions`): next steps from the agent's newest answer, written once for
   that answer by a small model on the source the model of the agent's chat is paid from (its
   `.jobs/.bench/<id>.yaml`, which for an agent saved with no model holds the one the app chose for
-  what is connected): on a `ChatGPT` plan, that same model; an agent on a free model writes with it
+  what is connected): on a `ChatGPT` plan, the plan's quick model (the fast tier's in
+  `schemas/model-tiers.json`) when the plan offers it, else that same model; an agent on a free model
+  writes with it
   (`Provider::once`, no tools, the model named with its source, as a plan and a Claude key read
   it), while the answer is younger than `NEXT_STEPS_FOR` and the
   person hasn't written since; then what the person asked it more than once, without files.
