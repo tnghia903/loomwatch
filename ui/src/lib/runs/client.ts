@@ -153,6 +153,14 @@ export interface SpendStop {
 /** `add` grows this run's limit and carries on; `finish` ends the run with what it has (or stops that agent). */
 export type SpendDecision = 'add' | 'finish'
 
+/** The agent that asked for a run (`runs::RunAskedBy`). */
+export interface RunAskedBy {
+  /** Its id in My agents, whose figure it wears. */
+  agent: string
+  /** Its name when it asked. */
+  name: string
+}
+
 export interface RunRecord {
   replyableAgents?: string[]
   /** What the run spent and may spend (ADR 0068); absent on runs recorded before spend limits. */
@@ -229,6 +237,12 @@ export interface RunRecord {
   teamRevision?: string | null
   /** A one-agent turn (ADR 0051): the one agent the operator wrote to with an @mention. */
   onlyAgent?: string | null
+  /**
+   * The agent that asked for this run, when one did rather than you: the agent pinned to the notch,
+   * asking from its own chat, then you pressed Start (ADR 0083, decision 10). The team's chat shows
+   * the request as its. Absent for a run you or a schedule started.
+   */
+  askedBy?: RunAskedBy | null
   /** Agents in the middle of a turn of work right now, which the chat shows as working. */
   working?: string[]
   /** Notes waiting for an agent's current turn to end (ADR 0051). */

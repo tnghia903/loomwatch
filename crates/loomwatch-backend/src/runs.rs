@@ -264,6 +264,12 @@ pub struct RunRecord {
     /// it with an @mention. Its reply is the run's answer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub only_agent: Option<String>,
+    /// The agent that asked for this run, when one did rather than the person: the agent pinned to
+    /// the notch, asking from its own chat, then the person pressed Start (ADR 0083, decision 10).
+    /// The team's chat shows the request as that agent's. Fixed at launch and stored, so it still
+    /// does after a restart. `None` for a run the person or a schedule started.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asked_by: Option<RunAskedBy>,
     /// Agents in the middle of a turn of work right now, which the chat shows as working (ADR
     /// 0051). Live only, like `permission_requests`: a restart ends every run.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -406,6 +412,16 @@ impl Interrupt {
     }
 }
 
+/// The agent that asked for a run ([`RunRecord::asked_by`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunAskedBy {
+    /// Its id in My agents, whose figure it wears.
+    pub agent: String,
+    /// Its name when it asked.
+    pub name: String,
+}
+
 impl RunRecord {
     /// Build a `queued` record for a validated team.
     ///
@@ -457,6 +473,7 @@ impl RunRecord {
             team_key,
             team_revision: None,
             only_agent: None,
+            asked_by: None,
             working: Vec::new(),
             queued_notes: Vec::new(),
             auto_mode: team.permissions.mode == crate::config::PermissionMode::Auto,
@@ -628,16 +645,20 @@ impl RunStore {
             .made
             .as_ref()
             .and_then(|made| serde_json::to_value(made).ok());
+        let asked_by = record
+            .asked_by
+            .as_ref()
+            .and_then(|asked_by| serde_json::to_value(asked_by).ok());
         sqlx::query(
             "INSERT INTO runs
              (run_id, session_id, team_path, prompt, status, mode, entrypoint, responder,
               agent_ids, created_at, started_at, finished_at, error, exit_code, error_code,
               stop_reason, event_count, reply, trigger, delivery, follows_run_id, start_at,
               retry_of_run_id, waiting_on, start_key, start_fingerprint, team_key, only_agent,
-              team_revision, team_name, agent_names, spend, made)
+              team_revision, team_name, agent_names, spend, made, asked_by)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
                      $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32,
-                     $33)
+                     $33, $34)
              ON CONFLICT (run_id) DO UPDATE SET
                status = EXCLUDED.status,
                started_at = EXCLUDED.started_at,
@@ -702,6 +723,7 @@ impl RunStore {
         .bind(&agent_names)
         .bind(&spend)
         .bind(&made)
+        .bind(&asked_by)
         .execute(self.db.writer())
         .await?;
         Ok(())
@@ -800,6 +822,9 @@ pub(crate) fn decode_run(row: &sqlx::sqlite::SqliteRow) -> Result<StoredRun, sql
                 .unwrap_or_default(),
             team_revision: row.try_get("team_revision")?,
             only_agent: row.try_get("only_agent")?,
+            asked_by: row
+                .try_get::<Option<Value>, _>("asked_by")?
+                .and_then(|asked_by| serde_json::from_value(asked_by).ok()),
             working: Vec::new(),
             queued_notes: Vec::new(),
             auto_mode: false,
@@ -2286,6 +2311,11 @@ pub(crate) struct StartRunRequest {
     /// another team's agent made.
     #[serde(skip)]
     links: Vec<String>,
+    /// The agent that asked for the run (ADR 0083, decision 10), recorded on it. Only the daemon
+    /// sets it, when the person starts a team an agent asked: a page cannot start a run as an
+    /// agent's.
+    #[serde(skip)]
+    asked_by: Option<RunAskedBy>,
 }
 
 impl StartRunRequest {
@@ -2329,6 +2359,13 @@ impl StartRunRequest {
     #[must_use]
     pub(crate) fn written_by_the_operator(mut self, words: &str) -> Self {
         self.links = crate::agent::tools::links_written_in(words);
+        self
+    }
+
+    /// An agent asked for the run, not the person (ADR 0083, decision 10).
+    #[must_use]
+    pub(crate) fn asked_by(mut self, agent: RunAskedBy) -> Self {
+        self.asked_by = Some(agent);
         self
     }
 
@@ -2607,6 +2644,7 @@ pub(crate) async fn launch_manual(
     prepared.lineage.reply.clone_from(&request.reply);
     prepared.lineage.files.clone_from(&request.files);
     prepared.lineage.links.clone_from(&request.links);
+    prepared.record.asked_by.clone_from(&request.asked_by);
     // Retry lineage is a column, not a `Map` in the browser: a reloaded page still says
     // "Retry of Run 07". Written after `resolve_continuation` so an explicit `retryOfRunId` wins
     // over the one a checkpoint continuation derives, which is the more specific claim.
@@ -8640,6 +8678,70 @@ pub(crate) mod tests {
         assert_eq!(spend.limit_usd, Some(2.5));
         assert_eq!(spend.agents["a"].limit_usd, Some(0.3));
         assert!((spend.agents["a"].spent_usd - 0.25).abs() < 1e-9);
+    }
+
+    /// The agent that asked for a run is stored with it (ADR 0083, decision 10), so the team's chat
+    /// still shows the request as that agent's after a restart. A run the person started has none.
+    #[tokio::test]
+    async fn the_agent_that_asked_is_stored_with_the_run() {
+        let db = crate::db::Db::temp().await;
+        let team = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    model: m\n",
+        )
+        .unwrap();
+        let mut asked =
+            RunRecord::queued("t.yaml".into(), "plan it".into(), &team, RunTrigger::Manual)
+                .unwrap();
+        asked.asked_by = Some(RunAskedBy {
+            agent: "maya".into(),
+            name: "Maya".into(),
+        });
+        let yours =
+            RunRecord::queued("t.yaml".into(), "go".into(), &team, RunTrigger::Manual).unwrap();
+        let store = RunStore::new(db.clone());
+        store.upsert(&asked, None, None).await.unwrap();
+        store.upsert(&yours, None, None).await.unwrap();
+        let back = store.recent().await.unwrap();
+        let wire = |run_id: &str| {
+            let record = &back
+                .iter()
+                .find(|run| run.record.run_id == run_id)
+                .expect("stored")
+                .record;
+            serde_json::to_value(record).unwrap()
+        };
+        assert_eq!(
+            wire(&asked.run_id)["askedBy"],
+            json!({"agent": "maya", "name": "Maya"})
+        );
+        assert!(wire(&yours.run_id).get("askedBy").is_none());
+    }
+
+    /// Only the daemon records that an agent asked for a run: a page cannot start one as an
+    /// agent's through `POST /api/runs`.
+    #[tokio::test]
+    async fn a_page_cannot_start_a_run_as_an_agents() {
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        dir.write_team("team.yaml", &completing());
+        let registry = RunRegistry::default();
+        let app = router(
+            Some(EventArchive::new(pool)),
+            dir.0.clone(),
+            registry.clone(),
+        );
+        let response = app
+            .oneshot(post_json(
+                "/api/runs",
+                &json!({"teamPath": "team.yaml", "prompt": "say done", "askedBy": {"agent": "maya", "name": "Maya"}}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        let run: RunRecord = serde_json::from_value(json_body(response).await).unwrap();
+        assert_eq!(run.asked_by, None);
+        let done = wait_for(&registry, &run.run_id, |r| r.status.is_terminal()).await;
+        assert_eq!(done.asked_by, None);
     }
 
     /// ADR 0098: a run's message is read only when something can read it: not when the team turned it

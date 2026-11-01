@@ -21,6 +21,7 @@ vi.mock('@xyflow/react', () => ({
 }))
 import { type Evidence, projectRun } from '../../lib/watch/events'
 import type { AgentRuntime } from '../../lib/runs/graph'
+import type { RunRecord } from '../../lib/runs/client'
 import { appRules, background, cascaded, px, topLevel } from '../../test/cascade'
 import { apcaLc, THEMES, tokenColour, wcagRatio, type Theme } from '../../test/contrast'
 const setup = (overrides: Partial<DeliveryLaneProps> = {}) => {
@@ -96,6 +97,18 @@ describe('Delivery Lane', () => {
     cleanup()
     setup({ output: { ...props.output, text: '' } })
     expect(screen.getByRole('list', { name: 'Team stages' })).toHaveTextContent('Appears when the team is done.')
+  })
+
+  // ADR 0083, decision 10: work one of your agents asked for starts from that agent, as the chat
+  // beside the record says, not from you.
+  it('starts the row from the agent that asked for the work for you', () => {
+    const record = { runId: 'r', askedBy: { agent: 'maya', name: 'Maya' } } as RunRecord
+    setup({ record })
+    const first = within(screen.getByRole('list', { name: 'Team stages' })).getAllByRole('listitem')[0]
+    expect(first.querySelector('.flow-micro')).toHaveTextContent(/^Request$/)
+    expect(first).toHaveTextContent('From Maya')
+    expect(first).not.toHaveTextContent('From you')
+    expect(first.querySelector('.flow-request')).toHaveAttribute('title', 'Maya asked this for you. You pressed Start.')
   })
 
   // A card had its model, its status and its name squeezed in beside the figure: a long model

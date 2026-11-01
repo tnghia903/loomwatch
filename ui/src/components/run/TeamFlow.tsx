@@ -48,6 +48,8 @@ export interface FlowStage {
 export interface TeamFlowProps {
   /** There is a request to start from. */
   asked: boolean
+  /** The name of the agent that asked for the work for you (ADR 0083, decision 10); absent when you did. */
+  askedBy?: string | null
   stages: readonly FlowStage[]
   /** The stages run in a line, each handing on to the next: draw the lines between them. */
   relay: boolean
@@ -73,16 +75,16 @@ function FlowLink({ line, pass, passing, sentBack }: { line: boolean; pass: Flow
   )
 }
 
-export function TeamFlow({ asked, stages, relay, answered, answerPass, planned, finished, animate, onSelect, onOpen, onOpenSkill }: TeamFlowProps) {
+export function TeamFlow({ asked, askedBy, stages, relay, answered, answerPass, planned, finished, animate, onSelect, onOpen, onOpenSkill }: TeamFlowProps) {
   return (
     <div className="team-flow" data-tour="stages">
       <div className="flow-row" role="list" aria-label="Team stages">
         <div className="flow-node flow-end" role="listitem">
           {/* What was asked and what came back are read in the chat beside this record (ADR 0051):
               the ends of the row say where the work starts and ends, not the words again. */}
-          <article className="flow-card flow-request">
-            <span className="flow-micro">Your request</span>
-            <strong className="flow-text">{asked ? 'From you' : 'Not asked yet'}</strong>
+          <article className="flow-card flow-request" title={asked && askedBy ? `${askedBy} asked this for you. You pressed Start.` : undefined}>
+            <span className="flow-micro">{askedBy ? 'Request' : 'Your request'}</span>
+            <strong className="flow-text">{!asked ? 'Not asked yet' : askedBy ? `From ${askedBy}` : 'From you'}</strong>
           </article>
         </div>
         {stages.map((stage, index) => (
