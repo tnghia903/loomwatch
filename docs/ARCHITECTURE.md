@@ -457,8 +457,10 @@ iPhone or another computer connects to it and keeps nothing but a key of its own
   `push::spawn` reads what the phone's home screen would show. It pushes what is new to each
   phone: someone waiting, or a run that succeeded or failed (not cancelled, not one trying
   again). It follows the phone's settings, and in quiet hours, in the phone's time zone, only a
-  permission ask rings. What was there when LoomWatch started, or when a phone first gave its
-  token, isn't news. A push carries only ids (`target`, `run`, `node`, `room`); the phone's
+  permission ask rings. A run that wrote a message the person asked for at a time (`messageAt`,
+  below) is pushed as a message: it rings, in quiet hours too and whatever the phone says about
+  finished runs. What was there when LoomWatch started, or when a phone first gave its token,
+  isn't news. A push carries only ids (`target`, `run`, `node`, `room`); the phone's
   notification extension reads the words from here over the person's Tailscale, so nothing
   anyone wrote passes through Apple. Pushes go straight to Apple's service, signed (ES256) with
   the person's own push key. `loomwatchd push-key set` keeps that key in the Keychain as
@@ -483,6 +485,27 @@ new run with the same prompt, whose `retryOfRunId` names the run before it, so t
 job. A source that answered (a refused key, no credit, a plan's limit) is not tried again, and
 neither is a run started with Run now: those need the person. The routine's own next time, Run now,
 or pausing the routine lets a waiting try go.
+
+### Messages at a time
+
+An agent in its own chat (`.jobs/.bench/<id>.yaml`, started by a person) is offered
+`message_me_at`, `pending_messages` and `cancel_message` on the Team Bus (ADR 0108). Nobody else
+is, and a call from anywhere else is refused. `message_me_at` keeps `{chat, agent, at, text}` in
+the archive's `messages_at` table and returns at once. `at` is read in this computer's time zone
+("17:20" is the next 17:20) unless it carries an offset, or the agent gives `inMinutes`.
+
+`messages_at::spawn` waits for the soonest by the wall clock (`deadline.rs`), so a computer that
+slept through the time sends it within half a minute of waking, and one due while LoomWatch was
+closed goes when it starts, telling the agent it comes late. At the time, `chat::send_message_at`
+starts the agent's turn in its own chat through the chat's own send path, once no turn is at work
+there. Its start key is `message-<id>`, so a restart can't start it twice. The agent is given the
+words it set, then a note from LoomWatch, and writes the message. The words are the agent's, so
+their links ask first (ADR 0104).
+
+The run keeps `messageAt: {id, at, text}`. The chat draws its start as a reminder, the push
+watcher sends it as a message that rings, and the phone shows the agent's reply, or the words
+that were set when the turn failed. `GET /api/messages-at` lists what is waiting, and
+`DELETE /api/messages-at/{id}` cancels one.
 
 ### Permissions
 

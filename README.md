@@ -600,7 +600,11 @@ your runs. Turn it off in the **Check for updates** window. A copy of the source
 terminal instead: see [Build from source](#build-from-source).
 
 To stop one run, click **Stop** beside the request box. Closing the browser tab does not stop LoomWatch or
-its runs. Scheduled teams run only while LoomWatch is running and the computer is awake. If a scheduled run can't
+its runs. For a reminder, ask one of your agents in its **Chat** tab, such as "remind me at 5:20 pm to stand up". At
+that time it writes to you there, and it shows in the LoomWatch app on your iPhone if you connected one. To see or
+cancel your reminders, ask the same agent. Each one is a turn of the agent's work, and costs what it uses. Scheduled
+teams and reminders run only while LoomWatch is running and the computer is awake. A reminder due while the computer
+slept, LoomWatch was closed or the agent was busy comes late, as soon as it can. If a scheduled run can't
 reach its AI, often just after the computer wakes, LoomWatch tries it again by itself, up to five more times within the
 hour. Each try starts the work over, and costs what it uses. For scheduled runs and optional Notion delivery, see [Routines](docs/WATCH.md#routines) and
 [Notion setup](docs/NOTION.md).

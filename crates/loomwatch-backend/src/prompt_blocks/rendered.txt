@@ -711,6 +711,61 @@ Search the web. This asks the person first; their yes gives you web search and p
       "type": "object"
     },
     "name": "ask_team"
+  },
+  {
+    "description": "Message the person later, at a time they ask: \"remind me at 17:20 to stand up\", \"tell me in an hour how the build went\". It returns at once. When the time comes, you take a turn here and write them the message in this chat. Give either at or inMinutes. Never use commands, sleep or notifications for this.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "at": {
+          "description": "When, in this computer's time: \"17:20\" (24-hour, the next 17:20) or \"2026-11-02 08:00\". For another time zone, give the time with its offset: \"2026-11-02T08:00:00+09:00\".",
+          "minLength": 1,
+          "type": "string"
+        },
+        "inMinutes": {
+          "description": "Instead of at: how many minutes from now.",
+          "maximum": 576000,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "text": {
+          "description": "What to remind them of, in a few of their own words, such as \"stand up\". It shows in the chat as their reminder, and you write the message from it when the time comes.",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "type": "object"
+    },
+    "name": "message_me_at"
+  },
+  {
+    "description": "List the messages you set for the person in this chat that are still waiting, soonest first, each with its id.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "name": "pending_messages"
+  },
+  {
+    "description": "Cancel a message you set for the person that is still waiting, when they no longer want it.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "The message's id, as pending_messages lists it",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "name": "cancel_message"
   }
 ]
 ===== bus: a team's lead that may bring in my agents
@@ -1077,6 +1132,8 @@ Search the web. This asks the person first; their yes gives you web search and p
 ]
 ===== bus: my_agents, with none to list
 None of the person's other agents can be brought in here now. Do the work with the agents you have.
+===== bus: message_me_at, once set
+Tell the person in a few words when the message comes, then end your turn.
 ===== stage 0
 You are Researcher, step 1 of 3 in the News desk team.
 The operator's request comes to you first.
@@ -1219,3 +1276,9 @@ No claim contradicts its source or the request
 ===== check items: research
 Does what the request asked
 No claim contradicts its source or the request
+===== message due, late
+stand up
+
+(From LoomWatch, not the person.) It is today at 17:20 (UTC+07:00). You set a message for the person for this time, and the words above are what you set. Write them the message now: your reply is the message they read. If it asks you to check or find something first, do that, then write it. Keep to what they asked for.
+
+It was due today at 16:40 (UTC+07:00) and comes late, because this computer was asleep, LoomWatch was closed, or you were busy in this chat then: say so in a few words.

@@ -247,7 +247,8 @@ async fn answer_route(
         ));
     }
     let request = match answer.decision {
-        Decision::Start => start(&state, request).await,
+        // Boxed: a run's start is a large future, and the route's would pass Clippy's limit.
+        Decision::Start => Box::pin(start(&state, request)).await,
         Decision::Decline => {
             decline(&state, &request).await;
             request

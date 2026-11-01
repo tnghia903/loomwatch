@@ -254,6 +254,21 @@ export interface RunRecord {
    */
   teamName?: string
   agentNames?: Record<string, string>
+  /**
+   * The message the person asked an agent for at a time, which this run's turn writes (ADR 0108,
+   * the daemon's `messages_at::MessageAt`): the chat draws the run's start as a reminder of these
+   * words. Absent on every other run.
+   */
+  messageAt?: MessageAt | null
+}
+
+/** A message the person asked an agent for at a time (ADR 0108). */
+export interface MessageAt {
+  id: string
+  /** When it was set for. */
+  at: string
+  /** The words the agent set. */
+  text: string
 }
 
 /** A note sent to an agent at work, waiting for its current turn to end (ADR 0051). */

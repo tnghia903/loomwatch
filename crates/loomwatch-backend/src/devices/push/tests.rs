@@ -188,6 +188,67 @@ fn a_phone_that_wants_no_finished_runs_hears_only_who_waits() {
     assert_eq!(targets(&sent), ["permission-r1-p1"]);
 }
 
+/// A message the person asked an agent for at a time (ADR 0108): its run, finished or failed.
+fn message_run(run: &str, status: &str) -> Value {
+    json!({
+        "runId": run,
+        "status": status,
+        "teamPath": ".jobs/.bench/coby.yaml",
+        "messageAt": { "id": "m1", "at": "2026-11-01T10:20:00.000Z", "text": "stand up" },
+    })
+}
+
+#[test]
+fn a_message_the_person_asked_for_rings_in_quiet_hours_and_with_finished_runs_turned_off() {
+    let mut watch = Watch::default();
+    let mut phone = target();
+    phone.tell_done = false;
+    // 23:00 to 07:00 in Ho Chi Minh City (UTC+7): 17:00 UTC is midnight there.
+    phone.quiet = Some(Quiet {
+        from: 23 * 60,
+        to: 7 * 60,
+        time_zone: "Asia/Ho_Chi_Minh".to_owned(),
+    });
+    let phones = [("phone".to_owned(), phone)];
+    let night = Utc.with_ymd_and_hms(2026, 11, 1, 17, 0, 0).unwrap();
+    watch.next(&home(&[], &[]), &phones, night);
+
+    let sent = watch.next(
+        &home(
+            &[],
+            &[
+                finished("r1", "succeeded"),
+                message_run("r2", "succeeded"),
+                message_run("r3", "failed"),
+            ],
+        ),
+        &phones,
+        night,
+    );
+    assert_eq!(targets(&sent), ["done-r2", "done-r3"]);
+    assert!(
+        sent.iter()
+            .all(|(_, _, notice)| notice.about == About::Message),
+        "{sent:?}"
+    );
+    assert_eq!(
+        sent[0].2.payload(),
+        json!({
+            "aps": {
+                "alert": { "title": "LoomWatch", "body": "Your reminder" },
+                "mutable-content": 1,
+                "thread-id": "message",
+                "badge": 0,
+                "sound": "default",
+            },
+            "target": "done-r2",
+            "run": "r2",
+            "room": ".jobs/.bench/coby.yaml",
+        }),
+        "it rings, and carries ids only"
+    );
+}
+
 #[test]
 fn a_phone_that_gives_its_token_later_isnt_told_what_was_already_there() {
     let mut watch = Watch::default();

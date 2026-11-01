@@ -306,6 +306,10 @@ pub struct RunRecord {
     /// 0068). Live only, like `permission_requests`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub spend_stops: Vec<crate::spend::SpendStop>,
+    /// The message the person asked for at a time that this run's turn writes (ADR 0108). Fixed at
+    /// launch and stored. `None` for every other run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_at: Option<crate::messages_at::MessageAt>,
     /// When the schedule tries this run again, for a scheduled run that could not reach its AI
     /// source (`errorCode: "source_unreachable"`). The try is a new run whose `retry_of_run_id`
     /// names this one; this clears once it starts, or once the schedule won't try. Live only, like
@@ -482,6 +486,7 @@ impl RunRecord {
             spend: Some(crate::spend::RunSpend::for_team(team)),
             made: None,
             spend_stops: Vec::new(),
+            message_at: None,
             next_try_at: None,
             try_again_after: None,
             wait_for_you: None,
@@ -630,35 +635,23 @@ impl RunStore {
         start_fingerprint: Option<&str>,
     ) -> Result<(), sqlx::Error> {
         let agent_ids = serde_json::to_value(&record.agent_ids).unwrap_or(Value::Null);
-        let delivery = record
-            .delivery
-            .as_ref()
-            .and_then(|delivery| serde_json::to_value(delivery).ok());
-        let agent_names = (!record.agent_names.is_empty())
-            .then(|| serde_json::to_value(&record.agent_names).ok())
-            .flatten();
-        let spend = record
-            .spend
-            .as_ref()
-            .and_then(|spend| serde_json::to_value(spend).ok());
-        let made = record
-            .made
-            .as_ref()
-            .and_then(|made| serde_json::to_value(made).ok());
-        let asked_by = record
-            .asked_by
-            .as_ref()
-            .and_then(|asked_by| serde_json::to_value(asked_by).ok());
+        let delivery = json_column(record.delivery.as_ref());
+        let agent_names = json_column(Some(&record.agent_names).filter(|names| !names.is_empty()));
+        let spend = json_column(record.spend.as_ref());
+        let made = json_column(record.made.as_ref());
+        let asked_by = json_column(record.asked_by.as_ref());
+        let message_at = json_column(record.message_at.as_ref());
         sqlx::query(
             "INSERT INTO runs
              (run_id, session_id, team_path, prompt, status, mode, entrypoint, responder,
               agent_ids, created_at, started_at, finished_at, error, exit_code, error_code,
               stop_reason, event_count, reply, trigger, delivery, follows_run_id, start_at,
               retry_of_run_id, waiting_on, start_key, start_fingerprint, team_key, only_agent,
-              team_revision, team_name, agent_names, spend, made, asked_by)
+              team_revision, team_name, agent_names, spend, made, asked_by,
+              message_at)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
                      $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32,
-                     $33, $34)
+                     $33, $34, $35)
              ON CONFLICT (run_id) DO UPDATE SET
                status = EXCLUDED.status,
                started_at = EXCLUDED.started_at,
@@ -724,6 +717,7 @@ impl RunStore {
         .bind(&spend)
         .bind(&made)
         .bind(&asked_by)
+        .bind(&message_at)
         .execute(self.db.writer())
         .await?;
         Ok(())
@@ -749,6 +743,11 @@ impl RunStore {
         .await?;
         rows.iter().map(decode_run).collect()
     }
+}
+
+/// `value` as a JSON column of `runs`: NULL when there is none, or it can't be written.
+fn json_column<T: Serialize>(value: Option<&T>) -> Option<Value> {
+    value.and_then(|value| serde_json::to_value(value).ok())
 }
 
 /// One stored run: the record, plus the idempotency binding it was submitted under.
@@ -840,6 +839,9 @@ pub(crate) fn decode_run(row: &sqlx::sqlite::SqliteRow) -> Result<StoredRun, sql
                 .try_get::<Option<Value>, _>("made")?
                 .and_then(|made| serde_json::from_value(made).ok()),
             spend_stops: Vec::new(),
+            message_at: row
+                .try_get::<Option<Value>, _>("message_at")?
+                .and_then(|message| serde_json::from_value(message).ok()),
             next_try_at: None,
             try_again_after: None,
             wait_for_you: None,
@@ -2316,6 +2318,10 @@ pub(crate) struct StartRunRequest {
     /// agent's.
     #[serde(skip)]
     asked_by: Option<RunAskedBy>,
+    /// The message the person asked for at a time that this run's turn writes (ADR 0108). Only
+    /// the daemon sets it.
+    #[serde(skip)]
+    message_at: Option<crate::messages_at::MessageAt>,
 }
 
 impl StartRunRequest {
@@ -2366,6 +2372,15 @@ impl StartRunRequest {
     #[must_use]
     pub(crate) fn asked_by(mut self, agent: RunAskedBy) -> Self {
         self.asked_by = Some(agent);
+        self
+    }
+
+    /// The turn writes `message`, which the person asked for at a time (ADR 0108). Its words are
+    /// the agent's, so none of their links count as the operator's.
+    #[must_use]
+    pub(crate) fn for_message_at(mut self, message: crate::messages_at::MessageAt) -> Self {
+        self.links = Vec::new();
+        self.message_at = Some(message);
         self
     }
 
@@ -2645,6 +2660,7 @@ pub(crate) async fn launch_manual(
     prepared.lineage.files.clone_from(&request.files);
     prepared.lineage.links.clone_from(&request.links);
     prepared.record.asked_by.clone_from(&request.asked_by);
+    prepared.record.message_at.clone_from(&request.message_at);
     // Retry lineage is a column, not a `Map` in the browser: a reloaded page still says
     // "Retry of Run 07". Written after `resolve_continuation` so an explicit `retryOfRunId` wins
     // over the one a checkpoint continuation derives, which is the more specific claim.

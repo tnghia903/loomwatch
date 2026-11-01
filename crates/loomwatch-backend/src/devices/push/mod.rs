@@ -133,6 +133,8 @@ pub enum About {
         review: bool,
     },
     Finished,
+    /// A message the person asked an agent for at a time (ADR 0108): it always rings.
+    Message,
 }
 
 impl Notice {
@@ -147,6 +149,7 @@ impl Notice {
                 "desk",
             ),
             About::Finished => ("A team finished", "", "done"),
+            About::Message => ("Your reminder", "", "message"),
         };
         let mut aps = json!({
             "alert": { "title": "LoomWatch", "body": body },
@@ -162,7 +165,7 @@ impl Notice {
             About::Waiting {
                 permission: true,
                 ..
-            }
+            } | About::Message
         ) {
             aps["sound"] = json!("default");
         }

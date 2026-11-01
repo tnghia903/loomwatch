@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PASS_BEAT_MS } from '../../lib/chat/baton'
 import type { ChatItem, ChatMessage } from '../../lib/chat/client'
 import { ChatMentionsContext } from '../../lib/chat/faces'
-import { clockTime } from '../../lib/chat/format'
+import { clockTime, dayLabel } from '../../lib/chat/format'
 import type { Lesson } from '../../lib/lessons/client'
 import { figureFor, figureHue, figureStill, freshFigure } from '../../lib/library/figures'
 import type { RunRecord } from '../../lib/runs/client'
@@ -440,6 +440,42 @@ describe('the message box says where a message goes before it is sent', () => {
 })
 
 describe('the team’s chat', () => {
+  // ADR 0108: the agent wrote the message you asked for at a time. Its start reads as the reminder
+  // you set, never as your own words or the long note LoomWatch gave the agent.
+  it('shows a message you asked for at a time as a reminder, with the agent’s message under it', async () => {
+    page = [
+      {
+        kind: 'work',
+        run: run({ onlyAgent: 'writer', prompt: 'stand up\n\n(From LoomWatch, not the person.) It is today at 17:20.', reply: 'Time to stand up!', messageAt: { id: 'm1', at: '2026-10-06T10:20:00.000Z', text: 'stand up' } }),
+        request: message({ text: 'stand up\n\n(From LoomWatch, not the person.) It is today at 17:20.' }),
+        notes: [],
+      },
+    ]
+    renderChat()
+    const log = await screen.findByRole('log', { name: 'Messages' })
+    await waitFor(() => expect(within(log).getByText('Time to stand up!')).toBeInTheDocument())
+    expect(within(log).getByText('Your reminder')).toBeInTheDocument()
+    expect(within(log).getByText('stand up')).toBeInTheDocument()
+    expect(within(log).queryByText(/From LoomWatch/)).not.toBeInTheDocument()
+    expect(within(log).queryByText(/^You →/)).not.toBeInTheDocument()
+  })
+
+  it('says the day of a reminder that came on a later day than it was set for', async () => {
+    const at = '2026-10-05T10:20:00.000Z'
+    page = [
+      {
+        kind: 'work',
+        run: run({ onlyAgent: 'writer', prompt: 'stand up', reply: 'Sorry, this comes late: time to stand up!', messageAt: { id: 'm1', at, text: 'stand up' } }),
+        request: message({ text: 'stand up' }),
+        notes: [],
+      },
+    ]
+    renderChat()
+    const log = await screen.findByRole('log', { name: 'Messages' })
+    await waitFor(() => expect(within(log).getByText('Your reminder')).toBeInTheDocument())
+    expect(within(log).getByText(`${dayLabel(at)} ${clockTime(at)}`)).toBeInTheDocument()
+  })
+
   it('reads oldest first, by day, with each answer in full and one line for the talk under each piece', async () => {
     page = [
       { kind: 'work', run: run({ runId: 'old', createdAt: '2026-10-05T02:00:00.000Z', startedAt: '2026-10-05T02:00:00.000Z', finishedAt: '2026-10-05T02:03:00.000Z', reply: 'Yesterday’s digest.', trigger: 'schedule' }), request: null, notes: [] },
