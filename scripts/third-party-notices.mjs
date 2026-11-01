@@ -15,6 +15,55 @@ const out = join(repo, 'ui/public/third-party-notices.txt')
 const LICENSE_FILE = /^(licen[cs]e|copying|copyright|notice|unlicense)/i
 const WIDTH = 78
 
+// npm packages that ship no license file, with the notice quoted by hand from where the package
+// points. Keyed by version, so a new one is read again before it is quoted.
+const REMARK_MATH_LICENSE = `(The MIT License)
+
+Copyright (c) Junyoung Choi <fluke8259@gmail.com>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.`
+const BY_HAND = {
+  // Its README's License section.
+  'isarray@1.0.0': `Copyright (c) 2013 Julian Gruber <julian@juliangruber.com>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.`,
+  // Both READMEs name the license file at the root of their monorepo, remarkjs/remark-math.
+  'rehype-katex@7.0.1': REMARK_MATH_LICENSE,
+  'remark-math@6.0.0': REMARK_MATH_LICENSE,
+}
+
 function run(command, args, cwd) {
   return execFileSync(command, args, {
     cwd,
@@ -110,10 +159,11 @@ function npmNotices() {
     for (const pkg of packages) {
       pkg.paths.forEach((path, index) => {
         const files = licenseFiles(path)
-        if (files.length === 0) {
-          throw new Error(`${pkg.name} ships no license file; quote its license in this script by hand`)
+        const byHand = BY_HAND[`${pkg.name}@${pkg.versions[index]}`]
+        if (files.length === 0 && !byHand) {
+          throw new Error(`${pkg.name} ${pkg.versions[index]} ships no license file; quote its license in BY_HAND`)
         }
-        const text = files.map((name) => readFileSync(join(path, name), 'utf8').trim()).join('\n\n')
+        const text = files.length > 0 ? files.map((name) => readFileSync(join(path, name), 'utf8').trim()).join('\n\n') : byHand
         addNotice(groups, license, text, `${pkg.name} ${pkg.versions[index]}`)
         count += 1
       })
