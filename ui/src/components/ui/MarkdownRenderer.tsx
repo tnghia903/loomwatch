@@ -4,7 +4,7 @@ import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import 'katex/dist/katex.min.css'
 
-import { useContext, useMemo, useState, type ComponentProps } from 'react'
+import { createContext, useContext, useMemo, useState, type ComponentProps } from 'react'
 import { sourceSpans } from '../../lib/files/markdownEdits'
 import { BACKED, CLAIM_MARK } from '../../lib/chat/claims'
 import { withoutCitationMarks } from '../../lib/chat/citationMarks'
@@ -111,16 +111,24 @@ function numbersAsWords(text: string): string {
   return text.replace(/^( {0,3})(\d{1,9})([.)])(?=\s|$)/gm, '$1$2\\$3')
 }
 
-/** A span, or a person's @mention drawn as [`SaidMention`] says. Typeset math keeps its own style and roles. */
+/** Inside typeset math, where every box is KaTeX's (raw HTML is skipped, so none is the reply's). */
+const InMath = createContext(false)
+
+/**
+ * A span, or a person's @mention drawn as [`SaidMention`] says. Typeset math keeps its own style
+ * and roles, on every box inside it: a fraction's parts are placed by their inline height and top.
+ */
 function Span({ children, node, ...rest }: ComponentProps<'span'> & ExtraProps) {
   const { className, title } = rest
+  const inMath = useContext(InMath)
   const draw = useContext(SaidMention)
+  if (inMath) return <span {...rest}>{children}</span>
   if (className === 'md-said-mention' && draw) {
     const agent = String(node?.properties.dataAgent ?? '')
     const text = node?.children.map((child) => (child.type === 'text' ? child.value : '')).join('') ?? ''
     return <>{draw(agent || undefined, text)}</>
   }
-  if (typeof className === 'string' && className.includes('katex')) return <span {...rest}>{children}</span>
+  if (typeof className === 'string' && className.includes('katex')) return <InMath.Provider value><span {...rest}>{children}</span></InMath.Provider>
   return <span className={className} title={title}>{children}</span>
 }
 
