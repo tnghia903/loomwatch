@@ -338,10 +338,15 @@ mod tests {
         server.abort();
     }
 
+    /// How soon an event committed while the stream waits must reach it. A stream that missed the
+    /// commit's signal reads again only at [`FOLLOW_FALLBACK`], so an event well inside that came
+    /// by the signal. Wide enough for a loaded Windows runner, which has taken 461 ms.
+    const WOKEN_WITHIN: Duration = Duration::from_secs(2);
+
     /// The stream is pushed, not polled: an event committed while the stream waits arrives at
-    /// once, far sooner than the half-second poll it replaced, whether the event was written for
-    /// a caller that waited or by the writer's own batch window. Closing the socket ends the
-    /// follow task, which lets go of the writer's signal.
+    /// once, long before the fallback read, whether the event was written for a caller that
+    /// waited or by the writer's own batch window. Closing the socket ends the follow task, which
+    /// lets go of the writer's signal.
     #[tokio::test]
     async fn a_waiting_stream_is_woken_by_the_commit_and_ends_with_its_socket() {
         use crate::archive::WriteFailure;
@@ -349,6 +354,10 @@ mod tests {
         use futures_util::StreamExt;
         use std::sync::Arc;
         use std::time::Instant;
+        assert!(
+            WOKEN_WITHIN * 10 <= FOLLOW_FALLBACK,
+            "the fallback read is too soon for this test to tell a woken stream from a polling one"
+        );
         let db = crate::db::Db::temp().await;
         let archive = EventArchive::new(db.clone());
         let make_event = |seq| RunEvent {
@@ -389,7 +398,7 @@ mod tests {
         assert_eq!(next().await, make_event(1));
         let waited = started.elapsed();
         assert!(
-            waited < Duration::from_millis(250),
+            waited < WOKEN_WITHIN,
             "a committed event took {waited:?} to reach the stream"
         );
 
@@ -401,7 +410,7 @@ mod tests {
         assert_eq!(next().await, make_event(2));
         let waited = started.elapsed();
         assert!(
-            waited < crate::archive::BATCH_WINDOW + Duration::from_millis(250),
+            waited < crate::archive::BATCH_WINDOW + WOKEN_WITHIN,
             "a queued event took {waited:?} to reach the stream"
         );
         failure.check().unwrap();
