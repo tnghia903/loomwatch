@@ -342,6 +342,9 @@ mod tests {
     /// once, far sooner than the half-second poll it replaced, whether the event was written for
     /// a caller that waited or by the writer's own batch window. Closing the socket ends the
     /// follow task, which lets go of the writer's signal.
+    ///
+    /// Timed from the commit, not from the hand-over: how long the disk takes to write the row
+    /// (a third of a second on a busy Windows runner) is the writer's, not the stream's.
     #[tokio::test]
     async fn a_waiting_stream_is_woken_by_the_commit_and_ends_with_its_socket() {
         use crate::archive::WriteFailure;
@@ -384,8 +387,9 @@ mod tests {
 
         // Long enough for the stream to be waiting, not mid-read.
         tokio::time::sleep(Duration::from_millis(100)).await;
-        let started = Instant::now();
+        // `append` returns once its batch is committed.
         archive.append(&make_event(1)).await.unwrap();
+        let started = Instant::now();
         assert_eq!(next().await, make_event(1));
         let waited = started.elapsed();
         assert!(
@@ -395,14 +399,22 @@ mod tests {
 
         // Handed over without waiting: nobody flushes, the writer's window commits it.
         tokio::time::sleep(Duration::from_millis(100)).await;
+        let mut written = archive.written();
+        written.mark_unchanged();
         let failure = Arc::new(WriteFailure::default());
-        let started = Instant::now();
         archive.enqueue(make_event(2), &failure).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(3), written.changed())
+            .await
+            .expect("the writer's window commits it")
+            .unwrap();
+        // Let go of the signal, so the count below is the stream's alone.
+        drop(written);
+        let started = Instant::now();
         assert_eq!(next().await, make_event(2));
         let waited = started.elapsed();
         assert!(
-            waited < crate::archive::BATCH_WINDOW + Duration::from_millis(250),
-            "a queued event took {waited:?} to reach the stream"
+            waited < Duration::from_millis(250),
+            "a queued event took {waited:?} to reach the stream once committed"
         );
         failure.check().unwrap();
 
