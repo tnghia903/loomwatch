@@ -7,7 +7,7 @@ import type { ChatItem, ChatMessage } from '../../lib/chat/client'
 import { ChatMentionsContext } from '../../lib/chat/faces'
 import { clockTime } from '../../lib/chat/format'
 import type { Lesson } from '../../lib/lessons/client'
-import { figureFor, figureStill } from '../../lib/library/figures'
+import { figureFor, figureHue, figureStill, freshFigure } from '../../lib/library/figures'
 import type { RunRecord } from '../../lib/runs/client'
 import { FileReaderContext } from '../../lib/files/reader'
 import type { TeamMessage } from '../../lib/watch/messages'
@@ -497,6 +497,34 @@ describe('the team’s chat', () => {
     expect(within(said).queryByRole('button', { name: /^React to/ })).toBeNull()
     // The agent's answer to it is still its own.
     expect(within(log).getByText('Here is the plan.')).toBeInTheDocument()
+  })
+
+  // ADR 0083, decision 10: work one of your agents asked the team for is that agent's request.
+  it('shows a request one of your agents made of the team as that agent’s, with its figure, never as yours', async () => {
+    // Maya, in My agents, wearing a figure she chose rather than the one her id would give her.
+    const chosen = freshFigure('maya', [figureFor('maya')])
+    const stub = vi.mocked(fetch).getMockImplementation()!
+    vi.mocked(fetch).mockImplementation(async (input, init) => String(input) === '/api/jobs'
+      ? new Response(JSON.stringify({ folder: '', jobs: [{ id: 'maya', file: 'maya.yaml', name: 'Maya', instructions: 'Help me with my day.', figure: chosen }], problems: [] }), { status: 200 })
+      : stub(input, init))
+    page = [{ kind: 'work', run: run({ runId: 'asked', prompt: 'Plan **3 gentle days** in Đà Lạt', askedBy: { agent: 'maya', name: 'Maya' } }), request: null, notes: [] }]
+    renderChat()
+    const log = await screen.findByRole('log', { name: 'Messages' })
+    const said = (await within(log).findByText('Maya')).closest<HTMLElement>('.chat-msg')!
+    expect(said).not.toHaveClass('mine')
+    expect(within(said).getByText('to the team')).toBeInTheDocument()
+    expect(within(log).queryByText(/^You → /)).toBeNull()
+    // That you started it, on hover and to a screen reader.
+    expect(said.querySelector('.chat-meta')?.getAttribute('title')).toBe('Maya asked this for you. You pressed Start.')
+    expect(said.querySelector('.chat-meta .visually-hidden')).toHaveTextContent('Maya asked this for you. You pressed Start.')
+    // Her words, formatted, and her figure from My agents, her name in its colour.
+    await waitFor(() => expect(said.querySelector('strong')?.textContent).toBe('3 gentle days'))
+    await waitFor(() => expect(said.querySelector('.chat-avatar img')?.getAttribute('src')).toBe(figureStill(chosen)))
+    expect(within(said).getByText('Maya')).toHaveClass(`hue-${figureHue(chosen)}`)
+    // A face on it is on her words, not yours: Wrong tells the team, it doesn't take back yours.
+    fireEvent.click(within(said).getByRole('button', { name: "React to Maya's request" }))
+    const tray = screen.getByRole('toolbar', { name: 'Pick a reaction' })
+    expect(within(tray).getByRole('button', { name: 'Wrong' })).toHaveAttribute('aria-description', 'The team won’t build on it')
   })
 
   it('shows a team’s word that joined the agent’s turn as a note as the team’s too, with when it was taken', async () => {
