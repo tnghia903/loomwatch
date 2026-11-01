@@ -21,7 +21,7 @@ const SERVICE: &str = "LoomWatch.Push";
 const ACCOUNT: &str = "apns-key";
 
 /// The app pushes go to, unless the key says otherwise: `LoomWatch` for iPhone.
-pub const APP: &str = "io.github.loomwatch.phone";
+pub const APP: &str = "loomwatch.phone";
 
 /// An Apple push key. Deliberately no Debug implementation: it holds the private key.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
