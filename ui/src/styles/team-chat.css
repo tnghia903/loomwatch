@@ -351,8 +351,11 @@
 .tc-talk-line .chat-dots { margin-left: 6px; vertical-align: middle; }
 .tc-talk-end { white-space: nowrap; }
 .tc-talk-line b { font-weight: 600; color: var(--color-ink); }
-/* An agent keeps its own colour here, as on its messages; the blue dots say it is working, as its glow does. */
-.tc-talk-line .chat-name { color: var(--hue); }
+/* An agent is its chip here, as anywhere a sentence names it; the dots say it is working, as its
+   glow does. The line is as tall as a chip whatever it says, so its row keeps its height when the
+   words change, and chips on wrapped rows keep apart. */
+.tc-talk-line { line-height: 24px; }
+.tc-talk-keep { white-space: nowrap; }
 .tc-replies.live .tc-talk-line .chat-dots i { background: var(--color-live); }
 .tc-replies.live .tc-talk-line b.tc-wait { color: var(--color-accent); }
 .tc-replies-end { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 12px; margin-left: auto; }

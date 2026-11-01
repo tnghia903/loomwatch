@@ -1043,13 +1043,14 @@ describe('who has the work', () => {
     expect(pill()?.querySelector('.chat-dots')).toBeNull()
   })
 
-  it('names each agent at work in its own colour, as its messages do, with green dots for the work', async () => {
+  it('names each agent at work as its chip, as a sentence anywhere names it, with green dots for the work', async () => {
     fold()
     page = working({ working: ['researcher', 'writer'] })
     renderChat()
     const line = await talkLine(/are working/)
     expect(line).toHaveTextContent('Researcher and Writer are working')
-    expect([...line.querySelectorAll('b')].map((name) => [name.textContent, name.className])).toEqual([['Researcher', 'chat-name hue-1'], ['Writer', 'chat-name hue-2']])
+    expect([...line.querySelectorAll('.tc-mention')].map((chip) => [chip.textContent, chip.className, chip.querySelector('.tc-mention-at')])).toEqual([['Researcher', 'tc-mention hue-1', null], ['Writer', 'tc-mention hue-2', null]])
+    expect(line.querySelectorAll('.tc-mention .tc-mention-face')).toHaveLength(2)
     // The dots stay with the last word, so a wrapped line never leaves them alone on a row.
     const dots = line.querySelector('.chat-dots')!
     expect(dots.parentElement).toHaveClass('tc-talk-end')
@@ -1061,6 +1062,25 @@ describe('who has the work', () => {
     expect([cascaded(said, 'display'), cascaded(said, 'flex')]).toEqual(['block', '0 1 auto'])
     // Both faces on the piece's line glow blue, at work.
     expect([...document.querySelectorAll('.tc-replies-faces .chat-avatar')].map((face) => [face.getAttribute('class')?.match(/hue-\d/)?.[0], face.classList.contains('working')])).toEqual([['hue-1', true], ['hue-2', true]])
+  })
+
+  it('keeps the comma and the “’s” after an agent’s chip with it, so a wrapped line never starts with them', async () => {
+    fold()
+    page = working({ working: ['researcher', 'writer', 'researcher~1'] })
+    const three = renderChat()
+    const listed = await talkLine(/are working/)
+    expect(listed).toHaveTextContent('Researcher, Writer and 1 helper are working')
+    const first = listed.querySelector('.tc-mention')!.parentElement!
+    expect(first.textContent).toBe('Researcher,')
+    expect(cascaded(first, 'white-space')).toBe('nowrap')
+    three.unmount()
+    page = working({ working: ['researcher', 'writer~1', 'writer~2'] })
+    renderChat()
+    const helped = await talkLine(/are working/)
+    expect(helped).toHaveTextContent('Researcher and Writer’s 2 helpers are working')
+    const writer = [...helped.querySelectorAll('.tc-mention')][1].parentElement!
+    expect(writer.textContent).toBe('Writer’s 2 helpers')
+    expect(cascaded(writer, 'white-space')).toBe('nowrap')
   })
 
   it('flashes nothing between two agents, and brings the count back once the work is done', async () => {
@@ -1135,7 +1155,7 @@ describe('the piece’s line and the header’s pill', () => {
     asking()
     renderChat()
     await waitFor(() => expect(line()?.querySelector('.tc-talk-line')).toHaveTextContent('Writer is asking Researcher'))
-    expect([...line()!.querySelectorAll('.tc-talk-line b')].map((name) => name.className)).toEqual(['chat-name hue-2', 'chat-name hue-1'])
+    expect([...line()!.querySelectorAll('.tc-talk-line .tc-mention')].map((chip) => [chip.textContent, chip.className])).toEqual([['Writer', 'tc-mention hue-2'], ['Researcher', 'tc-mention hue-1']])
     scrollLine(true)
     expect(pill()).toBeNull()
     // Scrolled away: the line sets off from the chat's edge, and the pill waits hidden until it lands.
@@ -2014,12 +2034,13 @@ describe('one agent’s own chat', () => {
     expect(props.prepare).not.toHaveBeenCalled()
   })
 
-  it('says it is working in its own colour, its face glowing on the piece’s line', async () => {
+  it('says it is working as its chip, its face glowing on the piece’s line', async () => {
     page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null, onlyAgent: 'ada', responder: 'ada', agentIds: ['ada'], working: ['ada'] }), request: message({ text: 'sum up the report', route: 'agent', agentId: 'ada' }), notes: [] }]
     renderSolo()
     const line = await talkLine(/is working/)
     expect(line).toHaveTextContent('Ada is working')
-    expect(line.querySelector('b')).toHaveClass('chat-name', 'hue-3')
+    expect(line.querySelector('.tc-mention')).toHaveClass('hue-3')
+    expect(line.querySelector('.tc-mention')).toHaveTextContent(/^Ada$/)
     expect(document.querySelectorAll('.tc-replies-faces .chat-avatar')).toHaveLength(1)
     expect(document.querySelector('.tc-replies-faces .chat-avatar')).toHaveClass('hue-3', 'working')
   })

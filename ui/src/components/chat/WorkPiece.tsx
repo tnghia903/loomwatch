@@ -50,7 +50,7 @@ import { Reactions } from './Reactions'
 import { Spool } from './Spool'
 import { StatusGlyph } from '../ui/glyphs'
 import { ChangesQuote, ReplyQuote } from './ReplyQuote'
-import { SaidText } from './SaidText'
+import { MentionChip, SaidText } from './SaidText'
 
 
 /** The team as the chat draws it. */
@@ -454,9 +454,14 @@ export function WorkPiece({ item, newest = false, approveFilled = true, fixFille
               ? <><b className="tc-wait">Waiting for you</b> · {stopSentence(stops[0]).replace(/\.$/, '')}</>
             : passLine
               // The dots stay with the last words, so a wrapped line never leaves them alone.
-              ? <>{passLine.slice(0, -1).map((part, index) => (part.agent ? <Named key={index} hue={hue(part.agent)}>{part.text}</Named> : <Fragment key={index}>{part.text}</Fragment>))}<span className="tc-talk-end">{passLine.slice(-1).map((part) => (part.agent ? <Named key="last" hue={hue(part.agent)}>{part.text}</Named> : <Fragment key="last">{part.text}</Fragment>))}<span className="chat-dots" aria-hidden="true"><i /><i /><i /></span></span></>
+              ? <>{passLine.slice(0, -1).map((part, index) => (part.agent ? <MentionChip key={index} id={part.agent} name={part.text} hue={hue(part.agent)} bare /> : <Fragment key={index}>{part.text}</Fragment>))}<span className="tc-talk-end">{passLine.slice(-1).map((part) => (part.agent ? <MentionChip key="last" id={part.agent} name={part.text} hue={hue(part.agent)} bare /> : <Fragment key="last">{part.text}</Fragment>))}<span className="chat-dots" aria-hidden="true"><i /><i /><i /></span></span></>
             : working.length > 0
-              ? <><span>{whoWorks(working).map((part, index, parts) => <Fragment key={part.agent ?? part.text}>{index === 0 ? '' : index === parts.length - 1 ? ' and ' : ', '}{part.agent ? <Named hue={hue(part.agent)}>{part.helpers ? `${name(part.agent)}’s ${part.text}` : name(part.agent)}</Named> : part.text}</Fragment>)}</span> {working.length === 1 ? 'is' : 'are'} <span className="tc-talk-end">working<span className="chat-dots" aria-hidden="true"><i /><i /><i /></span></span></>
+              ? <><span>{whoWorks(working).map((part, index, parts) => {
+                // A chip keeps the "’s" and the comma after it, so a wrapped line never starts with them.
+                const comma = index < parts.length - 2 ? ',' : ''
+                const space = index === parts.length - 1 ? '' : index === parts.length - 2 ? ' and ' : ' '
+                return <Fragment key={part.agent ?? part.text}>{part.agent ? <span className="tc-talk-keep"><MentionChip id={part.agent} name={name(part.agent)} hue={hue(part.agent)} bare />{part.helpers ? `’s ${part.text}` : ''}{comma}</span> : `${part.text}${comma}`}{space}</Fragment>
+              })}</span> {working.length === 1 ? 'is' : 'are'} <span className="tc-talk-end">working<span className="chat-dots" aria-hidden="true"><i /><i /><i /></span></span></>
               : run.status === 'queued' || run.status === 'starting' ? 'Starting…' : 'Handing over…'}
         </Swap>}
         <Spool spend={record.spend} stops={stops} name={name} hue={hue} />
@@ -903,11 +908,6 @@ function Answer({ tour, run, answer, touched, folder, written, streaming, name, 
       </div>
     </div>
   )
-}
-
-/** An agent named on the piece's line: in its own colour, as its name is on its messages. */
-function Named({ hue, children }: { hue: number; children: ReactNode }) {
-  return <b className={`chat-name hue-${hue}`}>{children}</b>
 }
 
 /** What the talk line says, as a key: a change of who is working, or of how the work moved, slides the new words in. */
