@@ -74,7 +74,12 @@ async fn other() -> Other {
         .with_state(calls.clone());
     let home = serve(home).await;
     let devices = Devices::memory();
-    let door = serve(door_router(devices.clone(), &home)).await;
+    let door = serve(door_router(
+        devices.clone(),
+        super::super::push::key::KeyPlace::memory(),
+        &home,
+    ))
+    .await;
     Other {
         door,
         devices,

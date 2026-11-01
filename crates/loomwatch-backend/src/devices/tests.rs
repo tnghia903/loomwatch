@@ -116,7 +116,12 @@ async fn phone_door(daemon: &str) -> String {
 async fn door_with(daemon: &str, kind: Kind) -> String {
     let devices = Devices::memory();
     devices.connect_for_test(kind, KEY);
-    serve(door_router(devices, daemon)).await
+    serve(door_router(
+        devices,
+        super::push::key::KeyPlace::memory(),
+        daemon,
+    ))
+    .await
 }
 
 fn client() -> reqwest::Client {

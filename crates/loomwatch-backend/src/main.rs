@@ -97,6 +97,14 @@ enum Commands {
         #[command(flatten)]
         database: DatabaseArgs,
     },
+    /// Your own Apple push key, which lets this computer push to `LoomWatch` on your iPhone the
+    /// moment something needs you. Kept in the Keychain (Credential Manager on Windows).
+    PushKey {
+        #[command(flatten)]
+        database: DatabaseArgs,
+        #[command(subcommand)]
+        action: PushKeyAction,
+    },
     /// Run one turn of a team's entrypoint agent.
     Run {
         #[arg(long)]
@@ -145,6 +153,29 @@ enum Commands {
     #[cfg(feature = "prompt-overrides")]
     #[command(long_flag = "dump-prompt-blocks")]
     DumpPromptBlocks { dir: PathBuf },
+}
+
+#[derive(Debug, Subcommand)]
+enum PushKeyAction {
+    /// Keep the key from Apple's developer site (Keys, with Apple Push Notifications service).
+    Set {
+        /// The key's id, shown beside it on the developer site.
+        #[arg(long)]
+        key_id: String,
+        /// Your developer team's id (Membership).
+        #[arg(long)]
+        team_id: String,
+        /// The .p8 file Apple gave when the key was made.
+        #[arg(long)]
+        p8: PathBuf,
+        /// The iPhone app's bundle id, when it isn't `LoomWatch`'s own.
+        #[arg(long)]
+        topic: Option<String>,
+    },
+    /// Say whether a key is kept, and which, without showing it.
+    Show,
+    /// Forget the key: pushes stop.
+    Remove,
 }
 
 /// A durable registry with its cache already filled from the `runs` table, and every run the last
@@ -580,8 +611,13 @@ async fn main() -> Result<()> {
                     std::env::var("LOOMWATCH_DEVICES_LISTEN").ok().as_deref(),
                 ) {
                     Ok(Some(door)) if listen.ip().is_loopback() => {
-                        if loomwatch_backend::devices::open_door(devices.clone(), door, address)
-                            .await
+                        if loomwatch_backend::devices::open_door(
+                            devices.clone(),
+                            loomwatch_backend::devices::push::key::KeyPlace::open(&state_dir),
+                            door,
+                            address,
+                        )
+                        .await
                         {
                             loomwatch_backend::devices::api::Door::Open(door)
                         } else {
@@ -645,6 +681,36 @@ async fn main() -> Result<()> {
             let keys = loomwatch_backend::devices::connected::KeyPlace::open(&state_dir);
             loomwatch_backend::devices::connected::disconnect(&state_dir, &keys).await?;
             println!("This computer runs its own LoomWatch again.");
+        }
+        Commands::PushKey { database, action } => {
+            use loomwatch_backend::devices::push::key::{KeyPlace, PushKey};
+            let keys = KeyPlace::open(&database.state_dir()?);
+            match action {
+                PushKeyAction::Set {
+                    key_id,
+                    team_id,
+                    p8,
+                    topic,
+                } => {
+                    let text = std::fs::read_to_string(&p8)
+                        .with_context(|| format!("couldn't read {}", p8.display()))?;
+                    let key = PushKey::new(&key_id, &team_id, topic.as_deref(), &text)?;
+                    keys.write(Some(&key)).await?;
+                    println!(
+                        "Kept {}. LoomWatch pushes to your iPhone within a minute; you can delete {} now.",
+                        key.describe(),
+                        p8.display()
+                    );
+                }
+                PushKeyAction::Show => match keys.read().await? {
+                    Some(key) => println!("{}", key.describe()),
+                    None => println!("No push key is kept."),
+                },
+                PushKeyAction::Remove => {
+                    keys.write(None).await?;
+                    println!("The push key is forgotten. LoomWatch stops pushing within a minute.");
+                }
+            }
         }
         Commands::Run {
             team,

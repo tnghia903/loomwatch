@@ -180,7 +180,12 @@ fn an_old_code_or_the_one_before_doesnt_pair() {
 async fn a_phone_trades_its_code_for_a_key_at_the_door_and_keeps_to_its_list() {
     let (daemon, calls) = stand_in().await;
     let devices = Devices::memory();
-    let door = serve(door_router(devices.clone(), &daemon)).await;
+    let door = serve(door_router(
+        devices.clone(),
+        super::push::key::KeyPlace::memory(),
+        &daemon,
+    ))
+    .await;
     let code = devices.make_code(Kind::Phone);
 
     let reply = claim(&door, &code.code).await;
@@ -212,7 +217,12 @@ async fn a_computer_reaches_everything_as_a_local_program() {
     let devices = Devices::memory();
     let code = devices.make_code(Kind::Computer);
     let (_, key) = devices.claim(&code.code, Some("MacBook"), None).unwrap();
-    let door = serve(door_router(devices, &daemon)).await;
+    let door = serve(door_router(
+        devices,
+        super::push::key::KeyPlace::memory(),
+        &daemon,
+    ))
+    .await;
 
     let reply = client()
         .put(format!("{door}/api/team?path=a.yaml"))
@@ -253,7 +263,12 @@ async fn a_computers_live_connection_passes_both_ways_and_needs_its_key() {
     let (daemon, _calls) = stand_in().await;
     let devices = Devices::memory();
     devices.connect_for_test(Kind::Computer, KEY);
-    let door = serve(door_router(devices, &daemon)).await;
+    let door = serve(door_router(
+        devices,
+        super::push::key::KeyPlace::memory(),
+        &daemon,
+    ))
+    .await;
     let live = format!("ws://{}/api/live", door.trim_start_matches("http://"));
 
     let mut request = live.clone().into_client_request().unwrap();
@@ -290,7 +305,12 @@ async fn a_removed_device_is_turned_away_at_once() {
     let (daemon, calls) = stand_in().await;
     let devices = Devices::memory();
     let device = devices.connect_for_test(Kind::Computer, KEY);
-    let door = serve(door_router(devices.clone(), &daemon)).await;
+    let door = serve(door_router(
+        devices.clone(),
+        super::push::key::KeyPlace::memory(),
+        &daemon,
+    ))
+    .await;
     let read = || {
         client()
             .get(format!("{door}/api/team?path=a.yaml"))

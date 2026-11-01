@@ -53,7 +53,11 @@ tar = "0.4"
 # the flate2 above, nothing else.
 zip = { version = "9.0.4", default-features = false, features = ["deflate-flate2"] }
 uuid = { version = "1.18", features = ["v4", "v7"] }
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "stream"] }
+# http2: Apple's push service answers only over HTTP/2 (devices/push).
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "stream", "http2"] }
+# Signs the token Apple's push service asks for (ES256, devices/push/apns.rs) with the person's own
+# push key, read from its .p8 file.
+p256 = { version = "0.13", default-features = false, features = ["ecdsa", "pem", "pkcs8", "std"] }
 cron = "0.17"
 chrono-tz = "0.10"
 toml = { version = "1", default-features = false, features = ["parse", "serde", "std"] }

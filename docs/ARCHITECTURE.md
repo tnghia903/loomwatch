@@ -449,6 +449,20 @@ iPhone or another computer connects to it and keeps nothing but a key of its own
   words that say so. When the other computer can't be reached or has removed this one, a page says
   which, with Try again and Use LoomWatch on this computer, which forgets the connection and exits
   with 76 again. `loomwatchd disconnect` does the same from a terminal.
+- **Push to an iPhone.** A paired phone gives its Apple push token and its notification settings
+  at `PUT /phone/v0/push` (`DELETE` stops it). The door answers this itself, since it knows
+  which phone is asking, and keeps the token with the device in `devices.json`. Every 3 s
+  `push::spawn` reads what the phone's home screen would show. It pushes what is new to each
+  phone: someone waiting, or a run that succeeded or failed (not cancelled, not one trying
+  again). It follows the phone's settings, and in quiet hours, in the phone's time zone, only a
+  permission ask rings. What was there when LoomWatch started, or when a phone first gave its
+  token, isn't news. A push carries only ids (`target`, `run`, `node`, `room`); the phone's
+  notification extension reads the words from here over the person's Tailscale, so nothing
+  anyone wrote passes through Apple. Pushes go straight to Apple's service, signed (ES256) with
+  the person's own push key. `loomwatchd push-key set` keeps that key in the Keychain as
+  `LoomWatch.Push` (Credential Manager on Windows, `push-key.json` elsewhere). Apple saying a
+  token is gone forgets it; a push that fails goes again on the next read. A relay for people
+  without a key of their own fits behind `push::Sender` (`push/`).
 
 ### Schedules
 
