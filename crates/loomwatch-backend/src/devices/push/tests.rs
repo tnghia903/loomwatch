@@ -431,7 +431,7 @@ async fn a_push_goes_to_apple_signed_for_the_app_and_a_gone_token_says_so() {
     let seen = seen.lock().unwrap();
     let first = &seen[0];
     assert_eq!(first["token"], TOKEN);
-    assert_eq!(first["topic"], "io.github.loomwatch.phone");
+    assert_eq!(first["topic"], "loomwatch.phone");
     assert_eq!(first["type"], "alert");
     assert_eq!(first["collapse"], "answer-r1-review");
     assert!(
