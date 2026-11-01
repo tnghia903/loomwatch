@@ -437,7 +437,11 @@ iPhone or another computer connects to it and keeps nothing but a key of its own
 - **What each may do.** Every request at the door carries its key. An iPhone gets the phone's
   routes (`/phone/v0/*`) and the short list in `phone::ALLOWED`: see, answer, approve, start,
   stop, chat, Ask, and small changes to an agent or a team, never keys, sign-ins or settings
-  (`phone/`). A computer gets everything a person at this computer can do: its requests go on as
+  (`phone/`). A phone's request stops at 1 MB, except a file it sends into a team's chat or an
+  agent's own chat, such as the picture of a part circled in the reader: that goes to
+  `PUT /api/chat/files` as raw bytes (`application/octet-stream`, anything else refused at the
+  door), up to 25 MB, and its message names it in `files`, as the Mac's chat does (ADR 0082). A
+  computer gets everything a person at this computer can do: its requests go on as
   a local program's would, without its key, cookies or the page it came from, and marked
   `x-loomwatch-via-device` so LoomWatch keeps a few things, such as connecting this computer to
   another, to its own screen (`door.rs`, `pass.rs`). Live connections are joined byte for byte.

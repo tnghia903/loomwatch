@@ -54,7 +54,7 @@ impl ChatFile {
 }
 
 /// A file a message names, as the message box sends it: by the path its upload answered with.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SentFile {
     pub path: String,
