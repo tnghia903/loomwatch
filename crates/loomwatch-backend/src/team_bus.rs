@@ -1621,6 +1621,9 @@ impl TeamBus {
                 }))
             }
             "ask_team" => self.ask_team(session, event_log, arguments).await,
+            "message_me_at" => self.message_me_at(session, event_log, arguments).await,
+            "pending_messages" => self.pending_messages(session).await,
+            "cancel_message" => self.cancel_message(session, arguments).await,
             "my_agents" => self.my_agents(session).await,
             "dispatch" => {
                 let reference = required_string(arguments, "agent")?;
@@ -3374,6 +3377,8 @@ pub(crate) struct BusSeat {
     /// The agent the work starts with, in a team with no fixed order that lists the person's other
     /// agents: it may bring one in from My agents (ADR 0092).
     pub(crate) my_agents: bool,
+    /// In its own chat, with a person: it may message them at a time they ask (ADR 0108).
+    pub(crate) own_chat: bool,
 }
 
 impl TeamBus {
@@ -3429,7 +3434,131 @@ impl TeamBus {
                 && team.agents.iter().any(|agent| {
                     agent.id == holder.agent_id && crate::bring_in::may_bring_in(team, agent)
                 }),
+            own_chat: !copy
+                && !holder.helper
+                && !holder.answering
+                && self.state.operator.is_some()
+                && self.own_chat(&holder.agent_id).is_some(),
         }
+    }
+
+    /// `agent`'s own chat, relative to the teams root, when this run's team is it: the one-agent
+    /// team My agents keeps for its chat (`jobs::chat_of`).
+    fn own_chat(&self, agent: &str) -> Option<String> {
+        let path = self.state.team_path.to_string_lossy();
+        (crate::jobs::chat_of(&path) == Some(agent)).then(|| {
+            format!(
+                "{}/{}/{agent}.yaml",
+                crate::jobs::JOBS_DIR,
+                crate::jobs::BENCH_DIR
+            )
+        })
+    }
+
+    /// The chat of the agent behind `session`, when it is in its own chat with a person to message
+    /// (ADR 0108). Refused for anyone else, so a harness that cached an older list of tools can't
+    /// set a message either.
+    fn own_chat_of(&self, session: &AgentSession) -> Result<String> {
+        if crate::helpers::lead_of(&session.agent_id).is_none()
+            && !session.answering
+            && self.state.operator.is_some()
+            && let Some(chat) = self.own_chat(&session.agent_id)
+        {
+            return Ok(chat);
+        }
+        Err(refused(
+            "not_own_chat",
+            "only an agent in its own chat, with the person there, may set a message for them"
+                .to_owned(),
+        ))
+    }
+
+    /// `message_me_at`: keep the message for its time, and return at once.
+    async fn message_me_at(
+        &self,
+        session: &AgentSession,
+        event_log: &EventLog,
+        arguments: &Value,
+    ) -> Result<Value> {
+        let chat = self.own_chat_of(session)?;
+        let text = required_string(arguments, "text")?;
+        if text.chars().count() > crate::messages_at::MAX_TEXT_CHARS {
+            return Err(refused(
+                "too_long",
+                format!(
+                    "a message's words may be at most {} characters: set what to say, and \
+                     write the rest when the time comes",
+                    crate::messages_at::MAX_TEXT_CHARS
+                ),
+            ));
+        }
+        let now = chrono::Local::now();
+        let at = crate::messages_at::when(
+            arguments.get("at").and_then(Value::as_str),
+            arguments.get("inMinutes").and_then(Value::as_i64),
+            &now,
+        )
+        .map_err(|why| refused("not_a_time", why))?;
+        let set = crate::messages_at::Store::new(self.state.archive.db().clone())
+            .set(
+                &chat,
+                &session.agent_id,
+                at,
+                &text,
+                Some(event_log.session_id()),
+            )
+            .await
+            .map_err(|why| refused("not_set", why))?;
+        Ok(json!({
+            "set": true,
+            "id": set.id,
+            "comes": format!(
+                "{}, {}",
+                crate::messages_at::in_words(at, &now),
+                crate::messages_at::how_long(now.with_timezone(&chrono::Utc), at)
+            ),
+            "note": MESSAGE_ME_AT_SET.text(),
+        }))
+    }
+
+    /// `pending_messages`: what this chat has waiting, soonest first.
+    async fn pending_messages(&self, session: &AgentSession) -> Result<Value> {
+        let chat = self.own_chat_of(session)?;
+        let waiting = crate::messages_at::Store::new(self.state.archive.db().clone())
+            .waiting(Some(&chat))
+            .await
+            .map_err(|why| refused("not_read", why))?;
+        let now = chrono::Local::now();
+        Ok(Value::Array(
+            waiting
+                .into_iter()
+                .filter_map(|message| {
+                    let at = crate::deadline::parse(&message.at)?;
+                    Some(json!({
+                        "id": message.id,
+                        "comes": crate::messages_at::in_words(at, &now),
+                        "text": message.text,
+                    }))
+                })
+                .collect(),
+        ))
+    }
+
+    /// `cancel_message`: cancel one of this chat's waiting messages.
+    async fn cancel_message(&self, session: &AgentSession, arguments: &Value) -> Result<Value> {
+        let chat = self.own_chat_of(session)?;
+        let id = required_string(arguments, "id")?;
+        let cancelled = crate::messages_at::Store::new(self.state.archive.db().clone())
+            .cancel(&id, Some(&chat))
+            .await
+            .map_err(|why| refused("not_cancelled", why))?;
+        if !cancelled {
+            return Err(refused(
+                "not_waiting",
+                format!("no message waiting in this chat has the id {id:?}: call pending_messages"),
+            ));
+        }
+        Ok(json!({"cancelled": true, "id": id}))
     }
 
     /// Where the person's teams are, when the agent behind `session` is the one pinned to the
@@ -3595,6 +3724,10 @@ pub(crate) fn offered_tools(seat: &BusSeat) -> Vec<Value> {
     if seat.front_desk {
         tools.extend(front_desk_tools());
     }
+    // ADR 0108: an agent in its own chat may message the person at a time they ask.
+    if seat.own_chat {
+        tools.extend(message_tools());
+    }
     if seat.notebook {
         tools.extend(memory_tool_definitions());
     }
@@ -3740,6 +3873,89 @@ pub(crate) const ASK_TEAM_REQUEST: Block = Block::new(
     "bus.ask_team.request",
     "What the team should do, in full: what you were asked, what you already know and what to \
      send back. The team sees none of this conversation.",
+);
+
+/// The tools that message the person at a time they ask (ADR 0108).
+fn message_tools() -> [Value; 3] {
+    [
+        tool(
+            "message_me_at",
+            MESSAGE_ME_AT.text(),
+            &object(
+                &[
+                    ("text", string_property(MESSAGE_ME_AT_TEXT.text(), 1)),
+                    ("at", string_property(MESSAGE_ME_AT_AT.text(), 1)),
+                    (
+                        "inMinutes",
+                        integer_property(
+                            MESSAGE_ME_AT_IN.text(),
+                            1,
+                            crate::messages_at::MAX_AHEAD.num_minutes(),
+                        ),
+                    ),
+                ],
+                &["text"],
+            ),
+        ),
+        tool(
+            "pending_messages",
+            PENDING_MESSAGES.text(),
+            &json!({"type": "object", "additionalProperties": false}),
+        ),
+        tool(
+            "cancel_message",
+            CANCEL_MESSAGE.text(),
+            &one_string("id", "The message's id, as pending_messages lists it"),
+        ),
+    ]
+}
+
+/// What `message_me_at` is for (ADR 0108).
+pub(crate) const MESSAGE_ME_AT: Block = Block::new(
+    "bus.message_me_at",
+    "Message the person later, at a time they ask: \"remind me at 17:20 to stand up\", \"tell me \
+     in an hour how the build went\". It returns at once. When the time comes, you take a turn \
+     here and write them the message in this chat. Give either at or inMinutes. Never use \
+     commands, sleep or notifications for this.",
+);
+
+/// `message_me_at`'s `text`.
+pub(crate) const MESSAGE_ME_AT_TEXT: Block = Block::new(
+    "bus.message_me_at.text",
+    "What to remind them of, in a few of their own words, such as \"stand up\". It shows in the \
+     chat as their reminder, and you write the message from it when the time comes.",
+);
+
+/// `message_me_at`'s `at`.
+pub(crate) const MESSAGE_ME_AT_AT: Block = Block::new(
+    "bus.message_me_at.at",
+    "When, in this computer's time: \"17:20\" (24-hour, the next 17:20) or \"2026-11-02 08:00\". \
+     For another time zone, give the time with its offset: \"2026-11-02T08:00:00+09:00\".",
+);
+
+/// `message_me_at`'s `inMinutes`.
+pub(crate) const MESSAGE_ME_AT_IN: Block = Block::new(
+    "bus.message_me_at.in_minutes",
+    "Instead of at: how many minutes from now.",
+);
+
+/// What `message_me_at` answers with, beside when the message comes.
+pub(crate) const MESSAGE_ME_AT_SET: Block = Block::new(
+    "bus.message_me_at.set",
+    "Tell the person in a few words when the message comes, then end your turn.",
+);
+
+/// What `pending_messages` is for.
+pub(crate) const PENDING_MESSAGES: Block = Block::new(
+    "bus.pending_messages",
+    "List the messages you set for the person in this chat that are still waiting, soonest first, \
+     each with its id.",
+);
+
+/// What `cancel_message` is for.
+pub(crate) const CANCEL_MESSAGE: Block = Block::new(
+    "bus.cancel_message",
+    "Cancel a message you set for the person that is still waiting, when they no longer want it.",
 );
 
 /// `start_helper` (ADR 0079): the part's title the person reads, then the brief in its two halves.
@@ -4122,12 +4338,167 @@ mod tests {
                 helpers: 4,
                 front_desk: true,
                 my_agents: true,
+                own_chat: true,
             };
             for tool in offered_tools(&seat) {
                 let text = tool.to_string();
                 assert!(!text.contains("  "), "{text}");
             }
         }
+    }
+
+    /// ADR 0108: an agent in its own chat sets, lists and cancels a message on the bus itself;
+    /// the same calls from any other team are refused, whatever list of tools a harness cached.
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn only_an_agent_in_its_own_chat_sets_lists_and_cancels_a_message() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
+        let archive = EventArchive::new(pool);
+        let bus_at = |path: PathBuf| {
+            let team = Arc::new(TeamConfig {
+                project: None,
+                shares: None,
+                project_file: None,
+                schema_version: 1,
+                id: "coby".into(),
+                name: "Coby".into(),
+                entrypoint: "coby".into(),
+                responder: None,
+                schedule: None,
+                deliver: None,
+                conversation: ConversationConfig::default(),
+                permissions: crate::config::TeamPermissions::default(),
+                spend: crate::spend::SpendConfig::default(),
+                memory: None,
+                guards: GuardsConfig::default(),
+                agents: vec![test_agent("coby", OFFLINE)],
+                edges: Vec::new(),
+            });
+            TeamBus::start(
+                team,
+                &path,
+                archive.clone(),
+                Duration::from_secs(2),
+                TeamBusMode::Pipeline,
+                Arc::new(crate::memory::TeamMemory::default()),
+                Some(crate::runs::RunRegistry::default().operator_desk(Some(&archive))),
+            )
+        };
+        let call = |bus: TeamBus, token: String, name: &'static str, arguments: Value| async move {
+            let response = post_json(
+                &bus,
+                &token,
+                &json!({
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {"name": name, "arguments": arguments}
+                }),
+            )
+            .await?;
+            anyhow::Ok(response["result"].clone())
+        };
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+        let tool_names = |bus: TeamBus, token: String| async move {
+            let listed = post_json(
+                &bus,
+                &token,
+                &json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}),
+            )
+            .await?;
+            anyhow::Ok(
+                listed["result"]["tools"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|tool| tool["name"].as_str().map(str::to_owned))
+                    .collect::<Vec<_>>(),
+            )
+        };
+
+        let own = bus_at(root.join(".jobs").join(".bench").join("coby.yaml"))?;
+        let connection = own.connection("coby").await?;
+        connection
+            .register(EventLog::new(archive.clone(), "own-chat".into()))
+            .await;
+        let token = connection.token.clone();
+        let tools = tool_names(own.clone(), token.clone()).await?;
+        for tool in ["message_me_at", "pending_messages", "cancel_message"] {
+            assert!(tools.iter().any(|name| name == tool), "{tool}: {tools:?}");
+        }
+        let set = call(
+            own.clone(),
+            token.clone(),
+            "message_me_at",
+            json!({"text": "stand up", "inMinutes": 25}),
+        )
+        .await?;
+        assert_eq!(set["isError"], false, "{set}");
+        assert!(
+            set["structuredContent"]["comes"]
+                .as_str()
+                .is_some_and(|comes| comes.ends_with("in 25 minutes")),
+            "{set}"
+        );
+        let id = set["structuredContent"]["id"].as_str().unwrap().to_owned();
+        let listed = call(own.clone(), token.clone(), "pending_messages", json!({})).await?;
+        assert_eq!(listed["structuredContent"][0]["id"], json!(id), "{listed}");
+        assert_eq!(listed["structuredContent"][0]["text"], "stand up");
+        let cancelled = call(
+            own.clone(),
+            token.clone(),
+            "cancel_message",
+            json!({"id": id}),
+        )
+        .await?;
+        assert_eq!(cancelled["isError"], false, "{cancelled}");
+        let again = call(
+            own.clone(),
+            token.clone(),
+            "cancel_message",
+            json!({"id": id}),
+        )
+        .await?;
+        assert_eq!(
+            again["isError"], true,
+            "a message is cancelled once: {again}"
+        );
+        let gone = call(own.clone(), token, "pending_messages", json!({})).await?;
+        assert_eq!(gone["structuredContent"], json!([]));
+
+        let elsewhere = bus_at(root.join("team.yaml"))?;
+        let connection = elsewhere.connection("coby").await?;
+        connection
+            .register(EventLog::new(archive.clone(), "elsewhere".into()))
+            .await;
+        let tools = tool_names(elsewhere.clone(), connection.token.clone()).await?;
+        assert!(
+            !tools.iter().any(|name| name == "message_me_at"),
+            "{tools:?}"
+        );
+        let refused = call(
+            elsewhere,
+            connection.token.clone(),
+            "message_me_at",
+            json!({"text": "stand up", "inMinutes": 25}),
+        )
+        .await?;
+        assert_eq!(refused["isError"], true, "{refused}");
+        assert!(
+            refused
+                .to_string()
+                .contains("only an agent in its own chat"),
+            "{refused}"
+        );
+        assert_eq!(
+            crate::messages_at::Store::new(archive.db().clone())
+                .waiting(None)
+                .await
+                .map_err(anyhow::Error::msg)?,
+            []
+        );
+        Ok(())
     }
 
     #[allow(clippy::too_many_lines)]
@@ -7719,8 +8090,9 @@ mod tests {
             helpers: 0,
             front_desk: false,
             my_agents: false,
+            own_chat: false,
         };
-        let cases: [(&str, BusSeat, &[&str]); 17] = [
+        let cases: [(&str, BusSeat, &[&str]); 18] = [
             (
                 "one agent, team mode",
                 seat(TeamBusMode::Team, 0, false),
@@ -7819,6 +8191,20 @@ mod tests {
                     ..seat(TeamBusMode::Pipeline, 0, false)
                 },
                 &["start_helper", "ask_user", "my_teams", "ask_team"],
+            ),
+            // ADR 0108: any agent in its own chat may message the person at a time they ask.
+            (
+                "an agent in its own chat",
+                BusSeat {
+                    own_chat: true,
+                    ..seat(TeamBusMode::Pipeline, 0, false)
+                },
+                &[
+                    "ask_user",
+                    "message_me_at",
+                    "pending_messages",
+                    "cancel_message",
+                ],
             ),
             // ADR 0092: the agent the work starts with, when it may bring in the person's others.
             (

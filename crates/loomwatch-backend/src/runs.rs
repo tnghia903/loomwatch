@@ -300,6 +300,10 @@ pub struct RunRecord {
     /// 0068). Live only, like `permission_requests`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub spend_stops: Vec<crate::spend::SpendStop>,
+    /// The message the person asked for at a time that this run's turn writes (ADR 0108). Fixed at
+    /// launch and stored. `None` for every other run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_at: Option<crate::messages_at::MessageAt>,
     /// When the schedule tries this run again, for a scheduled run that could not reach its AI
     /// source (`errorCode: "source_unreachable"`). The try is a new run whose `retry_of_run_id`
     /// names this one; this clears once it starts, or once the schedule won't try. Live only, like
@@ -465,6 +469,7 @@ impl RunRecord {
             spend: Some(crate::spend::RunSpend::for_team(team)),
             made: None,
             spend_stops: Vec::new(),
+            message_at: None,
             next_try_at: None,
             try_again_after: None,
             wait_for_you: None,
@@ -628,16 +633,20 @@ impl RunStore {
             .made
             .as_ref()
             .and_then(|made| serde_json::to_value(made).ok());
+        let message_at = record
+            .message_at
+            .as_ref()
+            .and_then(|message| serde_json::to_value(message).ok());
         sqlx::query(
             "INSERT INTO runs
              (run_id, session_id, team_path, prompt, status, mode, entrypoint, responder,
               agent_ids, created_at, started_at, finished_at, error, exit_code, error_code,
               stop_reason, event_count, reply, trigger, delivery, follows_run_id, start_at,
               retry_of_run_id, waiting_on, start_key, start_fingerprint, team_key, only_agent,
-              team_revision, team_name, agent_names, spend, made)
+              team_revision, team_name, agent_names, spend, made, message_at)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
                      $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32,
-                     $33)
+                     $33, $34)
              ON CONFLICT (run_id) DO UPDATE SET
                status = EXCLUDED.status,
                started_at = EXCLUDED.started_at,
@@ -702,6 +711,7 @@ impl RunStore {
         .bind(&agent_names)
         .bind(&spend)
         .bind(&made)
+        .bind(&message_at)
         .execute(self.db.writer())
         .await?;
         Ok(())
@@ -815,6 +825,9 @@ pub(crate) fn decode_run(row: &sqlx::sqlite::SqliteRow) -> Result<StoredRun, sql
                 .try_get::<Option<Value>, _>("made")?
                 .and_then(|made| serde_json::from_value(made).ok()),
             spend_stops: Vec::new(),
+            message_at: row
+                .try_get::<Option<Value>, _>("message_at")?
+                .and_then(|message| serde_json::from_value(message).ok()),
             next_try_at: None,
             try_again_after: None,
             wait_for_you: None,
@@ -2286,6 +2299,10 @@ pub(crate) struct StartRunRequest {
     /// another team's agent made.
     #[serde(skip)]
     links: Vec<String>,
+    /// The message the person asked for at a time that this run's turn writes (ADR 0108). Only
+    /// the daemon sets it.
+    #[serde(skip)]
+    message_at: Option<crate::messages_at::MessageAt>,
 }
 
 impl StartRunRequest {
@@ -2329,6 +2346,15 @@ impl StartRunRequest {
     #[must_use]
     pub(crate) fn written_by_the_operator(mut self, words: &str) -> Self {
         self.links = crate::agent::tools::links_written_in(words);
+        self
+    }
+
+    /// The turn writes `message`, which the person asked for at a time (ADR 0108). Its words are
+    /// the agent's, so none of their links count as the operator's.
+    #[must_use]
+    pub(crate) fn for_message_at(mut self, message: crate::messages_at::MessageAt) -> Self {
+        self.links = Vec::new();
+        self.message_at = Some(message);
         self
     }
 
@@ -2607,6 +2633,7 @@ pub(crate) async fn launch_manual(
     prepared.lineage.reply.clone_from(&request.reply);
     prepared.lineage.files.clone_from(&request.files);
     prepared.lineage.links.clone_from(&request.links);
+    prepared.record.message_at.clone_from(&request.message_at);
     // Retry lineage is a column, not a `Map` in the browser: a reloaded page still says
     // "Retry of Run 07". Written after `resolve_continuation` so an explicit `retryOfRunId` wins
     // over the one a checkpoint continuation derives, which is the more specific claim.

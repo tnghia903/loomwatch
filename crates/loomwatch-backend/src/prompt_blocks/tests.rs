@@ -223,6 +223,7 @@ fn bus_tools(out: &mut String) {
         helpers: 0,
         front_desk: false,
         my_agents: false,
+        own_chat: false,
     };
     let stage = BusSeat {
         mode: TeamBusMode::Pipeline,
@@ -237,6 +238,7 @@ fn bus_tools(out: &mut String) {
         teammates: 0,
         helpers: 3,
         front_desk: true,
+        own_chat: true,
         notebook: false,
         conversation: false,
         ..lead
@@ -249,6 +251,7 @@ fn bus_tools(out: &mut String) {
     let alone_bringing_in = BusSeat {
         my_agents: true,
         front_desk: false,
+        own_chat: false,
         ..alone
     };
     for (title, seat) in [

@@ -51,10 +51,14 @@ impl Watch {
                 let wanted = match item.notice.about {
                     About::Waiting { .. } => target.tell_needs_me,
                     About::Finished => target.tell_done,
+                    // The person asked for it at this time (ADR 0108).
+                    About::Message => true,
                 };
                 // In quiet hours only a permission ask rings: it runs out, and would stop the
-                // team. The rest waits for morning.
-                if wanted && quiet && !item.permission {
+                // team. A message rings too: the person chose its time. The rest waits for
+                // morning.
+                let rings = item.permission || item.notice.about == About::Message;
+                if wanted && quiet && !rings {
                     continue;
                 }
                 told.insert(key.clone());
@@ -126,10 +130,19 @@ fn items(home: &Value) -> Vec<Item> {
             continue;
         }
         let id = text(run, "runId");
+        // A message the person asked for at a time: its turn's reply is the message, or, when the
+        // turn failed, the words that were set (ADR 0108).
+        let message = run
+            .get("messageAt")
+            .is_some_and(|message| !message.is_null());
         items.push(Item {
             notice: Notice {
                 target: format!("done-{id}"),
-                about: About::Finished,
+                about: if message {
+                    About::Message
+                } else {
+                    About::Finished
+                },
                 run: Some(id.to_owned()),
                 node: None,
                 room: Some(text(run, "teamPath").to_owned()).filter(|path| !path.is_empty()),

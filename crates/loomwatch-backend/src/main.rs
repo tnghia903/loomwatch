@@ -514,6 +514,13 @@ async fn main() -> Result<()> {
                 archive.clone(),
                 teams_root.clone(),
             );
+            // ADR 0108: messages agents set for the person, each sent as the agent's turn in its
+            // own chat when its time comes, by the wall clock.
+            loomwatch_backend::messages_at::spawn(
+                opened.clone(),
+                teams_root.clone(),
+                registry.clone(),
+            );
             // Ask LoomWatch (ADR 0033): the Ask panel's endpoints and the tools its agent calls. It
             // shares the registry so a run it starts is an ordinary run, and the listener so the
             // links it gives are the daemon's own.
@@ -574,6 +581,7 @@ async fn main() -> Result<()> {
                     teams_root.clone(),
                     registry.clone(),
                 ))
+                .merge(loomwatch_backend::messages_at::router(Some(opened.clone())))
                 .merge(loomwatch_backend::you::router(you));
             if listen.ip().is_loopback() || allow_container_listener {
                 app = app.merge(loomwatch_backend::notion::router(

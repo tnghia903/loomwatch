@@ -479,6 +479,14 @@ back. Every agent of the run draws on it: stages, the lead, Team Bus helpers,
     told, and does that part itself.
   - `POST /api/runs/{id}/agents/{helper}/stop` stops one helper; "Allow for this run" given to the
     agent or any of its helpers covers all of them.
+- **A message at a time (ADR 0108).** One of My agents in its own chat, with a person there, may
+  message them later: "remind me at 17:20 to stand up". It sets one with the Team Bus tool
+  `message_me_at`, lists what it set with `pending_messages`, and cancels one with
+  `cancel_message`. At the time, it takes one turn in its chat and writes the message, which shows
+  there and is pushed to a paired iPhone when this computer has a push key. A chat may have 50
+  waiting, each at most 400 days ahead.
+  Nobody else is offered these tools: not a team's agents, a helper, or an agent answering a
+  question.
 - **One of My agents brought in (ADR 0092).** In a team with no connections, the `entrypoint`,
   which is also an agent working alone in its own chat, may bring in another of the person's
   agents from My agents for a part no one on the team does. It lists them with the Team Bus tool

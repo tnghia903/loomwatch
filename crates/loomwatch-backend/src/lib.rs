@@ -35,6 +35,7 @@ pub(crate) mod made;
 pub mod marketplace;
 pub mod memory;
 pub mod message_done;
+pub mod messages_at;
 pub mod my_agents;
 pub mod notebook_api;
 pub mod notion;

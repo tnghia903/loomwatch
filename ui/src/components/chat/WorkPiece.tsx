@@ -1,4 +1,4 @@
-import { ArrowRight, CalendarClock, FileText, RotateCcw, Square } from '../ui/icon'
+import { ArrowRight, CalendarClock, Clock3, FileText, RotateCcw, Square } from '../ui/icon'
 import { Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import { AppearContext, useAppear } from '../../lib/chat/appear'
@@ -8,7 +8,7 @@ import { handedBackText, type ChatItem, type ChatMessage, type HandedBack, type 
 import { describeDocument, documentSize, isDocument } from '../../lib/chat/document'
 import { LOOMWATCH_CHECK_ID, helperOf, helpersOf, nameWithHelpers, wearerOf, whoWorks } from '../../lib/chat/helpers'
 import { handedBy, type HandOver } from '../../lib/chat/handed'
-import { clockTime, listNames, took } from '../../lib/chat/format'
+import { clockTime, dayKey, dayLabel, listNames, took } from '../../lib/chat/format'
 import { triesLine, tryingAgain } from '../../lib/chat/tries'
 import { checkReactions, talkReactions, targets, yoursOn, type AgentReaction, type Face, type ReactionAbout } from '../../lib/chat/reactions'
 import { answerRun, cancelRun, isTerminalRun, stopHelper, type RunRecord } from '../../lib/runs/client'
@@ -433,6 +433,8 @@ export function WorkPiece({ item, newest = false, approveFilled = true, fixFille
         // A team's answer handed back: who took it up, not how long that took, which would read as
         // the team's time; and no face of yours, which the chat would read as on your own words.
         ? reactOn(targets.request, `${request.handedBack.teamName}'s answer`, onRequest.map(({ face, by, at }) => ({ face, by, at })), { shown: true })
+        : run.messageAt
+        ? reactOn(targets.request, 'your reminder', onRequest, { own: true })
         : reactOn(targets.request, run.trigger === 'schedule' ? "the schedule's request" : 'your request', onRequest, { mine: run.trigger !== 'schedule', own: true })} />
       {/* What the message said done looks like, which the work is checked against (ADR 0098). */}
       {session.projection.doneWhen && !continued && (
@@ -696,7 +698,7 @@ function Decisions({ messages, autoRan = [], operators, name }: { messages: read
   )
 }
 
-/** What started this piece: your message, the schedule's, or your Continue. */
+/** What started this piece: your message, the schedule's, a reminder you asked for, or your Continue. */
 function Request({ run, request, flash = false, continuedFrom, name, solo, onShowReplied, reactions }: { run: RunRecord; request: ChatMessage | null; flash?: boolean; continuedFrom: string | null; name: (id: string) => string; solo?: string; onShowReplied?: (reply: ReplyTo) => (() => void) | undefined; reactions: (said: ReactNode) => ReactNode }) {
   if (continuedFrom) {
     return <div className={`chat-notice${flash ? ' flash' : ''}`} data-said={`request:${run.runId}`}><span>You pressed Continue with the team · from {continuedFrom}</span><time>{clockTime(run.createdAt)}</time></div>
@@ -710,6 +712,21 @@ function Request({ run, request, flash = false, continuedFrom, name, solo, onSho
         <div className="chat-stack">
           <div className="chat-meta"><span className="chat-name hue-quiet">The schedule</span><span className="tc-to">to the team</span><time>{clockTime(run.createdAt)}</time></div>
           {reactions(<div className="chat-bubble"><div className="chat-text"><Markdown>{text}</Markdown></div></div>)}
+        </div>
+      </div>
+    )
+  }
+  // A reminder you asked the agent for (ADR 0108): the words it set, at the time it was set for,
+  // with the day when it came on another one. The agent's reply under it is the message.
+  if (run.messageAt) {
+    const { at } = run.messageAt
+    const when = dayKey(at) === dayKey(run.createdAt) ? clockTime(at) : `${dayLabel(at)} ${clockTime(at)}`
+    return (
+      <div className={`chat-msg${flash ? ' flash' : ''}`} data-said={`request:${run.runId}`}>
+        <span className="chat-gutter"><i className="chat-avatar hue-quiet tc-schedule" style={{ width: 28, height: 28 }}><Clock3 size={14} aria-hidden="true" /></i></span>
+        <div className="chat-stack">
+          <div className="chat-meta" title={`You asked ${to} to remind you at ${when}`}><span className="chat-name hue-quiet">Your reminder</span><time>{when}</time></div>
+          {reactions(<div className="chat-bubble"><div className="chat-text"><SaidText text={run.messageAt.text} /></div></div>)}
         </div>
       </div>
     )

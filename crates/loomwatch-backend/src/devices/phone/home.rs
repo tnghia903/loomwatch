@@ -70,6 +70,9 @@ fn run_summary(record: &Value) -> Value {
         "error",
         "responder",
         "nextTryAt",
+        // The message the person asked for at a time that the run wrote (ADR 0108): its notice
+        // is the agent's message, and the words that were set when the turn failed.
+        "messageAt",
     ] {
         if let Some(value) = record.get(key).filter(|value| !value.is_null()) {
             run.insert(key.to_owned(), value.clone());
@@ -126,7 +129,8 @@ mod tests {
                 "permissionRequests": [], "spendStops": [],
                 "waitingOn": {"node": "review", "question": "Approve?", "since": "2026-10-28T10:03:00Z"}
             },
-            {"runId": "old", "status": "succeeded", "reply": "Done.", "finishedAt": "2026-10-28T09:00:00Z"},
+            {"runId": "old", "status": "succeeded", "reply": "Done.", "finishedAt": "2026-10-28T09:00:00Z",
+             "messageAt": {"id": "m1", "at": "2026-10-28T08:59:00.000Z", "text": "stand up"}},
             {"runId": "new", "status": "failed", "finishedAt": "2026-10-28T09:30:00Z",
              "error": "Out of credits.\nDetails follow.", "responder": "writer", "nextTryAt": null}
         ]);
@@ -163,6 +167,10 @@ mod tests {
             .collect();
         assert_eq!(done, ["new", "old"]);
         assert_eq!(home["done"][1]["reply"], "Done.");
+        assert_eq!(
+            home["done"][1]["messageAt"]["text"], "stand up",
+            "a message the person asked for reaches the phone as one (ADR 0108)"
+        );
         assert_eq!(home["done"][0]["error"], "Out of credits.\nDetails follow.");
         assert_eq!(home["done"][0]["responder"], "writer");
         assert!(

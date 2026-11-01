@@ -355,6 +355,8 @@ always has its archive; a router built without one (tests) answers 503.
 | `GET /api/pinned-agent/suggestions` | `{"suggestions": [{"text": "Make it shorter", "kind": "next"}, …], "writing": false}`: up to three things the person may ask the pinned agent next, for the buttons under the island's box (ADR 0105). `next` are next steps from its newest answer, written once for that answer by a small model on the source the agent runs on, while the answer is younger than 12 hours and nothing has been sent since; `again` are requests sent to it more than once without files. `writing` is `true` while that answer's next steps are being written: ask again in a moment. The island asks only while its box is open. An agent on a free model writes them with that model. Each call is counted in `model_calls` (`call_kind` `next_steps`, under the agent's chat), so `GET /api/usage` shows it, and the answers written and what they cost (as the provider reported) are added to `next-steps.json` in the state folder |
 | `PUT /api/pinned-agent` | Pin `{"agent": "<id>"}` in place of any other, or unpin with `{"agent": null}`; only from `LoomWatch`'s own page (`X-LoomWatch-Request: 1`, else 403), and 404 for an id that is not one of My agents. Answers as `GET` does. Only the agent is kept, in `pinned.json` in the state folder |
 | `GET /api/team-requests` | The pinned agent's requests for one of your teams (`ask_team`), oldest first: `{id, askedBy: {runId, agent, chatPath}, team: {path, name}, request, status, runId, problem, createdAt, finishedAt}`, `status` one of `waiting`, `started`, `declined`, `done`, `failed`. Waiting and started ones always; the others within `?finishedWithin=<seconds>`, and for an hour at most. Kept in memory; a restart clears them. The island reads it beside `GET /api/runs` |
+| `GET /api/messages-at` | The messages agents set for you at a time, still waiting, soonest first (ADR 0108): `[{id, chatPath, agent, at, text, setAt}]`, with `at` and `setAt` in UTC. Kept in the run history's database, so a restart keeps them |
+| `DELETE /api/messages-at/{id}` | Cancel one waiting message: 204, or 404 when none waiting has that id |
 | `POST /api/team-requests/{id}` | `{"decision": "start" \| "decline"}`. Start runs the team on the request as the person would (`team_needs_review` and spend limits apply; a refusal becomes `failed` with a plain `problem`); once it ends, its answer is sent into the agent's chat and starts its next turn. That chat message carries `handedBack: {teamPath, teamName, agent, fromAgent, request, heading}` in `GET /api/chat`, and the chat shows it as the team's; a page cannot set it. 404 for an unknown id, 409 once answered |
 
 Request body:
@@ -436,6 +438,9 @@ Response (`202 Accepted`):
 - `teamName` (the team file's `name`) and `agentNames` (each agent's name by id, its id when it
   has none) are fixed at launch, so a client that has not read the team file, such as the menu
   bar, can say who `working` is. Runs recorded before they were kept have neither.
+- `messageAt: {id, at, text}` is on a run that wrote a message the person asked an agent for at a
+  time (ADR 0108): the words the agent set and when for. Its `prompt` starts with those words. It
+  is fixed at launch and stored; every other run has none.
 - `spend` is what the run has spent and may spend on model calls, in US dollars: `{limitUsd,
   spentUsd, agents: {id: {spentUsd, limitUsd?, stopped?}}, added: [{agent?, atUsd, addUsd}],
   stopped?}`. `limitUsd` is the team's `spend.perRun` plus whatever was added this run (absent: no limit);

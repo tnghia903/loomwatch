@@ -2326,6 +2326,10 @@ struct SendMessage {
     /// Set only by the daemon ([`tell_agent`]): a page cannot send a message as a team's.
     #[serde(skip)]
     handed_back: Option<HandedBack>,
+    /// Set only by the daemon ([`send_message_at`]): the message the person asked for at a time
+    /// (ADR 0108), whose turn this starts. Its words are the agent's, not the person's.
+    #[serde(skip)]
+    message_at: Option<crate::messages_at::MessageAt>,
 }
 
 /// Where a message goes, decided from who it is addressed to and who is working right now.
@@ -2485,6 +2489,7 @@ pub(crate) async fn tell_agent(
         work: true,
         files: Vec::new(),
         handed_back,
+        message_at: None,
     };
     let response = send_message(State(state), Ok(Json(request)))
         .await
@@ -2493,6 +2498,90 @@ pub(crate) async fn tell_agent(
         Ok(())
     } else {
         Err(format!("the chat refused it ({})", response.status()))
+    }
+}
+
+/// How [`send_message_at`] went.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum MessageAtSent {
+    /// The agent's turn started, or had already started for this message: this run.
+    Started(String),
+    /// The agent's chat is at work: the message waits for that turn to end, so its reply is a
+    /// run of its own.
+    Busy,
+    Refused(String),
+}
+
+/// Start `agent`'s turn in its own chat `chat_path` for a message the person asked for at a time
+/// (ADR 0108), with `task` as what it is asked. It goes through [`send_message`], as a message to
+/// that agent does, so it is archived and shown, and the run keeps `message_at`. The start key is
+/// the message's, so a second start for it starts nothing.
+pub(crate) async fn send_message_at(
+    registry: &RunRegistry,
+    archive: Option<EventArchive>,
+    teams_root: &Path,
+    chat_path: &str,
+    agent: &str,
+    task: &str,
+    message_at: crate::messages_at::MessageAt,
+) -> MessageAtSent {
+    let state = ChatState {
+        archive,
+        teams_root: teams_root.to_owned(),
+        registry: registry.clone(),
+        answering: NotesAnswering::default(),
+    };
+    let (relative, team) = match open_team(&state.teams_root, chat_path) {
+        Ok(opened) => opened,
+        Err(error) => return MessageAtSent::Refused(error.message),
+    };
+    if !state
+        .registry
+        .live_runs_of(&team.chat_key(&relative), &relative)
+        .is_empty()
+    {
+        return MessageAtSent::Busy;
+    }
+    let request = SendMessage {
+        team_path: chat_path.to_owned(),
+        text: task.to_owned(),
+        to: Some(Target::Agent {
+            agent: agent.to_owned(),
+        }),
+        now: false,
+        expected_revision: None,
+        start_key: Some(format!("message-{}", message_at.id)),
+        reply_to: None,
+        work: true,
+        files: Vec::new(),
+        handed_back: None,
+        message_at: Some(message_at),
+    };
+    let response = match send_message(State(state), Ok(Json(request))).await {
+        Ok(response) => response,
+        Err(error) => return MessageAtSent::Refused(error.message),
+    };
+    let status = response.status();
+    let body = axum::body::to_bytes(response.into_body(), 1 << 20)
+        .await
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        .unwrap_or(Value::Null);
+    // A conflict on the start key is this message's turn too: it started before, from words that
+    // said another time, and a restart came before the message was marked sent.
+    let run_id = body
+        .pointer("/run/runId")
+        .or_else(|| body.get("runId"))
+        .and_then(Value::as_str)
+        .filter(|_| status.is_success() || status == StatusCode::CONFLICT);
+    match run_id {
+        Some(run_id) => MessageAtSent::Started(run_id.to_owned()),
+        None => MessageAtSent::Refused(format!(
+            "the chat refused it ({status}): {}",
+            body.get("error")
+                .and_then(Value::as_str)
+                .unwrap_or("no reason given")
+        )),
     }
 }
 
@@ -2652,10 +2741,13 @@ async fn send_message(
         changes: Vec::new(),
     };
     let mut decided = decide(request.to.as_ref(), &live);
-    learn_from_words(
-        &state, &store, &team, &relative, &request, &message, &decided,
-    )
-    .await;
+    // A message the person asked for at a time is LoomWatch's words, not feedback from them.
+    if request.message_at.is_none() {
+        learn_from_words(
+            &state, &store, &team, &relative, &request, &message, &decided,
+        )
+        .await;
+    }
     if let Decided::Note { run_id, agent } = &decided {
         let note = QueuedNote {
             id: message.id.clone(),
@@ -2714,8 +2806,13 @@ async fn send_message(
                 request.start_key.clone(),
             )
             .replying(replied)
-            .giving(message.files.clone())
-            .written_by_the_operator(text);
+            .giving(message.files.clone());
+            // ADR 0104 is about the person's own words: a message set for a time holds the
+            // agent's, so a link in it asks first.
+            start = match &request.message_at {
+                Some(message_at) => start.for_message_at(message_at.clone()),
+                None => start.written_by_the_operator(text),
+            };
             if let Decided::Agent(agent) = &decided {
                 start = start.only(agent);
                 message.route = Route::Agent;
