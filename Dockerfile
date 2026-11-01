@@ -2,7 +2,7 @@ FROM node:24-bookworm-slim AS ui-builder
 
 WORKDIR /source/ui
 RUN corepack enable
-COPY ui/package.json ui/pnpm-lock.yaml ./
+COPY ui/package.json ui/pnpm-lock.yaml ui/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY ui/ ./
 # The model table the app shares with the daemon (ui/src/lib/ai/modelIds.ts).

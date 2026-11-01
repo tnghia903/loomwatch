@@ -1,0 +1,4 @@
+# rehype-katex draws the math and katex's own stylesheet lays it out, so both use the one katex
+# the app names below; a stylesheet from another version leaves boxes it renamed unstyled.
+overrides:
+  katex: $katex

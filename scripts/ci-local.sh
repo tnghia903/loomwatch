@@ -113,7 +113,7 @@ fi
 # Container image, only when the branch changes what the Dockerfile builds from (the paths in
 # .github/workflows/container.yml).
 container_inputs=(Dockerfile .dockerignore Cargo.lock ':(glob)**/Cargo.toml' rust-toolchain.toml
-  ui/package.json ui/pnpm-lock.yaml .github/workflows/container.yml)
+  ui/package.json ui/pnpm-lock.yaml ui/pnpm-workspace.yaml .github/workflows/container.yml)
 if [ -z "$base" ]; then
   skip "Container: build" "no origin/main to compare the branch with"
 elif ! changes "${container_inputs[@]}"; then
