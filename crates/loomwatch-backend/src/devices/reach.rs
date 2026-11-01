@@ -33,8 +33,12 @@ pub enum Reach {
     NotShared,
     /// Tailscale isn't on this computer.
     NoTailscale,
-    /// Tailscale is installed but not running, or turned off.
-    TailscaleOff,
+    /// Tailscale is installed but not running, turned off, or didn't answer. `said` is what its
+    /// command line printed when it failed, so the person sees more than "turn it on".
+    TailscaleOff {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        said: Option<String>,
+    },
     /// This computer isn't signed in to Tailscale. `url` signs it in, when Tailscale gave one.
     SignedOut { url: Option<String> },
     /// The tailnet must allow sharing once, on this page.
@@ -81,7 +85,7 @@ pub fn plan(status: &Value, serving: &Value, door_port: u16) -> Plan {
                 .map(str::to_owned);
             return Plan::Done(Reach::SignedOut { url });
         }
-        _ => return Plan::Done(Reach::TailscaleOff),
+        _ => return Plan::Done(Reach::TailscaleOff { said: None }),
     }
     let Some(name) = status
         .pointer("/Self/DNSName")
@@ -163,8 +167,9 @@ pub async fn reach(
     let Some(program) = program.or(found.as_deref()) else {
         return Reach::NoTailscale;
     };
-    let Some(status) = read_json(program, &["status", "--json"]).await else {
-        return Reach::TailscaleOff;
+    let status = match read_json(program, &["status", "--json"]).await {
+        Ok(status) => status,
+        Err(said) => return Reach::TailscaleOff { said: Some(said) },
     };
     // `serve status` answers `{}` when nothing is shared.
     let serving = read_json(program, &["serve", "status", "--json"])
@@ -220,7 +225,8 @@ fn asks_for_ok(printed: &str) -> bool {
     printed.contains("visit:") && approval_url(printed).is_some()
 }
 
-async fn read_json(program: &Path, args: &[&str]) -> Option<Value> {
+/// What `program` printed as JSON, or what went wrong in Tailscale's own words.
+async fn read_json(program: &Path, args: &[&str]) -> Result<Value, String> {
     let output = tokio::time::timeout(
         READ_LIMIT,
         Command::new(program)
@@ -230,12 +236,18 @@ async fn read_json(program: &Path, args: &[&str]) -> Option<Value> {
             .output(),
     )
     .await
-    .ok()?
-    .ok()?;
+    .map_err(|_| format!("Tailscale didn't answer within {} s", READ_LIMIT.as_secs()))?
+    .map_err(|error| format!("Couldn't start {}: {error}", program.display()))?;
     if !output.status.success() {
-        return None;
+        let printed = format!(
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return Err(last_line(&printed));
     }
-    serde_json::from_slice(&output.stdout).ok()
+    serde_json::from_slice(&output.stdout)
+        .map_err(|_| last_line(&String::from_utf8_lossy(&output.stdout)))
 }
 
 struct Ran {
@@ -401,7 +413,7 @@ mod tests {
         );
         assert_eq!(
             plan(&json!({"BackendState": "Stopped"}), &json!({}), 3440),
-            Plan::Done(Reach::TailscaleOff)
+            Plan::Done(Reach::TailscaleOff { said: None })
         );
         assert!(matches!(
             plan(&json!({"BackendState": "Running"}), &json!({}), 3440),
@@ -434,8 +446,15 @@ mod tests {
             r#"{"state":"signedOut","url":null}"#
         );
         assert_eq!(
-            serde_json::to_string(&Reach::TailscaleOff).unwrap(),
+            serde_json::to_string(&Reach::TailscaleOff { said: None }).unwrap(),
             r#"{"state":"tailscaleOff"}"#
+        );
+        let unanswered = Reach::TailscaleOff {
+            said: Some("failed to connect to local Tailscale service".into()),
+        };
+        assert_eq!(
+            serde_json::to_string(&unanswered).unwrap(),
+            r#"{"state":"tailscaleOff","said":"failed to connect to local Tailscale service"}"#
         );
     }
 

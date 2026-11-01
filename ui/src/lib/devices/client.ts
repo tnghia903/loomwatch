@@ -20,7 +20,7 @@ export type Reach =
   | { state: 'ready'; address: string }
   | { state: 'notShared' }
   | { state: 'noTailscale' }
-  | { state: 'tailscaleOff' }
+  | { state: 'tailscaleOff'; said?: string }
   | { state: 'signedOut'; url: string | null }
   | { state: 'needsOk'; url: string }
   | { state: 'portsTaken' }

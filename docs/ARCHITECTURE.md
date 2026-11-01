@@ -425,8 +425,10 @@ iPhone or another computer connects to it and keeps nothing but a key of its own
   devices, on Connections, runs `tailscale serve` on the press of Let my devices in, on a free one
   of the ports 443, 8443 and 10000, and never changes what Tailscale already shares (`reach.rs`;
   `LOOMWATCH_TAILSCALE` names Tailscale's program when it isn't in a usual place).
-- **Pairing.** Connections makes a code for an iPhone or a computer. It works once, for ten
-  minutes; five wrong codes in a row end it; a new code ends the one before. It travels as
+- **Pairing.** Connect a device to this computer, on Connections, asks which: an iPhone or
+  another computer. It then shows three stages in sight (Tailscale on, devices let in, the code)
+  and makes a code for the device chosen. A code works once, for ten minutes; five wrong codes in
+  a row end it; a new code ends the one before. It travels as
   `loomwatch://pair?address=…&code=…`, as a QR code for an iPhone and a link for a computer. The
   device trades it at `POST /devices/v0/claim` for a 256-bit key it is shown once. LoomWatch
   keeps only the key's SHA-256, in `devices.json` in the state folder, so Remove ends a device at
@@ -439,8 +441,8 @@ iPhone or another computer connects to it and keeps nothing but a key of its own
   a local program's would, without its key, cookies or the page it came from, and marked
   `x-loomwatch-via-device` so LoomWatch keeps a few things, such as connecting this computer to
   another, to its own screen (`door.rs`, `pass.rs`). Live connections are joined byte for byte.
-- **A connected computer.** Connecting starts on that computer's own Connections page: Connect to
-  another computer takes the link, trades its code, keeps the key in the Keychain (Credential
+- **A connected computer.** Connecting starts on that computer's own Connections page: Connect this
+  computer to another one takes the link, trades its code, keeps the key in the Keychain (Credential
   Manager on Windows, `connection-key.json` elsewhere), writes `connected.json`, and exits with
   76. The Mac and Windows apps then start `loomwatchd connect` instead of `serve`, on the same
   port, so the notch, the menu bar and the browser show the other computer
