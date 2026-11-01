@@ -1,10 +1,14 @@
 import ReactMarkdown, { defaultUrlTransform, type Components, type ExtraProps, type UrlTransform } from 'react-markdown'
+import rehypeKatex from 'rehype-katex'
 import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
+import 'katex/dist/katex.min.css'
 
-import { useContext, useMemo, useState, type ComponentProps, type ReactNode } from 'react'
+import { useContext, useMemo, useState, type ComponentProps } from 'react'
 import { sourceSpans } from '../../lib/files/markdownEdits'
 import { BACKED, CLAIM_MARK } from '../../lib/chat/claims'
 import { withoutCitationMarks } from '../../lib/chat/citationMarks'
+import { withMathMarks } from '../../lib/chat/mathMarks'
 import { segments, useFoundWords, type FindTerm } from '../../lib/chat/findWords'
 import { filePathFrom, filePathFromLink } from '../../lib/files/fileRefs'
 import { FileChip } from './FileChip'
@@ -37,6 +41,9 @@ import { SaidMention, type SaidMarks } from './saidMention'
  * list is kept as its words. With `clickable={false}` as well, a link is its words and a file path
  * stays code: for a quote cut short, where a hidden link would still take the Tab key.
  *
+ * Math is typeset (KaTeX) in whichever of its usual spellings the model wrote it: `$$…$$`,
+ * `\[…\]` or `\(…\)` ([`withMathMarks`]). A single `$` is a price, not math: "$1,000 at 5%".
+ *
  * `said` is for words a person typed in the chat: a line they broke stays broken, as they see it in
  * the box they typed in, and each @mention `said.find` names in the words is drawn by the
  * [`SaidMention`] around it (the agent's chip).
@@ -45,14 +52,14 @@ export default function MarkdownRenderer({ children, inline = false, clickable =
   // The words a chat search found, while the chat shows where one was said (ADR 0081).
   const found = useFoundWords()
   const rehype = useMemo(() => {
-    const plugins = [...REHYPE_PLUGINS]
+    const plugins = [...(inline ? REHYPE_PLUGINS : REHYPE_MATH_PLUGINS)]
     if (said) plugins.push(() => (tree: { children: HastChild[] }) => markSaid(tree, said))
     if (found) plugins.push(() => (tree: { children: HastChild[] }) => markFound(tree, found))
     return plugins
-  }, [found, said])
+  }, [found, inline, said])
   return (
-    <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={rehype} skipHtml urlTransform={urlTransform} components={clickable ? COMPONENTS : WORDS_ONLY} allowedElements={inline ? (clickable ? INLINE_ELEMENTS : INLINE_WORDS) : undefined} unwrapDisallowed={inline}>
-      {inline ? numbersAsWords(withoutCitationMarks(children)) : withoutCitationMarks(children)}
+    <ReactMarkdown remarkPlugins={inline ? REMARK_PLUGINS : REMARK_MATH_PLUGINS} rehypePlugins={rehype} skipHtml urlTransform={urlTransform} components={clickable ? COMPONENTS : WORDS_ONLY} allowedElements={inline ? (clickable ? INLINE_ELEMENTS : INLINE_WORDS) : undefined} unwrapDisallowed={inline}>
+      {inline ? numbersAsWords(withoutCitationMarks(children)) : withMathMarks(withoutCitationMarks(children))}
     </ReactMarkdown>
   )
 }
@@ -104,14 +111,16 @@ function numbersAsWords(text: string): string {
   return text.replace(/^( {0,3})(\d{1,9})([.)])(?=\s|$)/gm, '$1$2\\$3')
 }
 
-/** A span, or a person's @mention drawn as [`SaidMention`] says. */
-function Span({ children, className, title, node }: { children?: ReactNode; className?: string; title?: string; node?: HastElement }) {
+/** A span, or a person's @mention drawn as [`SaidMention`] says. Typeset math keeps its own style and roles. */
+function Span({ children, node, ...rest }: ComponentProps<'span'> & ExtraProps) {
+  const { className, title } = rest
   const draw = useContext(SaidMention)
   if (className === 'md-said-mention' && draw) {
     const agent = String(node?.properties.dataAgent ?? '')
     const text = node?.children.map((child) => (child.type === 'text' ? child.value : '')).join('') ?? ''
     return <>{draw(agent || undefined, text)}</>
   }
+  if (typeof className === 'string' && className.includes('katex')) return <span {...rest}>{children}</span>
   return <span className={className} title={title}>{children}</span>
 }
 
@@ -131,7 +140,9 @@ function Picture({ src, alt }: { src?: string; alt?: string }) {
 }
 
 const REMARK_PLUGINS = [remarkGfm]
+const REMARK_MATH_PLUGINS = [remarkGfm, [remarkMath, { singleDollarTextMath: false }]] as NonNullable<ComponentProps<typeof ReactMarkdown>['remarkPlugins']>
 const REHYPE_PLUGINS = [() => markClaimsAndSources]
+const REHYPE_MATH_PLUGINS = [[rehypeKatex, { throwOnError: false, strict: 'ignore' }], ...REHYPE_PLUGINS] as NonNullable<ComponentProps<typeof ReactMarkdown>['rehypePlugins']>
 // What stays inside a sentence, the claim tag and found words included: everything else is
 // replaced by its words.
 const INLINE_ELEMENTS = ['a', 'strong', 'em', 'del', 'code', 'br', 'img', 'span', 'mark']

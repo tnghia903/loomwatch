@@ -90,6 +90,24 @@
 .fr-answer-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 8px; font-size: 12px; color: var(--color-ink-3); }
 .fr-for { padding: 1px 8px; border-radius: var(--r-full); background: var(--color-accent-tint); color: var(--color-ink); font-weight: 600; }
 .fr-answer-text { font-size: 15px; line-height: 1.6; overflow-wrap: anywhere; }
+/* The answer is Markdown, shown formatted at the answer's own size, as a chat shows it at the chat's. */
+.fr-answer-text :is(p, ul, ol, pre, table, blockquote, .katex-display) { margin: 0 0 10px; }
+.fr-answer-text > :last-child { margin-bottom: 0; }
+.fr-answer-text :is(h1, h2, h3, h4, h5, h6) { margin: 16px 0 6px; font-size: 16px; font-weight: 650; line-height: 1.35; }
+.fr-answer-text > :first-child:is(h1, h2, h3, h4, h5, h6) { margin-top: 0; }
+.fr-answer-text :is(ul, ol) { padding-left: 22px; }
+.fr-answer-text ul { list-style: disc; }
+.fr-answer-text ol { list-style: decimal; }
+.fr-answer-text li + li { margin-top: 2px; }
+.fr-answer-text blockquote { padding-left: 12px; border-left: 3px solid var(--color-hairline); color: var(--color-ink-2); }
+.fr-answer-text code { padding: 0 4px; border-radius: 4px; background: color-mix(in srgb, var(--color-ink) 8%, transparent); font: 400 13px/1.4 var(--font-mono); }
+.fr-answer-text pre { padding: 10px 12px; border-radius: 8px; background: var(--color-ground); white-space: pre-wrap; overflow-wrap: anywhere; }
+.fr-answer-text pre code { padding: 0; background: none; }
+.fr-answer-text a { color: var(--color-accent); text-decoration: underline; }
+/* A table scrolls on its own when it is wider than the answer; numbers line up. */
+.fr-answer-text table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; font-size: 14px; line-height: 1.45; font-variant-numeric: tabular-nums; overflow-wrap: normal; }
+.fr-answer-text :is(th, td) { padding: 6px 12px; border: 1px solid var(--color-hairline); text-align: left; vertical-align: top; }
+.fr-answer-text th { font-weight: 650; background: color-mix(in srgb, var(--color-ink) 5%, transparent); }
 .fr-writing { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 13px; color: var(--color-ink-3); }
 
 /* The offer, in the crew member's voice. */
