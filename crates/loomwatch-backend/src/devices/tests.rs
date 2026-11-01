@@ -461,3 +461,272 @@ async fn a_team_the_mac_refuses_is_said_to_be_gone_not_that_loomwatch_is_closed(
     let body: Value = reply.json().await.unwrap();
     assert_eq!(body["error"], "That team isn't on your Mac any more.");
 }
+
+/// What a stand-in chat kept of each file sent to it: the path and query, the content type and the
+/// bytes.
+type Kept = Arc<Mutex<Vec<(String, Option<String>, Vec<u8>)>>>;
+
+/// A stand-in daemon whose chat keeps any file sent to it and counts any message, whatever its
+/// size, so only the door can stop one.
+async fn files_stand_in() -> (String, Kept, Calls) {
+    let kept: Kept = Arc::default();
+    let calls: Calls = Arc::default();
+    let files = Router::new()
+        .route(
+            "/api/chat/files",
+            put(|State(kept): State<Kept>, request: Request| async move {
+                let (parts, body) = request.into_parts();
+                let bytes = axum::body::to_bytes(body, usize::MAX).await.unwrap();
+                let content_type = parts
+                    .headers
+                    .get("content-type")
+                    .map(|value| value.to_str().unwrap().to_owned());
+                kept.lock()
+                    .unwrap()
+                    .push((parts.uri.to_string(), content_type, bytes.to_vec()));
+                Json(json!({"name": "part.png"}))
+            }),
+        )
+        .with_state(kept.clone());
+    let messages = Router::new()
+        .route(
+            "/api/chat/messages",
+            post(|State(calls): State<Calls>, request: Request| async move {
+                let bytes = axum::body::to_bytes(request.into_body(), usize::MAX)
+                    .await
+                    .unwrap();
+                calls.lock().unwrap().push(json!({"bytes": bytes.len()}));
+                Json(json!({"route": "agent"}))
+            }),
+        )
+        .with_state(calls.clone());
+    (serve(files.merge(messages)).await, kept, calls)
+}
+
+/// Sends `bytes` to a team's chat through the door as a file named `part.png`, and answers the
+/// status.
+async fn send_file(door: &str, content_type: Option<&str>, bytes: Vec<u8>) -> u16 {
+    let mut request = client()
+        .put(format!(
+            "{door}/api/chat/files?teamPath=trips%2FTokyo+trip.yaml&name=part.png"
+        ))
+        .bearer_auth(KEY)
+        .body(bytes);
+    if let Some(content_type) = content_type {
+        request = request.header("content-type", content_type);
+    }
+    request.send().await.unwrap().status().as_u16()
+}
+
+/// ADR 0082: a file the phone sends into a chat, such as the picture of a part circled in the
+/// reader, goes through as its bytes, up to the size a chat keeps; nothing else does.
+#[tokio::test]
+async fn a_phone_sends_a_chat_file_as_its_bytes_up_to_the_size_a_chat_keeps() {
+    let (daemon, kept, _) = files_stand_in().await;
+    let door = phone_door(&daemon).await;
+    let octets = Some("application/octet-stream");
+    let most = crate::chosen_knowledge::MAX_FILE_BYTES;
+
+    // The biggest file a chat keeps, far over what any other call may carry.
+    let file: Vec<u8> = (0..=250u8).cycle().take(most).collect();
+    assert_eq!(send_file(&door, octets, file.clone()).await, 200);
+    {
+        let kept = kept.lock().unwrap();
+        assert_eq!(kept.len(), 1);
+        let (path, content_type, bytes) = &kept[0];
+        assert_eq!(
+            path,
+            "/api/chat/files?teamPath=trips%2FTokyo+trip.yaml&name=part.png"
+        );
+        assert_eq!(content_type.as_deref(), octets);
+        assert!(*bytes == file, "the file changed on its way");
+    }
+
+    // Bytes only, as the chat takes them, refused at the door.
+    assert_eq!(
+        send_file(&door, Some("image/png"), b"png".to_vec()).await,
+        415
+    );
+    assert_eq!(
+        send_file(&door, Some("application/json"), b"{}".to_vec()).await,
+        415
+    );
+    assert_eq!(send_file(&door, None, b"png".to_vec()).await, 415);
+    // One byte more than a chat keeps.
+    assert_eq!(send_file(&door, octets, vec![7; most + 1]).await, 413);
+    // Sending a file is one call, not a way in to others.
+    let other = client()
+        .post(format!("{door}/api/chat/files?teamPath=trips.yaml&name=x"))
+        .bearer_auth(KEY)
+        .header("content-type", "application/octet-stream")
+        .body(b"x".to_vec())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(other.status(), 404);
+
+    assert_eq!(
+        kept.lock().unwrap().len(),
+        1,
+        "a refused file reached the daemon"
+    );
+}
+
+#[tokio::test]
+async fn every_other_call_still_stops_at_a_megabyte() {
+    let (daemon, _, calls) = files_stand_in().await;
+    let door = phone_door(&daemon).await;
+    // The door's own limit for words, answers and approvals.
+    let limit = 1024 * 1024;
+    let send = |content_type: &'static str, bytes: Vec<u8>| {
+        client()
+            .post(format!("{door}/api/chat/messages"))
+            .bearer_auth(KEY)
+            .header("content-type", content_type)
+            .body(bytes)
+            .send()
+    };
+
+    let at_most = send("application/json", vec![b' '; limit]).await.unwrap();
+    assert_eq!(at_most.status(), 200);
+    let over = send("application/json", vec![b' '; limit + 1])
+        .await
+        .unwrap();
+    assert_eq!(over.status(), 413);
+    // Sent as bytes, a message is still a message.
+    let as_bytes = send("application/octet-stream", vec![b' '; limit + 1])
+        .await
+        .unwrap();
+    assert_eq!(as_bytes.status(), 413);
+
+    assert_eq!(
+        *calls.lock().unwrap(),
+        [json!({"bytes": limit})],
+        "a call over the limit went on"
+    );
+}
+
+/// ADR 0082: a message from the phone to an agent, pinned or in one of My agents' own chats,
+/// carries the files sent with it to the chat.
+#[tokio::test]
+async fn a_message_to_an_agent_carries_its_files_to_the_chat() {
+    let same = Box::leak(super::phone::pinned::chat_yaml("maya", "Maya").into_boxed_str());
+    let part = "/Users/me/LoomWatch/teams/.jobs/.bench/maya.files/chat/Report part.png";
+    for route in [
+        "/phone/v0/pinned/messages",
+        "/phone/v0/agents/maya/messages",
+    ] {
+        let (daemon, calls) = pinned_stand_in(Some("maya"), Some(same)).await;
+        let door = phone_door(&daemon).await;
+        let reply = client()
+            .post(format!("{door}{route}"))
+            .bearer_auth(KEY)
+            .json(
+                &json!({"text": "What is this?", "startKey": "phone-4", "files": [{"path": part}]}),
+            )
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(reply.status(), 200, "{route}");
+        let calls = calls.lock().unwrap().clone();
+        assert_eq!(calls.len(), 1, "{route}: {calls:?}");
+        let sent: Value = serde_json::from_str(calls[0]["body"].as_str().unwrap()).unwrap();
+        assert_eq!(sent["teamPath"], ".jobs/.bench/maya.yaml", "{route}");
+        assert_eq!(sent["text"], "What is this?", "{route}");
+        assert_eq!(sent["files"], json!([{"path": part}]), "{route}");
+    }
+}
+
+/// The real chat behind the door: a file the phone sends is kept in the agent's own chat, and a
+/// message naming a file from anywhere else is refused, because every agent of a chat may read
+/// what it names without asking (ADR 0082, decision 3).
+#[tokio::test]
+async fn the_chat_keeps_a_phones_file_with_the_agent_and_refuses_one_from_elsewhere() {
+    let dir = crate::runs::tests::TeamsDir::new();
+    let bench = dir.0.join(".jobs").join(".bench");
+    std::fs::create_dir_all(&bench).unwrap();
+    let team = |id: &str| {
+        format!(
+            "schemaVersion: 1\nid: {id}\nname: Maya\nentrypoint: maya\nagents:\n  - id: maya\n    name: Maya\n    role: plan trips\n    model: fake/offline\nedges: []\n"
+        )
+    };
+    let chat = bench.join("maya.yaml");
+    std::fs::write(&chat, team("bench-maya")).unwrap();
+    let trip = dir.0.join("trip.yaml");
+    std::fs::write(&trip, team("trip")).unwrap();
+    let theirs =
+        crate::chat_files::store(&trip, "theirs.png", &crate::test_support::png(4, 3, false))
+            .unwrap();
+
+    // What the phone's routes read around the chat. The chat file is said to be the link already,
+    // so the team above is the one the chat opens.
+    let link: &'static str =
+        Box::leak(super::phone::pinned::chat_yaml("maya", "Maya").into_boxed_str());
+    let around = Router::new()
+        .route(
+            "/api/pinned-agent",
+            get(|| async { Json(json!({"agent": "maya"})) }),
+        )
+        .route(
+            "/api/jobs",
+            get(|| async { Json(json!({"jobs": [{"id": "maya", "name": "Maya"}]})) }),
+        )
+        .route(
+            "/api/bench",
+            post(|| async { Json(json!({"folder": ".jobs/.bench"})) }),
+        )
+        .route(
+            "/api/team",
+            get(move || async move { Json(json!({"yaml": link, "revision": "sha256:old"})) }),
+        );
+    let chat_routes = crate::chat::router(None, dir.0.clone(), crate::runs::RunRegistry::default());
+    let daemon = serve(chat_routes.merge(around)).await;
+    let door = phone_door(&daemon).await;
+
+    let picture = crate::test_support::png(6, 4, false);
+    let reply = client()
+        .put(format!(
+            "{door}/api/chat/files?teamPath=.jobs%2F.bench%2Fmaya.yaml&name=part.png"
+        ))
+        .bearer_auth(KEY)
+        .header("content-type", "application/octet-stream")
+        .body(picture.clone())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(reply.status(), 200);
+    let kept: Value = reply.json().await.unwrap();
+    let kept_at = bench.join("maya.files").join("chat").join("part.png");
+    assert_eq!(kept["path"], kept_at.to_string_lossy().as_ref(), "{kept}");
+    assert_eq!(kept["picture"], true);
+    assert_eq!(std::fs::read(&kept_at).unwrap(), picture);
+    // One the agent's chat takes.
+    let sent = crate::chat_files::SentFile {
+        path: kept_at.to_string_lossy().into_owned(),
+    };
+    assert!(crate::chat_files::check(&chat, &[sent]).is_ok());
+
+    // Another team's chat file, and the chat's own team file beside its folder.
+    for (route, elsewhere) in [
+        ("/phone/v0/agents/maya/messages", theirs.path.clone()),
+        (
+            "/phone/v0/pinned/messages",
+            chat.to_string_lossy().into_owned(),
+        ),
+    ] {
+        let reply = client()
+            .post(format!("{door}{route}"))
+            .bearer_auth(KEY)
+            .json(&json!({"text": "What is this?", "files": [{"path": elsewhere}]}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(reply.status(), 400, "{route}");
+        let refused: Value = reply.json().await.unwrap();
+        let error = refused["error"].as_str().unwrap_or_default();
+        assert!(
+            error.contains("isn't in this team's chat"),
+            "{route}: {refused}"
+        );
+    }
+}

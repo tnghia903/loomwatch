@@ -12,6 +12,7 @@ use serde_json::{Value, json};
 
 use super::daemon::Daemon;
 use super::studio::figure_for;
+use crate::chat_files::SentFile;
 
 /// Where My agents' chats are kept, relative to the teams folder (`jobs::BENCH_DIR`).
 pub const CHATS: &str = ".jobs/.bench";
@@ -29,6 +30,10 @@ pub struct PinnedMessage {
     /// What it replies to, quoted as the Mac's chat quotes it (`replyTo` on a chat message).
     #[serde(default)]
     pub reply_to: Option<Value>,
+    /// Files sent with it, by the paths their uploads to the agent's chat (`chatPath`) answered
+    /// with. The chat refuses any other path (ADR 0082).
+    #[serde(default)]
+    pub files: Vec<SentFile>,
 }
 
 /// The agent's id in its own chat: `chatAgentId` in the app, the same id however it is renamed.
@@ -251,6 +256,9 @@ pub async fn send_to(
     });
     if let Some(reply) = message.reply_to {
         body["replyTo"] = reply;
+    }
+    if !message.files.is_empty() {
+        body["files"] = json!(message.files);
     }
     let sent = daemon
         .send_json(Method::POST, "/api/chat/messages", &[], &body)

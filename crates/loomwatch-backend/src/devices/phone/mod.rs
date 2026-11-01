@@ -54,6 +54,9 @@ pub const ALLOWED: &[(&str, &str)] = &[
     ("POST", "/api/runs/{}/spend"),
     ("POST", "/api/runs/{}/answers"),
     ("POST", "/api/chat/messages"),
+    // A file sent with a chat message, such as the picture of a part circled in the reader: kept
+    // first, then named in the message's `files` (ADR 0082). See [`FILES`].
+    ("PUT", "/api/chat/files"),
     // A face on something said in a chat, as the Mac's reactions put one on.
     ("POST", "/api/chat/reactions"),
     // A note that started nothing, started: "Start the team on this".
@@ -66,9 +69,13 @@ pub const ALLOWED: &[(&str, &str)] = &[
     ("DELETE", "/api/ask/conversations/{}"),
 ];
 
-/// The most a phone may send in one request. Messages, answers and approvals are small; files the
-/// phone sends will get their own route.
+/// The most a phone may send in one request. Messages, answers and approvals are small.
 const BODY_LIMIT: usize = 1024 * 1024;
+
+/// The calls on [`ALLOWED`] that carry a file's bytes rather than words: raw bytes only
+/// (`application/octet-stream`), as the daemon takes them, and up to a chat file's size
+/// ([`crate::chosen_knowledge::MAX_FILE_BYTES`]) in place of [`BODY_LIMIT`].
+const FILES: &[(&str, &str)] = &[("PUT", "/api/chat/files")];
 
 /// The phone's side of the door: `LoomWatch` here, and what each live run's agents were last seen
 /// doing.
@@ -113,8 +120,13 @@ pub fn router(helper: Arc<Phone>) -> Router {
 /// Whether the phone may make this call: the method and every segment must match one entry.
 #[must_use]
 pub fn allowed(method: &Method, path: &str) -> bool {
+    listed(ALLOWED, method, path)
+}
+
+/// Whether one entry of `list` matches the method and every segment.
+fn listed(list: &[(&str, &str)], method: &Method, path: &str) -> bool {
     let segments: Vec<&str> = path.split('/').collect();
-    ALLOWED.iter().any(|(allowed_method, pattern)| {
+    list.iter().any(|(allowed_method, pattern)| {
         let pattern: Vec<&str> = pattern.split('/').collect();
         method.as_str() == *allowed_method
             && pattern.len() == segments.len()
@@ -479,12 +491,28 @@ async fn forward(State(helper): State<Arc<Phone>>, request: Request) -> Response
             "The phone can't do this. It stays on the Mac.",
         );
     }
+    let file = listed(FILES, &method, &path);
     let path_and_query = request
         .uri()
         .path_and_query()
         .map_or(path, |value| value.as_str().to_owned());
     let content_type = request.headers().get(header::CONTENT_TYPE).cloned();
-    let Ok(body) = to_bytes(request.into_body(), BODY_LIMIT).await else {
+    let bytes_only = content_type
+        .as_ref()
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("application/octet-stream"));
+    if file && !bytes_only {
+        return problem(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "Send the file as application/octet-stream.",
+        );
+    }
+    let limit = if file {
+        crate::chosen_knowledge::MAX_FILE_BYTES
+    } else {
+        BODY_LIMIT
+    };
+    let Ok(body) = to_bytes(request.into_body(), limit).await else {
         return problem(
             StatusCode::PAYLOAD_TOO_LARGE,
             "That is too big to send from the phone.",
@@ -551,6 +579,7 @@ mod tests {
         assert!(allowed(&Method::POST, "/api/chat/reactions"));
         assert!(allowed(&Method::GET, "/api/skills"));
         assert!(allowed(&Method::GET, "/api/wardrobe"));
+        assert!(allowed(&Method::PUT, "/api/chat/files"));
 
         // Not on the list: settings, keys, team edits, other methods.
         assert!(!allowed(&Method::PUT, "/api/team"));
@@ -562,6 +591,10 @@ mod tests {
         assert!(!allowed(&Method::POST, "/api/skills/install"));
         assert!(!allowed(&Method::DELETE, "/api/skills/x"));
         assert!(!allowed(&Method::POST, "/api/wardrobe/earned"));
+        // Sending a chat file, never another way in to the files.
+        assert!(!allowed(&Method::POST, "/api/chat/files"));
+        assert!(!allowed(&Method::PUT, "/api/chat/files/x"));
+        assert!(!allowed(&Method::PUT, "/api/kept"));
 
         // A wildcard is one plain segment, never a way out of it.
         assert!(!allowed(&Method::POST, "/api/runs//cancel"));

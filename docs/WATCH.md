@@ -272,7 +272,10 @@ chat (a dashed gold line goes round it while you drag), or press the paperclip. 
 moment it is added, with `PUT /api/chat/files?teamPath=&name=` (raw bytes, 25 MB at most), in
 `<team>.files/chat/` beside the team file, and shows as a chip above the box; a message carries up
 to 10 and still needs words. `POST /api/chat/messages` names them in `files: [{path}]`, and the
-daemon refuses any path outside that team's `chat/` folder. Every agent of the team may read them
+daemon refuses any path outside that team's `chat/` folder. A connected iPhone sends them the same
+way through its door, and its messages to an agent (`POST /phone/v0/pinned/messages`,
+`POST /phone/v0/agents/{id}/messages`) take the same `files`, kept first in that agent's own chat
+(its `chatPath`, `.jobs/.bench/<id>.yaml`). Every agent of the team may read them
 without asking. Each agent the work reaches finds them listed under its task, by path, and the
 agent the message reaches first is shown the pictures with its words when its model sees pictures;
 a note's pictures go to the agent it is for. A message with files always starts work, never a quick
