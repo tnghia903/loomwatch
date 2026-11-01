@@ -245,6 +245,9 @@ span.story-schedule { cursor: default; }
 .chat-text th { font-weight: 650; background: color-mix(in srgb, var(--color-ink) 5%, transparent); }
 .chat-text a, .md-inline a { color: var(--color-accent); text-decoration: underline; word-break: break-all; }
 .chat-text .markdown-fallback { white-space: pre-wrap; }
+/* Typeset math wider than its column scrolls on its own, rather than the column. */
+.katex-display { max-width: 100%; overflow-x: auto; overflow-y: hidden; padding: 2px 0; }
+.katex { overflow-wrap: normal; }
 .chat-more { margin-top: 4px; font-size: 12px; color: var(--color-accent); }
 .chat-more:hover, .chat-more:focus-visible { text-decoration: underline; }
 .chat-failed { margin: 6px 0 0; font: 400 12px/1.45 var(--font-mono); color: var(--color-alert); overflow-wrap: anywhere; }
