@@ -425,8 +425,10 @@ iPhone or another computer connects to it and keeps nothing but a key of its own
   devices, on Connections, runs `tailscale serve` on the press of Let my devices in, on a free one
   of the ports 443, 8443 and 10000, and never changes what Tailscale already shares (`reach.rs`;
   `LOOMWATCH_TAILSCALE` names Tailscale's program when it isn't in a usual place).
-- **Pairing.** Connections makes a code for an iPhone or a computer. It works once, for ten
-  minutes; five wrong codes in a row end it; a new code ends the one before. It travels as
+- **Pairing.** Connect a device to this computer, on Connections, asks which: an iPhone or
+  another computer. It then shows three stages in sight (Tailscale on, devices let in, the code)
+  and makes a code for the device chosen. A code works once, for ten minutes; five wrong codes in
+  a row end it; a new code ends the one before. It travels as
   `loomwatch://pair?address=…&code=…`, as a QR code for an iPhone and a link for a computer. The
   device trades it at `POST /devices/v0/claim` for a 256-bit key it is shown once. LoomWatch
   keeps only the key's SHA-256, in `devices.json` in the state folder, so Remove ends a device at
@@ -439,8 +441,8 @@ iPhone or another computer connects to it and keeps nothing but a key of its own
   a local program's would, without its key, cookies or the page it came from, and marked
   `x-loomwatch-via-device` so LoomWatch keeps a few things, such as connecting this computer to
   another, to its own screen (`door.rs`, `pass.rs`). Live connections are joined byte for byte.
-- **A connected computer.** Connecting starts on that computer's own Connections page: Connect to
-  another computer takes the link, trades its code, keeps the key in the Keychain (Credential
+- **A connected computer.** Connecting starts on that computer's own Connections page: Connect this
+  computer to another one takes the link, trades its code, keeps the key in the Keychain (Credential
   Manager on Windows, `connection-key.json` elsewhere), writes `connected.json`, and exits with
   76. The Mac and Windows apps then start `loomwatchd connect` instead of `serve`, on the same
   port, so the notch, the menu bar and the browser show the other computer
@@ -449,6 +451,20 @@ iPhone or another computer connects to it and keeps nothing but a key of its own
   words that say so. When the other computer can't be reached or has removed this one, a page says
   which, with Try again and Use LoomWatch on this computer, which forgets the connection and exits
   with 76 again. `loomwatchd disconnect` does the same from a terminal.
+- **Push to an iPhone.** A paired phone gives its Apple push token and its notification settings
+  at `PUT /phone/v0/push` (`DELETE` stops it). The door answers this itself, since it knows
+  which phone is asking, and keeps the token with the device in `devices.json`. Every 3 s
+  `push::spawn` reads what the phone's home screen would show. It pushes what is new to each
+  phone: someone waiting, or a run that succeeded or failed (not cancelled, not one trying
+  again). It follows the phone's settings, and in quiet hours, in the phone's time zone, only a
+  permission ask rings. What was there when LoomWatch started, or when a phone first gave its
+  token, isn't news. A push carries only ids (`target`, `run`, `node`, `room`); the phone's
+  notification extension reads the words from here over the person's Tailscale, so nothing
+  anyone wrote passes through Apple. Pushes go straight to Apple's service, signed (ES256) with
+  the person's own push key. `loomwatchd push-key set` keeps that key in the Keychain as
+  `LoomWatch.Push` (Credential Manager on Windows, `push-key.json` elsewhere). Apple saying a
+  token is gone forgets it; a push that fails goes again on the next read. A relay for people
+  without a key of their own fits behind `push::Sender` (`push/`).
 
 ### Schedules
 

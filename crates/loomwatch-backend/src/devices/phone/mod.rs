@@ -9,7 +9,7 @@
 mod agents;
 mod daemon;
 mod doing;
-mod home;
+pub(super) mod home;
 pub(super) mod pinned;
 mod studio;
 mod talk;

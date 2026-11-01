@@ -1237,7 +1237,8 @@ describe('the box: any of My agents, and its workbench', () => {
     // Maya stands beside the notch once the page has read who is pinned.
     await waitFor(() => expect(container.querySelector('.island-head img')).toBeTruthy())
     tellPage({ kind: 'compose' })
-    await within(container).findByRole('textbox', { name: 'Message Maya' })
+    // The box takes longer than findBy's 1 s on a busy CI machine.
+    await within(container).findByRole('textbox', { name: 'Message Maya' }, { timeout: 5_000 })
     expect(within(container).queryByLabelText('Hold Control-Option-Space to talk to Maya')).toBeNull()
     expect(container.querySelector('.island-talk')).toBeNull()
   }, 15_000)
@@ -1251,7 +1252,7 @@ describe('the box: any of My agents, and its workbench', () => {
       place()
       await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
       tellPage({ kind: 'compose' })
-      const field = await within(container).findByRole('textbox', { name: 'Message Maya' })
+      const field = await within(container).findByRole('textbox', { name: 'Message Maya' }, { timeout: 5_000 })
       await waitFor(() => expect(document.activeElement).toBe(field))
       expect(focus.mock.contexts).toContain(field)
       for (const [index, element] of focus.mock.contexts.entries()) if (element === field) expect(focus.mock.calls[index][0]).toEqual({ preventScroll: true })

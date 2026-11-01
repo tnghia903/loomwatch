@@ -68,16 +68,22 @@ it('connects an iPhone with a code its camera reads, and a computer with a link 
   render(<Devices />)
   expect(await screen.findByText('No devices connected.')).toBeInTheDocument()
 
-  fireEvent.click(screen.getByRole('button', { name: 'Connect a device' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Connect a device to this computer' }))
+  // Nothing is chosen for the person, and no code is made until they choose.
+  expect(screen.getByText('What are you connecting to this computer?')).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'iPhone' })).toHaveAttribute('aria-pressed', 'false')
+  expect(sent(fetch, '/api/devices/codes', 'POST')).toHaveLength(0)
+  fireEvent.click(screen.getByRole('button', { name: 'iPhone' }))
   expect(await screen.findByRole('img', { name: 'Code for your iPhone’s camera' })).toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'iPhone' })).toHaveAttribute('aria-pressed', 'true')
   expect(screen.getByText(/Your iPhone needs the LoomWatch app and Tailscale/)).toBeInTheDocument()
-  expect(screen.getByText(/^Works once, until/)).toBeInTheDocument()
+  expect(screen.getByText(/^Waiting for your iPhone\. The code works once, until/)).toBeInTheDocument()
 
-  fireEvent.click(screen.getByRole('button', { name: 'Computer' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Another computer' }))
   const link = await screen.findByRole('textbox', { name: 'Link for your other computer' })
   expect(link).toHaveValue('loomwatch://pair?address=x&code=computer-code')
-  expect(screen.getByText(/^Send this link to your other computer/)).toBeInTheDocument()
+  // What to do on the other computer names the button it will find there.
+  expect(screen.getByText(/press Connect this computer to another one\./)).toBeInTheDocument()
   expect(screen.queryByRole('img', { name: 'Code for your iPhone’s camera' })).toBeNull()
 
   const asked = sent(fetch, '/api/devices/codes', 'POST').map(([, init]) => JSON.parse(String(init?.body)) as { kind: string })
@@ -87,7 +93,8 @@ it('connects an iPhone with a code its camera reads, and a computer with a link 
 it('says when the device has connected, and closes the code', async () => {
   const { arrive } = daemon({ devices: [phone] })
   render(<Devices />)
-  fireEvent.click(await screen.findByRole('button', { name: 'Connect a device' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Connect a device to this computer' }))
+  fireEvent.click(screen.getByRole('button', { name: 'iPhone' }))
   expect(await screen.findByRole('img', { name: 'Code for your iPhone’s camera' })).toBeInTheDocument()
 
   arrive({ id: 'p2', name: 'Work iPhone', kind: 'phone', pairedAt: '2026-10-30T10:01:00Z', lastSeen: null })
@@ -98,9 +105,15 @@ it('says when the device has connected, and closes the code', async () => {
 it('lets the devices in on Tailscale only when asked, then shows the code', async () => {
   const { fetch } = daemon({ devices: [], reach: { state: 'notShared' } })
   render(<Devices />)
-  fireEvent.click(await screen.findByRole('button', { name: 'Connect a device' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Connect a device to this computer' }))
+  fireEvent.click(screen.getByRole('button', { name: 'iPhone' }))
   const share = await screen.findByRole('button', { name: 'Let my devices in' })
   expect(screen.getByText(/No one else can/)).toBeInTheDocument()
+  // The stages so far are in sight: Tailscale done, this one now, the code next.
+  const stages = within(screen.getByRole('list', { name: 'Connecting your iPhone' })).getAllByRole('listitem')
+  expect(stages.map((stage) => stage.getAttribute('data-state'))).toEqual(['done', 'now', 'later'])
+  expect(within(stages[0]).getByText('Tailscale is on')).toBeInTheDocument()
+  expect(within(stages[2]).getByText('Connect your iPhone')).toBeInTheDocument()
   expect(sent(fetch, '/api/devices/reach', 'POST')).toHaveLength(0)
   expect(screen.queryByRole('img', { name: 'Code for your iPhone’s camera' })).toBeNull()
 
@@ -112,7 +125,8 @@ it('lets the devices in on Tailscale only when asked, then shows the code', asyn
 it('says what stands in the way, with the one thing to do about it', async () => {
   daemon({ devices: [], reach: { state: 'noTailscale' } })
   render(<Devices />)
-  fireEvent.click(await screen.findByRole('button', { name: 'Connect a device' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Connect a device to this computer' }))
+  fireEvent.click(screen.getByRole('button', { name: 'iPhone' }))
   expect(await screen.findByRole('link', { name: 'Get Tailscale' })).toHaveAttribute('href', 'https://tailscale.com/download')
   expect(screen.getByText(/on this computer and on your iPhone\. Sign in to both with the same account/)).toBeInTheDocument()
 })
@@ -120,23 +134,38 @@ it('says what stands in the way, with the one thing to do about it', async () =>
 it('gives Tailscale’s own words as detail, under what to do', async () => {
   daemon({ devices: [], reach: { state: 'failed', message: 'Permission denied (os error 13)' } })
   render(<Devices />)
-  fireEvent.click(await screen.findByRole('button', { name: 'Connect a device' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Connect a device to this computer' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Another computer' }))
   expect(await screen.findByText(/^Tailscale couldn’t let your devices in\. Quit Tailscale, open it again/)).toBeInTheDocument()
   expect(screen.getByText('Tailscale said: Permission denied (os error 13)')).toBeInTheDocument()
+})
+
+it('says when Tailscale doesn’t answer in its own words, and that Check again ran', async () => {
+  const { fetch } = daemon({ devices: [], reach: { state: 'tailscaleOff', said: 'failed to connect to local Tailscale service' } })
+  render(<Devices />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Connect a device to this computer' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Another computer' }))
+  expect(await screen.findByText(/^LoomWatch can’t reach Tailscale on this computer\./)).toBeInTheDocument()
+  expect(screen.getByText('Tailscale said: failed to connect to local Tailscale service')).toBeInTheDocument()
+  expect(screen.queryByText(/^Checked at/)).toBeNull()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Check again' }))
+  expect(await screen.findByText(/^Checked at/)).toBeInTheDocument()
+  expect(sent(fetch, '/api/devices/codes', 'POST')).toHaveLength(2)
 })
 
 it('says so, and the page stays, when the answer isn’t a list of devices', async () => {
   vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(response({ connected: false }))))
   render(<Devices />)
   expect(await screen.findByText('Connecting other devices isn’t available in this LoomWatch.')).toBeInTheDocument()
-  expect(screen.queryByRole('button', { name: 'Connect a device' })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Connect a device to this computer' })).toBeNull()
 })
 
 it('offers no code when other devices can’t connect to this computer, and says what to do', async () => {
   daemon({ devices: [], door: null })
   render(<Devices />)
   expect(await screen.findByText('Other devices can’t connect right now. Quit LoomWatch and open it again.')).toBeInTheDocument()
-  expect(screen.queryByRole('button', { name: 'Connect a device' })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Connect a device to this computer' })).toBeNull()
 })
 
 it('says connecting is turned off when it was turned off on purpose', async () => {
@@ -149,7 +178,8 @@ it('says connecting is turned off when it was turned off on purpose', async () =
 it('connects this computer to LoomWatch on another one with the link made there', async () => {
   const { fetch } = daemon({ devices: [] })
   render(<Devices />)
-  fireEvent.click(await screen.findByRole('button', { name: 'Connect to another computer' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Connect this computer to another one' }))
+  expect(screen.getByText(/press Connect a device to this computer\./)).toBeInTheDocument()
   const connect = screen.getByRole('button', { name: 'Connect' })
   expect(connect).toBeDisabled()
   fireEvent.change(screen.getByRole('textbox', { name: 'Link from the other computer' }), { target: { value: 'loomwatch://pair?address=a&code=b' } })
@@ -162,12 +192,25 @@ it('connects this computer to LoomWatch on another one with the link made there'
   await waitFor(() => expect(reloaded).toHaveBeenCalledTimes(1))
 })
 
+it('shows one way of connecting at a time', async () => {
+  daemon({ devices: [] })
+  render(<Devices />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Connect a device to this computer' }))
+  expect(screen.queryByRole('button', { name: 'Connect this computer to another one' })).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+  fireEvent.click(await screen.findByRole('button', { name: 'Connect this computer to another one' }))
+  expect(screen.queryByRole('button', { name: 'Connect a device to this computer' })).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+  expect(await screen.findByRole('button', { name: 'Connect a device to this computer' })).toBeInTheDocument()
+})
+
 it('shown from another computer, says which, and goes back to this one’s own', async () => {
   const { fetch } = daemon({ devices: [macbook], shownFrom: { address: 'https://mac-mini.tail1234.ts.net:8443', hostName: 'mac-mini' } })
   render(<Devices />)
   expect(await screen.findByText('This computer shows LoomWatch on mac-mini.')).toBeInTheDocument()
   // It can't hand the other computer to a third one.
-  expect(screen.queryByRole('button', { name: 'Connect to another computer' })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Connect this computer to another one' })).toBeNull()
 
   fireEvent.click(screen.getByRole('button', { name: 'Use LoomWatch on this computer instead' }))
   await waitFor(() => expect(sent(fetch, '/connector/v0/stop', 'POST')).toHaveLength(1))

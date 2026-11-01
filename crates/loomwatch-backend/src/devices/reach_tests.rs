@@ -170,7 +170,7 @@ async fn a_tailnet_that_doesnt_allow_sharing_yet_gives_the_page_to_allow_it() {
 }
 
 #[tokio::test]
-async fn tailscale_that_doesnt_answer_is_off() {
+async fn tailscale_that_doesnt_answer_is_off_in_its_own_words() {
     let tailscale = StandIn::new("off", "{}", "{}");
     std::fs::write(tailscale.dir.join("status.json"), "").unwrap();
     std::fs::write(
@@ -185,7 +185,12 @@ async fn tailscale_that_doesnt_answer_is_off() {
         true,
     )
     .await;
-    assert_eq!(reached, Reach::TailscaleOff);
+    assert_eq!(
+        reached,
+        Reach::TailscaleOff {
+            said: Some("failed to connect to local Tailscale daemon".into())
+        }
+    );
 }
 
 #[tokio::test]

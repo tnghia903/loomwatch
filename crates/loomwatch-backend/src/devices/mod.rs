@@ -16,6 +16,7 @@ mod door;
 mod pairing_tests;
 mod pass;
 mod phone;
+pub mod push;
 pub mod reach;
 #[cfg(all(test, unix))]
 mod reach_tests;
@@ -91,6 +92,9 @@ struct Stored {
     paired_at: DateTime<Utc>,
     #[serde(default)]
     last_seen: Option<DateTime<Utc>>,
+    /// Where a phone's pushes go, once it has given its token ([`push`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    push: Option<push::PushTarget>,
 }
 
 impl Stored {
@@ -254,6 +258,7 @@ impl Devices {
             key_sha256: hex(&sha256(&key)),
             paired_at: now,
             last_seen: Some(now),
+            push: None,
         };
         let device = stored.device();
         state.devices.push(stored);
@@ -296,6 +301,43 @@ impl Devices {
         removed
     }
 
+    /// Where device `id`'s pushes go from now on; `None` stops them. False when there is no such
+    /// device.
+    pub fn set_push(&self, id: &str, target: Option<push::PushTarget>) -> bool {
+        let mut state = self.state();
+        let Some(device) = state.devices.iter_mut().find(|device| device.id == id) else {
+            return false;
+        };
+        if device.push != target {
+            device.push = target;
+            self.save(&state);
+        }
+        true
+    }
+
+    /// Every phone that has given a push token, by its id.
+    #[must_use]
+    pub fn push_targets(&self) -> Vec<(String, push::PushTarget)> {
+        self.state()
+            .devices
+            .iter()
+            .filter(|device| device.kind == Kind::Phone)
+            .filter_map(|device| Some((device.id.clone(), device.push.clone()?)))
+            .collect()
+    }
+
+    /// Forgets device `id`'s push token when it is still `token`: Apple said it's no good.
+    pub fn forget_push_token(&self, id: &str, token: &str) {
+        let mut state = self.state();
+        let Some(device) = state.devices.iter_mut().find(|device| device.id == id) else {
+            return;
+        };
+        if device.push.as_ref().is_some_and(|push| push.token == token) {
+            device.push = None;
+            self.save(&state);
+        }
+    }
+
     /// Connects a device of `kind` whose key is `key`, as pairing would.
     #[cfg(test)]
     fn connect_for_test(&self, kind: Kind, key: &str) -> Device {
@@ -306,6 +348,7 @@ impl Devices {
             key_sha256: hex(&sha256(key)),
             paired_at: Utc::now(),
             last_seen: None,
+            push: None,
         };
         let device = stored.device();
         self.state().devices.push(stored);
@@ -356,9 +399,15 @@ pub fn door_address(setting: Option<&str>) -> Result<Option<SocketAddr>, String>
     Ok(Some(address))
 }
 
-/// Opens the door on `address`, in front of `LoomWatch` on `home`. When the port is taken, this
-/// computer runs without a door and says so; nothing else changes.
-pub async fn open_door(devices: Arc<Devices>, address: SocketAddr, home: SocketAddr) -> bool {
+/// Opens the door on `address`, in front of `LoomWatch` on `home`, and starts pushing to phones
+/// that gave a token ([`push`]). When the port is taken, this computer runs without a door and
+/// says so; nothing else changes.
+pub async fn open_door(
+    devices: Arc<Devices>,
+    push_key: push::key::KeyPlace,
+    address: SocketAddr,
+    home: SocketAddr,
+) -> bool {
     let listener = match tokio::net::TcpListener::bind(address).await {
         Ok(listener) => listener,
         Err(error) => {
@@ -369,7 +418,9 @@ pub async fn open_door(devices: Arc<Devices>, address: SocketAddr, home: SocketA
         }
     };
     println!("devices connect through http://{address}");
-    let app = door_router(devices, &format!("http://{home}"));
+    let home = format!("http://{home}");
+    push::spawn(devices.clone(), push_key.clone(), &home);
+    let app = door_router(devices, push_key, &home);
     tokio::spawn(async move {
         if let Err(error) = axum::serve(listener, app).await {
             eprintln!("warning: the door for other devices closed: {error}");

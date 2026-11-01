@@ -21,6 +21,7 @@ use tower::ServiceExt as _;
 
 use super::pass::{no_store, not_running, pass_on, problem};
 use super::phone::{self, Daemon, Phone};
+use super::push::{self, key::KeyPlace};
 use super::{Devices, Kind, Refused};
 
 struct Door {
@@ -29,14 +30,17 @@ struct Door {
     phone: Router,
     /// `LoomWatch` here, for a computer's requests.
     daemon: Daemon,
+    /// The push key, which says whether a phone's pushes can go.
+    push_key: KeyPlace,
 }
 
 /// The door, in front of `LoomWatch` at `home` (such as `http://127.0.0.1:3000`).
-pub fn router(devices: Arc<Devices>, home: &str) -> Router {
+pub fn router(devices: Arc<Devices>, push_key: KeyPlace, home: &str) -> Router {
     let door = Arc::new(Door {
         devices,
         phone: phone::router(Phone::new(Daemon::at(home))),
         daemon: Daemon::at(home),
+        push_key,
     });
     let claim = Router::new()
         .route("/devices/v0/claim", post(claim))
@@ -100,6 +104,11 @@ async fn through(State(door): State<Arc<Door>>, mut request: Request) -> Respons
     request
         .headers_mut()
         .insert(VIA_DEVICE, HeaderValue::from_static("1"));
+    // A phone's push token is about the phone itself, so it is answered here, where the door knows
+    // which phone it is.
+    if device.kind == Kind::Phone && request.uri().path() == push::ROUTE {
+        return push::route(&door.devices, &door.push_key, &device, request).await;
+    }
     match device.kind {
         Kind::Phone => match door.phone.clone().oneshot(request).await {
             Ok(response) => response,

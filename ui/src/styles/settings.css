@@ -409,6 +409,18 @@
 .lw-devices-kind button:hover:not([aria-pressed="true"]) { color: var(--color-ink); border-color: var(--color-hairline); }
 .lw-devices-kind button[aria-pressed="true"] { border-color: var(--color-accent); box-shadow: inset 0 0 0 1px var(--color-accent); background: var(--color-accent-tint); color: var(--color-ink); font-weight: 600; }
 .lw-devices-kind button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+/* Connecting, as three stages in sight: done ones ticked and quiet, the one in the way with what to
+   do, the ones after it dimmed, so the person sees how far they are and what comes next. */
+.lw-devices-stages { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-3); }
+.lw-devices-stages > li { display: flex; gap: var(--sp-3); align-items: flex-start; }
+.lw-devices-stage-mark { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border: 1px solid var(--color-hairline); border-radius: 50%; color: var(--color-ink-2); font: 600 12px/1 var(--font-sans); }
+.lw-devices-stages > li[data-state="now"] .lw-devices-stage-mark { border-color: var(--color-accent); background: var(--color-accent-tint); color: var(--color-ink); }
+.lw-devices-stages > li[data-state="done"] .lw-devices-stage-mark { border-color: var(--color-accent); color: var(--color-ink); }
+.lw-devices-stage-body { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; flex: 1; padding-top: 1px; }
+.lw-devices-stage-name { margin: 0; font: 500 14px/20px var(--font-sans); color: var(--color-ink); }
+.lw-devices-stages > li[data-state="done"] .lw-devices-stage-name { color: var(--color-ink-2); font-weight: 400; }
+.lw-devices-stages > li[data-state="later"] .lw-devices-stage-name { color: var(--color-ink-2); font-weight: 400; }
+.lw-devices-howto { margin: 0; padding-left: 1.4em; list-style: decimal; display: flex; flex-direction: column; gap: var(--sp-1); }
 .lw-devices-step { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-2); }
 .lw-devices-step p, .lw-devices-link p, .lw-devices-qr p, .lw-devices-connect > p { margin: 0; overflow-wrap: anywhere; }
 /* The code stays dark on paper in both themes: phone cameras read that best. */
