@@ -274,6 +274,7 @@ export function DeliveryLane({
             </div>
             <TeamFlow
               asked={Boolean(prompt.trim())}
+              askedBy={record?.askedBy?.name}
               relay={pipeline && linearPipeline}
               answered={answered}
               answerPass={answerPass}

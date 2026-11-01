@@ -1132,6 +1132,8 @@ Search the web. This asks the person first; their yes gives you web search and p
 ]
 ===== bus: my_agents, with none to list
 None of the person's other agents can be brought in here now. Do the work with the agents you have.
+===== bus: message_me_at, once set
+Tell the person in a few words when the message comes, then end your turn.
 ===== stage 0
 You are Researcher, step 1 of 3 in the News desk team.
 The operator's request comes to you first.
@@ -1274,3 +1276,9 @@ No claim contradicts its source or the request
 ===== check items: research
 Does what the request asked
 No claim contradicts its source or the request
+===== message due, late
+stand up
+
+(From LoomWatch, not the person.) It is today at 17:20 (UTC+07:00). You set a message for the person for this time, and the words above are what you set. Write them the message now: your reply is the message they read. If it asks you to check or find something first, do that, then write it. Keep to what they asked for.
+
+It was due today at 16:40 (UTC+07:00) and comes late, because this computer was asleep, LoomWatch was closed, or you were busy in this chat then: say so in a few words.

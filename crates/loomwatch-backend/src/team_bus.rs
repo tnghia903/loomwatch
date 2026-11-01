@@ -3603,10 +3603,17 @@ impl TeamBus {
                 format!("{file:?} is not one of the person's teams: call my_teams for their files"),
             ));
         };
+        let name = self
+            .agent(&session.agent_id)
+            .ok()
+            .map(|agent| agent.name.trim().to_owned())
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| session.agent_id.clone());
         let asked = crate::team_requests::ask(
             crate::team_requests::AskedBy {
                 run_id: event_log.session_id().to_owned(),
                 agent: session.agent_id.clone(),
+                name,
                 chat_path: desk.chat_path.clone(),
             },
             team.clone(),

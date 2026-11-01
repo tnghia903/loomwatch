@@ -361,15 +361,23 @@ pub(crate) const DUE_LATE: Block = Block::new(
 
 /// What `message` asks of its agent, sent at `now`.
 pub(crate) fn task(message: &Waiting, now: DateTime<Utc>) -> String {
-    let local = now.with_timezone(&Local);
+    task_at(message, &now.with_timezone(&Local))
+}
+
+/// [`task`] at `now` in its own time zone.
+pub(crate) fn task_at<Tz: TimeZone>(message: &Waiting, now: &DateTime<Tz>) -> String
+where
+    Tz::Offset: std::fmt::Display,
+{
+    let from = now.with_timezone(&Utc);
     let mut task = format!(
         "{}\n\n{}",
         message.text,
-        DUE.fill(&[("now", &in_words(now, &local))])
+        DUE.fill(&[("now", &in_words(from, now))])
     );
-    if let Some(due) = deadline::parse(&message.at).filter(|due| now - *due > LATE_AFTER) {
+    if let Some(due) = deadline::parse(&message.at).filter(|due| from - *due > LATE_AFTER) {
         task.push_str("\n\n");
-        task.push_str(&DUE_LATE.fill(&[("due", &in_words(due, &local))]));
+        task.push_str(&DUE_LATE.fill(&[("due", &in_words(due, now))]));
     }
     task
 }

@@ -27,7 +27,9 @@ use uuid::Uuid;
 
 use crate::api::ApiError;
 use crate::archive::EventArchive;
-use crate::runs::{LaunchError, RunRegistry, RunStatus, StartRunOutcome, StartRunRequest};
+use crate::runs::{
+    LaunchError, RunAskedBy, RunRegistry, RunStatus, StartRunOutcome, StartRunRequest,
+};
 use crate::watch_api::local_evidence;
 
 /// How long a finished request stays listed.
@@ -45,6 +47,8 @@ const ANSWER_KEPT_CHARS: usize = 20_000;
 pub(crate) struct AskedBy {
     pub(crate) run_id: String,
     pub(crate) agent: String,
+    /// The agent's name, which the team's chat shows its request under.
+    pub(crate) name: String,
     /// The asking agent's own chat team, relative to the teams root (`.jobs/.bench/<id>.yaml`).
     pub(crate) chat_path: String,
 }
@@ -243,7 +247,8 @@ async fn answer_route(
         ));
     }
     let request = match answer.decision {
-        Decision::Start => start(&state, request).await,
+        // Boxed: a run's start is a large future, and the route's would pass Clippy's limit.
+        Decision::Start => Box::pin(start(&state, request)).await,
         Decision::Decline => {
             decline(&state, &request).await;
             request
@@ -252,14 +257,19 @@ async fn answer_route(
     Ok(Json(request))
 }
 
-/// Start the team as the person would, and hand its answer back when it ends.
+/// Start the team as the person would, and hand its answer back when it ends. The run keeps
+/// which agent asked, so the team's chat shows the request as that agent's, not the person's.
 async fn start(state: &TeamRequestsState, request: TeamRequest) -> TeamRequest {
     let launch = StartRunRequest::from_chat(
         &request.team.path,
         &request.request,
         None,
         Some(format!("team-request-{}", request.id)),
-    );
+    )
+    .asked_by(RunAskedBy {
+        agent: request.asked_by.agent.clone(),
+        name: request.asked_by.name.clone(),
+    });
     let outcome = crate::runs::launch_manual(
         &state.registry,
         state.archive.clone(),
@@ -723,6 +733,7 @@ mod tests {
             AskedBy {
                 run_id: first.run_id.clone(),
                 agent: "maya".into(),
+                name: "Maya".into(),
                 chat_path: ".jobs/.bench/maya.yaml".into()
             }
         );
@@ -769,6 +780,23 @@ mod tests {
         assert_eq!(
             (run.team_path.as_str(), run.prompt.as_str()),
             ("trips.yaml", "Plan 3 gentle days in Đà Lạt")
+        );
+        // In Trip planner's own chat the request is Maya's, not the person's: the run says who
+        // asked, by her id in My agents and her name.
+        let (status, team_page) =
+            call(&rig.chat, "GET", "/api/chat?teamPath=trips.yaml", None).await;
+        assert_eq!(status, StatusCode::OK, "{team_page}");
+        let piece = team_page["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["run"]["runId"] == team_run.as_str())
+            .cloned()
+            .unwrap_or_else(|| panic!("the team's chat shows the work: {team_page}"));
+        assert_eq!(
+            piece["run"]["askedBy"],
+            json!({"agent": "maya", "name": "Maya"}),
+            "{piece}"
         );
         // Answering again is refused.
         let (again, _) = call(
@@ -850,6 +878,8 @@ mod tests {
         let yours = request_of(&first.run_id);
         assert!(yours["text"].is_string(), "{page}");
         assert!(yours.get("handedBack").is_none(), "{yours}");
+        // The person asked Maya themself: no agent asked for that run.
+        assert!(first.asked_by.is_none(), "{first:?}");
         let done = asked_from(&first.run_id).remove(0);
         assert_eq!(
             (done.status, done.run_id.as_deref()),
@@ -981,6 +1011,7 @@ mod tests {
             AskedBy {
                 run_id: Uuid::new_v4().to_string(),
                 agent: "maya".into(),
+                name: "Maya".into(),
                 chat_path: ".jobs/.bench/maya.yaml".into(),
             },
             TeamRef {
@@ -1019,6 +1050,7 @@ mod tests {
         let asked_by = AskedBy {
             run_id: Uuid::new_v4().to_string(),
             agent: "maya".into(),
+            name: "Maya".into(),
             chat_path: ".jobs/.bench/maya.yaml".into(),
         };
         let team = TeamRef {

@@ -275,6 +275,30 @@ fn bus_tools(out: &mut String) {
         "bus: my_agents, with none to list",
         crate::team_bus::MY_AGENTS_NONE.text(),
     );
+    section(
+        out,
+        "bus: message_me_at, once set",
+        crate::team_bus::MESSAGE_ME_AT_SET.text(),
+    );
+}
+
+/// The turn an agent takes when a message it set comes due (ADR 0108), at 17:20 in UTC+7, for one
+/// set for 16:40, so it comes late.
+fn message_due(out: &mut String) {
+    let now = chrono::DateTime::parse_from_rfc3339("2026-11-01T17:20:00+07:00").expect("time");
+    let message = crate::messages_at::Waiting {
+        id: "m1".to_owned(),
+        chat_path: ".jobs/.bench/maya.yaml".to_owned(),
+        agent: "maya".to_owned(),
+        at: "2026-11-01T09:40:00.000Z".to_owned(),
+        text: "stand up".to_owned(),
+        set_at: "2026-11-01T09:00:00.000Z".to_owned(),
+    };
+    section(
+        out,
+        "message due, late",
+        &crate::messages_at::task_at(&message, &now),
+    );
 }
 
 fn orientations(out: &mut String) {
@@ -390,6 +414,7 @@ fn rendered() -> String {
     bus_tools(&mut out);
     orientations(&mut out);
     check_items(&mut out);
+    message_due(&mut out);
     out
 }
 

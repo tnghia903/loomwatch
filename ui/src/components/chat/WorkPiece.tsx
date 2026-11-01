@@ -11,7 +11,7 @@ import { handedBy, type HandOver } from '../../lib/chat/handed'
 import { clockTime, dayKey, dayLabel, listNames, took } from '../../lib/chat/format'
 import { triesLine, tryingAgain } from '../../lib/chat/tries'
 import { checkReactions, talkReactions, targets, yoursOn, type AgentReaction, type Face, type ReactionAbout } from '../../lib/chat/reactions'
-import { answerRun, cancelRun, isTerminalRun, stopHelper, type RunRecord } from '../../lib/runs/client'
+import { answerRun, cancelRun, isTerminalRun, stopHelper, type RunAskedBy, type RunRecord } from '../../lib/runs/client'
 import { failedAgent, plainRunError, problemAction } from '../../lib/runs/errors'
 import { openStops, stopSentence } from '../../lib/runs/spend'
 import { useRunSession } from '../../lib/runs/useRunSession'
@@ -41,7 +41,7 @@ import { AgentFace } from './AgentFace'
 import { AvatarFace } from '../agents/AvatarFace'
 import { FigureStill } from '../agents/FigureStill'
 import { GuestNamesContext } from '../agents/figureContext'
-import { agentFigure, figureFor } from '../../lib/library/figures'
+import { agentFigure, figureFor, figureHue } from '../../lib/library/figures'
 import { useSavedJobs } from '../../lib/library/jobs'
 import { Appearing, Swap } from './Appearing'
 import type { Lesson } from '../../lib/lessons/client'
@@ -433,6 +433,8 @@ export function WorkPiece({ item, newest = false, approveFilled = true, fixFille
         // A team's answer handed back: who took it up, not how long that took, which would read as
         // the team's time; and no face of yours, which the chat would read as on your own words.
         ? reactOn(targets.request, `${request.handedBack.teamName}'s answer`, onRequest.map(({ face, by, at }) => ({ face, by, at })), { shown: true })
+        // One of your agents asked for this work: its words, not yours.
+        : run.askedBy ? reactOn(targets.request, `${run.askedBy.name}'s request`, onRequest)
         : run.messageAt
         ? reactOn(targets.request, 'your reminder', onRequest, { own: true })
         : reactOn(targets.request, run.trigger === 'schedule' ? "the schedule's request" : 'your request', onRequest, { mine: run.trigger !== 'schedule', own: true })} />
@@ -698,7 +700,7 @@ function Decisions({ messages, autoRan = [], operators, name }: { messages: read
   )
 }
 
-/** What started this piece: your message, the schedule's, a reminder you asked for, or your Continue. */
+/** What started this piece: your message, the schedule's, one of your agents', a reminder you asked for, or your Continue. */
 function Request({ run, request, flash = false, continuedFrom, name, solo, onShowReplied, reactions }: { run: RunRecord; request: ChatMessage | null; flash?: boolean; continuedFrom: string | null; name: (id: string) => string; solo?: string; onShowReplied?: (reply: ReplyTo) => (() => void) | undefined; reactions: (said: ReactNode) => ReactNode }) {
   if (continuedFrom) {
     return <div className={`chat-notice${flash ? ' flash' : ''}`} data-said={`request:${run.runId}`}><span>You pressed Continue with the team · from {continuedFrom}</span><time>{clockTime(run.createdAt)}</time></div>
@@ -716,6 +718,7 @@ function Request({ run, request, flash = false, continuedFrom, name, solo, onSho
       </div>
     )
   }
+  if (run.askedBy) return <FromAgent run={run} asked={run.askedBy} text={text} to={to} flash={flash} reactions={reactions} />
   // A reminder you asked the agent for (ADR 0108): the words it set, at the time it was set for,
   // with the day when it came on another one. The agent's reply under it is the message.
   if (run.messageAt) {
@@ -770,6 +773,35 @@ function FromTeam({ message, handed, said, to, flash, reactions, children }: { m
         </div>
         {reactions(<div className="chat-bubble"><div className="chat-text"><Markdown>{handedBackText(message.text, handed)}</Markdown></div></div>)}
         {children}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Work one of your agents asked this team for (ADR 0083, decision 10): the agent pinned to the
+ * notch asked from its own chat, and you pressed Start. Its words, under its name in its colour and
+ * its figure from My agents, never as yours. That you started it is said on hover, and to a screen
+ * reader.
+ */
+function FromAgent({ run, asked, text, to, flash, reactions }: { run: RunRecord; asked: RunAskedBy; text: string; to: string; flash: boolean; reactions: (said: ReactNode) => ReactNode }) {
+  const saved = useSavedJobs().jobs
+  const figure = agentFigure({ id: asked.agent }, saved, asked.agent)
+  const hue = `hue-${figureHue(figure)}`
+  const started = `${asked.name} asked this for you. You pressed Start.`
+  return (
+    <div className={`chat-msg tc-from-agent${flash ? ' flash' : ''}`} data-said={`request:${run.runId}`}>
+      <span className="chat-gutter" title={started}>
+        <i className={`chat-avatar ${hue} has-figure`} style={{ width: 28, height: 28 }} aria-hidden="true">
+          <FigureStill className="chat-avatar-figure" figure={figure} headOnly alt="" draggable={false} />
+        </i>
+      </span>
+      <div className="chat-stack">
+        <div className="chat-meta" title={started}>
+          <span className={`chat-name ${hue}`}>{asked.name}</span><span className="tc-to">to {to}</span><time>{clockTime(run.createdAt)}</time>
+          <span className="visually-hidden">{started}</span>
+        </div>
+        {reactions(<div className="chat-bubble"><div className="chat-text"><Markdown>{text}</Markdown></div></div>)}
       </div>
     </div>
   )

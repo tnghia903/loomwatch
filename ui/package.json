@@ -17,7 +17,7 @@
     "ajv": "^8.20.0",
     "docx-preview": "0.4.1",
     "jszip": "3.10.2",
-    "katex": "0.16.22",
+    "katex": "0.18.2",
     "pdfjs-dist": "6.4.299",
     "pptxtojson": "2.2.0",
     "react": "^19.3.0",
