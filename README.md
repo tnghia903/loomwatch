@@ -456,9 +456,10 @@ notch** in the menu. LoomWatch's face then sits at the right of the menu bar: cl
 menu, where you can turn the notch back on.
 
 > [!NOTE]
-> LoomWatch is not notarized by Apple yet, so the first time you open it macOS may say it can't
-> check it for malicious software. Click **Done**, open **System Settings › Privacy & Security**,
-> scroll down, and click **Open Anyway** beside LoomWatch. macOS asks only once.
+> LoomWatch is signed and notarized by Apple, so the first time you open it macOS only checks that
+> you meant to open an app downloaded from the internet: click **Open**. If you're updating from
+> 0.23.0 or earlier, macOS also asks for your password once so the signed LoomWatch can use the
+> keys it saved before: enter it and click **Always Allow**, not **Allow**, and it won't ask again.
 
 ### The Windows app
 
