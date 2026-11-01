@@ -1,6 +1,6 @@
 [package]
 name = "loomwatch-backend"
-version = "0.25.0"
+version = "0.26.0"
 description = "Local execution backend for LoomWatch"
 edition.workspace = true
 license.workspace = true
