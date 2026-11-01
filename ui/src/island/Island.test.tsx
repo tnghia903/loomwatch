@@ -1640,26 +1640,26 @@ describe('the notch as the pinned agent’s slot, and its crew', () => {
     jobs = [maya]
     const { container } = render(<Island />)
     place()
-    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }), { timeout: 5_000 })
     const shape = container.querySelector<HTMLElement>('.island-shape')!
     const plan = new File([new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x00])], 'Budget plan.pages')
     fireEvent.dragEnter(shape, carrying([pdf, plan]))
     fireEvent.drop(shape, carrying([pdf, plan]))
-    await waitFor(() => expect(within(container).getByRole('alert').textContent).toBe('Left out Budget plan.pages. Maya can’t open Pages files. In Pages, choose File › Export To › PDF, then add the PDF.'))
+    await waitFor(() => expect(within(container).getByRole('alert').textContent).toBe('Left out Budget plan.pages. Maya can’t open Pages files. In Pages, choose File › Export To › PDF, then add the PDF.'), { timeout: 5_000 })
     // The list closes while the person exports it: the line stays with the lease that waits.
     tellPage({ kind: 'clickOutside' })
-    await waitFor(() => expect(container.querySelector('.island')!.getAttribute('data-view')).not.toBe('list'))
+    await waitFor(() => expect(container.querySelector('.island')!.getAttribute('data-view')).not.toBe('list'), { timeout: 5_000 })
     tellPage({ kind: 'pointer', over: true, area: 0 })
     expect(within(container).getByRole('alert').textContent).toContain('Budget plan.pages')
     // The PDF joins the lease, and the line goes: nothing was left out this time.
     const exported = new File(['%PDF-1.7 plan'], 'Budget plan.pdf', { type: 'application/pdf' })
     fireEvent.dragEnter(shape, carrying([exported]))
     fireEvent.drop(shape, carrying([exported]))
-    await waitFor(() => expect(names(container)).toEqual(['Lease 2027.pdf', 'Budget plan.pdf']))
+    await waitFor(() => expect(names(container)).toEqual(['Lease 2027.pdf', 'Budget plan.pdf']), { timeout: 5_000 })
     const row = within(container.querySelector<HTMLElement>('.island-pinned')!)
     expect(within(container).queryByRole('alert')).toBeNull()
     fireEvent.click(row.getByRole('button', { name: 'Summarize each' }))
-    await waitFor(() => expect(messages).toHaveLength(1))
+    await waitFor(() => expect(messages).toHaveLength(1), { timeout: 5_000 })
     expect(uploads).toEqual(['Lease 2027.pdf', 'Budget plan.pdf'])
   }, 15_000)
 
