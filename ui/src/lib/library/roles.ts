@@ -27,6 +27,7 @@ export type RoleIcon = 'research' | 'write' | 'edit' | 'review' | 'code' | 'desi
 
 export type { EffortTier, ModelTier }
 
+/** The same list as `schemas/job-icons.json`, which the daemon checks a saved agent's icon against. */
 export const ROLE_ICON_IDS: readonly RoleIcon[] = ['research', 'write', 'edit', 'review', 'code', 'design', 'analyse', 'slides', 'document', 'sheet', 'chart', 'dashboard', 'video']
 
 export interface RolePreset {

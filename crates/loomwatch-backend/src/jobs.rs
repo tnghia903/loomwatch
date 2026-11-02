@@ -25,6 +25,7 @@
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
 use serde::{Deserialize, Serialize};
 
@@ -49,9 +50,16 @@ const MAX_PATH: usize = 4096;
 const MAX_LIST: usize = 32;
 
 /// The icons a job may name; the UI draws one for each, and a job without one gets a plain mark.
-const ICONS: &[&str] = &[
-    "research", "write", "edit", "review", "code", "design", "analyse",
-];
+/// `schemas/job-icons.json` is the one list, so an icon the app picks is never refused here.
+static ICONS: LazyLock<Vec<String>> = LazyLock::new(|| {
+    #[derive(Deserialize)]
+    struct IconsFile {
+        icons: Vec<String>,
+    }
+    serde_json::from_str::<IconsFile>(include_str!("../../../schemas/job-icons.json"))
+        .expect("schemas/job-icons.json is the list of job icons")
+        .icons
+});
 
 /// The figures an agent may wear in Your agents, and their colours (ui/src/lib/library/figures.ts
 /// draws them). Only the builder and the agent lists show it: a team never copies it. The last
@@ -315,7 +323,7 @@ fn normalize_icon(icon: Option<String>) -> Result<Option<String>, String> {
         .map(|icon| icon.trim().to_owned())
         .filter(|icon| !icon.is_empty());
     if let Some(icon) = &icon
-        && !ICONS.contains(&icon.as_str())
+        && !ICONS.contains(icon)
     {
         return Err(format!(
             "Unknown icon {icon:?}. Use one of: {}.",
@@ -1080,6 +1088,31 @@ mod tests {
             save_job(root.path(), "x", icon, false, None),
             Err(JobError::Invalid(_))
         ));
+    }
+
+    /// Every icon the app may give an agent saves and reads back. The app picks one from the
+    /// agent's name when it saves it (a "Video maker" gets `video`), so a refused icon refuses the
+    /// whole save.
+    #[test]
+    fn every_icon_the_app_picks_is_kept() {
+        let root = root();
+        let shared: serde_json::Value =
+            serde_json::from_str(include_str!("../../../schemas/job-icons.json")).expect("icons");
+        let icons = shared["icons"].as_array().expect("an icons list");
+        assert!(icons.iter().any(|icon| icon == "video"));
+        for icon in icons {
+            let icon = icon.as_str().expect("an icon is a word");
+            let mut job = spec("Maker");
+            job.icon = Some(icon.into());
+            save_job(root.path(), icon, job, false, None)
+                .unwrap_or_else(|error| panic!("{icon}: {error:?}"));
+            assert_eq!(
+                read_job(root.path(), icon)
+                    .and_then(|job| job.icon)
+                    .as_deref(),
+                Some(icon)
+            );
+        }
     }
 
     #[test]
