@@ -1,11 +1,12 @@
 import { parse } from 'yaml'
 import { describe, expect, it } from 'vitest'
 
+import jobIcons from '../../../../schemas/job-icons.json'
 import { DEFAULT_MODEL, setConnectedSources } from '../ai/modelIds'
 import { agentFromDraft, BLANK_DRAFT, blankDraft, chatAgentId, chatTeamYaml, draftChanged, draftFromJob, draftFromPreset, makesNewVersion, specFromDraft } from './draft'
 import { buildAgentFromSource } from './createAgent'
 import { savedJobPreset } from './jobs'
-import { ROLE_PRESETS, roleSource } from './roles'
+import { ROLE_ICON_IDS, ROLE_PRESETS, roleSource } from './roles'
 import { draftFromTeamAgent, teamAgentEdit } from './teamDraft'
 
 describe('the agent builder’s draft', () => {
@@ -27,6 +28,16 @@ describe('the agent builder’s draft', () => {
     const spec = specFromDraft(draft, 'First cut')
     expect(spec).toEqual({ name: 'Reader', does: 'Checks stories', instructions: 'Check every story.', icon: 'review', figure: { kind: 'button', color: 'sage' }, model: 'sonnet', skills: ['source-check'], tools: ['github'], allow: { web: true }, note: 'First cut' })
     expect(draftFromJob(spec)).toEqual({ ...draft, allow: { web: true } })
+  })
+
+  it('saves with an icon the daemon keeps, from the one list both read', () => {
+    // The daemon refuses a save whose icon isn't in schemas/job-icons.json.
+    expect(ROLE_ICON_IDS).toEqual(jobIcons.icons)
+    for (const preset of ROLE_PRESETS) {
+      const { icon } = specFromDraft(draftFromPreset(preset))
+      if (icon) expect(jobIcons.icons, preset.id).toContain(icon)
+    }
+    expect(specFromDraft({ ...blankDraft(), name: 'Video maker' }).icon).toBe('video')
   })
 
   it('saves a tool’s always-allowed calls only for tools it is given, and a team copies them (ADR 0069)', () => {

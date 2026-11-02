@@ -1,0 +1,4 @@
+{
+  "$comment": "The icons one of My agents may name in its file (`icon:`). The one list: the daemon refuses any other when an agent is saved (crates/loomwatch-backend/src/jobs.rs), and the app draws one for each and picks one from an agent's name when it saves it (ui/src/lib/library/roles.ts ROLE_ICON_IDS, checked against this list in draft.test.ts). An agent with no icon gets a plain mark.",
+  "icons": ["research", "write", "edit", "review", "code", "design", "analyse", "slides", "document", "sheet", "chart", "dashboard", "video"]
+}
