@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -75,6 +78,17 @@ vi.mock('docx-preview', () => ({
     body.innerHTML = '<div class="docx-wrapper"><section class="docx"><p>Dear team,</p><p>Sales grew.</p></section></div>'
   }),
 }))
+
+/** The reader's own rules outside any `@media`, by selector: jsdom applies no CSS, so it is read. */
+const fitRules = () => {
+  const css = readFileSync(resolve(process.cwd(), 'src/styles/reader.css'), 'utf8')
+  expect(css).not.toBe('')
+  const rules = new Map<string, string>()
+  for (const [, selector, body] of css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    if (!rules.has(selector.trim())) rules.set(selector.trim(), body)
+  }
+  return rules
+}
 
 const REPORT = '/teams/.loomwatch/market/writer/market-report.md'
 const respond = (status: number, body: unknown) => Promise.resolve(new Response(JSON.stringify(body), { status }))
@@ -605,6 +619,103 @@ describe('a picture in the reader', () => {
   /** What is marked stays marked once the browser has had its turn (a click's own work runs after it). */
   const settle = () => act(() => new Promise((done) => { setTimeout(done, 20) }))
 
+  it('fits in the pane, a tall one too, where a report scrolls as a page', async () => {
+    renderReader({ file: { path: CHART, runId: 'run-1', from: 'writer' } })
+    await screen.findByText('Drag over any part')
+    // jsdom draws nothing: what fits it is the pane measured as a size, and the rules that hold
+    // the picture inside it with room for the tip under it.
+    expect(document.querySelector('.rd-scroll')).toHaveClass('fits')
+    const rules = fitRules()
+    expect(rules.get('.rd-scroll.fits')).toContain('container-type: size')
+    expect(rules.get('.rd-scroll.fits .rd-picture:not(.long) img')).toMatch(/max-height: max\(\d+px, 100cqh - \(/)
+    cleanup()
+    renderReader()
+    expect(await screen.findByRole('heading', { name: 'Market report', level: 1 })).toBeInTheDocument()
+    expect(document.querySelector('.rd-scroll')).not.toHaveClass('fits')
+  })
+
+  it('zooms from the bar, with the keys or a pinch, and its number shows it whole again', async () => {
+    renderReader({ file: { path: CHART, runId: 'run-1', from: 'writer' } })
+    await screen.findByText('Drag over any part')
+    // 1600 pixels wide, drawn 800 wide in jsdom: it fits at half its size.
+    fireEvent.load(document.querySelector('.rd-picture img')!)
+    const zoom = await screen.findByRole('group', { name: 'Zoom' })
+    expect(within(zoom).getByRole('button', { name: '50% of its real size, shown whole' })).toHaveAttribute('aria-pressed', 'true')
+    const scroll = document.querySelector<HTMLElement>('.rd-scroll')!
+    const drawnAt = () => scroll.style.getPropertyValue('--rd-zoom-w')
+    fireEvent.click(within(zoom).getByRole('button', { name: 'Zoom in' }))
+    expect(scroll).toHaveClass('zoomed')
+    expect(drawnAt()).toBe('1072px')
+    expect(within(zoom).getByRole('button', { name: '67% of its real size. Show it whole' })).toHaveTextContent('67%')
+    // − undoes +: back to whole, not to 50% zoomed.
+    fireEvent.click(within(zoom).getByRole('button', { name: 'Zoom out' }))
+    expect(scroll).not.toHaveClass('zoomed')
+    fireEvent.click(within(zoom).getByRole('button', { name: 'Zoom out' }))
+    expect(drawnAt()).toBe('528px')
+    fireEvent.click(within(zoom).getByRole('button', { name: '33% of its real size. Show it whole' }))
+    expect(scroll).not.toHaveClass('zoomed')
+    // From the keyboard while the reader has it: + and ⌘+ in, − out, 0 fits.
+    const target = document.querySelector('.rd-picture-target')!
+    fireEvent.keyDown(target, { key: '+' })
+    fireEvent.keyDown(target, { key: '=', metaKey: true })
+    expect(drawnAt()).toBe('1200px')
+    fireEvent.keyDown(target, { key: '-' })
+    expect(drawnAt()).toBe('1072px')
+    fireEvent.keyDown(target, { key: '0' })
+    expect(scroll).not.toHaveClass('zoomed')
+    // A pinch goes between the steps; a wheel alone scrolls.
+    fireEvent.wheel(scroll, { deltaY: -50 })
+    expect(scroll).not.toHaveClass('zoomed')
+    fireEvent.wheel(scroll, { ctrlKey: true, deltaY: -40, clientX: 400, clientY: 300 })
+    expect(within(zoom).getByRole('button', { name: '75% of its real size. Show it whole' })).toBeInTheDocument()
+    // A mouse's notch with Ctrl held is one step, not a leap.
+    fireEvent.wheel(scroll, { ctrlKey: true, deltaY: -100, clientX: 400, clientY: 300 })
+    expect(drawnAt()).toBe('1600px')
+    // A box marked on it is let go of as it zooms, rather than grow away from its Ask.
+    drag(picture(), 200, 0, 600, 300)
+    expect(await screen.findByRole('toolbar', { name: 'Ask Writer about the part you marked' })).toBeInTheDocument()
+    fireEvent.click(within(zoom).getByRole('button', { name: 'Zoom out' }))
+    await waitFor(() => expect(screen.queryByRole('toolbar', { name: 'Ask Writer about the part you marked' })).toBeNull())
+  })
+
+  it('opens each picture fitted, and zooms no further than its last step', async () => {
+    renderReader({ file: { path: CHART, runId: 'run-1', from: 'writer' } })
+    await screen.findByText('Drag over any part')
+    fireEvent.load(document.querySelector('.rd-picture img')!)
+    const zoom = await screen.findByRole('group', { name: 'Zoom' })
+    const zoomIn = within(zoom).getByRole('button', { name: 'Zoom in' })
+    zoomIn.focus()
+    for (let step = 0; step < 12; step += 1) fireEvent.click(zoomIn)
+    // Spent, but still holding the keyboard, so − and 0 go on working from it.
+    expect(zoomIn).toHaveAttribute('aria-disabled', 'true')
+    expect(zoomIn).toHaveFocus()
+    expect(document.querySelector<HTMLElement>('.rd-scroll')!.style.getPropertyValue('--rd-zoom-w')).toBe('12800px')
+    fireEvent.keyDown(zoomIn, { key: '0' })
+    expect(document.querySelector('.rd-scroll')).not.toHaveClass('zoomed')
+    cleanup()
+    renderReader()
+    expect(await screen.findByRole('heading', { name: 'Market report', level: 1 })).toBeInTheDocument()
+    expect(screen.queryByRole('group', { name: 'Zoom' })).toBeNull()
+  })
+
+  it('lets a very long picture, such as a whole page’s screenshot, scroll at the pane’s width rather than shrink to a strip', async () => {
+    const size = (width: number, height: number) => {
+      vi.spyOn(HTMLImageElement.prototype, 'naturalWidth', 'get').mockReturnValue(width)
+      vi.spyOn(HTMLImageElement.prototype, 'naturalHeight', 'get').mockReturnValue(height)
+      fireEvent.load(document.querySelector('.rd-picture img')!)
+    }
+    renderReader({ file: { path: CHART, runId: 'run-1', from: 'writer' } })
+    await screen.findByText('Drag over any part')
+    const figure = document.querySelector('.rd-picture')!
+    // A phone's frame fits; a page six times as tall as it is wide is read down the pane.
+    size(1080, 1920)
+    expect(figure).not.toHaveClass('long')
+    size(1440, 6000)
+    expect(figure).toHaveClass('long')
+    expect(fitRules().get('.rd-scroll.fits .rd-picture:not(.long) img')).toMatch(/max-height:/)
+    expect(fitRules().has('.rd-scroll.fits .rd-picture img')).toBe(false)
+  })
+
   it('marks a box dragged over it, or all of it for a click, and sends the part’s place with the picture inside it', async () => {
     const { onAsk } = renderReader({ file: { path: CHART, runId: 'run-1', from: 'writer' } })
     await screen.findByText('Drag over any part')
@@ -944,6 +1055,32 @@ describe('a recording in the reader', () => {
     fireEvent.pointerMove(line(), { pointerId: 1, clientX: toX, clientY: 10 })
     fireEvent.pointerUp(target, { pointerId: 1, clientX: toX, clientY: 10 })
   }
+
+  it('fits a video and its bar in the pane, with room under them for the tip', async () => {
+    renderReader({ file: { path: TALK, runId: 'run-1', from: 'writer' } })
+    expect(await screen.findByText('Click or drag the bar')).toBeInTheDocument()
+    expect(document.querySelector('.rd-scroll')).toHaveClass('fits')
+    const rules = fitRules()
+    // The frame is as wide as the video, so a box drawn on it is a box on the picture.
+    expect(rules.get('.rd-scroll.fits .rd-media-view:not(.audio) .rd-media-frame')).toContain('width: fit-content')
+    expect(rules.get('.rd-scroll.fits .rd-media-view:not(.audio) .rd-media')).toMatch(/max-height: max\(\d+px, 100cqh - \(/)
+  })
+
+  it('zooms a video from the bar as a picture zooms, and a recording of sound not at all', async () => {
+    renderReader({ file: { path: TALK, runId: 'run-1', from: 'writer' } })
+    expect(await screen.findByText('Click or drag the bar')).toBeInTheDocument()
+    // 1280 pixels wide, drawn 800 wide in jsdom.
+    fireEvent(document.querySelector('video')!, new Event('loadedmetadata'))
+    const zoom = await screen.findByRole('group', { name: 'Zoom' })
+    expect(within(zoom).getByRole('button', { name: '63% of its real size, shown whole' })).toBeInTheDocument()
+    fireEvent.click(within(zoom).getByRole('button', { name: 'Zoom in' }))
+    expect(document.querySelector<HTMLElement>('.rd-scroll')!.style.getPropertyValue('--rd-zoom-w')).toBe('858px')
+    cleanup()
+    renderReader({ file: { path: SONG, runId: 'run-1', from: 'writer' } })
+    await waitFor(() => expect(document.querySelector('audio')).not.toBeNull())
+    fireEvent(document.querySelector('audio')!, new Event('loadedmetadata'))
+    expect(screen.queryByRole('group', { name: 'Zoom' })).toBeNull()
+  })
 
   it('marks the moment pressed on its line, goes there, and sends its frame with the question', async () => {
     const { onAsk } = renderReader({ file: { path: TALK, runId: 'run-1', from: 'writer' } })

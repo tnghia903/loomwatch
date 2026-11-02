@@ -21,6 +21,7 @@ export const ICON_PATHS = {
   close: 'M6 6l12 12 M18 6 6 18',
   check: 'M5 12.5l4.5 4.5L19 7.5',
   plus: 'M12 5v14 M5 12h14',
+  minus: 'M5 12h14',
   search: 'M4 11a7 7 0 1 0 14 0a7 7 0 1 0-14 0 M20.5 20.5 16 16',
   send: 'M12 19.5V5 M6 11l6-6 6 6',
   enter: 'M9 10l-5 5 5 5 M20 4v7a4 4 0 0 1-4 4H4',

@@ -73,6 +73,16 @@
 .rd-draft-text:focus { border-color: var(--color-accent); }
 .rd-draft-text:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 .rd-acts { display: inline-flex; flex: none; gap: 2px; }
+/* Zoom, for a picture or a video: −, how big it is drawn, +. Zoomed, the number has an edge: a
+   press shows it whole again. At either end − or + stays focusable, and looks spent. */
+.rd-zoom { display: inline-flex; flex: none; align-items: center; gap: 2px; }
+.rd-zoom-now { box-sizing: border-box; min-width: 46px; height: 28px; padding: 0 4px; border: 0; border-radius: 8px; background: transparent; color: var(--color-ink-2); font: 500 12.5px/1 var(--font-sans); font-variant-numeric: tabular-nums; cursor: pointer; transition: background-color var(--t-instant) var(--ease-out); }
+.rd-zoom-now[aria-pressed='true'] { cursor: default; }
+.rd-zoom-now[aria-pressed='false'] { box-shadow: inset 0 0 0 1px var(--color-hairline); color: var(--color-ink); }
+@media (hover: hover) { .rd-zoom-now[aria-pressed='false']:hover { background: var(--color-accent-tint); } }
+.rd-zoom-now:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.rd-zoom .btn[aria-disabled='true'], .rd-zoom .btn[aria-disabled='true']:hover { background: transparent; color: var(--color-ink-3); cursor: default; }
+@media (pointer: coarse), (max-width: 767px) { .rd-zoom-now { height: 44px; } .rd-zoom .btn { min-width: 44px; height: 44px; justify-content: center; } }
 .rd-note { flex: none; margin: 0; padding: 8px 18px; border-bottom: 1px solid var(--color-hairline); background: var(--color-accent-tint); font-size: 12.5px; line-height: 1.45; color: var(--color-ink-2); }
 
 /* ---------- The page ---------- */
@@ -143,6 +153,31 @@
 .rd-media-view { box-sizing: border-box; width: calc(100% - 48px); max-width: 720px; margin: 32px auto 96px; }
 .rd-media-view .rd-media { width: 100%; margin: 0; }
 .rd-media-frame { position: relative; line-height: 0; }
+
+/* A picture, or a video with its bar, fits the pane, so a tall one is seen whole without
+   scrolling. The pane is what they are measured against (`fits`, on a picture or a recording
+   only), and the room under them is the tip's: one line of it ends 52px above the pane's foot. A
+   very long picture (`long`, a page's screenshot) is read down the pane instead. */
+.rd-scroll.fits { container-type: size; --rd-tip-room: 64px; }
+.rd-scroll.fits .rd-picture { min-height: 100cqh; padding-bottom: var(--rd-tip-room); }
+.rd-scroll.fits .rd-picture:not(.long) img { max-height: max(120px, 100cqh - (24px + var(--rd-tip-room))); }
+/* The frame is as wide as the video it holds, so a box drawn on it is a box on the picture. The
+   height left over: the view's top margin, the bar's gap and the bar, the view's bottom margin
+   (the bubbles' rows and the tip), and a little to spare. */
+.rd-scroll.fits .rd-media-view:not(.audio) .rd-media-frame { width: fit-content; max-width: 100%; margin-inline: auto; }
+.rd-scroll.fits .rd-media-view:not(.audio) .rd-media { width: auto; max-width: 100%; max-height: max(160px, 100cqh - (32px + 32px + 28px + 96px + 4px)); }
+/* Zoomed (−, + or a pinch, `useZoom`): drawn at its share of its own pixels (`--rd-zoom-w`), and the
+   pane scrolls both ways to move around it. Smaller than the pane it stays in the middle; bigger,
+   it starts at the pane's top left, so every part of it can be scrolled to. */
+.rd-scroll.fits.zoomed .rd-picture { width: max-content; min-width: 100%; place-items: start; }
+.rd-scroll.fits.zoomed .rd-picture-frame { max-width: none; margin: auto; }
+/* A video keeps its margin when wider than the pane, and its bar stays in view, as wide as it was. */
+.rd-scroll.fits.zoomed .rd-as-media { box-sizing: border-box; width: max-content; min-width: 100%; padding-inline: 24px; }
+.rd-scroll.fits.zoomed .rd-media-view:not(.audio) { width: max-content; min-width: min(720px, 100%); max-width: none; }
+.rd-scroll.fits.zoomed .rd-media-view:not(.audio) .rd-media-line { position: sticky; left: 24px; width: min(100%, 720px, 100cqw - 48px); }
+.rd-scroll.fits.zoomed .rd-media-view:not(.audio) .rd-media-frame { max-width: none; }
+.rd-scroll.fits.zoomed .rd-picture .rd-picture-frame img,
+.rd-scroll.fits.zoomed .rd-media-view:not(.audio) .rd-media-frame .rd-media { width: var(--rd-zoom-w); height: auto; max-width: none; max-height: none; }
 /* The whole frame, where boxes are placed; only its catch above the controls takes the pointer. A
    finger scrolls rather than draws, as on a picture. */
 .rd-media-drawing { position: absolute; inset: 0; pointer-events: none; isolation: isolate; }
@@ -173,6 +208,7 @@
 .rd-box.rd-moment .rd-bubble-point { display: none; }
 @media (pointer: coarse) {
   .rd-media-line { height: 44px; }
+  .rd-scroll.fits .rd-media-view:not(.audio) .rd-media { max-height: max(160px, 100cqh - (32px + 32px + 44px + 96px + 4px)); }
   .rd-box.rd-moment { top: 10px; bottom: 10px; }
   .rd-box.rd-moment.frame { top: 4px; bottom: 4px; }
 }
@@ -472,6 +508,8 @@
 .rd-hint b { font-weight: 600; color: var(--color-ink); }
 .rd-hint-close { display: grid; flex: none; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--color-ink-3); cursor: pointer; }
 .rd-hint-close:hover { background: var(--color-hairline); color: var(--color-ink); }
+/* A zoomed video's own controls are at the pane's foot, and its bar may be scrolled away: no tip. */
+.rd:has(.rd-scroll.zoomed .rd-media-view:not(.audio)) .rd-hint { display: none; }
 
 /* The marked words on their way to the message box. */
 .rd-flight {
@@ -520,14 +558,16 @@
   .rd-bar { padding-left: 14px; }
   /* A web page's bar holds the Pick switch as well: in a narrow pane its buttons go to a row of
      their own, at its right, rather than squeeze the title to a few letters. */
-  .rd-bar:has(.rd-pick, .rd-change) { flex-wrap: wrap; row-gap: 8px; }
-  .rd-bar:has(.rd-pick, .rd-change) .rd-bar-words { flex: 1 1 calc(100% - 44px); }
+  .rd-bar:has(.rd-pick, .rd-change, .rd-zoom) { flex-wrap: wrap; row-gap: 8px; justify-content: flex-end; }
+  .rd-bar:has(.rd-pick, .rd-change, .rd-zoom) .rd-bar-words { flex: 1 1 calc(100% - 44px); }
   .rd-bar:has(.rd-pick) .rd-pick, .rd-bar:not(:has(.rd-pick)) .rd-change { margin-left: auto; }
   /* What came of a change says it on a row of its own, whole. */
   .rd-saved { order: 1; flex-basis: 100%; white-space: normal; }
   /* The tip wraps rather than lose its end (where to click, and who is asked), over the pane's
      width: centred from its middle, it would otherwise wrap in half of it. */
   .rd-hint { width: max-content; white-space: normal; border-radius: 16px; }
+  /* The tip takes two lines here: a fitted picture leaves it that room. */
+  .rd-scroll.fits { --rd-tip-room: 80px; }
   .rd-title { font-size: 15.5px; }
   .rd-sheet { display: none; }
 }

@@ -213,7 +213,12 @@ goes with its picture, the box cut out of the picture, which the agent you ask s
 sees pictures. So **Explain** on a picture starts the agent's work rather than a quick answer in the
 chat. The agent is told where the box is as well, so it can open the file itself. The box stays on
 the picture with the bubble of each agent asked at its corner, and the box or its bubble opens the
-answer. A PDF is shown as its pages, and you mark its words as in any file. Drag over a picture or
+answer. A picture or a video opens whole in the reader, with no scrolling; a very long picture, such
+as a whole page's screenshot, is read down the reader at its width instead. − and + at the top zoom
+it, from a tenth of its real size to eight times it, and the number between them says how big it is
+drawn; − after + comes back to whole, and so does a press on the number. A pinch on a trackpad, or
+⌘+, ⌘− and ⌘0 while the reader has the keyboard, do the same, and a zoomed picture or video scrolls
+every way. A PDF is shown as its pages, and you mark its words as in any file. Drag over a picture or
 a chart on a page to mark a box there; to mark all of a page with one, press Tab until the page is
 ringed, then Enter (or tap it, on a touch screen). The agent is told the page and where the box is,
 and sent a sharp picture of the box. A PDF that can't be shown as its pages shows only its words.
