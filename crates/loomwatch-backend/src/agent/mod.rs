@@ -44,7 +44,8 @@ mod tests;
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Duration;
 
 pub use anthropic::{Anthropic, Price, list_price};
 pub use chatgpt::{ChatGptPlan, PlanAccess};
@@ -71,6 +72,36 @@ pub use store::SessionStore;
 /// A boxed future, for the traits the daemon implements ([`EventSink`], [`Permissions`],
 /// [`HostTools`]): they are used as trait objects, which `async fn` in a trait cannot be.
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+
+/// How long a model provider waits for a connection to open.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// The clients every model provider sends through: one for the internet, one for a stand-in on
+/// this computer, the only place plain `http` may go.
+static MODEL_CLIENTS: Mutex<[Option<reqwest::Client>; 2]> = Mutex::new([None, None]);
+
+/// The HTTP client a model provider sends through, the same one for the daemon's whole life.
+///
+/// Claude's and the `ChatGPT` plan's providers are made for each session, so a key changed between
+/// runs is picked up, but the connections stay: a session's first call goes out on one an earlier
+/// session left open instead of opening its own. Opening one to `OpenAI` took 0.37 s on average,
+/// over half a second a quarter of the time and up to 2 s; to Anthropic, 0.1 s on average
+/// (measured 2026-11-02). The client holds no key: each request carries its own.
+pub(crate) fn model_client(local: bool) -> reqwest::Result<reqwest::Client> {
+    let mut clients = MODEL_CLIENTS.lock().unwrap_or_else(PoisonError::into_inner);
+    let kept = &mut clients[usize::from(local)];
+    if let Some(client) = kept {
+        return Ok(client.clone());
+    }
+    let client = reqwest::Client::builder()
+        .user_agent(concat!("LoomWatch/", env!("CARGO_PKG_VERSION")))
+        .connect_timeout(CONNECT_TIMEOUT)
+        .redirect(reqwest::redirect::Policy::none())
+        .https_only(!local)
+        .build()?;
+    *kept = Some(client.clone());
+    Ok(client)
+}
 
 /// The operator's provider key. Its `Debug` never shows it, and it has no `Display`, so it cannot
 /// end up in an event, a log line or an error message by accident.

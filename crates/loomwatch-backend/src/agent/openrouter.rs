@@ -81,7 +81,6 @@ pub fn is_loopback_http(url: &str) -> bool {
 /// How `OpenRouter` names `LoomWatch` on its dashboards.
 pub(crate) const REFERER: &str = "https://github.com/tnghia903/loomwatch";
 pub(crate) const TITLE: &str = "LoomWatch";
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 /// Silence allowed between two pieces of a stream. `OpenRouter` sends a comment every few seconds
 /// while a model thinks, so this much silence means the connection is gone.
 const STREAM_IDLE: Duration = Duration::from_mins(3);
@@ -161,12 +160,7 @@ impl OpenRouter {
             base.starts_with("https://") || local,
             "an OpenRouter address must be https"
         );
-        let client = Client::builder()
-            .user_agent(concat!("LoomWatch/", env!("CARGO_PKG_VERSION")))
-            .connect_timeout(CONNECT_TIMEOUT)
-            .redirect(reqwest::redirect::Policy::none())
-            .https_only(!local)
-            .build()?;
+        let client = super::model_client(local)?;
         let claude = Anthropic::through_openrouter(key.clone(), &base)?;
         Ok(Self {
             client,

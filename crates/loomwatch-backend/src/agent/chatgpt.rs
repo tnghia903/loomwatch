@@ -36,7 +36,6 @@ use super::provider::{
 use super::sse::SseDecoder;
 use crate::ai::{ChatGptModel, ModelRef, Source};
 
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 const STREAM_IDLE: Duration = Duration::from_mins(3);
 const ATTEMPTS: u32 = 4;
 const MAX_BACKOFF: Duration = Duration::from_secs(30);
@@ -81,12 +80,7 @@ impl ChatGptPlan {
             base.starts_with("https://") || local,
             "an OpenAI address must be https"
         );
-        let client = Client::builder()
-            .user_agent(concat!("LoomWatch/", env!("CARGO_PKG_VERSION")))
-            .connect_timeout(CONNECT_TIMEOUT)
-            .redirect(reqwest::redirect::Policy::none())
-            .https_only(!local)
-            .build()?;
+        let client = super::model_client(local)?;
         Ok(Self {
             client,
             base,

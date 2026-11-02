@@ -52,7 +52,10 @@ instructions and tools.
   search is a block of its own between the words around it, where chat completions marks nothing.
   The offline **Demo** (`agent/demo.rs`) answers
   without a model. It runs the offline demo team (`model: fake/offline`), which needs no key and
-  no internet, and the tests.
+  no internet, and the tests. Every provider sends through one HTTP client kept for the daemon's
+  life (`agent::model_client`), so a new session's first call goes out on a connection an earlier
+  session left open instead of waiting for a new one; the client holds no key, and each request
+  carries its own.
 - **Built-in tools** (`agent/tools/`) are `list_files`, `read_file`, `search_files`,
   `write_file`, `edit_file`, `run_command`, `update_plan` and `read_tool_output`. A Word, Excel,
   PowerPoint, PDF or email file that `write_file` or `edit_file` changed is read back with the
