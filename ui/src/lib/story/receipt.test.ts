@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
-import { projectRun, recordedReplyText, type RunEvent } from '../watch/events'
+import { LOOMWATCH_CHECK_ID, LOOMWATCH_NAME } from '../chat/helpers'
+import { settleAfterRun } from '../runs/settle'
+import { projectRun, recordedReplyText, type RunEvent, type RunPhase } from '../watch/events'
 import { buildReceipt, receiptMarkdown } from './receipt'
 import { describeEvidence } from './weft'
 import { findingsOf } from './verdict'
@@ -278,6 +280,157 @@ describe('a turn its app reported as failed', () => {
     })
     expect(receipt.lines).toEqual([{ tone: 'bad', text: 'Gatherer stopped (Codex reported an error)', agentId: 'gatherer' }])
     expect(receipt.checks).toContainEqual({ tone: 'warn', text: `Codex reported an error instead of an answer: ${REFUSAL}`, agentId: 'gatherer', evidenceId: undefined })
+  })
+
+  // The daemon of the time followed that `turn_end` with its `turn_failed` note in the same words.
+  it('raises it once, though the note after it says it again', () => {
+    const projection = projectRun([
+      gather(0, 'process', { phase: 'spawned', pid: 7 }),
+      gather(1, 'session_meta', { sessionUpdate: 'session_info_update', _meta: { codex: { threadStatus: { type: 'systemError' } } } }),
+      gather(2, 'message', { role: 'agent', content: { type: 'text', text: REFUSAL } }),
+      gather(3, 'turn_end', { stopReason: 'end_turn' }),
+      { ...gather(4, 'session_meta', { phase: 'turn_failed', reason: 'app_error', message: REFUSAL }), raw: { source: 'loomwatch', phase: 'turn_failed' } },
+    ])
+    expect(projection.attention.map((alert) => alert.message)).toEqual([`Codex reported an error instead of an answer: ${REFUSAL}`])
+    expect(projection.agents[0]).toMatchObject({ status: 'failed', error: REFUSAL })
+  })
+})
+
+// Run 03f7b0dd (2026-11-02): LoomWatch's own check of the answer ran on the person's ChatGPT plan,
+// which had reached its usage limit. Its only turn failed, so the answer went out unchecked, and the
+// receipt said "loomwatch:check stopped". Recorded as the engine records a turn that fails: its
+// `turn_failed` note, and no `turn_end` or exit after it.
+describe('LoomWatch’s own check of the answer, when its turn failed', () => {
+  const LIMIT = 'LoomWatch has reached a usage limit on your ChatGPT plan: the plan\'s own limit, or the share you allowed LoomWatch. See it under Manage usage in ChatGPT\'s settings.'
+  const note = (phase: string) => ({ source: 'loomwatch', phase })
+  const check = (seq: number, kind: RunEvent['kind'], payload: RunEvent['payload'], raw?: unknown): RunEvent =>
+    ({ id: `check-${seq}`, sessionId: 'run-1', agentId: LOOMWATCH_CHECK_ID, seq, ts: at(seq), kind, payload, ...(raw ? { raw } : {}) })
+  const failed = (problem?: Record<string, unknown>, message = LIMIT): RunEvent[] => [
+    event(0, 'process', { phase: 'spawned', pid: 7 }),
+    event(1, 'message', { role: 'user', content: { type: 'text', text: 'Make the launch video.' } }),
+    event(2, 'message', { role: 'agent', content: { type: 'text', text: 'Here is the video.' } }),
+    event(3, 'turn_end', { stopReason: 'end_turn' }),
+    check(4, 'process', { phase: 'spawned', pid: 9 }),
+    check(5, 'session_meta', { phase: 'set_config_option', configId: 'model', value: 'chatgpt:gpt-6.1-sol' }, note('set_config_option')),
+    check(6, 'message', { role: 'user', content: { type: 'text', text: '## Your assigned role\nYou are the team’s checker.' } }),
+    check(7, 'session_meta', { phase: 'turn_failed', reason: 'app_error', message, ...(problem ? { problem } : {}) }, note('turn_failed')),
+    event(8, 'process', { phase: 'exited', exitCode: 0 }),
+  ]
+  function receiptFor(events: RunEvent[], phase: RunPhase = 'succeeded') {
+    const projection = projectRun(events)
+    // As the run's Details hands them over: the check named as the chat names it, and whoever was
+    // still mid-task when the run ended settled the way the cards settle it.
+    const runtime = (id: string) => {
+      const status = projection.agents.find((agent) => agent.id === id)?.status ?? 'idle'
+      return { status: settleAfterRun(status, { phase, operator: false, laterStageStarted: false })?.status ?? status }
+    }
+    return buildReceipt({
+      attempt: 3,
+      prompt: 'Make the launch video.',
+      phase,
+      elapsed: '48m',
+      agents: [{ id: 'writer', name: 'Writer', operator: false, runtime: runtime('writer') }, { id: LOOMWATCH_CHECK_ID, name: LOOMWATCH_NAME, operator: false, runtime: runtime(LOOMWATCH_CHECK_ID) }],
+      projection,
+      evidenceByAgent: new Map(),
+      harnessLabels: new Map([['writer', 'Claude Opus 5.5'], [LOOMWATCH_CHECK_ID, 'GPT-6.1 Sol']]),
+      answered: true,
+    })
+  }
+  const PLAN_LIMIT = { kind: 'plan_limit', source: 'chatgpt', url: 'https://chatgpt.com/settings/usage' }
+
+  it('says the answer wasn’t checked, and why, in the words LoomWatch said it in', () => {
+    const receipt = receiptFor(failed(PLAN_LIMIT))
+    expect(receipt.lines).toEqual([
+      { tone: 'ok', text: 'Writer finished', agentId: 'writer' },
+      { tone: 'bad', text: `The answer wasn’t checked. ${LIMIT}`, agentId: LOOMWATCH_CHECK_ID },
+    ])
+    // Said once: the line already says what the alert would.
+    expect(receipt.checks.map((line) => line.text)).not.toContain(LIMIT)
+    // Not one of the team's agents, as the chat counts who worked.
+    expect(receipt.team).toBe('1 agent')
+    // The answer is whole, only unchecked: the run finished, as the daemon recorded it.
+    expect(projectRun(failed(PLAN_LIMIT), Infinity, { status: 'succeeded', evidenceComplete: true }).phase).toBe('succeeded')
+    expect(receiptMarkdown(receipt)).toContain(`- ✗ The answer wasn’t checked. ${LIMIT}`)
+  })
+
+  it('is a finding of the answer, so the chat says it too', () => {
+    expect(findingsOf(receiptFor(failed(PLAN_LIMIT))).map((line) => line.text)).toEqual([`The answer wasn’t checked. ${LIMIT}`])
+  })
+
+  // An error with no known way out is named on the line, and said whole under "Worth a look", as
+  // an app's reported error is.
+  it('names who reported an error it has no known cause for, and says it under “Worth a look”', () => {
+    const said = 'OpenAI reported an error: the server had an error while processing your request'
+    const receipt = receiptFor(failed(undefined, said))
+    expect(receipt.lines[1]).toEqual({ tone: 'bad', text: 'LoomWatch couldn’t check the answer (GPT-6.1 Sol reported an error)', agentId: LOOMWATCH_CHECK_ID })
+    expect(receipt.checks).toContainEqual({ tone: 'warn', text: said, agentId: LOOMWATCH_CHECK_ID, evidenceId: undefined })
+  })
+
+  // Its sentence for a source's rate limit says to try again, and for an ineligible plan to choose
+  // another model "for this agent": written for the team's agents, not for a check whose model the
+  // person doesn't choose. Said under "Worth a look" instead.
+  it('keeps a sentence written for the team’s agents off its line', () => {
+    const said = 'ChatGPT is limiting how fast LoomWatch can make requests. Wait a minute, then try again.'
+    const receipt = receiptFor(failed({ kind: 'rate_limited', source: 'chatgpt' }, said))
+    expect(receipt.lines[1]).toEqual({ tone: 'bad', text: 'LoomWatch couldn’t check the answer (GPT-6.1 Sol reported an error)', agentId: LOOMWATCH_CHECK_ID })
+    expect(receipt.checks.map((line) => line.text)).toContain(said)
+  })
+
+  it('says it checked the answer when it did', () => {
+    const checked = [...failed().slice(0, 7), check(7, 'message', { role: 'agent', content: { type: 'text', text: 'Every item is met.' } }), check(8, 'turn_end', { stopReason: 'end_turn' }), check(9, 'process', { phase: 'exited', exitCode: 0 }), event(10, 'process', { phase: 'exited', exitCode: 0 })]
+    expect(receiptFor(checked).lines[1]).toEqual({ tone: 'ok', text: 'LoomWatch checked the answer', agentId: LOOMWATCH_CHECK_ID })
+  })
+
+  // Still at work when the receipt was printed: stopped by you, cut off by the run's end, or not over.
+  it('says the answer wasn’t checked yet in its own words, however it ended', () => {
+    const still = failed().slice(0, 7)
+    expect(receiptFor(still, 'cancelled').lines[1].text).toBe('You stopped the run before the answer was checked')
+    const line = (phase: RunPhase) => buildReceipt({
+      attempt: 3, prompt: 'Make the launch video.', phase, elapsed: '48m',
+      agents: [{ id: LOOMWATCH_CHECK_ID, name: LOOMWATCH_NAME, operator: false, runtime: { status: 'running' } }],
+      projection: projectRun(still), evidenceByAgent: new Map(), harnessLabels: new Map(), answered: true,
+    }).lines[0].text
+    expect(line('succeeded')).toBe('LoomWatch didn’t finish checking the answer')
+    expect(line('running')).toBe('LoomWatch is still checking the answer')
+  })
+
+  // Any agent's turn that LoomWatch's engine failed, with a known cause, says it on its own line.
+  it('gives a team agent’s failed turn its reason too', () => {
+    const projection = projectRun([
+      event(0, 'process', { phase: 'spawned', pid: 7 }),
+      event(1, 'message', { role: 'user', content: { type: 'text', text: 'Make the launch video.' } }),
+      { ...event(2, 'session_meta', { phase: 'turn_failed', reason: 'app_error', message: LIMIT, problem: PLAN_LIMIT }), raw: note('turn_failed') },
+    ])
+    expect(projection.agents[0]).toMatchObject({ status: 'failed', error: LIMIT, problem: PLAN_LIMIT })
+    const receipt = buildReceipt({
+      attempt: 3, prompt: 'Make the launch video.', phase: 'failed', elapsed: '1m',
+      agents: [{ id: 'writer', name: 'Writer', operator: false, runtime: { status: 'failed' } }],
+      projection, evidenceByAgent: new Map(), harnessLabels: new Map([['writer', 'GPT-6.1 Sol']]), answered: false,
+    })
+    expect(receipt.lines).toEqual([{ tone: 'bad', text: `Writer stopped. ${LIMIT}`, agentId: 'writer' }])
+    expect(receipt.checks.map((line) => line.text)).toEqual(['The run ended without an answer'])
+    // Its sentence for a rate limit was written for an agent of the team, so it goes on its line.
+    const limited = 'ChatGPT is limiting how fast LoomWatch can make requests. Wait a minute, then try again.'
+    const slowed = projectRun([
+      event(0, 'process', { phase: 'spawned', pid: 7 }),
+      { ...event(1, 'session_meta', { phase: 'turn_failed', reason: 'app_error', message: limited, problem: { kind: 'rate_limited', source: 'chatgpt' } }), raw: note('turn_failed') },
+    ])
+    expect(buildReceipt({
+      attempt: 3, prompt: 'Make the launch video.', phase: 'failed', elapsed: '1m',
+      agents: [{ id: 'writer', name: 'Writer', operator: false, runtime: { status: 'failed' } }],
+      projection: slowed, evidenceByAgent: new Map(), harnessLabels: new Map([['writer', 'GPT-6.1 Sol']]), answered: false,
+    }).lines).toEqual([{ tone: 'bad', text: `Writer stopped. ${limited}`, agentId: 'writer' }])
+  })
+
+  it('forgets the reason once a later turn of the same agent ends as usual', () => {
+    const recovered = projectRun([
+      event(0, 'process', { phase: 'spawned', pid: 7 }),
+      { ...event(1, 'session_meta', { phase: 'turn_failed', reason: 'app_error', message: LIMIT, problem: PLAN_LIMIT }), raw: note('turn_failed') },
+      event(2, 'message', { role: 'agent', content: { type: 'text', text: 'Here is the video.' } }),
+      event(3, 'turn_end', { stopReason: 'end_turn' }),
+    ])
+    expect(recovered.agents[0].error).toBeUndefined()
+    expect(recovered.agents[0].problem).toBeUndefined()
   })
 })
 

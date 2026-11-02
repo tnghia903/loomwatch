@@ -1,3 +1,4 @@
+import { nameWithHelpers } from '../chat/helpers'
 import { capabilityEvidence } from '../runs/capabilityEvidence'
 import { isTerminalRun, type RunRecord } from '../runs/client'
 import { settleAfterRun } from '../runs/settle'
@@ -51,8 +52,10 @@ export function checkAnswer({ record, projection, parties, answer, streaming, se
   const projected = new Map(projection.agents.map((agent) => [agent.id, agent]))
   // A one-agent turn ran that agent alone: the others were never asked, so they are not "missing".
   const members = record.onlyAgent ? parties.filter((party) => party.id === record.onlyAgent) : [...parties]
+  // Named as the chat names them: LoomWatch's own check as LoomWatch, a helper after its agent.
+  const names = new Map(parties.map((party) => [party.id, party.name]))
   for (const agent of projection.agents) {
-    if (!members.some((party) => party.id === agent.id) && !parties.some((party) => party.id === agent.id)) members.push({ id: agent.id, name: agent.id, operator: false })
+    if (!members.some((party) => party.id === agent.id) && !parties.some((party) => party.id === agent.id)) members.push({ id: agent.id, name: nameWithHelpers(names, agent.id) ?? agent.id, operator: false })
   }
   const order = members.map((party) => party.id)
   const pipeline = record.mode === 'pipeline'

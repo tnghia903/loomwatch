@@ -2306,11 +2306,11 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     if (!notificationsOn || !activeRunId) return
     for (const alert of [...session.latest.attention, ...(waitingAlert ? [waitingAlert] : [])]) {
       if (alert.seq > notifiedThrough.current) {
-        try { new Notification(`LoomWatch · ${alert.agentId}`, { body: alert.message, tag: `${activeRunId}:${alert.id}` }) } catch { /* permission may be revoked */ }
+        try { new Notification(`LoomWatch · ${nameWithHelpers(nodeNames, alert.agentId) ?? alert.agentId}`, { body: alert.message, tag: `${activeRunId}:${alert.id}` }) } catch { /* permission may be revoked */ }
       }
     }
     notifiedThrough.current = session.lastSeq
-  }, [session.latest.attention, session.lastSeq, notificationsOn, activeRunId, waitingAlert])
+  }, [session.latest.attention, session.lastSeq, notificationsOn, activeRunId, waitingAlert, nodeNames])
   const enableNotifications = useCallback(async () => {
     if (notificationsOn) { setNotificationsOn(false); return }
     if (!('Notification' in window)) { setStartError('Notifications are unavailable in this browser.'); return }

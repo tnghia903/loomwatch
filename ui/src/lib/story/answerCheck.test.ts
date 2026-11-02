@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { RunRecord } from '../runs/client'
-import { projectRun, type Evidence, type RunProjection } from '../watch/events'
+import { projectRun, type Evidence, type RunEvent, type RunProjection } from '../watch/events'
 import { checkAnswer, type CheckParty } from './answerCheck'
 
 const record = (overrides: Partial<RunRecord> = {}): RunRecord => ({
@@ -61,6 +61,51 @@ describe('what an answer’s record holds to check', () => {
     const { verdict } = check({ projection: stuck })
     expect(verdict.tone).toBe('bad')
     expect(verdict.label).toBe('Partial answer')
+  })
+
+  // Run 03f7b0dd: LoomWatch's own check ran on a ChatGPT plan at its usage limit, and the answer's
+  // finding read "loomwatch:check stopped". It is not on the team, so it was named by its id.
+  it('names LoomWatch’s own check, and says the answer wasn’t checked and why', () => {
+    const limit = 'LoomWatch has reached a usage limit on your ChatGPT plan: the plan\'s own limit, or the share you allowed LoomWatch. See it under Manage usage in ChatGPT\'s settings.'
+    const at = (seq: number) => new Date(Date.UTC(2026, 10, 2, 16, 51, seq)).toISOString()
+    const on = (agentId: string, seq: number, kind: RunEvent['kind'], payload: RunEvent['payload'], raw?: unknown): RunEvent =>
+      ({ id: `${agentId}-${seq}`, sessionId: 'run-1', agentId, seq, ts: at(seq), kind, payload, ...(raw ? { raw } : {}) })
+    const events = [
+      ...['researcher', 'writer'].flatMap((id, index) => [
+        on(id, index * 4, 'process', { phase: 'spawned', pid: index }),
+        on(id, index * 4 + 1, 'message', { role: 'agent', content: { type: 'text', text: '# Digest' } }),
+        on(id, index * 4 + 2, 'turn_end', { stopReason: 'end_turn' }),
+        on(id, index * 4 + 3, 'process', { phase: 'exited', exitCode: 0 }),
+      ]),
+      on('loomwatch:check', 8, 'process', { phase: 'spawned', pid: 9 }),
+      on('loomwatch:check', 9, 'session_meta', { phase: 'turn_failed', reason: 'app_error', message: limit, problem: { kind: 'plan_limit', source: 'chatgpt', url: 'https://chatgpt.com/settings/usage' } }, { source: 'loomwatch', phase: 'turn_failed' }),
+    ]
+    // The run as the daemon ended it: a check that couldn't run leaves the answer whole, not partial.
+    const projection = projectRun(events, Infinity, { status: 'succeeded', evidenceComplete: true })
+    expect(projection.phase).toBe('succeeded')
+    const { verdict } = check({ record: record({ mode: 'team' }), projection })
+    expect(verdict.label).toBe('1 thing to check')
+    expect(verdict.findings.map((line) => line.text)).toEqual([`The answer wasn’t checked. ${limit}`])
+    // Its sentence already ends: the badge's hover doesn't add a second full stop.
+    expect(verdict.detail).toContain(`The answer wasn’t checked. ${limit}`)
+    expect(verdict.detail).not.toContain('..')
+  })
+
+  // ADR 0079: a helper is on no team file either, and is named after the agent it helps.
+  it('names a helper that stopped after the agent it helps', () => {
+    const at = (seq: number) => new Date(Date.UTC(2026, 10, 2, 16, 51, seq)).toISOString()
+    const on = (agentId: string, seq: number, kind: RunEvent['kind'], payload: RunEvent['payload']): RunEvent =>
+      ({ id: `${agentId}-${seq}`, sessionId: 'run-1', agentId, seq, ts: at(seq), kind, payload })
+    const events = [
+      on('writer', 0, 'process', { phase: 'spawned', pid: 1 }),
+      on('writer~2', 1, 'process', { phase: 'spawned', pid: 2 }),
+      on('writer~2', 2, 'process', { phase: 'exited', exitCode: 1 }),
+      on('writer', 3, 'message', { role: 'agent', content: { type: 'text', text: '# Digest' } }),
+      on('writer', 4, 'turn_end', { stopReason: 'end_turn' }),
+      on('writer', 5, 'process', { phase: 'exited', exitCode: 0 }),
+    ]
+    const { verdict } = check({ record: record({ mode: 'team', onlyAgent: undefined }), projection: projectRun(events, Infinity, { status: 'succeeded', evidenceComplete: true }), parties: [parties[1]] })
+    expect(verdict.findings.map((line) => line.text)).toContain('Writer’s helper 2 stopped (exit code 1)')
   })
 
   it('waits for the whole record before saying anything, and says so while the answer is written', () => {

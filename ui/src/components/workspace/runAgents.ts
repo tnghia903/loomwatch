@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 
+import { nameWithHelpers } from '../../lib/chat/helpers'
 import type { CapabilityEdgeConfig, CapabilityNodeConfig } from '../../lib/composer-layout/types'
 import type { AgentNode } from '../../lib/library/nodeFromDrop'
 import type { WaitingOn } from '../../lib/runs/client'
@@ -49,13 +50,16 @@ export interface RunAgentsInput {
 export function runAgentNodes(input: RunAgentsInput & { helperPlacements: Readonly<Record<string, Point>>; historicalPositions: Readonly<Record<string, Point>> | null }): AgentNode[] {
   const { doc, session, projection, record, phase, orderedAgentIds, evidenceByAgent, leadId, waiting, packetAgentIds, helperPlacements, historicalPositions } = input
   const docNodeById = new Map(doc.nodes.map((node) => [node.id, node]))
+  // Who the team file doesn't list is named as the chat names it: LoomWatch's own check as
+  // LoomWatch, a helper after its agent ("Ada’s helper 2"), one of your agents as in My agents.
+  const names = new Map([...input.guestNames ?? [], ...doc.nodes.map((node) => [node.id, node.data.agent.name] as const)])
   const projectedById = new Map(projection.agents.map((agent) => [agent.id, agent]))
   const pipeline = (record?.mode ?? doc.mode) === 'pipeline'
   return orderedAgentIds.flatMap((id): AgentNode[] => {
     const docNode = docNodeById.get(id)
     const position = historicalPositions?.[id] ?? docNode?.position ?? helperPlacements[id]
     if (!position) return []
-    const agent = docNode?.data.agent ?? syntheticAgent(id, input.guestNames?.get(id))
+    const agent = docNode?.data.agent ?? syntheticAgent(id, nameWithHelpers(names, id) ?? id)
     const base: AgentNode = docNode ?? { id, type: 'agent', position, selected: false, data: { label: agent.name, agent } }
     const projected = projectedById.get(id)
     const eventCount = evidenceByAgent.get(id)?.length ?? 0

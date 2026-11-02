@@ -127,7 +127,8 @@ function verdictOf(input: VerdictInput, changed: number): AnswerVerdict {
   const findings = [...noteFindings(input.notes), ...checkFindings(input.checks), ...findingsOf(input.receipt)]
     .sort((a, b) => Number(b.tone === 'bad') - Number(a.tone === 'bad'))
   const allMet = Boolean(input.checks?.length) && input.checks!.every((round) => round.items.every((item) => item.verdict === 'met'))
-  const first = findings[0] ? `${lineWords(findings[0])}.` : ''
+  // A finding in LoomWatch's own words for a stop already ends its sentence.
+  const first = findings[0] ? lineWords(findings[0]).replace(/([^.!?])$/, '$1.') : ''
   // What the check fixed, then where the edits are: neither is in the answer any more.
   const after = [checkProgressSentence(input.checks), changed ? `The review lists ${plural(changed, 'change')} made to the draft.` : ''].filter(Boolean).join(' ')
   const withAfter = (detail: string) => (after ? `${detail} ${after}` : detail)

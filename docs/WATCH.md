@@ -712,8 +712,10 @@ paying by itself. A key refused later, credit run out or a plan's limit fails th
 reason in plain words, such as "Your Claude API credit is used up." Its `turn_failed` note carries
 `problem: { kind, source, url? }`, with `kind` one of `not_connected`, `key_refused`,
 `out_of_credits`, `rate_limited`, `plan_limit`, `plan_not_eligible`, `plan_use_off` and
-`sign_in_again`, so the app can offer the fix, such as **Manage usage**. A team whose agents all
-run on `fake/offline` needs nothing connected.
+`sign_in_again`, so the app can offer the fix, such as **Manage usage**. The run's receipt says
+that reason on the agent's line; when the turn that failed was LoomWatch's own check of the answer,
+the line says the answer wasn't checked, and why. A team whose agents all run on `fake/offline`
+needs nothing connected.
 
 A team file written for an earlier LoomWatch may carry a `spawn` block naming an AI app to start.
 Only its `cwd`, the agent's folder, is read; `cmd`, `args` and `env` are accepted and ignored, and
