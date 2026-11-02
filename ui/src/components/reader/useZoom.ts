@@ -37,7 +37,7 @@ export interface Zoom {
  * is shown whole at stops there, so − undoes +. The point under the pointer, or the middle of the
  * pane for a button, stays where it is as it grows or shrinks. Each file opens whole.
  */
-export function useZoom(scroller: RefObject<HTMLDivElement | null>, path: string, on: boolean): Zoom {
+export function useZoom(paneRef: RefObject<HTMLDivElement | null>, path: string, on: boolean): Zoom {
   const [zoom, setZoom] = useState<{ path: string; scale: number } | null>(null)
   const [size, setSize] = useState<{ path: string; natural: number; whole: number } | null>(null)
   const scale = on && zoom?.path === path ? zoom.scale : null
@@ -45,14 +45,16 @@ export function useZoom(scroller: RefObject<HTMLDivElement | null>, path: string
   const shown = scale ?? fitted?.whole ?? null
   // What the listeners read: they are added once for each file.
   const now = useRef(shown)
-  now.current = shown
   const wholeAt = useRef(fitted?.whole ?? null)
-  wholeAt.current = fitted?.whole ?? null
+  useLayoutEffect(() => {
+    now.current = shown
+    wholeAt.current = fitted?.whole ?? null
+  })
   /** The point to keep still through the next change, as a share of the media and on screen. */
   const anchor = useRef<{ fx: number; fy: number; x: number; y: number } | null>(null)
 
   const change = useCallback((to: number | null, at?: Point) => {
-    const pane = scroller.current
+    const pane = paneRef.current
     const media = pane?.querySelector(MEDIA)
     if (pane && media) {
       const box = media.getBoundingClientRect()
@@ -62,7 +64,7 @@ export function useZoom(scroller: RefObject<HTMLDivElement | null>, path: string
       anchor.current = { fx: box.width ? (x - box.left) / box.width : 0.5, fy: box.height ? (y - box.top) / box.height : 0.5, x, y }
     }
     setZoom(to === null ? null : { path, scale: to })
-  }, [scroller, path])
+  }, [paneRef, path])
 
   const step = useCallback((way: 1 | -1, at?: Point) => {
     const from = now.current
@@ -77,7 +79,7 @@ export function useZoom(scroller: RefObject<HTMLDivElement | null>, path: string
   // Its size whole in the pane, measured as it loads and whenever it or the pane changes size (a
   // very long picture widens once it is known to be one).
   useEffect(() => {
-    const pane = scroller.current
+    const pane = paneRef.current
     if (!on || !pane) return
     const sized = typeof ResizeObserver === 'function' ? new ResizeObserver(() => measure()) : null
     const measure = () => {
@@ -98,12 +100,12 @@ export function useZoom(scroller: RefObject<HTMLDivElement | null>, path: string
       pane.removeEventListener('loadedmetadata', measure, true)
       sized?.disconnect()
     }
-  }, [scroller, path, on, scale])
+  }, [paneRef, path, on, scale])
 
   // A pinch: a wheel with Ctrl in Chromium, a gesture in Safari. A mouse's wheel with Ctrl or ⌘
   // held steps, a notch at a time.
   useEffect(() => {
-    const pane = scroller.current
+    const pane = paneRef.current
     if (!on || !pane) return
     const wheel = (event: WheelEvent) => {
       if (!(event.ctrlKey || event.metaKey) || now.current === null) return
@@ -127,11 +129,11 @@ export function useZoom(scroller: RefObject<HTMLDivElement | null>, path: string
       pane.removeEventListener('gesturestart', start)
       pane.removeEventListener('gesturechange', pinch)
     }
-  }, [scroller, on, change, step])
+  }, [paneRef, on, change, step])
 
   // The kept point back under where it was.
   useLayoutEffect(() => {
-    const pane = scroller.current
+    const pane = paneRef.current
     const kept = anchor.current
     anchor.current = null
     const media = pane?.querySelector(MEDIA)
@@ -139,7 +141,7 @@ export function useZoom(scroller: RefObject<HTMLDivElement | null>, path: string
     const box = media.getBoundingClientRect()
     pane.scrollLeft += box.left + kept.fx * box.width - kept.x
     pane.scrollTop += box.top + kept.fy * box.height - kept.y
-  }, [scroller, scale])
+  }, [paneRef, scale])
 
   const zoomIn = useCallback(() => step(1), [step])
   const zoomOut = useCallback(() => step(-1), [step])
