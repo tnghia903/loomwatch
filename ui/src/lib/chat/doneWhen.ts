@@ -4,6 +4,7 @@
 
 import { makerOf } from '../ai/makers'
 import { modelNameFromId } from '../ai/modelIds'
+import type { CheckRound } from '../story/checks'
 
 export interface DoneWhen {
   /** `found`: what was read; `failed`: the read failed, so the work isn't checked against it. */
@@ -42,6 +43,20 @@ export function readDoneWhen(payload: Record<string, unknown>): DoneWhen | null 
     checker: checker && typeof checker.model === 'string' ? { model: checker.model, sameMaker: checker.sameMaker === true } : null,
     ended: payload.ended === true,
   }
+}
+
+/** The evidence the daemon gives an item a readable reply left out (`lib.rs` `NOT_CHECKED`). */
+const LEFT_OUT = 'Not checked'
+
+/**
+ * Whether the work was judged against `done`'s items: a check, LoomWatch's own or a check step's,
+ * gave a verdict on one of them in a reply it could read. A check can end without one: LoomWatch's
+ * couldn't start (run 03f7b0dd, a ChatGPT plan at its limit), or the run stopped before it.
+ */
+export function judgedAgainst(done: DoneWhen, checks: readonly CheckRound[] = []): boolean {
+  const items = new Set(done.items.filter((item) => item.checked).map((item) => item.text))
+  return checks.some((round) => round.readable !== false && [...(round.first ?? []), ...round.items]
+    .some((result) => items.has(result.item) && !result.evidence.startsWith(LEFT_OUT)))
 }
 
 /**

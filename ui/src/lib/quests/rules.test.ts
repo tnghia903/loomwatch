@@ -170,6 +170,15 @@ describe('quests', () => {
     expect(items(checked([round(1, 'met')]))).toEqual([])
   })
 
+  // A trial of LoomWatch's own check (ADR 0098) earned it, and the receipt said "loomwatch:check
+  // sent Writer’s work back once".
+  it('monocle: names LoomWatch’s own check as the chat names it', () => {
+    const agents = [agent('writer')]
+    const round = { checker: 'loomwatch:check', checked: 'writer', round: 2, items: [{ verdict: 'met' as const, item: 'At most 40 words', evidence: '' }] }
+    const earned = questsEarned(facts({ agents, projection: { agents: [ran('writer'), ran('loomwatch:check')], evidence: [], messages: [], checks: [round] } }))
+    expect(earned.find((award) => award.item === 'monocle')?.line).toBe('LoomWatch sent Writer’s work back once, and the second pass met all 1 item it checks.')
+  })
+
   it('patch: a habit of the last runs that this run did not repeat', () => {
     const scout = agent('scout')
     const asked = (id: string) => lesson(id, ['scout'], { messages: [{ kind: 'permission', from: 'scout', to: 'operator', text: 'x', carried: false, permission: { requestId: 'r', switch: 'web', detail: null, outcome: 'allow_once', settled: null } }] })

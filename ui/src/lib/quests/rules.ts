@@ -9,6 +9,7 @@ import type { LessonRun } from '../team-file/runLessons'
 import type { AgentConfig, AllowSwitch } from '../team-file/types'
 import type { RunProjection } from '../watch/events'
 import { OPERATOR_ID } from '../watch/messages'
+import { nameWithHelpers } from '../chat/helpers'
 import { chosenIsFile } from '../knowledge/chosen'
 import { isWindowsPath } from '../files/paths'
 import { AREAS, QUESTS, type QuestItem } from './catalog'
@@ -39,8 +40,9 @@ export interface QuestFacts {
 const SWITCH_WORDS: Record<AllowSwitch, string> = { web: 'search the web', edits: 'change files', commands: 'run commands' }
 const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`
 
+/** As the chat names `id`: LoomWatch's own check as LoomWatch, a helper after the agent it helps. */
 function nameOf(agents: readonly AgentConfig[], id: string): string {
-  return agents.find((agent) => agent.id === id)?.name ?? id
+  return nameWithHelpers(new Map(agents.map((agent) => [agent.id, agent.name])), id) ?? id
 }
 
 const clean = (path: string) => path.replaceAll('\\', '/').replace(/\/+$/, '')

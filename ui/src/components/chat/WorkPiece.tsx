@@ -6,6 +6,7 @@ import { agentResolver, batonWords, passesOf, useBaton, type Baton } from '../..
 import { useFollow } from '../../lib/chat/follow'
 import { handedBackText, type ChatItem, type ChatMessage, type HandedBack, type ReplyTo } from '../../lib/chat/client'
 import { describeDocument, documentSize, isDocument } from '../../lib/chat/document'
+import { judgedAgainst } from '../../lib/chat/doneWhen'
 import { LOOMWATCH_CHECK_ID, helperOf, helpersOf, nameWithHelpers, wearerOf, whoWorks } from '../../lib/chat/helpers'
 import { handedBy, type HandOver } from '../../lib/chat/handed'
 import { clockTime, dayKey, dayLabel, listNames, took } from '../../lib/chat/format'
@@ -440,7 +441,7 @@ export function WorkPiece({ item, newest = false, approveFilled = true, fixFille
         : reactOn(targets.request, run.trigger === 'schedule' ? "the schedule's request" : 'your request', onRequest, { mine: run.trigger !== 'schedule', own: true })} />
       {/* What the message said done looks like, which the work is checked against (ADR 0098). */}
       {session.projection.doneWhen && !continued && (
-        <MessageDoneWhen runId={run.runId} doneWhen={session.projection.doneWhen} live={live} to={run.onlyAgent ? name(run.onlyAgent) : team.solo ? name(team.solo) : 'the team'} />
+        <MessageDoneWhen runId={run.runId} doneWhen={session.projection.doneWhen} judged={judgedAgainst(session.projection.doneWhen, session.projection.checks)} live={live} to={run.onlyAgent ? name(run.onlyAgent) : team.solo ? name(team.solo) : 'the team'} />
       )}
       {notes.map((note) => <Note key={note.id} note={note} flash={saidFlash?.id === `note:${note.id}`} live={live} name={name} onShowReplied={onShowReplied} reactions={reactOn(targets.note(note.id), note.handedBack ? `${note.handedBack.teamName}'s answer` : `your note to ${name(note.agentId ?? '')}`, note.deliveredAt && note.agentId ? [{ face: 'seen', by: note.agentId, at: note.deliveredAt }] : [], note.handedBack ? { shown: true } : { mine: true })} />)}
       {tries && !tryingAgain(ended) && <div className="chat-notice tc-tries"><span>{tries}</span></div>}

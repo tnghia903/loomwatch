@@ -20,11 +20,11 @@ import type { TeamView } from './WorkPiece'
 
 // The pieces read their own record and events only while live or shown; a still session here,
 // saying what the agents said when a test gives it messages.
-const said = vi.hoisted(() => ({ messages: [] as TeamMessage[], read: false, agents: [] as unknown[], events: [] as unknown[], evidence: [] as unknown[], record: null as RunRecord | null, doneWhen: null as unknown }))
+const said = vi.hoisted(() => ({ messages: [] as TeamMessage[], read: false, agents: [] as unknown[], events: [] as unknown[], evidence: [] as unknown[], record: null as RunRecord | null, doneWhen: null as unknown, checks: [] as unknown[] }))
 vi.mock('../../lib/runs/useRunSession', () => ({
   useRunSession: (runId: string | null) => ({
     record: said.record && said.record.runId === runId ? said.record : null, applyRecord: vi.fn(), missing: false, events: runId && said.events.length > 0 ? said.events : runId && (said.read || said.messages.length > 0) ? [{ id: 'e0' }] : [], error: null, connected: false,
-    projection: { agents: runId ? said.agents : [], evidence: runId ? said.evidence : [], messages: runId ? said.messages : [], delegations: [], attention: [], coverage: {}, prompt: null, promptAgentId: null, phase: said.read ? 'succeeded' : 'queued', doneWhen: runId ? said.doneWhen : null },
+    projection: { agents: runId ? said.agents : [], evidence: runId ? said.evidence : [], messages: runId ? said.messages : [], delegations: [], attention: [], coverage: {}, prompt: null, promptAgentId: null, phase: said.read ? 'succeeded' : 'queued', doneWhen: runId ? said.doneWhen : null, checks: runId ? said.checks : [] },
     latest: null, cursor: null, setCursor: vi.fn(), lastSeq: -1, mode: 'replay', terminal: true, evidenceComplete: true,
   }),
 }))
@@ -70,6 +70,7 @@ beforeEach(() => {
   said.read = false
   said.record = null
   said.doneWhen = null
+  said.checks = []
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     if (url.startsWith('/api/chat?')) return new Response(JSON.stringify({ teamKey: 'news', teamPath: 'news.yaml', items: [...page].reverse(), more: false }), { status: 200 })
@@ -1552,6 +1553,7 @@ describe('a piece of work', () => {
   it('takes the marks away once the check has ended, and says when a read failed', async () => {
     // Still running, so it is the check's end, not the run's, that takes the marks away.
     said.doneWhen = { state: 'found', items: [{ text: 'At most 250 words', checked: true }, { text: 'Three sections', checked: false }], tries: null, rounds: null, checker: null, ended: true }
+    said.checks = [{ checker: 'loomwatch:check', checked: 'writer', round: 1, items: [{ verdict: 'met', item: 'At most 250 words', evidence: '212 words' }] }]
     page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null }), request: message({}), notes: [] }]
     renderChat()
     const block = await screen.findByRole('group', { name: 'Done when' })
@@ -1565,6 +1567,23 @@ describe('a piece of work', () => {
     renderChat()
     expect(await screen.findByText('LoomWatch couldn’t read this message, so the work isn’t checked against it.')).toBeInTheDocument()
     expect(screen.queryByRole('group', { name: 'Done when' })).not.toBeInTheDocument()
+  })
+
+  // Run 03f7b0dd: LoomWatch's own check couldn't start, as a ChatGPT plan had reached its limit.
+  // The check ended without a verdict, and the chat said the work was checked.
+  it('says the work wasn’t checked when the check ended without judging it', async () => {
+    said.doneWhen = { state: 'found', items: [{ text: 'At most 40 words', checked: true }], tries: null, rounds: 2, checker: null, ended: true }
+    page = [{ kind: 'work', run: run({}), request: message({}), notes: [] }]
+    renderChat()
+    const block = await screen.findByRole('group', { name: 'Done when' })
+    expect(block).toHaveTextContent('The work wasn’t checked against these.')
+    expect(block).not.toHaveTextContent('was checked')
+    // Nor does its hover say who checked it: the check started, and gave no verdict on them.
+    cleanup()
+    said.doneWhen = { state: 'found', items: [{ text: 'At most 40 words', checked: true }], tries: null, rounds: 2, checker: { model: 'chatgpt:gpt-6.1-sol', sameMaker: false }, ended: true }
+    renderChat()
+    const started = await screen.findByRole('group', { name: 'Done when' })
+    expect(within(started).getByText('Done when').getAttribute('title')).not.toContain('Checked on')
   })
 
   // ADR 0098: a send-back from a check's stop may carry no note; your answer then has no bubble.

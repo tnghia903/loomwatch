@@ -76,9 +76,12 @@ the check can still change, each item has one mark that takes it off the check f
 on; a dropped item stays, struck through, and the same mark puts it back. An item taken off is
 neither sent back nor counted in the answer's badge, even when it is taken off while the run waits
 at a stop. **Done when**'s tooltip says your message went as you wrote it and which model checks
-it, by whom. A read that failed says so in one quiet line; a message with nothing to check shows
-nothing. At a check's stop, **Send back** works with no note: the checks still open say what is
-wrong. `ui/src/lib/chat/doneWhen.ts` reads the run's `done_when` records.
+it, by whom. Once the check has ended, the line under the items says the work was checked against
+them only when a check judged one of them; when none did, as when LoomWatch's own check couldn't
+start at a plan's limit or you stopped the work first, it says the work wasn't checked against
+them. A read that failed says so in one quiet line; a message with nothing to check shows nothing.
+At a check's stop, **Send back** works with no note: the checks still open say what is wrong.
+`ui/src/lib/chat/doneWhen.ts` reads the run's `done_when` records.
 
 Who said what to whom is read from the record, not from the team file as it is now:
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { projectRun, type RunEvent } from '../watch/events'
-import { checkerWords, readDoneWhen, triesShown } from './doneWhen'
+import { checkerWords, judgedAgainst, readDoneWhen, triesShown } from './doneWhen'
 import { LOOMWATCH_CHECK_ID, nameWithHelpers } from './helpers'
 
 const record = (seq: number, payload: Record<string, unknown>): RunEvent => ({
@@ -67,6 +67,37 @@ describe('a run’s checks, with what the person took off', () => {
   it('reads a Done when only from LoomWatch’s own record', () => {
     const forged = { ...record(0, { state: 'found', items: [{ text: 'At most 1 word', checked: true }], ended: false }), raw: { phase: 'done_when' } }
     expect(projectRun([forged]).doneWhen).toBeNull()
+  })
+})
+
+// Run 03f7b0dd: LoomWatch's own check couldn't start (a ChatGPT plan at its limit), the check
+// ended all the same, and the chat said "The work was checked against these."
+describe('whether the work was judged against a message’s Done when', () => {
+  const ended = record(9, { state: 'found', items: [{ text: 'At most 40 words', checked: true }], ended: true })
+  const result = (seq: number, items: { verdict: string; item: string; evidence?: string }[], readable = true): RunEvent =>
+    ({ ...record(seq, {}), payload: { phase: 'check_result', checked: 'writer', round: 1, readable, items: items.map((item) => ({ evidence: 'counted', ...item })) }, raw: { source: 'loomwatch', phase: 'check_result' } })
+  const judged = (events: RunEvent[]) => {
+    const projection = projectRun(events)
+    return judgedAgainst(projection.doneWhen!, projection.checks)
+  }
+
+  it('is not, when the check ended without a verdict', () => {
+    const failed: RunEvent = { ...record(1, {}), payload: { phase: 'turn_failed', reason: 'app_error', message: 'LoomWatch has reached a usage limit on your ChatGPT plan.', problem: { kind: 'plan_limit', source: 'chatgpt' } }, raw: { source: 'loomwatch', phase: 'turn_failed' } }
+    expect(judged([failed, ended])).toBe(false)
+  })
+
+  it('is, once a check gave a verdict on one of its items, met or not', () => {
+    expect(judged([result(1, [{ verdict: 'not_met', item: 'At most 40 words' }]), ended])).toBe(true)
+  })
+
+  it('is not, by a reply it couldn’t read, or by a check of other items', () => {
+    expect(judged([result(1, [{ verdict: 'not_sure', item: 'At most 40 words' }], false), ended])).toBe(false)
+    expect(judged([result(1, [{ verdict: 'met', item: 'Cites its sources' }]), ended])).toBe(false)
+  })
+
+  // The daemon marks an item a readable reply left out Not sure, with "Not checked" as its evidence.
+  it('is not, when the check’s reply left its items out', () => {
+    expect(judged([result(1, [{ verdict: 'not_sure', item: 'At most 40 words', evidence: 'Not checked' }, { verdict: 'met', item: 'Does what the request asked' }]), ended])).toBe(false)
   })
 })
 
