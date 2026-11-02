@@ -42,7 +42,6 @@ use super::sse::SseDecoder;
 use crate::ai::anthropic::API_VERSION;
 use crate::ai::{ClaudeModel, ModelRef, Source};
 
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 /// Silence allowed between two pieces of a stream. Anthropic sends `ping` events while a model
 /// thinks, so this much silence means the connection is gone.
 const STREAM_IDLE: Duration = Duration::from_mins(3);
@@ -193,12 +192,7 @@ impl Anthropic {
             "an {} address must be https",
             route.name()
         );
-        let client = Client::builder()
-            .user_agent(concat!("LoomWatch/", env!("CARGO_PKG_VERSION")))
-            .connect_timeout(CONNECT_TIMEOUT)
-            .redirect(reqwest::redirect::Policy::none())
-            .https_only(!local)
-            .build()?;
+        let client = super::model_client(local)?;
         Ok(Self {
             client,
             route,

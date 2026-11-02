@@ -11,6 +11,7 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
+use axum::serve::ListenerExt as _;
 use base64::Engine as _;
 use serde_json::{Value, json};
 
@@ -834,6 +835,8 @@ struct Stand {
     auth: Arc<Mutex<Vec<String>>>,
     /// Where each request was posted.
     paths: Arc<Mutex<Vec<String>>>,
+    /// Connections opened to it.
+    connections: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 async fn chat(State(stand): State<Stand>, uri: Uri, headers: HeaderMap, body: String) -> Response {
@@ -883,6 +886,10 @@ async fn stand(replies: Vec<Reply>) -> (Stand, String) {
         .with_state(stand.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
+    let connections = stand.connections.clone();
+    let listener = listener.tap_io(move |_| {
+        connections.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    });
     tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
@@ -5372,4 +5379,162 @@ async fn read_page_asks_only_for_an_address_the_person_did_not_write() {
         "{answered:?}"
     );
     assert!(!session.snapshot().web);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Connections
+// ---------------------------------------------------------------------------------------------
+
+/// Every provider sends through the daemon's one client: a session's first call goes out on the
+/// connection an earlier session left open, instead of waiting for a new one to open. Two sessions
+/// on a Claude key, one on a `ChatGPT` plan and one on `OpenRouter`, one after another, open one
+/// connection between them, and each still gets its own answer with its own key.
+#[tokio::test]
+async fn sessions_one_after_another_reuse_one_open_connection() {
+    let folder = Folder::new();
+    let on_claude = || {
+        let [start, delta, stop] = text_block(0, "From Claude.");
+        let [delta_usage, message_stop] = ended("end_turn", 3);
+        events(&[
+            message_start(10, 0),
+            start,
+            delta,
+            stop,
+            delta_usage,
+            message_stop,
+        ])
+    };
+    let answer = json!({"type": "message", "id": "msg_1", "role": "assistant", "status": "completed",
+                        "content": [{"type": "output_text", "text": "From the plan.", "annotations": []}]});
+    let on_plan = events(&[item_done(&answer), completed(10, 0, 3)]);
+    let on_openrouter = ok(&[
+        json!({"choices": [{"index": 0, "delta": {"content": "From OpenRouter."}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 10, "completion_tokens": 3, "cost": 0.001}}),
+    ]);
+    let (stand, base) = stand(vec![on_claude(), on_claude(), on_plan, on_openrouter]).await;
+    let sessions = [
+        (claude(&base), "anthropic:claude-opus-5-5", "From Claude."),
+        (claude(&base), "anthropic:claude-opus-5-5", "From Claude."),
+        (
+            plan(&base, Arc::new(FixedToken::default())),
+            "chatgpt:gpt-6.1-sol",
+            "From the plan.",
+        ),
+        (openrouter(&base), CHAT_CLAUDE, "From OpenRouter."),
+    ];
+    for (provider, model, said) in sessions {
+        let mut session = session_on(
+            &folder,
+            provider,
+            Arc::new(Recorded::default()),
+            Arc::new(AllowAll),
+            model,
+        );
+        let end = tokio::time::timeout(Duration::from_secs(10), session.prompt("Say who you are."))
+            .await
+            .expect("the call answers")
+            .unwrap();
+        assert_eq!(end.reply, said);
+    }
+    assert_eq!(
+        *stand.auth.lock().unwrap(),
+        [
+            CLAUDE_KEY,
+            CLAUDE_KEY,
+            "Bearer at_plan",
+            &format!("Bearer {KEY}")
+        ]
+    );
+    assert_eq!(
+        stand.connections.load(std::sync::atomic::Ordering::Relaxed),
+        1,
+        "each session opened a connection of its own"
+    );
+}
+
+/// Every call on a `ChatGPT` plan starts with the whole request before it, so `OpenAI` can read the
+/// conversation it has already seen from its cache: from one tool call to the next, in the next
+/// turn, and after the agent was parked and reopened.
+#[tokio::test]
+async fn each_plan_request_starts_with_the_whole_request_before_it() {
+    let folder = Folder::new();
+    std::fs::write(folder.0.join("notes.md"), "hello").unwrap();
+    let reasoning = json!({"type": "reasoning", "id": "rs_1", "encrypted_content": "enc-1",
+                           "summary": [{"type": "summary_text", "text": "Look first."}]});
+    let call = json!({"type": "function_call", "id": "fc_1", "call_id": "call_1", "name": "read_file",
+                      "namespace": "loomwatch", "arguments": "{\"path\":\"notes.md\"}", "status": "completed"});
+    let answer = |id: &str, text: &str| {
+        json!({"type": "message", "id": id, "role": "assistant", "status": "completed",
+               "content": [{"type": "output_text", "text": text, "annotations": []}]})
+    };
+    let (stand, base) = stand(vec![
+        events(&[
+            item_done(&reasoning),
+            item_done(&call),
+            completed(100, 0, 10),
+        ]),
+        events(&[
+            item_done(&answer("msg_1", "It says hello.")),
+            completed(120, 0, 5),
+        ]),
+        events(&[item_done(&answer("msg_2", "Hello.")), completed(140, 0, 5)]),
+        events(&[
+            item_done(&answer("msg_3", "You're welcome.")),
+            completed(160, 0, 5),
+        ]),
+    ])
+    .await;
+    let access = Arc::new(FixedToken::default());
+    let model = "chatgpt:gpt-6.1-sol";
+    let mut session = session_on(
+        &folder,
+        plan(&base, access.clone()),
+        Arc::new(Recorded::default()),
+        Arc::new(AllowAll),
+        model,
+    );
+    session.prompt("What does notes.md say?").await.unwrap();
+    session.prompt("Shorter, please.").await.unwrap();
+    // Parked as the engine parks an agent: through the store's JSON.
+    let parked: Snapshot =
+        serde_json::from_str(&serde_json::to_string(&session.snapshot()).unwrap()).unwrap();
+    let mut reopened = Session::resume(
+        parked,
+        SessionConfig::new("session-1", "writer", folder.0.clone(), model),
+        plan(&base, access),
+        Arc::new(Recorded::default()),
+        Arc::new(AllowAll),
+        Arc::new(NoHostTools),
+    );
+    reopened.prompt("Thanks.").await.unwrap();
+
+    let bodies = stand.bodies.lock().unwrap().clone();
+    assert_eq!(bodies.len(), 4);
+    for (call, pair) in bodies.windows(2).enumerate() {
+        let (before, after) = (&pair[0], &pair[1]);
+        for field in [
+            "model",
+            "instructions",
+            "tools",
+            "tool_choice",
+            "reasoning",
+            "include",
+            "prompt_cache_key",
+        ] {
+            assert_eq!(
+                before[field],
+                after[field],
+                "call {} changed `{field}`",
+                call + 2
+            );
+        }
+        let sent = before["input"].as_array().unwrap();
+        let next = after["input"].as_array().unwrap();
+        assert!(next.len() > sent.len(), "call {} sent less", call + 2);
+        assert_eq!(
+            next[..sent.len()],
+            sent[..],
+            "call {} doesn't start with the request before it",
+            call + 2
+        );
+    }
 }

@@ -255,7 +255,9 @@ pub(crate) async fn provider_for(model: &ModelRef) -> Result<Provider, AppReport
 }
 
 /// A connection to Anthropic with the person's Claude key, the models its check listed and their
-/// list prices. Made for each session: it is cheap, and a key changed between runs is picked up.
+/// list prices. Made for each session, so a key changed between runs is picked up; the network
+/// connections under it are the daemon's own and stay open between sessions
+/// ([`crate::agent::model_client`]).
 async fn claude_provider() -> Result<Provider, AppReportedError> {
     let missing = || not_connected(Source::Anthropic);
     let ai = crate::ai::installed().ok_or_else(missing)?;
@@ -298,7 +300,8 @@ async fn claude_provider() -> Result<Provider, AppReportedError> {
     Ok(Provider::Anthropic(Arc::new(provider)))
 }
 
-/// A connection to the person's `ChatGPT` plan, whose access token the sign-in renews.
+/// A connection to the person's `ChatGPT` plan, whose access token the sign-in renews. Made for
+/// each session too, over the same kept network connections.
 fn plan_provider() -> Result<Provider, AppReportedError> {
     let missing = || not_connected(Source::ChatGpt);
     let ai = crate::ai::installed().ok_or_else(missing)?;
