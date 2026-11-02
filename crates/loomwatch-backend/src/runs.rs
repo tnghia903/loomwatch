@@ -4952,6 +4952,31 @@ pub(crate) mod tests {
         })
     }
 
+    /// [`wait_for`] in the `runs` table, what the boot after reads: a run writes a change there
+    /// after its registry shows it.
+    async fn wait_stored(
+        store: &RunStore,
+        run_id: &str,
+        done: impl Fn(&RunRecord) -> bool,
+    ) -> RunRecord {
+        tokio::time::timeout(Duration::from_secs(15), async {
+            loop {
+                let stored = store.recent().await.expect("read the runs table");
+                if let Some(record) = stored
+                    .into_iter()
+                    .map(|run| run.record)
+                    .find(|record| record.run_id == run_id)
+                    && done(&record)
+                {
+                    return record;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("the run's record was never stored in the awaited state"))
+    }
+
     fn permission_request(id: &str, kind: &str) -> crate::permissions::PermissionRequest {
         crate::permissions::PermissionRequest {
             id: id.to_owned(),
@@ -7882,6 +7907,9 @@ pub(crate) mod tests {
         )
         .await;
         assert_eq!(listed[0]["made"], json!(made));
+        // The run writes its end after the registry shows it: boot from that write.
+        let stored = wait_stored(&archive.run_store(), &run.run_id, |r| r.made.is_some()).await;
+        assert_eq!(stored.status, RunStatus::Succeeded, "{stored:?}");
         let next = RunRegistry::durable(archive.run_store());
         next.reload().await.expect("reload");
         assert_eq!(next.get(&run.run_id).and_then(|r| r.made), Some(made));
