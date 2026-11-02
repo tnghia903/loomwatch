@@ -23,7 +23,8 @@ pub struct TeamChange {
     pub name: Option<String>,
     /// The most one run may spend, in US dollars.
     pub per_run: Option<f64>,
-    /// Commands that only read or download run without asking (`permissions.mode: auto`).
+    /// The team's mode (ADR 0061, ADR 0109): Auto (`permissions.mode: auto`), or Ask me. Saved
+    /// through `PUT /api/team`, so it reaches the team's work going on now.
     pub auto_mode: Option<bool>,
     /// Whether the routine runs at its times.
     pub schedule_enabled: Option<bool>,

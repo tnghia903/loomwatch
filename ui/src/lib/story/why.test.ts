@@ -110,6 +110,10 @@ describe('whyItFailed, for the other reasons a call fails', () => {
   })
 
   it('names LoomWatch’s own limits as the reason, over what the program made of them', () => {
+    // ADR 0109: a command Auto mode ran on its own is said to have met Auto mode's limit, not the Wi-Fi.
+    const auto = '\n(Auto mode ran this on its own, in a sandbox that keeps it off the network, out of other apps and away from keys. If it needs any of those, run exactly the same command again: that asks the person.)'
+    expect(whyItFailed(`curl: (7) Failed to connect to example.com port 443${auto}`, 'command').text).toBe('Auto mode runs commands without the web.')
+    expect(whyItFailed(`cp: /etc/hosts: Operation not permitted${auto}`, 'command').text).toBe('Auto mode lets commands change files only in the folder it works in.')
     const files = 'cp: /etc/hosts: Operation not permitted\n(The sandbox blocked this: commands may change files only in the work folder, and reach the network only when this agent may use the web.)'
     const web = 'curl: (6) Could not resolve host: example.com\n(The sandbox blocked this: commands may change files only in the work folder, and reach the network only when this agent may use the web.)'
     expect(whyItFailed(files, 'command').text).toBe('Agents may only change files in their own folder.')

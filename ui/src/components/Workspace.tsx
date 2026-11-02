@@ -56,7 +56,8 @@ import { takeTeamOut } from '../lib/projects/client'
 import { TeamReviewDialog } from './run/TeamReviewDialog'
 import { Home } from './home/Home'
 import { ALLOW_SWITCHES } from '../lib/team-file/allow'
-import type { AgentConfig } from '../lib/team-file/types'
+import type { AgentConfig, PermissionMode } from '../lib/team-file/types'
+import { modeSays } from '../lib/team-file/permissionMode'
 import type { InspectedCapability } from './canvas/CapabilityInspector'
 import { ParseFailureModal } from './canvas/ParseFailureModal'
 import { ScheduleNodeCard } from './canvas/ScheduleNodeCard'
@@ -1831,6 +1832,16 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     void doc.save()
     setStatusAnnouncement(`${name} may do “${what.label}” without asking from now on, in every team it’s in.`)
   }, [doc, guests])
+  // ADR 0109: the team's mode, beside the chat's send button. Saved at once, like "Always allow",
+  // and the daemon turns the team's work that is going on now to it as well.
+  const chooseMode = useCallback(async (mode: PermissionMode) => {
+    doc.updateTeamPermissionMode(mode)
+    // A team with something left to fix is not saved, and runs as it is on disk until it is.
+    const saved = await doc.save()
+    const said = `${mode === 'auto' ? 'Auto' : 'Ask me'} is on. ${modeSays(mode)}`
+    setStatusAnnouncement(saved ? said : `${said} It starts once the team’s problems are fixed.`)
+  }, [doc])
+  const permissionMode = useMemo(() => ({ mode: doc.teamPermissionMode, onChange: editable ? (mode: PermissionMode) => void chooseMode(mode) : undefined }), [doc.teamPermissionMode, editable, chooseMode])
   const inspecting = Boolean(inspectedNode || inspectedCapability || inspectedEvidence || provenanceOpen || scheduleOpen || memoryPanelOpen)
   // Ask docks where the inspector does. It waits behind whatever holds the dock, and asking for it
   // again — the header button, ⌘J, the palette — clears the dock for it.
@@ -2627,6 +2638,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
             ask={chatAsk}
             onPassages={takePassages}
             onConnectFolder={connectChatFolder}
+            permissionMode={permissionMode}
           />
           {detailsOpen && wide && <ChatResizer width={chatWidth} onResize={setChatWidth} />}
           {detailsOpen && (

@@ -35,6 +35,7 @@ import { ChatFind } from './ChatFind'
 import { SaidText } from './SaidText'
 import { Appearing, Swap } from './Appearing'
 import { ChatComposer, type OpenDecision } from './ChatComposer'
+import type { PermissionModeControl } from './PermissionModeMenu'
 import { Reactions } from './Reactions'
 import { Learned } from './Learned'
 import { ChangesQuote, ReplyQuote } from './ReplyQuote'
@@ -112,6 +113,8 @@ interface TeamChatProps {
    * about it, or `null` when the picker was closed.
    */
   onConnectFolder?: (name: string) => Promise<string | null>
+  /** The team's mode, Ask me or Auto (ADR 0109), beside the message box's send button. */
+  permissionMode?: PermissionModeControl
 }
 
 /** Sending one message: as a retry of a pending one, and as a reply to something said. */
@@ -133,7 +136,7 @@ const ROSTER_KEY = 'loomwatch.chatRoster'
  * With `team.solo` it is one agent's own chat (its Chat tab): everything you write goes to that
  * agent, starting its work when it is free and joining its turn while it works, so there is no @.
  */
-export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, routine, detailsRunId, answerRunId = null, recordRunId, onHandOver, onOpenAnswer, blocked, prepare, onDetails, onTeamReview, onStale, onAlwaysAllow, announce, onNewest, onStarted, reveal = null, landAt = null, onOpenFinding, onNewestRun, startTeam = false, onStartTeamTaken, ask = null, onPassages, onConnectFolder }: TeamChatProps) {
+export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, routine, detailsRunId, answerRunId = null, recordRunId, onHandOver, onOpenAnswer, blocked, prepare, onDetails, onTeamReview, onStale, onAlwaysAllow, announce, onNewest, onStarted, reveal = null, landAt = null, onOpenFinding, onNewestRun, startTeam = false, onStartTeamTaken, ask = null, onPassages, onConnectFolder, permissionMode }: TeamChatProps) {
   const chat = useTeamChat(teamPath)
   // Pictures and files pasted or dropped in, kept as they are added (ADR 0082).
   const attachments = useChatAttachments(teamPath)
@@ -937,6 +940,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
           return ok
         }}
         attachments={attachments}
+        permissionMode={team.solo ? undefined : permissionMode}
         notice={boxNote ?? moved?.line ?? null}
         onDismissNotice={boxNote ? undefined : letMovedGo}
         onAnswer={answer}

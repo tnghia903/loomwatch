@@ -525,13 +525,17 @@ Any tool call that reaches past reading the agent's own folder is a permission r
 policy answers it (`permissions.rs`), from the agent's `allow:` switches (`web`, `commands`,
 `edits`), its folder and the knowledge connected to it:
 
-- **Approved on the spot:** reads and searches inside the agent's folder or its knowledge, a
-  fetch with `web` on, a command with `commands` on, and an edit inside its folder with `edits`
-  on.
+- **Approved on the spot:** reads and searches inside the agent's folder, its teammates' folders
+  (the team's `.loomwatch/<team>/`) or its knowledge, a fetch with `web` on, a command with
+  `commands` on, and an edit inside its folder with `edits` on.
 - **Auto mode:** a team whose file says `permissions: {mode: auto}` (`auto_mode.rs`) also runs
-  commands that only read or download without asking. Each command is judged from its command
-  line alone. A fixed list always goes to the operator: deleting, pushing, publishing,
-  credentials, and any command built from text.
+  commands that only read or download without asking, lets edits inside the agent's folder through,
+  and on a Mac runs any other command in a tighter sandbox (`agent::sandbox::Tighter`: off the
+  network, away from key folders and other apps) as `Decision::AllowContained`. Each command is
+  judged from its command line alone. A fixed list always goes to the operator: deleting, pushing,
+  publishing, credentials, stopping programs, driving other apps. Saving the team's mode reaches its
+  live runs (`RunRegistry::follow_mode`), and a request waiting on the operator is answered when
+  Auto mode would have let it through (`PermissionAsker::once_auto_allows`).
 - **Everything else** goes to the operator of the run through `PermissionAsker`, while the agent
   waits. The operator can:
   - allow it once, for this agent for the rest of the run, or for every agent in the run;

@@ -56,7 +56,7 @@ export function AgentWorkFolder({ agent, readOnly = false, onChange, problem, te
   } else if (chosen) {
     title = chosen.name
     place = chosen.path
-    note = 'Its folder: it starts here and may read the files in it. It changes files or runs commands here only if you allow it below. Folders and files connected to it are read only.'
+    note = 'Its folder: it starts here and may read the files in it. It changes files or runs commands here only if you allow it below, or the team is in Auto. Folders and files connected to it are read only.'
     gist = 'Read only, unless allowed below.'
   } else {
     title = 'The team’s folder'
@@ -86,7 +86,7 @@ export function AgentWorkFolder({ agent, readOnly = false, onChange, problem, te
       {picking && (
         <FolderPicker
           title="Choose where it works"
-          note="The agent starts in this folder and may read the files in it. It changes files or runs commands there only if you allow it."
+          note="The agent starts in this folder and may read the files in it. It changes files or runs commands there only if you allow it, or the team is in Auto."
           verb="Use"
           start={chosen && isAbsolutePath(chosen.path) ? chosen.path : undefined}
           onClose={() => setPicking(false)}

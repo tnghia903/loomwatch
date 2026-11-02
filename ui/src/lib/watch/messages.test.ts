@@ -292,6 +292,21 @@ describe('messages between agents', () => {
     expect(projectRun(events, 1).messages[0]).toMatchObject({ state: 'pending', reply: null, permission: { outcome: null } })
   })
 
+  // ADR 0109: switching the team to Auto while a request waits on you answers it when Auto would have.
+  // The answer is LoomWatch's, not yours, and the request no longer reads as unanswered.
+  it('settles a request Auto mode answered after the switch as LoomWatch’s answer', () => {
+    seq = 0
+    const asked = (requestId: string) =>
+      event(1, 'worker', 'session_meta', { phase: 'awaiting_permission', requestId, title: 'Run: python3 -c "print(6*7)"', kind: 'execute', switch: 'commands', detail: null }, loomwatch('awaiting_permission'))
+    const answered = (seconds: number, requestId: string, outcome: string) =>
+      event(seconds, 'worker', 'session_meta', { phase: 'permission_answered', requestId, title: 'Run: python3 -c "print(6*7)"', kind: 'execute', outcome, allowed: true }, loomwatch('permission_answered'))
+    const { messages } = projectRun([asked('p1'), answered(20, 'p1', 'auto_contained'), asked('p2'), answered(30, 'p2', 'auto_approved')])
+    expect(messages.map((message) => [message.state, message.reply?.from, message.permission?.outcome])).toEqual([
+      ['answered', 'loomwatch:app', 'auto_contained'],
+      ['answered', 'loomwatch:app', 'auto_approved'],
+    ])
+  })
+
   // While a request waits, the record holds the agent's call (still open) and LoomWatch's note that it
   // asked you; the app's own permission event comes only with the answer. Details used to read the
   // open call alone, and said "Builder is running “rm”" and "Using a tool" while nothing ran.

@@ -1,6 +1,8 @@
 import { Check, FilePen, Globe, SquareTerminal } from '../ui/icon'
 
+import { isMac } from '../../lib/platform'
 import { ALLOW_SWITCHES } from '../../lib/team-file/allow'
+import { modeSays } from '../../lib/team-file/permissionMode'
 import type { AgentConfig, AllowSwitch } from '../../lib/team-file/types'
 import { SectionHead } from '../ui/SectionHead'
 
@@ -11,15 +13,23 @@ export interface AgentPermissionsProps {
   /** The heading's look in the panel that shows it. */
   headClassName?: string
   /**
-   * The team is in Auto mode (ADR 0061): a command this agent's switch leaves open runs when it only
-   * reads files or downloads a page, and asks you otherwise. The tile says so instead of "Asks you".
+   * The team is in Auto mode (ADR 0061, ADR 0109): the commands and file changes this agent's
+   * switches leave open go ahead inside Auto mode's limits, and ask you otherwise. Those tiles say so
+   * instead of "Asks you". The web keeps its own switch.
    */
   teamAuto?: boolean
 }
 
 const ICONS: Record<AllowSwitch, typeof Globe> = { web: Globe, edits: FilePen, commands: SquareTerminal }
 
-const AUTO_TITLE = 'Auto mode: commands that only read files or download pages run on their own; anything else asks you.'
+/** What Auto mode lets through for a switch that is off. Where there is no sandbox, commands only read. */
+function autoTitle(key: AllowSwitch): string | null {
+  if (key === 'edits') return 'Auto: changes to files in the folder it works in go ahead. Anything outside it asks you.'
+  if (key !== 'commands') return null
+  return isMac()
+    ? 'Auto: commands run on their own, without the web, changing files only in the folder it works in. Publishing and the like ask you.'
+    : 'Auto: commands that only read files or download pages run on their own. Anything else asks you.'
+}
 
 /**
  * ALLOWED WITHOUT ASKING (ADR 0037). LoomWatch answers every permission request the agent
@@ -38,15 +48,15 @@ export function AgentPermissions({ agent, readOnly = false, onChange, headClassN
       <SectionHead title="Allowed without asking" className={headClassName} explain={<>
         <div>Anything else it asks to do waits for your answer. If nobody answers, it is declined: after 10 minutes, or after 12 hours in a scheduled run.</div>
         {ALLOW_SWITCHES.map(({ key, label, off }) => <div key={key}><b>{label}</b> off: {off.charAt(0).toLowerCase()}{off.slice(1)}</div>)}
-        {teamAuto && <div><b>Auto</b>: the team is in Auto mode, so a command that only reads files or downloads a page runs on its own, and anything else asks you. Change it beside the team chat’s message box.</div>}
+        {teamAuto && <div><b>Auto</b>: the team is in Auto mode. {modeSays('auto')} Change it from “Auto” in the team chat’s message box.</div>}
       </>} />
       <div className="allow-tiles">
         {ALLOW_SWITCHES.map(({ key, label, short, on, off }) => {
           const active = agent.allow?.[key] === true
-          const auto = !active && teamAuto && key === 'commands'
+          const auto = !active && teamAuto ? autoTitle(key) : null
           const Icon = ICONS[key]
           return (
-            <button key={key} type="button" className={`allow-tile ${active ? 'on' : ''}${auto ? ' auto' : ''}`} disabled={readOnly || !onChange} onClick={() => onChange?.(key, !active)} aria-pressed={active} aria-label={label} title={active ? on : auto ? AUTO_TITLE : off} data-allow={key}>
+            <button key={key} type="button" className={`allow-tile ${active ? 'on' : ''}${auto ? ' auto' : ''}`} disabled={readOnly || !onChange} onClick={() => onChange?.(key, !active)} aria-pressed={active} aria-label={label} title={active ? on : auto ?? off} data-allow={key}>
               {active && <Check className="allow-tile-tick" size={10} strokeWidth={3} aria-hidden="true" />}
               <Icon size={15} aria-hidden="true" />
               <span className="allow-tile-name">{short}</span>

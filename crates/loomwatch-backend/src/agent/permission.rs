@@ -24,6 +24,9 @@ pub struct PermissionRequest {
     pub input: Value,
     /// Every file or folder it touches.
     pub locations: Vec<PathBuf>,
+    /// Auto mode ran this same command without asking earlier in the session, in its tighter
+    /// sandbox, and it failed there (ADR 0109): this time it goes to the person.
+    pub failed_contained: bool,
 }
 
 impl PermissionRequest {
@@ -32,7 +35,7 @@ impl PermissionRequest {
     /// operator's answer in the agent's place, which runs nothing either.
     #[must_use]
     pub fn as_message(&self) -> Value {
-        json!({
+        let mut message = json!({
             "jsonrpc": "2.0",
             "method": "session/request_permission",
             "params": {
@@ -50,7 +53,12 @@ impl PermissionRequest {
                     {"optionId": "answer", "name": "Answered instead", "kind": "reject_once"},
                 ],
             },
-        })
+        });
+        if self.failed_contained {
+            message["params"]["toolCall"]["_meta"] =
+                json!({"loomwatch": {"failedContained": true}});
+        }
+        message
     }
 }
 
@@ -58,6 +66,9 @@ impl PermissionRequest {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Decision {
     Allow,
+    /// Auto mode allowed this command without asking anyone (ADR 0109): it runs in the tighter
+    /// sandbox, off the network.
+    AllowContained,
     /// Allowed after the operator changed the arguments, such as a corrected command.
     AllowEdited(Value),
     Deny,

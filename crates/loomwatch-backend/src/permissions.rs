@@ -17,7 +17,7 @@ use crate::delivery::{Delivery, RESERVED_SERVER};
 /// Folders an agent may never edit, even inside its own folder: a change there could give it more
 /// on its next session than the operator switched on. `.agents` and `.claude` hold the skills it is
 /// offered, `.loomwatch` what `LoomWatch` keeps for the team, and `.git` hooks run code.
-const PROTECTED_FOLDERS: [&str; 4] = [".claude", ".agents", ".git", ".loomwatch"];
+pub(crate) const PROTECTED_FOLDERS: [&str; 4] = [".claude", ".agents", ".git", ".loomwatch"];
 
 /// Whether `name` is one of [`PROTECTED_FOLDERS`] as the file system sees it: in any case (Windows
 /// and macOS do not tell `.Claude` from `.claude`) and with Windows' trailing dots and spaces
@@ -28,6 +28,15 @@ fn is_protected(name: &std::ffi::OsStr) -> bool {
     PROTECTED_FOLDERS
         .iter()
         .any(|folder| name.eq_ignore_ascii_case(folder))
+}
+
+/// The team's folder, `.loomwatch/<team>` beside `team_file`, when `folder` (resolved) is one of
+/// its agents' work folders: where every teammate's work is. `None` for an agent working anywhere
+/// else, and for a team with no id, whose agents' folders sit straight in `.loomwatch`.
+fn team_folder(team_file: &Path, folder: &Path) -> Option<PathBuf> {
+    let teams = resolve(team_file.parent()?);
+    let team = folder.parent()?;
+    (team.parent()? == teams.join(".loomwatch")).then(|| team.to_path_buf())
 }
 
 /// How one run agent's permission requests are answered.
@@ -126,8 +135,9 @@ impl PermissionPolicy {
     }
 
     /// The policy for one of a run's agents: [`Self::for_agent`] with what the operator turned off
-    /// for it (ADR 0060), and the files sent in its team's chat to read (ADR 0082): sending one is
-    /// the operator giving it to the team.
+    /// for it (ADR 0060), the files sent in its team's chat to read (ADR 0082): sending one is
+    /// the operator giving it to the team, and its teammates' work, read as Claude reads inside
+    /// its working folder.
     #[must_use]
     pub fn for_run_agent(
         agent: &AgentConfig,
@@ -140,6 +150,9 @@ impl PermissionPolicy {
         policy
             .readable
             .push(resolve(&crate::chat_files::folder(team_file)));
+        if let Some(team) = team_folder(team_file, &policy.folder) {
+            policy.readable.push(team);
+        }
         policy.web_limits = agent.spend.web.limits();
         policy
     }
@@ -292,6 +305,14 @@ impl PermissionPolicy {
     /// (ADR 0061).
     pub(crate) fn may_write(&self, path: &Path) -> bool {
         self.allow.edits && self.editable(&resolve(path))
+    }
+
+    /// Whether Auto mode may let an edit of `path` through whatever the agent's switch, as a
+    /// command in its tighter sandbox may change the file (ADR 0109): inside the agent's folder,
+    /// never the folders it is offered skills from. A path the agent names from its folder is read
+    /// from there.
+    pub(crate) fn may_edit(&self, path: &Path) -> bool {
+        self.editable(&self.locate(&path.to_string_lossy()))
     }
 
     fn editable(&self, path: &Path) -> bool {
@@ -471,8 +492,12 @@ pub enum AskOutcome {
     NotAsked,
     /// The operator allowed this kind for the rest of the run earlier; allowed without asking.
     AllowedForRun,
-    /// The run is in Auto mode and the command only reads or downloads (ADR 0061).
+    /// The run is in Auto mode and the command only reads or downloads, or the edit lands in the
+    /// agent's own folder (ADR 0061, ADR 0109).
     AutoApproved,
+    /// The run is in Auto mode and the command runs in its tighter sandbox, off the network
+    /// (ADR 0109).
+    AutoContained,
     Answered(PermissionDecision),
     /// Allowed once as the operator changed it: the new command or address.
     Edited(String),
@@ -491,6 +516,7 @@ impl AskOutcome {
             self,
             Self::AllowedForRun
                 | Self::AutoApproved
+                | Self::AutoContained
                 | Self::Edited(_)
                 | Self::Answered(
                     PermissionDecision::AllowOnce
@@ -507,6 +533,7 @@ impl AskOutcome {
             Self::NotAsked => "not_asked",
             Self::AllowedForRun => "allowed_for_run",
             Self::AutoApproved => "auto_approved",
+            Self::AutoContained => "auto_contained",
             Self::Answered(PermissionDecision::AllowOnce) => "allow_once",
             Self::Answered(PermissionDecision::AllowRun) => "allow_run",
             Self::Answered(PermissionDecision::AllowTeam) => "allow_team",
@@ -725,18 +752,40 @@ impl PermissionAsker {
         finished
     }
 
-    /// What Auto mode makes of `request` (ADR 0061), when this run is in Auto mode and the request
-    /// is one of the app's own commands; `policy` is the asking agent's.
+    /// What Auto mode makes of `request` (ADR 0061, ADR 0109), when this run is in Auto mode and
+    /// the request is one of the app's own commands or a file edit; `policy` is the asking agent's.
+    /// `LoomWatch`'s own check runs only what reads, whatever the run's mode.
     #[must_use]
     pub fn auto(
         &self,
         request: &Value,
         policy: &PermissionPolicy,
     ) -> Option<crate::auto_mode::Verdict> {
-        if !self.reading_only && !self.desk.registry().auto_mode(&self.run_id) {
+        if self.reading_only {
+            return crate::auto_mode::decide_reading(request, policy);
+        }
+        if !self.desk.registry().auto_mode(&self.run_id) {
             return None;
         }
         crate::auto_mode::decide(request, policy)
+    }
+
+    /// Resolves once the person has turned the run's team to Auto mode and Auto mode lets
+    /// `request` go ahead (ADR 0109): a request left waiting when they walked away is answered
+    /// then. Never resolves while it doesn't, so it only ever races the person's answer.
+    pub async fn once_auto_allows(&self, request: &Value, policy: &PermissionPolicy) -> AskOutcome {
+        use crate::auto_mode::Verdict;
+        let mut changes = self.desk.registry().mode_changes();
+        loop {
+            match self.auto(request, policy) {
+                Some(Verdict::Approved) => return AskOutcome::AutoApproved,
+                Some(Verdict::Contained) => return AskOutcome::AutoContained,
+                _ => {}
+            }
+            if changes.changed().await.is_err() {
+                return std::future::pending().await;
+            }
+        }
     }
 
     /// Put one declined `session/request_permission` on the run record for the operator to answer,
@@ -802,6 +851,12 @@ impl OpenRequest {
     /// record. The app is blocked on this answer, so nothing races the ACP request timeout: that
     /// only runs while a line is being awaited.
     pub async fn wait(self) -> AskOutcome {
+        self.wait_or(std::future::pending()).await
+    }
+
+    /// [`Self::wait`], unless `instead` answers first, as Auto mode does for a request it lets go
+    /// ahead once the person turns it on (ADR 0109).
+    pub async fn wait_or(self, instead: impl Future<Output = AskOutcome>) -> AskOutcome {
         let Self {
             asker,
             request,
@@ -825,6 +880,7 @@ impl OpenRequest {
                 Err(_) => AskOutcome::NotAsked,
             },
             () = crate::deadline::passed(deadline) => AskOutcome::TimedOut,
+            outcome = instead => outcome,
         };
         asker
             .desk
@@ -1074,6 +1130,63 @@ mod tests {
             "Read notes.md",
             &[&beside.to_string_lossy()]
         )));
+    }
+
+    /// An agent reads its teammates' work without asking, as Claude reads inside its working
+    /// folder: anything in the team's folder (`.loomwatch/<team>/`) beside the team file. Only
+    /// reads, only that team's, and only for an agent working in it.
+    #[test]
+    fn an_agent_reads_its_teammates_work_without_asking() {
+        let scratch = Scratch::new();
+        let team = crate::config::TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: acp\n      cwd: .\n    model: test/model\n",
+        )
+        .unwrap();
+        let team_file = scratch.0.join("trip.yaml");
+        let team_folder = scratch.0.join(".loomwatch").join("trip");
+        let own = team_folder.join("checker");
+        let teammate = team_folder.join("video").join("poster.png");
+        let other_team = scratch.0.join(".loomwatch").join("other").join("a.md");
+        for file in [&teammate, &other_team] {
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            fs::write(file, "x").unwrap();
+        }
+        fs::create_dir_all(&own).unwrap();
+        let path = |path: &Path| path.to_string_lossy().into_owned();
+        let policy = PermissionPolicy::for_run_agent(
+            &team.agents[0],
+            &team_file,
+            &own,
+            &Delivery::default(),
+        );
+        assert!(policy.approves(&request(Some("read"), "Read", &[&path(&teammate)])));
+        assert!(policy.approves(&request(Some("read"), "List", &[".."])));
+        assert!(policy.approves(&request(Some("search"), "Search", &[&path(&team_folder)])));
+        assert!(policy.may_read(&teammate));
+        assert!(
+            !policy.approves(&request(Some("edit"), "Edit", &[&path(&teammate)])),
+            "a teammate's files are read, never changed, without asking"
+        );
+        assert!(
+            !policy.approves(&request(Some("read"), "Read", &[&path(&other_team)])),
+            "another team's work still asks"
+        );
+        assert!(!policy.approves(&request(
+            Some("read"),
+            "List",
+            &[&path(&scratch.0.join(".loomwatch"))]
+        )));
+
+        // An agent working in a folder of its own choosing reaches no further than before.
+        let elsewhere = scratch.0.join("agent");
+        let policy = PermissionPolicy::for_run_agent(
+            &team.agents[0],
+            &team_file,
+            &elsewhere,
+            &Delivery::default(),
+        );
+        assert!(!policy.approves(&request(Some("read"), "List", &[".."])));
+        assert!(!policy.approves(&request(Some("read"), "Read", &[&path(&teammate)])));
     }
 
     /// A settings folder is protected however the edit spells it: Windows and macOS make

@@ -26,6 +26,7 @@ import { bubbles as layOut, converse, expectsAnswer, fold, type Bubble, type Par
 import type { ReceiptLine } from '../../lib/story/receipt'
 import { LOOMWATCH_ID, OPERATOR_ID, type TeamMessage } from '../../lib/watch/messages'
 import type { AutoRan } from '../../lib/watch/events'
+import { autoLine } from '../../lib/watch/autoRan'
 import { workPhase } from '../../lib/watch/workPhase'
 import type { AgentConfig } from '../../lib/team-file/types'
 import type { AlwaysAllowed } from '../../lib/tools/allow'
@@ -667,7 +668,7 @@ function Decisions({ messages, autoRan = [], operators, name }: { messages: read
           <div className="chat-stack">
             <div className="chat-meta">
               <span className="tc-to" title={autoRan.map((ran) => `${name(ran.agentId)}: ${ran.detail ?? ran.title}`).join('\n')}>
-                {autoRan.length === 1 ? `Auto mode let ${name(lastAuto.agentId)} run ${lastAuto.detail ?? lastAuto.title}` : `Auto mode ran ${autoRan.length} commands without asking you · latest ${lastAuto.detail ?? lastAuto.title}`}
+                {autoLine(autoRan, name)}
               </span>
               <time>{clockTime(lastAuto.ts)}</time>
             </div>

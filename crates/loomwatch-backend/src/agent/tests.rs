@@ -334,6 +334,62 @@ async fn declined_answered_and_edited_requests_each_reach_the_model() {
     }
 }
 
+/// ADR 0109: a command Auto mode ran in its tighter sandbox that failed there goes to the person
+/// when the agent runs exactly the same command again, and the agent is told so. A changed
+/// command is Auto mode's again, and so is one that worked there.
+#[tokio::test]
+async fn a_command_that_failed_in_auto_modes_sandbox_asks_the_next_time() {
+    let folder = Folder::new();
+    let failing = json!({"command": "echo nope; exit 3"});
+    let demo = Demo::scripted(vec![
+        Completion::calls("", vec![call("a", "run_command", &failing)]),
+        Completion::calls("", vec![call("b", "run_command", &failing)]),
+        Completion::calls(
+            "",
+            vec![call("c", "run_command", &json!({"command": "echo fixed"}))],
+        ),
+        Completion::calls(
+            "",
+            vec![call("d", "run_command", &json!({"command": "echo fixed"}))],
+        ),
+        Completion::text("OK."),
+    ]);
+    let answers = Answers::new(vec![
+        Decision::AllowContained,
+        Decision::Allow,
+        Decision::AllowContained,
+        Decision::AllowContained,
+    ]);
+    let sink = Arc::new(Recorded::default());
+    let mut session = session(&folder, Provider::Demo(demo.clone()), sink, answers.clone());
+    session.prompt("Go.").await.unwrap();
+
+    let asked = answers.asked.lock().unwrap().clone();
+    let again: Vec<bool> = asked
+        .iter()
+        .map(|request| request.failed_contained)
+        .collect();
+    assert_eq!(again, [false, true, false, false]);
+    assert_eq!(
+        asked[1].as_message()["params"]["toolCall"]["_meta"]["loomwatch"]["failedContained"],
+        json!(true)
+    );
+    let first = demo.requests()[1]
+        .messages
+        .iter()
+        .find_map(|message| match message {
+            Message::Tool { content, .. } => Some(content.clone()),
+            _ => None,
+        })
+        .unwrap();
+    if cfg!(target_os = "macos") {
+        assert!(
+            first.contains("run exactly the same command again: that asks the person"),
+            "{first}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn a_long_output_is_set_aside_and_read_back_in_parts() {
     let folder = Folder::new();

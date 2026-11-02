@@ -1579,6 +1579,18 @@ async fn put_team(
     let team = TeamConfig::parse_in(&team_file.yaml, &state.teams_root)
         .map_err(|error| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, error.to_string()))?;
     let (resolved_path, before) = write_team_file(&state, &headers, &team_file)?;
+    // The team's live work follows a switch to or from Auto mode at once (ADR 0109), in each of
+    // its places (ADR 0103), which share its setup.
+    for place in std::iter::once(normalized_relative_path(&state.teams_root, &resolved_path))
+        .flatten()
+        .chain(
+            team.shares
+                .iter()
+                .flat_map(|shares| crate::team_places::places(&state.teams_root, shares)),
+        )
+    {
+        state.runs.follow_mode(&place, team.permissions.mode);
+    }
     // A team's own agent that became one of My agents takes its lessons along (ADR 0094).
     let became_mine = before
         .as_deref()
@@ -6002,6 +6014,78 @@ mod tests {
     }
 
     /// The run and the schedule's next try find the team by its path, so the file stays where it
+    /// ADR 0109: saving a team switched to Auto mode, from the app or the phone, reaches the work
+    /// it is doing now, in each of its places (ADR 0103), and switching back does too. Another
+    /// team's work, and work already over, are left as they are.
+    #[tokio::test]
+    async fn a_teams_live_work_follows_its_switch_to_auto_mode() {
+        let root = TempDirectory::new();
+        let trip_team = format!("{TRIP_TEAM}shares: trip\n");
+        fs::write(root.0.join("trip.yaml"), &trip_team).expect("write team");
+        fs::write(
+            root.0.join("trip-elsewhere.yaml"),
+            trip_team.replace("id: trip\n", "id: trip-elsewhere\n"),
+        )
+        .expect("write its other place");
+        let team = TeamConfig::parse(TRIP_TEAM).expect("team parses");
+        let runs = crate::runs::RunRegistry::default();
+        let live = |path: &str| {
+            let record = crate::runs::RunRecord::queued(
+                path.to_owned(),
+                "Plan a week in Kyoto".to_owned(),
+                &team,
+                crate::runs::RunTrigger::Manual,
+            )
+            .expect("run record");
+            runs.insert(record.clone());
+            record.run_id
+        };
+        let (trip, other) = (live("trip.yaml"), live("other.yaml"));
+        let elsewhere = live("trip-elsewhere.yaml");
+        let over = live("trip.yaml");
+        assert!(matches!(
+            runs.cancel(&over),
+            crate::runs::CancelOutcome::Cancelled(_)
+        ));
+        assert!(runs.get(&over).expect("run").status.is_terminal());
+        let save = |before: String, after: String| {
+            let router = router_with_runs(&root.0, runs.clone());
+            async move {
+                router
+                    .oneshot(
+                        Request::builder()
+                            .method("PUT")
+                            .uri("/api/team")
+                            .header(header::HOST, "localhost")
+                            .header(header::CONTENT_TYPE, "application/json")
+                            .header(
+                                header::IF_MATCH,
+                                format!("\"{}\"", crate::approvals::revision(before.as_bytes())),
+                            )
+                            .body(Body::from(
+                                json!({ "path": "trip.yaml", "yaml": after }).to_string(),
+                            ))
+                            .expect("request"),
+                    )
+                    .await
+                    .expect("response")
+            }
+        };
+        let auto = format!("{trip_team}permissions:\n  mode: auto\n");
+        let saved = save(trip_team.clone(), auto.clone()).await;
+        assert_eq!(saved.status(), StatusCode::OK);
+        let auto_mode = |id: &str| runs.get(id).expect("run").auto_mode;
+        assert!(auto_mode(&trip), "the team's work follows at once");
+        assert!(auto_mode(&elsewhere), "and its work in its other place");
+        assert!(!auto_mode(&other));
+        assert!(!auto_mode(&over), "work that is over stays as it ran");
+
+        let saved = save(auto, trip_team.clone()).await;
+        assert_eq!(saved.status(), StatusCode::OK);
+        assert!(!auto_mode(&trip), "and back to asking");
+        assert!(!auto_mode(&elsewhere));
+    }
+
     /// is while either still needs it.
     #[tokio::test]
     async fn rename_waits_while_the_team_works_or_its_schedule_will_try_again() {
