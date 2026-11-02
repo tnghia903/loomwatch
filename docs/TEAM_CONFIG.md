@@ -690,13 +690,16 @@ Every agent in a run works with LoomWatch's own tools:
   whether it opens.
 - **Commands**: `run_command` runs a shell command in the agent's work folder (with `cmd.exe` on
   Windows) and stops it, and everything it started, after two minutes, or up to ten if the agent
-  asks. The command's environment has every provider key and
+  asks. Something it left running in the background that still holds its output is stopped two
+  seconds after the command ends, and the agent is told why. The command's environment has every
+  provider key and
   LoomWatch's own settings removed, so a script cannot read your key or LoomWatch's database
   address. That means any variable ending in `_API_KEY`, `_API_TOKEN` or `_AUTH_TOKEN`, any starting
   with `OPENROUTER_`, `ANTHROPIC_`, `OPENAI_`, `GEMINI_`, `GOOGLE_API`, `LOOMWATCH_` or `POSTGRES_`,
   and `DATABASE_URL` and `PGPASSWORD`. On a Mac a command also runs in a sandbox: it can change
   files only in the agent's folder and temporary folders, and it can reach the network only when the
-  agent is allowed the web. A command can still work in your Mac's apps, such as Calendar, Mail or
+  agent is allowed the web. macOS starts no program that runs as another user, such as `ps`, inside
+  the sandbox; the agent is told so, and to use `pgrep`. A command can still work in your Mac's apps, such as Calendar, Mail or
   Notes, through `osascript`. macOS asks you the first time an agent works in each app (for now,
   again after each LoomWatch update); you can change your answer later in System Settings → Privacy
   & Security → Automation → LoomWatch. For Calendar, Reminders, Contacts and Photos, macOS then

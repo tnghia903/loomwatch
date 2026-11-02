@@ -11,8 +11,12 @@
 //! - It stops at its timeout, or when the turn is cancelled, and everything it started goes with
 //!   it: its process group on macOS and Linux, its job ([`ProcessTree`]) on Windows. On Windows
 //!   the job also closes when the command finishes, so nothing it started keeps running after.
+//! - A job it left running in the background that still holds its output once the shell has ended
+//!   is stopped after [`LEFT_RUNNING_WAIT`], and the agent is told. Otherwise the command would
+//!   wait on the job until its timeout, then stop it without saying why.
 
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
@@ -39,6 +43,16 @@ pub(crate) const USER_AGENT: &str = concat!(
     env!("CARGO_PKG_VERSION"),
     " (+https://loomwatch.github.io/)"
 );
+
+/// How long a command's output is waited for once its shell has ended. What still holds it after
+/// that is a job the command left running in the background, which is stopped.
+const LEFT_RUNNING_WAIT: Duration = Duration::from_secs(2);
+
+/// What a command is followed by when a job it left running in the background was stopped.
+const LEFT_RUNNING: &str = "\n(Something this command started was still running in the \
+                            background, holding its output, so it was stopped when the command \
+                            ended. Run a long job in the foreground, with a longer \
+                            timeout_seconds.)";
 
 /// What a command that reached for the network is followed by when the agent may not use the web.
 const OFF_NETWORK: &str = "\n(The sandbox kept this command off the network: this agent may not \
@@ -101,30 +115,44 @@ pub(super) async fn run(input: &Value, context: &Context<'_>) -> Output {
     let tree = ProcessTree::adopt(&child);
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
-    let reading = async {
-        let (out, err) = tokio::join!(read_all(stdout), read_all(stderr));
-        (out, err)
-    };
-    // On the heap: the read buffers would otherwise make every future that awaits a command large.
-    let waited = Box::pin(async {
-        let ((out, err), status) = tokio::join!(reading, child.wait());
-        (out, err, status)
-    });
+    // A task of its own, so reading can go on once the shell has ended, and on the heap: the read
+    // buffers would otherwise make every future that awaits a command large.
+    let mut reading = tokio::spawn(async move { tokio::join!(read_all(stdout), read_all(stderr)) });
     let outcome = tokio::select! {
-        finished = tokio::time::timeout(timeout, waited) => finished.ok(),
-        () = context.cancel.cancelled() => {
+        finished = tokio::time::timeout(timeout, child.wait()) => Some(finished.ok()),
+        () = context.cancel.cancelled() => None,
+    };
+    let status = match outcome {
+        Some(Some(status)) => status,
+        stopped => {
+            reading.abort();
             stop_tree(pid, tree).await;
-            return Output::failed("The command was stopped: the turn was cancelled.");
+            return Output::failed(if stopped.is_none() {
+                "The command was stopped: the turn was cancelled.".to_owned()
+            } else {
+                format!(
+                    "The command was stopped after {} seconds without finishing.",
+                    timeout.as_secs()
+                )
+            });
         }
     };
-    let Some((out, err, status)) = outcome else {
+    // The shell has ended, so whatever still holds its output is something it left running.
+    let read = tokio::time::timeout(LEFT_RUNNING_WAIT, &mut reading)
+        .await
+        .ok()
+        .and_then(Result::ok);
+    let left_running = read.is_none();
+    let (out, err) = if let Some(read) = read {
+        tree.end();
+        read
+    } else {
+        // Stopping it closes the output, so what the command printed can still be read.
         stop_tree(pid, tree).await;
-        return Output::failed(format!(
-            "The command was stopped after {} seconds without finishing.",
-            timeout.as_secs()
-        ));
+        let read = tokio::time::timeout(LEFT_RUNNING_WAIT, &mut reading).await;
+        reading.abort();
+        read.ok().and_then(Result::ok).unwrap_or_default()
     };
-    tree.end();
     let mut text = String::from_utf8_lossy(&out).into_owned();
     let err = String::from_utf8_lossy(&err);
     if !err.trim().is_empty() {
@@ -136,14 +164,16 @@ pub(super) async fn run(input: &Value, context: &Context<'_>) -> Output {
     if out.len() >= MAX_OUTPUT_BYTES || err.len() >= MAX_OUTPUT_BYTES {
         text.push_str("\n… the command printed more than 2 MB; the rest was cut.");
     }
-    answer(command, status, text, context)
+    answer(command, status, text, left_running, context)
 }
 
-/// What the agent is told of a command that ended: its output, and why the sandbox stopped it.
+/// What the agent is told of a command that ended: its output, what of it was stopped, and why
+/// the sandbox stopped it.
 fn answer(
     command: &str,
     status: std::io::Result<std::process::ExitStatus>,
     mut text: String,
+    left_running: bool,
     context: &Context<'_>,
 ) -> Output {
     // A command that reached for the network can still end well, `curl -s … | head` with nothing
@@ -154,6 +184,9 @@ fn answer(
             if text.trim().is_empty() {
                 "The command finished with no output.".clone_into(&mut text);
             }
+            if left_running {
+                text.push_str(LEFT_RUNNING);
+            }
             if offline {
                 text.push_str(OFF_NETWORK);
             }
@@ -163,8 +196,22 @@ fn answer(
             let code = status
                 .code()
                 .map_or_else(|| "a signal".to_owned(), |code| format!("exit code {code}"));
+            if left_running {
+                text.push_str(LEFT_RUNNING);
+            }
             if offline {
                 text.push_str(OFF_NETWORK);
+            } else if let Some(program) = sandbox::runs_as_another_user(&text) {
+                let instead = if Path::new(&program).file_name() == Some(OsStr::new("ps")) {
+                    " Use pgrep -fl NAME instead of ps to find what is running."
+                } else {
+                    ""
+                };
+                let _ = write!(
+                    text,
+                    "\n(The sandbox can't start {program}: it runs as another user, and nothing \
+                     in the sandbox may start a program that does.{instead})"
+                );
             } else if sandbox::denied(&text, context.cwd, context.command) {
                 text.push_str(
                     "\n(The sandbox blocked this: commands may change files only in the work \
@@ -443,6 +490,41 @@ mod tests {
         never_written(&folder).await;
     }
 
+    /// A job sent to the background that still holds the command's output, as a Video maker's
+    /// render did: on a Mac the shell of a backgrounded `cd … && program > log 2>&1 &` holds it.
+    /// Here the job holds it in any shell, as its output goes nowhere else. The command answers
+    /// soon after its shell ends, with what it printed and why the job was stopped, instead of
+    /// waiting on the job until its time is up and then stopping it unsaid.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_job_left_holding_the_output_is_stopped_soon_after_the_shell_ends() {
+        let folder = Folder::new();
+        let started = std::time::Instant::now();
+        let done = run_in(
+            &folder,
+            false,
+            &serde_json::json!({
+                "command": "/bin/sh -c 'sleep 4; echo late > late.txt' & echo started",
+                "timeout_seconds": 30,
+            }),
+        )
+        .await;
+        assert!(
+            started.elapsed() < Duration::from_secs(4),
+            "waited {:?} for the job: {}",
+            started.elapsed(),
+            done.text
+        );
+        assert!(!done.failed, "{}", done.text);
+        assert!(done.text.starts_with("started\n"), "{}", done.text);
+        assert!(
+            done.text.contains("still running in the background"),
+            "{}",
+            done.text
+        );
+        never_written(&folder).await;
+    }
+
     /// The agent learns the real reason when the sandbox stopped a command, and only then.
     #[cfg(target_os = "macos")]
     #[tokio::test]
@@ -485,6 +567,32 @@ mod tests {
                 && !locked.text.contains(note),
             "{}",
             locked.text
+        );
+    }
+
+    /// macOS starts no program that runs as another user inside a sandbox, whatever it allows:
+    /// `/bin/ps` is one. The agent is told that, and what to use instead, rather than that it
+    /// wrote outside its folder or reached the network.
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn on_a_mac_a_program_that_runs_as_another_user_is_said_so() {
+        let folder = Folder::new();
+        let done = run_in(
+            &folder,
+            false,
+            &serde_json::json!({ "command": "ps -p $$" }),
+        )
+        .await;
+        assert!(done.failed, "{}", done.text);
+        assert!(
+            done.text.contains("/bin/ps: it runs as another user") && done.text.contains("pgrep"),
+            "{}",
+            done.text
+        );
+        assert!(
+            !done.text.contains("(The sandbox blocked this"),
+            "{}",
+            done.text
         );
     }
 

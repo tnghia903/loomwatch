@@ -54,13 +54,19 @@ pub(crate) const RUN_COMMAND: Block = Block::new(
     if cfg!(windows) {
         "Run a command in your work folder with cmd.exe, such as a script a skill provides. Write \
          it for cmd.exe; for PowerShell, run powershell -NoProfile -Command \"…\". The operator may \
-         be asked first. Change files only inside your work folder."
+         be asked first. Change files only inside your work folder. Run a long job in the \
+         foreground with a longer timeout_seconds: one left in the background can be stopped when \
+         the command ends."
     } else if cfg!(target_os = "macos") {
         "Run a shell command in your work folder, such as a script a skill provides. The operator \
-         may be asked first. It can change files only inside your work folder."
+         may be asked first. It can change files only inside your work folder. Run a long job in \
+         the foreground with a longer timeout_seconds: one left in the background can be stopped \
+         when the command ends."
     } else {
         "Run a shell command in your work folder, such as a script a skill provides. The operator \
-         may be asked first. Change files only inside your work folder."
+         may be asked first. Change files only inside your work folder. Run a long job in the \
+         foreground with a longer timeout_seconds: one left in the background can be stopped when \
+         the command ends."
     },
 );
 pub(crate) const UPDATE_PLAN: Block = Block::new(

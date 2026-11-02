@@ -321,6 +321,42 @@ fn blocked(output: &str, writable: &[String], network: bool) -> bool {
     named.peek().is_none() || named.any(|path| !writable.iter().any(|folder| inside(path, folder)))
 }
 
+/// The program a failed command couldn't start because it runs as another user: set-user-ID or
+/// set-group-ID, as `/bin/ps` is. macOS starts no such program inside a sandbox, whatever the
+/// profile allows, and the shell says only "Operation not permitted".
+pub(crate) fn runs_as_another_user(output: &str) -> Option<String> {
+    if !cfg!(target_os = "macos") {
+        return None;
+    }
+    set_id_program(output)
+}
+
+/// The first program a refused line names that runs as another user.
+fn set_id_program(output: &str) -> Option<String> {
+    output
+        .lines()
+        .filter(|line| refused(line))
+        .flat_map(paths)
+        .filter_map(|rest| {
+            rest.split(|c: char| c.is_whitespace() || ":'\"`".contains(c))
+                .next()
+        })
+        .find(|program| runs_as_set_id(Path::new(program)))
+        .map(str::to_owned)
+}
+
+#[cfg(unix)]
+fn runs_as_set_id(program: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt as _;
+    std::fs::metadata(program)
+        .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o6000 != 0)
+}
+
+#[cfg(not(unix))]
+fn runs_as_set_id(_: &Path) -> bool {
+    false
+}
+
 /// Whether a line reports an `EPERM`.
 fn refused(line: &str) -> bool {
     line.to_ascii_lowercase()
@@ -379,6 +415,52 @@ mod tests {
         for (network, extra) in [(false, 0), (true, 0), (true, 2)] {
             assert!(profile(network, extra).contains("(deny device-microphone)\n"));
         }
+    }
+
+    /// A program that runs as another user is told from the line that refused it by its mode on
+    /// disk, however the line names it, and a plain one never is.
+    #[cfg(unix)]
+    #[test]
+    fn a_program_that_runs_as_another_user_is_found_by_its_mode() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let folder =
+            std::env::temp_dir().join(format!("loomwatch-set-id-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let program = |name: &str, mode: u32| {
+            let path = folder.join(name);
+            std::fs::write(&path, "#!/bin/sh\n").unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).unwrap();
+            path.to_string_lossy().into_owned()
+        };
+        let (lister, grouped, plain) = (
+            program("lister", 0o4755),
+            program("grouped", 0o2755),
+            program("plain", 0o755),
+        );
+        for (output, found) in [
+            (
+                format!("/bin/sh: {lister}: Operation not permitted"),
+                &lister,
+            ),
+            (
+                format!("/bin/sh: line 1: {grouped}: Operation not permitted"),
+                &grouped,
+            ),
+            (
+                format!("sandbox-exec: execvp() of '{lister}' failed: Operation not permitted"),
+                &lister,
+            ),
+        ] {
+            assert_eq!(set_id_program(&output).as_ref(), Some(found), "{output}");
+        }
+        for output in [
+            format!("/bin/sh: {plain}: Operation not permitted"),
+            format!("{lister} printed this, and nothing was refused"),
+        ] {
+            assert_eq!(set_id_program(&output), None, "{output}");
+        }
+        let _ = std::fs::remove_dir_all(&folder);
     }
 
     const WORK: &str = "/Users/me/Library/Application Support/LoomWatch/agents/coby";

@@ -1,4 +1,4 @@
-import { helperOf, nameWithHelpers } from '../chat/helpers'
+import { LOOMWATCH_CHECK_ID, LOOMWATCH_NAME, helperOf, nameWithHelpers } from '../chat/helpers'
 import { outwardCalls } from '../library/observed'
 import type { RunSpend } from '../runs/client'
 import type { AgentRuntime } from '../runs/graph'
@@ -172,6 +172,45 @@ function refusalLines(agent: ReceiptAgent, items: readonly Evidence[], carriedOn
   return lines
 }
 
+/** How an agent's line says where its part ended. */
+interface EndWords {
+  done: string
+  /** Before why: "Writer stopped (exit code 1)". */
+  stopped: string
+  /** Before LoomWatch's own sentence for a stop: "Writer stopped. Your OpenRouter account is…". */
+  stoppedBecause: string
+  stoppedByYou: string
+  unfinished: string
+  working: string
+}
+
+const agentWords = (name: string): EndWords => ({
+  done: `${name} finished`,
+  stopped: `${name} stopped`,
+  stoppedBecause: `${name} stopped`,
+  stoppedByYou: `${name} was stopped before it finished`,
+  unfinished: `${name} didn’t finish`,
+  working: `${name} is still working`,
+})
+
+/** LoomWatch's own check of the answer (ADR 0098): what a reader needs is whether the answer was checked. */
+const CHECK_WORDS: EndWords = {
+  done: `${LOOMWATCH_NAME} checked the answer`,
+  stopped: `${LOOMWATCH_NAME} couldn’t check the answer`,
+  // The sentence after it names LoomWatch.
+  stoppedBecause: 'The answer wasn’t checked',
+  stoppedByYou: 'You stopped the run before the answer was checked',
+  unfinished: `${LOOMWATCH_NAME} didn’t finish checking the answer`,
+  working: `${LOOMWATCH_NAME} is still checking the answer`,
+}
+
+/**
+ * Stops whose way out is the person's own account, which LoomWatch's sentence for each says how to
+ * take. The others are written for an agent of the team ("choose another model for this agent"),
+ * and the person doesn't choose the model LoomWatch's check runs on.
+ */
+const ACCOUNT_STOPS: ReadonlySet<string> = new Set(['plan_limit', 'out_of_credits', 'key_refused', 'sign_in_again', 'plan_use_off'])
+
 /** Why a turn happened, as the receipt says it. */
 const PURPOSE_WORDS: Record<TurnPurpose, string> = {
   work: 'The work',
@@ -227,6 +266,8 @@ export function buildReceipt(input: ReceiptInput): Receipt {
   const terminal = ['succeeded', 'partial', 'failed', 'cancelled'].includes(input.phase)
   const stoppedByYou = input.phase === 'cancelled'
   let anyRefused = false
+  /** Errors an agent's line already says, by agent: its alert would say them a second time. */
+  const told = new Set<string>()
   for (const agent of input.agents) {
     if (agent.operator) {
       const status = agent.runtime?.status
@@ -238,18 +279,26 @@ export function buildReceipt(input: ReceiptInput): Receipt {
     const run = projected.get(agent.id)
     const items = input.evidenceByAgent.get(agent.id) ?? []
     if (!run) { lines.push({ tone: 'wait', text: `${agent.name} didn’t run`, agentId: agent.id }); continue }
+    // LoomWatch's own check (ADR 0098) is said by what it was for: whether the answer was checked.
+    const check = agent.id === LOOMWATCH_CHECK_ID
+    const words = check ? CHECK_WORDS : agentWords(agent.name)
     // The cards' status first: it is corrected from the run record (a stage that handed over and
     // was kept alive is done, though its process was still open), and every surface says the same.
     const status = agent.runtime?.status ?? run.status
-    if (status === 'succeeded') lines.push({ tone: 'ok', text: `${agent.name} finished${workSummary(items)}`, agentId: agent.id })
-    else if (status === 'failed' || status === 'stopped' || status === 'unavailable') {
-      // A turn its app reported as failed still ends `end_turn`, so the stop reason says nothing:
-      // name who reported it here, and what it said is under "Worth a look".
+    if (status === 'succeeded') lines.push({ tone: 'ok', text: `${words.done}${workSummary(items)}`, agentId: agent.id })
+    else if ((status === 'failed' || status === 'stopped' || status === 'unavailable') && run.error && run.problem && (!check || ACCOUNT_STOPS.has(run.problem.kind))) {
+      // A stop LoomWatch knows the way out of (a plan's limit, a sign-in that ended) is said in its
+      // own words for it, which say what to do: on the line, and not again under "Worth a look".
+      lines.push({ tone: 'bad', text: `${words.stoppedBecause}. ${run.error}`, agentId: agent.id })
+      told.add(`${agent.id}\n${run.error}`)
+    } else if (status === 'failed' || status === 'stopped' || status === 'unavailable') {
+      // Any other error: name who reported it here, and what it said is under "Worth a look". A
+      // turn its app reported as failed still ends `end_turn`, so the stop reason says nothing.
       const why = run.error ? ` (${input.harnessLabels.get(agent.id) || 'its model'} reported an error)`
         : run.stopReason ? ` (${run.stopReason.replace(/_/g, ' ')})` : run.exitCode !== null ? ` (exit code ${run.exitCode})` : ''
-      lines.push({ tone: 'bad', text: !why && stoppedByYou ? `${agent.name} was stopped before it finished` : `${agent.name} stopped${why}`, agentId: agent.id })
-    } else if (terminal) lines.push({ tone: 'bad', text: stoppedByYou ? `${agent.name} was stopped before it finished` : `${agent.name} didn’t finish`, agentId: agent.id })
-    else lines.push({ tone: 'wait', text: `${agent.name} is still working`, agentId: agent.id })
+      lines.push({ tone: 'bad', text: !why && stoppedByYou ? words.stoppedByYou : `${words.stopped}${why}`, agentId: agent.id })
+    } else if (terminal) lines.push({ tone: 'bad', text: stoppedByYou ? words.stoppedByYou : words.unfinished, agentId: agent.id })
+    else lines.push({ tone: 'wait', text: words.working, agentId: agent.id })
 
     // Failures say what happened instead, so the reader knows whether the result is affected. A
     // failed read that another read made up for (a folder read as a file, then the files in it) is
@@ -295,6 +344,7 @@ export function buildReceipt(input: ReceiptInput): Receipt {
     }
   }
   for (const alert of input.projection.attention) {
+    if (told.has(`${alert.agentId}\n${alert.message}`)) continue
     checks.push({ tone: 'warn', text: alert.message, agentId: alert.agentId, evidenceId: alert.evidenceId })
   }
   if (anyRefused) checks.push({ tone: 'warn', text: 'What an agent isn’t allowed to do waits for your answer during a run. Requests you denied, or that nobody answered in time, were declined. To change what an agent may do, select its card on the Team tab and press Edit.', aside: true })
@@ -305,7 +355,8 @@ export function buildReceipt(input: ReceiptInput): Receipt {
   if (gaps.length) checks.push({ tone: 'warn', text: `Not everything was recorded: ${gaps.map(([key]) => key).join(', ')}` })
 
   const apps = [...new Set(input.agents.filter((agent) => !agent.operator).map((agent) => input.harnessLabels.get(agent.id)).filter(Boolean))]
-  const workers = input.agents.filter((agent) => !agent.operator)
+  // LoomWatch's own check is no agent of the team, as the chat's line of who worked counts it.
+  const workers = input.agents.filter((agent) => !agent.operator && agent.id !== LOOMWATCH_CHECK_ID)
   // The copies an agent brought in for parts of the work (ADR 0079), which the team file doesn't list.
   const helpers = input.projection.agents.filter((agent) => helperOf(agent.id)).length
   const operator = input.agents.some((agent) => agent.operator)

@@ -151,9 +151,14 @@ instructions and tools.
   `cmd.exe /d /s /c` on Windows (`agent/tools/command.rs`). Every provider key and LoomWatch
   setting is removed from their environment. A command stops at its time limit or when its turn
   is cancelled, with everything it started: its process group, or on Windows the job it runs in
-  (`platform::ProcessTree`), which also ends whatever it leaves running when it finishes. On a
-  Mac they also run in a Seatbelt sandbox (`agent/sandbox.rs`): they can change files only in the
-  work folder and temporary folders, and reach the network only when the agent may use the web.
+  (`platform::ProcessTree`), which also ends whatever it leaves running when it finishes. A job it
+  left running in the background that still holds its output (on a Mac, the shell of a backgrounded
+  `cd … && program > log &` does) is stopped two seconds after the command's shell ends, and the
+  agent is told why, rather than the command waiting on it until its time limit. On a Mac they
+  also run in a Seatbelt sandbox (`agent/sandbox.rs`): they can change files only in the work
+  folder and temporary folders, and reach the network only when the agent may use the web. macOS
+  starts no program that runs as another user (set-user-ID or set-group-ID, as `ps` is) inside a
+  sandbox, so the agent is told that, and to use `pgrep` for `ps`.
   macOS refuses Apple Events from a sandboxed program unless its signature carries an Apple Events
   entitlement, which `/usr/bin/osascript` lacks. So at start the daemon signs a copy of
   `loomwatch-osascript` into `programs/` in its state folder, once for each build, and puts that

@@ -4,6 +4,7 @@ import { ACTIVITY_KINDS, ReplyText, commentaryOf } from './replyText'
 import { summarizeUsage, turnUsage, type TokenSummary } from './usage'
 import { answerNotes, checkRounds, type AnswerNotes, type CheckRound } from '../story/checks'
 import { readDoneWhen, type DoneWhen } from '../chat/doneWhen'
+import { LOOMWATCH_CHECK_ID } from '../chat/helpers'
 
 export const eventKinds = ['message', 'thought', 'tool_call', 'tool_update', 'plan', 'permission', 'session_meta', 'usage', 'turn_end', 'process'] as const
 export interface RunEvent {
@@ -121,9 +122,17 @@ export interface Delegation { id: string; from: string; to: string; kind: 'dispa
  * — a crash and a non-`end_turn` stop have no call behind them and carry none.
  */
 export interface Attention { id: string; seq: number; agentId: string; message: string; evidenceId?: string }
+/** What stopped a turn, as the daemon names it (`agent/error.rs` `Problem`): `plan_limit`,
+    `sign_in_again`… from `chatgpt`, `openrouter` or `anthropic`, and where to fix it outside LoomWatch. */
+export interface TurnProblem { kind: string; source: string; url?: string }
 
 function object(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function turnProblem(value: unknown): TurnProblem | undefined {
+  if (!object(value) || typeof value.kind !== 'string' || typeof value.source !== 'string') return undefined
+  return { kind: value.kind, source: value.source, ...(typeof value.url === 'string' ? { url: value.url } : {}) }
 }
 export function parseEvents(value: unknown): RunEvent[] {
   if (!Array.isArray(value)) throw new Error('The archive returned an invalid event page.')
@@ -198,9 +207,13 @@ export interface ProjectedAgent {
   reply: string
   /** Explicit harness phases distinguish final output from progress text. */
   replyPhaseKnown?: boolean
-  /** What its app reported instead of an answer when its latest turn failed (Codex's
-      `threadStatus: systemError`), in the app's own words. Absent when that turn did not fail. */
+  /** Why its latest turn failed, in the words it was reported in: LoomWatch's own `turn_failed`
+      note, or what its app said instead of an answer (Codex's `threadStatus: systemError`). Absent
+      when that turn did not fail. */
   error?: string
+  /** Which source stopped that turn and why, when LoomWatch knows a way out (a plan's limit, a
+      sign-in that ended): the note's `problem`. */
+  problem?: TurnProblem
   thoughtChars: number
   thoughts: number
   toolCalls: number
@@ -905,6 +918,20 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
           if (p.phase === 'check_send_back_skipped') letters.checkSendBackSkipped(event)
           if (p.phase === 'check_stopped') letters.checkStopped(event)
           if (p.phase === 'delegated_result') letters.delegatedResult(event)
+          // LoomWatch's engine could not finish the turn (`engine/mod.rs` `turn_failed`): a plan's
+          // limit, a sign-in that ended, a source that answered with an error. Nothing follows it
+          // in the record, no `turn_end` and no exit, so this is the turn's end, and its words say
+          // why. A Codex error was already raised at its `turn_end` in the same words.
+          if (p.phase === 'turn_failed' && typeof p.message === 'string' && p.message.trim()) {
+            if (p.message !== agent.error) attention.push({ id: event.id, seq: event.seq, agentId: agent.id, message: p.message })
+            agent.error = p.message
+            agent.problem = turnProblem(p.problem)
+            agent.status = 'failed'
+            agent.task = firstLine(p.message, 80)
+            agent.streaming = false
+            agent.thinking = false
+            letters.turnFailed(event, p.message)
+          }
           if (p.phase === 'permission_answered' && p.outcome === 'auto_approved') {
             autoRan.push({ agentId: agent.id, title: typeof p.title === 'string' ? p.title : 'A command', detail: typeof p.detail === 'string' ? p.detail : null, ts: event.ts })
           }
@@ -1158,6 +1185,7 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
           letters.turnFailed(event, said)
         } else {
           agent.error = undefined
+          agent.problem = undefined
           if (!auxiliaryTurns.has(agent.id)) {
             agent.reply = agent.turnPhaseKnown ? agent.turnText.text : agent.turnText.text || agent.reply
             agent.replyPhaseKnown = agent.turnPhaseKnown
@@ -1225,7 +1253,9 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
   const responderId = context.responder ?? promptAgentId ?? list[0]?.id ?? null
   const responder = responderId ? agents.get(responderId) : undefined
   const responseText = responder?.reply ?? ''
-  const anyFailed = list.some((agent) => agent.status === 'failed')
+  // LoomWatch's own check that could not run leaves the answer as it was (ADR 0098): the daemon
+  // doesn't fail the person's run for a check nobody built into the team, and neither does this.
+  const anyFailed = list.some((agent) => agent.status === 'failed' && agent.id !== LOOMWATCH_CHECK_ID)
 
   let phase: RunPhase
   // CONTRACT §4: no content plus a normal turn with no response is `failed`

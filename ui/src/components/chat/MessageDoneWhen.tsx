@@ -14,7 +14,7 @@ import { Appearing } from './Appearing'
  * dropped item stays, struck through, and the same mark brings it back. A read that failed says so
  * in one quiet line. A read that found nothing shows nothing.
  */
-export function MessageDoneWhen({ runId, doneWhen, live, to }: { runId: string; doneWhen: DoneWhen; live: boolean; to: string }) {
+export function MessageDoneWhen({ runId, doneWhen, live, to, judged }: { runId: string; doneWhen: DoneWhen; live: boolean; to: string; judged: boolean }) {
   // What the daemon answered last, kept with the record it answered: a newer record replaces it.
   const [answered, setAnswered] = useState<{ to: DoneWhen; now: DoneWhen } | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -30,7 +30,8 @@ export function MessageDoneWhen({ runId, doneWhen, live, to }: { runId: string; 
   }
   const open = live && !shown.ended
   const tries = triesShown(shown)
-  const checker = checkerWords(shown)
+  // Who checks, until a check that ended without a verdict would make it read as checked.
+  const checker = judged || !shown.ended ? checkerWords(shown) : null
   const checking = shown.items.some((item) => item.checked)
   const toggle = (index: number, checked: boolean) => {
     setError(null)
@@ -58,7 +59,9 @@ export function MessageDoneWhen({ runId, doneWhen, live, to }: { runId: string; 
         })}
       </ul>
       {tries !== null && <span className="tc-done-tries">Up to {tries} {tries === 1 ? 'try' : 'tries'}</span>}
-      {checking && <p className="tc-done-hint">{shown.ended ? 'The work was checked against these.' : 'The work is checked against these.'}</p>}
+      {/* Once the check has ended, only a verdict on the items says it was checked: LoomWatch's own
+          check can end without one, when it couldn't start. */}
+      {checking && <p className="tc-done-hint">{!shown.ended ? 'The work is checked against these.' : judged ? 'The work was checked against these.' : 'The work wasn’t checked against these.'}</p>}
       {error && <p className="chat-failed" role="alert">{error}</p>}
     </Appearing>
   )
