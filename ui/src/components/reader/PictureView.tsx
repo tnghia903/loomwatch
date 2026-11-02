@@ -8,6 +8,12 @@ import type { Marked } from './PageFrame'
 const CLICK_PX = 6
 /** The smallest box a drag marks, each way; a thinner one was meant as a click. */
 const BOX_MIN_PX = 12
+/**
+ * Taller than this for its width (a whole page's screenshot, a long chart), a picture is read down
+ * the pane rather than fitted in it, where it would be a strip. A phone's screenshot (about 2.2)
+ * still fits.
+ */
+const LONG = 2.4
 
 export interface PictureBox {
   /** The part's id (`partId`): its bubbles' slot is found by it. */
@@ -45,6 +51,7 @@ const isWhole = (at: BoxAt) => at.x === 0 && at.y === 0 && at.w === WHOLE && at.
 export function PictureView({ src, alt, askable, boxes, marking, asking, onMarked, onOpen }: PictureViewProps) {
   const frame = useRef<HTMLDivElement>(null)
   const [drawing, setDrawing] = useState<{ from: Point; to: Point; pointer: number; touch: boolean } | null>(null)
+  const [long, setLong] = useState(false)
   const at = (event: PointerEvent): Point => {
     const box = frame.current?.getBoundingClientRect()
     if (!box || !box.width || !box.height) return { x: 0, y: 0 }
@@ -94,12 +101,13 @@ export function PictureView({ src, alt, askable, boxes, marking, asking, onMarke
   // The larger drawn first, so a smaller box and its bubbles sit over a larger one.
   const drawn = [...boxes].sort((a, b) => b.at.w * b.at.h - a.at.w * a.at.h)
   return (
-    <figure className="rd-picture">
+    <figure className={`rd-picture${long ? ' long' : ''}`}>
       <div ref={frame} className={`rd-picture-frame${askable ? ' askable' : ''}`} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={() => setDrawing(null)}>
         {/* Only the picture is the button: the bubbles on it are buttons of their own. */}
         <span className="rd-picture-target" onKeyDown={askable ? key : undefined} tabIndex={askable ? 0 : undefined}
           role={askable ? 'button' : undefined} aria-label={askable ? `Ask about ${alt}` : undefined}>
-          <img src={src} alt={askable ? '' : alt} draggable={false} />
+          <img src={src} alt={askable ? '' : alt} draggable={false}
+            onLoad={({ currentTarget: { naturalWidth, naturalHeight } }) => setLong(naturalHeight > naturalWidth * LONG)} />
         </span>
         {drawn.map((box) => (
           <div key={box.id} className={`rd-box ${box.look}${box.id === asking ? ' asking' : ''}${isWhole(box.at) ? ' whole' : ''}`} data-part={box.id} style={boxStyle(box.at)}>

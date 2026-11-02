@@ -1,5 +1,5 @@
-import { ExternalLink, FolderOpen, X } from '../ui/icon'
-import { createElement, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
+import { ExternalLink, FolderOpen, Minus, Plus, X } from '../ui/icon'
+import { createElement, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 
 import type { BoxAt, ReplyTo, TimeAt } from '../../lib/chat/client'
@@ -33,6 +33,8 @@ import { useTheme } from '../../lib/theme'
 import { useFileActions } from '../../lib/files/useFile'
 import { useFileText } from '../../lib/files/useFileText'
 import { relativeTime } from '../../lib/format'
+import { zoomWords } from '../../lib/files/zoom'
+import { keys } from '../../lib/platform'
 import { AvatarFace } from '../agents/AvatarFace'
 import { AgentCardPopup } from '../chat/AgentFace'
 import { useAgentCard } from '../../lib/chat/useAgentCard'
@@ -47,6 +49,7 @@ import { PartBubble } from './PartBubble'
 import { PictureView } from './PictureView'
 import { SheetView, type CellEdit, type MarkedCells } from './SheetView'
 import { MediaView } from './MediaView'
+import { useZoom } from './useZoom'
 import { PdfView } from './PdfView'
 
 export interface FileReaderProps {
@@ -261,9 +264,19 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
   const scroller = useRef<HTMLDivElement>(null)
   const page = useRef<HTMLDivElement>(null)
   const bubble = useRef<HTMLDivElement>(null)
+  // A picture or a video fits the pane, and zooms from the bar (not a recording of sound alone).
+  const fits = shown === 'picture' || shown === 'media'
+  const zoom = useZoom(scroller, path, shown === 'picture' || (shown === 'media' && !/^(mp3|wav|m4a)$/.test(extensionOf(path))))
 
   // The words marked now, and where they are on screen.
   const [marked, setMarked] = useState<Marked | null>(null)
+  // A box marked on a picture or a frame is let go of when it zooms: it would grow away from its Ask.
+  const zoomedAt = useRef(zoom.scale)
+  useEffect(() => {
+    if (zoomedAt.current === zoom.scale) return
+    zoomedAt.current = zoom.scale
+    setMarked(null)
+  }, [zoom.scale])
   const [cleared, setCleared] = useState(0)
   const dragging = useRef(false)
   const readSelection = useCallback(() => {
@@ -996,7 +1009,7 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
 
   return (
     <FileOriginContext.Provider value={origin}>
-    <article className={`rd${updated ? ' updated' : ''}`} aria-label={`${fileName}, read here`}>
+    <article className={`rd${updated ? ' updated' : ''}`} aria-label={`${fileName}, read here`} onKeyDown={zoom.onKey}>
       <header className="rd-bar">
         <span className="rd-sheet" aria-hidden="true">
           {createElement(fileIcon(content.file?.kind, path), { size: 15 })}
@@ -1050,6 +1063,19 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
             <button type="button" role="tab" aria-selected={view === 'code'} onClick={() => setView('code')}>Code</button>
           </div>
         )}
+        {/* There from the start, so the bar doesn't move when the file loads; the number once it has.
+            At either end − or + stays focusable, so the keys go on working. */}
+        {zoom.on && (
+          <span className="rd-zoom" role="group" aria-label="Zoom">
+            <button type="button" className="btn btn-icon" onClick={zoom.zoomOut} aria-disabled={!zoom.canOut} aria-label="Zoom out" title={`Zoom out (${keys('⌘−')})`}><Minus size={14} aria-hidden="true" /></button>
+            <button type="button" className="rd-zoom-now" onClick={zoom.whole} aria-pressed={zoom.scale === null}
+              aria-label={zoom.shown === null ? 'Shown whole' : zoom.scale === null ? `${zoomWords(zoom.shown)} of its real size, shown whole` : `${zoomWords(zoom.shown)} of its real size. Show it whole`}
+              title={zoom.shown === null ? 'Shown whole' : zoom.scale === null ? `Shown whole, at ${zoomWords(zoom.shown)} of its real size` : `Show it whole (${keys('⌘0')})`}>
+              {zoom.shown === null ? '' : zoomWords(zoom.shown)}
+            </button>
+            <button type="button" className="btn btn-icon" onClick={zoom.zoomIn} aria-disabled={!zoom.canIn} aria-label="Zoom in" title={`Zoom in (${keys('⌘+')})`}><Plus size={14} aria-hidden="true" /></button>
+          </span>
+        )}
         <span className="rd-acts">
           <button type="button" className="btn btn-icon" onClick={() => void actions.open()} disabled={actions.busy} aria-label={`Open ${fileName} in its own app`} title="Open in its own app"><ExternalLink size={14} aria-hidden="true" /></button>
           <button type="button" className="btn btn-icon" onClick={() => void actions.open(true)} disabled={actions.busy} aria-label={`Show ${fileName} in its folder`} title="Show in folder"><FolderOpen size={14} aria-hidden="true" /></button>
@@ -1070,7 +1096,8 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
       )}
       {cellsView && sheets && sheets.length > 1 && <div ref={setSheetBar} className="rd-sheet-bar" />}
       <div ref={stage} className="rd-stage">
-        <div ref={scroller} className={`rd-scroll${shown === 'page' ? ' rd-scroll-frame' : ' tc-document'}${drawn?.html ? ' drawn' : ''}`} onScroll={onScroll}>
+        <div ref={scroller} className={`rd-scroll${shown === 'page' ? ' rd-scroll-frame' : ' tc-document'}${drawn?.html ? ' drawn' : ''}${fits ? ' fits' : ''}${zoom.width !== null ? ' zoomed' : ''}`} onScroll={onScroll}
+          style={zoom.width !== null ? { '--rd-zoom-w': `${zoom.width}px` } as CSSProperties : undefined}>
           {body}
         </div>
         {drafting && draftMarks.map(({ keys, top, left }) => (
