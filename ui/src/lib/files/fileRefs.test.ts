@@ -136,6 +136,40 @@ describe('fileRefsIn', () => {
     expect(fileRefsIn('See /Users/me/teams/.loomwatch/writer/notes.md.')).toEqual(['/Users/me/teams/.loomwatch/writer/notes.md'])
   })
 
+  it('finds the names an agent lists in plain words under its own folder, named in plain words', () => {
+    const team = '/Users/me/LoomWatch/teams/.loomwatch/loomwatch-marketing'
+    // The shape of a real Marketing lead reply (run 6d5aade5): ffmpeg made the video and its poster,
+    // so the run wrote neither by name, and nothing is in code or a link.
+    const reply = [
+      `Files are in ${team}/video:\n- loomwatch-thread-stops-for-you.mp4\n- loomwatch-thread-stops-for-you-poster.png (a still of the final frame)`,
+      `The frames used for the check are in ${team}/checker:\n- frame-1s.png\n- frame-13.5s.png`,
+    ].join('\n\n')
+    expect(fileRefsIn(reply, [], `${team}/lead`)).toEqual([
+      `${team}/video/loomwatch-thread-stops-for-you.mp4`, `${team}/video/loomwatch-thread-stops-for-you-poster.png`,
+      `${team}/checker/frame-1s.png`, `${team}/checker/frame-13.5s.png`,
+    ])
+    expect(withFolderPaths(reply).split('\n')[2]).toBe(`- \`${team}/video/loomwatch-thread-stops-for-you-poster.png\` (a still of the final frame)`)
+    // In bold, numbered, at the end of a sentence, from a folder inside, or with a name in code.
+    expect(fileRefsIn(`Saved to ${team}/video/out.\n\n1. **cut.mp4** is the video.\n2. drafts/poster.png.\n- \`still.png\``)).toEqual([`${team}/video/out/cut.mp4`, `${team}/video/out/drafts/poster.png`, `${team}/video/out/still.png`])
+    // On Windows.
+    const win = 'C:\\Users\\ana\\LoomWatch\\teams\\.loomwatch\\launch\\writer'
+    expect(fileRefsIn(`In ${win}:\n- plan.docx`)).toEqual([`${win}\\plan.docx`])
+  })
+
+  it('leaves plain names alone unless they head a list under a folder an agent works in', () => {
+    const maker = '/Users/me/LoomWatch/teams/.loomwatch/news/writer'
+    // The person's own folder, or LoomWatch's: nothing there says the agent made it.
+    expect(fileRefsIn('Files are in /Users/me/project/design:\n- architecture.html')).toEqual([])
+    expect(fileRefsIn(`In ${maker}/.agents/skills:\n- deck.md\n\nIn ${maker}/knowledge:\n- brief.md\n\nIn ${maker}:\n- AGENTS.md`)).toEqual([])
+    // In running words, not heading the item, a folder after or in another passage, not a kind of file.
+    expect(fileRefsIn(`In ${maker} I read notes.md first.\n- It cites brief.pdf`)).toEqual([])
+    expect(fileRefsIn(`- plan.md\nare in ${maker}.\n\nFiles are in ${maker}:\n\nSee below.\n- notes.md`)).toEqual([])
+    expect(fileRefsIn(`In ${maker}:\n- v1.2\n- example.com/x\n- ../secret.md\n- .env.md\n- ~/x.md\n- page.tsx`)).toEqual([])
+    // A link's words, and fenced code, stay as written.
+    const kept = `In ${maker}:\n- [plan.md](https://example.com/plan)\n\n\`\`\`\nIn ${maker}:\n- deck.pptx\n\`\`\``
+    expect(withFolderPaths(kept)).toBe(kept)
+  })
+
   it('finds a full path with spaces when the reply sets it off in bold or quotes', () => {
     const deck = '/Users/John Smith/LoomWatch/teams/.loomwatch/review/maker/Q3 Report.pptx'
     expect(fileRefsIn(`The deck is ready: **${deck}**`)).toEqual([deck])

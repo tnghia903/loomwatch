@@ -125,7 +125,8 @@ a few lines), as the chat shows a message, by the figure and name of the agent w
 bubble, with its title on hover; then, past a thin line, each file its answer names that
 LoomWatch can show and that is on this computer, by its name and the mark of its kind. A file the
 work wrote counts even when the answer names it in plain words, by its name or path, with no code
-or link around it. In the chat
+or link around it. So does one an agent made with a command in its own folder, by its full path or
+by its name listed under that folder. In the chat
 such an answer stays short, a card with its title, opening words and length, whose **Open** shows
 its tab. Once the newest work has finished well, the pane opens on what it came to, or switches
 to it when it is open on the newest work and you haven't chosen a tab: the first page, document,

@@ -194,58 +194,103 @@ export function fileRefsIn(markdown: string, touched: readonly string[] = [], ag
  *
  * A file an agent made with a command (`python make_deck.py`) was never written by name. Its full
  * path in plain words becomes a file too when it is in an agent's own folder, where LoomWatch keeps
- * the team's work ([`madeByAgent`]): what is there, the work made.
+ * the team's work ([`madeByAgent`]): what is there, the work made. So does a name listed under such
+ * a folder given in plain words, in code or heading a list item, with the folder said before it:
+ *
+ *     Files are in /Users/me/teams/.loomwatch/launch/video:
+ *     - launch.mp4
+ *     - poster.png (a still of the final frame)
  */
 export function withFolderPaths(markdown: string, touched: readonly string[] = [], agentFolder: string | null = null, written: readonly string[] = []): string {
   const home = agentFolder && isAbsolutePath(agentFolder) ? agentFolder : null
   const lines = markdown.split('\n')
-  const passages = passagesOf(lines)
-  for (const passage of passages) {
+  const named = plainNames(written)
+  for (const passage of passagesOf(lines)) {
     const folders: Array<{ at: number; path: string }> = []
+    const plainFolders: Array<{ at: number; path: string }> = []
     passage.forEach((index, order) => {
       for (const match of lines[index].matchAll(MENTION)) {
         const path = folderPathFrom(match[1] ?? match[2] ?? match[3])
         if (path) folders.push({ at: order * LINE + (match.index ?? 0), path })
       }
+      for (const { at, words } of plainStretches(lines[index])) {
+        for (const match of words.matchAll(PLAIN_FOLDER)) {
+          const path = folderPathFrom(match[2].replace(/[.,;:!?]+$/, ''))
+          if (path) plainFolders.push({ at: order * LINE + at + match.index + match[1].length, path })
+        }
+      }
     })
-    if (!folders.length && !touched.length && !home) continue
-    // The nearest folder named before the name, else the first one named after it.
+    // The nearest folder named before the name, else the first one named after it; one named in plain
+    // words, only before it.
     const folderFor = (at: number) => folders.filter((folder) => folder.at < at).at(-1)?.path ?? folders.find((folder) => folder.at > at)?.path
-    passage.forEach((index, order) => {
-      lines[index] = lines[index].replace(MENTION, (whole: string, span?: string, href?: string, _url?: string, offset = 0) => {
-        if (span === undefined && href === undefined) return whole
-        const named = span ?? decodedLink(href)
-        const relative = relativeFileFrom(named)
-        const folder = relative ? folderFor(order * LINE + offset) : undefined
-        const path = relative && folder ? joinPath(folder, relative) : touchedFile(named, touched) ?? (href !== undefined ? fileUnder(home, named) : null)
-        if (!path) return whole
-        return span !== undefined ? `\`${path}\`` : `](${linkTarget(path)})`
+    const plainFolderFor = (at: number) => plainFolders.filter((folder) => folder.at < at).at(-1)?.path
+    if (folders.length || plainFolders.length || touched.length || home) {
+      passage.forEach((index, order) => {
+        lines[index] = lines[index].replace(MENTION, (whole: string, span?: string, href?: string, _url?: string, offset = 0) => {
+          if (span === undefined && href === undefined) return whole
+          const named = span ?? decodedLink(href)
+          const relative = relativeFileFrom(named)
+          const folder = relative ? folderFor(order * LINE + offset) : undefined
+          const path = relative && folder ? joinPath(folder, relative) : touchedFile(named, touched) ?? (href !== undefined ? fileUnder(home, named) : madeUnder(plainFolderFor(order * LINE + offset), relative))
+          if (!path) return whole
+          return span !== undefined ? `\`${path}\`` : `](${linkTarget(path)})`
+        })
       })
+    }
+    passage.forEach((index, order) => {
+      if (named) lines[index] = inPlainWords(lines[index], named)
+      // A path set off in bold or quotes may hold spaces; one in running words can't, as where it
+      // ends would be a guess. Each its own pass, so the first one's code spans are kept from the second.
+      lines[index] = inPlainWords(lines[index], setOffPaths)
+      lines[index] = inPlainWords(lines[index], madePaths)
+      const folder = plainFolderFor(order * LINE)
+      if (folder) {
+        lines[index] = lines[index].replace(LISTED_NAME, (whole, head: string, name: string) => {
+          const path = madeUnder(folder, relativeFileFrom(name))
+          return path ? `${head}\`${path}\`` : whole
+        })
+      }
     })
-  }
-  const named = plainNames(written)
-  for (const index of passages.flat()) {
-    if (named) lines[index] = inPlainWords(lines[index], named)
-    // A path set off in bold or quotes may hold spaces; one in running words can't, as where it ends
-    // would be a guess. Each its own pass, so the first one's code spans are kept from the second.
-    lines[index] = inPlainWords(lines[index], setOffPaths)
-    lines[index] = inPlainWords(lines[index], madePaths)
   }
   return lines.join('\n')
+}
+
+// A full path without spaces from `/` or a drive, standing alone, as a folder may be named in plain
+// words. What ends a sentence after it is taken off.
+const PLAIN_FOLDER = /(^|[\s(["'“‘*])((?:\/|[A-Za-z]:[\\/])[^\s`'"()<>[\]*]*)/g
+
+// A name heading a list item in plain words, or in bold: `- poster.png (a still)`, `1. **cut.mp4** is…`.
+const LISTED_NAME = /^(\s*(?:[-*+]|\d+[.)])\s+(?:\*\*)?)((?:[^\s`'"()<>[\]*\\/]+\/)*[^\s`'"()<>[\]*\\/]*\.[A-Za-z0-9]{1,8})(?=(?:\*\*)?(?:$|[\s)\]"'”’,;:!?]|\.(?:\s|$)))/
+
+/** A name ([`relativeFileFrom`]) as its full path under `folder`, if that is a file an agent made ([`madeByAgent`]). */
+function madeUnder(folder: string | undefined, relative: string | null): string | null {
+  const path = folder && relative ? joinPath(folder, relative) : null
+  return path && madeByAgent(path) ? path : null
 }
 
 // What plain words may not be read inside: code, a link with its words, an HTML tag or a web address.
 const KEPT = /`[^`\n]*`|!?\[[^\]\n]*\]\([^)\n]*\)|<[^>\n]*>|[A-Za-z][A-Za-z0-9+.-]*:\/\/\S+/g
 
+/** A line's plain words ([`KEPT`]), each stretch with where on the line it starts. */
+function plainStretches(line: string): Array<{ at: number; words: string }> {
+  const stretches: Array<{ at: number; words: string }> = []
+  let at = 0
+  for (const match of line.matchAll(KEPT)) {
+    stretches.push({ at, words: line.slice(at, match.index) })
+    at = match.index + match[0].length
+  }
+  return [...stretches, { at, words: line.slice(at) }]
+}
+
 /** A line with `resolve` applied to its plain words alone ([`KEPT`]). */
 function inPlainWords(line: string, resolve: (words: string) => string): string {
   let out = ''
-  let at = 0
-  for (const match of line.matchAll(KEPT)) {
-    out += resolve(line.slice(at, match.index)) + match[0]
-    at = match.index + match[0].length
+  let end = 0
+  for (const { at, words } of plainStretches(line)) {
+    out += line.slice(end, at) + resolve(words)
+    end = at + words.length
   }
-  return out + resolve(line.slice(at))
+  return out
 }
 
 // A full path without spaces, from `/` or a drive to an extension, standing alone as a name does
