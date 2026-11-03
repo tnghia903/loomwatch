@@ -127,6 +127,12 @@ impl Sender for Apns {
                 };
                 (token, format!("{}.push-type.liveactivity", self.key.topic))
             }
+            Push::Widgets => {
+                let Some(token) = &to.widget_token else {
+                    return Sent::Failed("the phone has no widgets that take pushes".to_owned());
+                };
+                (token, format!("{}.push-type.widgets", self.key.topic))
+            }
             Push::Notice(_) | Push::Changed { .. } => (&to.token, self.key.topic.clone()),
         };
         let mut request = self

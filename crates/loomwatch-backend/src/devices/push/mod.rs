@@ -81,6 +81,10 @@ pub struct PushTarget {
     /// someone starts waiting. Absent when its Live Activities are turned off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub start_token: Option<String>,
+    /// The token of the phone's widgets, in hex, so they read this computer again whenever what
+    /// they show changes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub widget_token: Option<String>,
 }
 
 /// A Live Activity on the phone: the work it follows, and its own push token from `ActivityKit`.
@@ -137,10 +141,10 @@ impl PushTarget {
             && self.activity.as_ref().is_none_or(|activity| {
                 hex(&activity.token, 400) && (1..=200).contains(&activity.run.len())
             })
-            && self
-                .start_token
-                .as_ref()
-                .is_none_or(|token| hex(token, 400))
+            && [&self.start_token, &self.widget_token]
+                .into_iter()
+                .flatten()
+                .all(|token| hex(token, 400))
     }
 }
 
@@ -254,6 +258,8 @@ pub enum Push {
         path: String,
         state: Value,
     },
+    /// What the phone's widgets show changed: they read this computer again, closed app or not.
+    Widgets,
 }
 
 impl Push {
@@ -294,6 +300,7 @@ impl Push {
                     "input-push-token": 1,
                 },
             }),
+            Self::Widgets => json!({ "aps": { "content-changed": true } }),
         }
     }
 
@@ -302,6 +309,7 @@ impl Push {
     pub fn kind(&self) -> &'static str {
         match self {
             Self::Activity { .. } | Self::Start { .. } => "liveactivity",
+            Self::Widgets => "widgets",
             Self::Notice(_) | Self::Changed { .. } => "alert",
         }
     }
@@ -322,6 +330,7 @@ impl Push {
         match self {
             Self::Notice(notice) => Some(notice.collapse_id()),
             Self::Changed { .. } => Some("changed".to_owned()),
+            Self::Widgets => Some("widgets".to_owned()),
             Self::Activity { .. } | Self::Start { .. } => None,
         }
     }
@@ -339,7 +348,8 @@ pub enum Sent {
 }
 
 /// What sends a push: Apple's service with the person's own key today. A Live Activity's push
-/// goes to `to.activity`'s token, a start to `to.start_token`, the rest to the app's.
+/// goes to `to.activity`'s token, a start to `to.start_token`, the widgets' to
+/// `to.widget_token`, the rest to the app's.
 #[async_trait]
 pub trait Sender: Send + Sync {
     async fn send(&self, to: &PushTarget, push: &Push) -> Sent;
@@ -445,6 +455,11 @@ pub fn spawn(devices: Arc<Devices>, keys: KeyPlace, home: &str) {
                         }
                         (Push::Start { .. }, _, Some(token)) => {
                             devices.forget_start_token(&id, token);
+                        }
+                        (Push::Widgets, _, _) => {
+                            if let Some(token) = &target.widget_token {
+                                devices.forget_widget_token(&id, token);
+                            }
                         }
                         _ => devices.forget_push_token(&id, &target.token),
                     },

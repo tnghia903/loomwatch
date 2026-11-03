@@ -39,6 +39,7 @@ fn target() -> PushTarget {
         quiet: None,
         activity: None,
         start_token: None,
+        widget_token: None,
     }
 }
 
@@ -690,6 +691,15 @@ fn a_phones_live_activity_is_kept_with_it_until_it_ends() {
     assert_eq!(devices.push_targets()[0].1, startable());
     devices.forget_start_token(&phone.id, START);
     assert_eq!(devices.push_targets()[0].1, target());
+    let widgets = PushTarget {
+        widget_token: Some(WIDGETS.to_owned()),
+        ..target()
+    };
+    assert!(devices.set_push(&phone.id, Some(widgets.clone())));
+    devices.forget_widget_token(&phone.id, "another");
+    assert_eq!(devices.push_targets()[0].1, widgets);
+    devices.forget_widget_token(&phone.id, WIDGETS);
+    assert_eq!(devices.push_targets()[0].1, target());
 }
 
 /// The phone's token for starting a Live Activity.
@@ -894,6 +904,108 @@ async fn a_start_goes_to_the_phones_start_token() {
     assert_eq!(seen[0]["body"]["aps"]["event"], "start");
 }
 
+/// The token of the phone's widgets.
+const WIDGETS: &str = "c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00";
+
+#[test]
+fn the_phones_widgets_read_this_computer_again_whenever_what_they_show_changes() {
+    let now = Utc::now();
+    let mut watch = Watch::default();
+    let phone = PushTarget {
+        widget_token: Some(WIDGETS.to_owned()),
+        ..target()
+    };
+    let phones = [("phone".to_owned(), phone)];
+    watch.next(&home_at(&[], &[], &[]), &phones, now);
+    let steps = [
+        (
+            "work starts",
+            home_at(&[], &[at_work("r1")], &[]),
+            "changed",
+        ),
+        (
+            "it stops at its spending limit",
+            home_at(&[spend("r1", "s1")], &[at_work("r1")], &[]),
+            "notice",
+        ),
+        (
+            "raised on this computer",
+            home_at(&[], &[at_work("r1")], &[]),
+            "changed",
+        ),
+        (
+            "it finishes",
+            home_at(&[], &[], &[finished("r1", "succeeded")]),
+            "notice",
+        ),
+    ];
+    for (step, home, first) in steps {
+        let sent = pushes(&watch.next(&home, &phones, now));
+        assert_eq!(sent.len(), 2, "{step}: {sent:?}");
+        assert_eq!(
+            matches!(sent[0], Push::Notice(_)),
+            first == "notice",
+            "{step}: {sent:?}"
+        );
+        assert_eq!(
+            sent[1],
+            Push::Widgets,
+            "{step}: the widgets read it, app closed or not"
+        );
+        assert!(watch.next(&home, &phones, now).is_empty(), "{step}: once");
+    }
+    let quiet = [("phone".to_owned(), target())];
+    let mut watch = Watch::default();
+    watch.next(&home_at(&[], &[], &[]), &quiet, now);
+    assert!(
+        !pushes(&watch.next(&home_at(&[], &[at_work("r1")], &[]), &quiet, now))
+            .contains(&Push::Widgets),
+        "no widget token, no widget push"
+    );
+}
+
+#[test]
+fn a_widget_push_that_didnt_go_goes_again() {
+    let now = Utc::now();
+    let mut watch = Watch::default();
+    let phone = PushTarget {
+        widget_token: Some(WIDGETS.to_owned()),
+        ..target()
+    };
+    let phones = [("phone".to_owned(), phone)];
+    watch.next(&home_at(&[], &[], &[]), &phones, now);
+    let working = home_at(&[], &[at_work("r1")], &[]);
+    watch.next(&working, &phones, now);
+    watch.undo("phone", &Push::Widgets);
+    assert_eq!(pushes(&watch.next(&working, &phones, now)), [Push::Widgets]);
+}
+
+#[tokio::test]
+async fn a_widget_push_goes_to_the_widgets_token() {
+    let seen: Seen = Arc::default();
+    let apns = Apns::at(push_key(), &apple(seen.clone()).await);
+    let phone = PushTarget {
+        widget_token: Some(WIDGETS.to_owned()),
+        ..target()
+    };
+    assert_eq!(apns.send(&phone, &Push::Widgets).await, Sent::Done);
+    assert!(
+        matches!(apns.send(&target(), &Push::Widgets).await, Sent::Failed(_)),
+        "no widget token, no push"
+    );
+    let seen = seen.lock().unwrap();
+    assert_eq!(seen.len(), 1);
+    assert_eq!(seen[0]["token"], WIDGETS);
+    assert_eq!(seen[0]["topic"], "loomwatch.phone.push-type.widgets");
+    assert_eq!(seen[0]["type"], "widgets");
+    assert_eq!(seen[0]["priority"], "10");
+    assert_eq!(seen[0]["collapse"], "widgets");
+    assert_eq!(
+        seen[0]["body"],
+        json!({ "aps": { "content-changed": true } })
+    );
+}
+
 #[test]
 fn quiet_hours_within_one_day_and_across_midnight() {
     let at = |hour, minute| Utc.with_ymd_and_hms(2026, 11, 1, hour, minute, 0).unwrap();
@@ -1015,6 +1127,16 @@ async fn a_phone_gives_its_own_token_at_the_door_and_hears_whether_this_computer
         devices.push_targets()[0].1.start_token.as_deref(),
         Some(START)
     );
+    followed["startToken"] = json!(START);
+    followed["widgetToken"] = json!(WIDGETS);
+    assert_eq!(put("phone-key", followed.clone()).await.status(), 200);
+    assert_eq!(
+        devices.push_targets()[0].1.widget_token.as_deref(),
+        Some(WIDGETS)
+    );
+    followed["widgetToken"] = json!("not hex");
+    assert_eq!(put("phone-key", followed.clone()).await.status(), 400);
+    followed["widgetToken"] = Value::Null;
     followed["startToken"] = json!("not hex");
     assert_eq!(put("phone-key", followed).await.status(), 400);
     // A computer has no push token: the route is the phone's.

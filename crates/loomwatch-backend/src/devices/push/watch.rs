@@ -26,6 +26,8 @@ struct Phone {
     told: HashSet<String>,
     /// What it was last brought in step with; `None` sends it again.
     shown: Option<Shown>,
+    /// What its widgets were last told to read again for; `None` sends it again.
+    widgets: Option<Shown>,
     /// Its Live Activity's token, and what it shows.
     activity: Option<(String, Live)>,
     /// Starting one from here, while it has none.
@@ -88,6 +90,7 @@ impl Watch {
             let phone = self.phones.entry(id.clone()).or_insert_with(|| Phone {
                 told: current.clone(),
                 shown: Some(shown.clone()),
+                widgets: Some(shown.clone()),
                 activity: None,
                 starting: Starting::Idle,
             });
@@ -109,6 +112,11 @@ impl Watch {
                 }
                 phone.shown = Some(shown.clone());
             }
+            // The widgets read this computer again themselves, even with the app swiped away.
+            if target.widget_token.is_some() && phone.widgets.as_ref() != Some(&shown) {
+                push(Push::Widgets);
+            }
+            phone.widgets = Some(shown.clone());
 
             let next = if let Some(activity) = &target.activity {
                 phone.starting = Starting::Idle;
@@ -144,6 +152,7 @@ impl Watch {
                 }
             }
             Push::Start { run, .. } => phone.starting = Starting::Next(run.clone()),
+            Push::Widgets => phone.widgets = None,
         }
     }
 }

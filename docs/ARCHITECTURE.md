@@ -464,8 +464,8 @@ iPhone or another computer connects to it and keeps nothing but a key of its own
   which, with Try again and Use LoomWatch on this computer, which forgets the connection and exits
   with 76 again. `loomwatchd disconnect` does the same from a terminal.
 - **Push to an iPhone.** A paired phone gives its Apple push token, its notification settings,
-  its Live Activity's own token with the run it follows, and its token for starting one at
-  `PUT /phone/v0/push` (`DELETE` stops it). The door answers this itself, since it knows which phone is asking, and keeps them
+  its Live Activity's own token with the run it follows, its token for starting one, and its
+  widgets' token at `PUT /phone/v0/push` (`DELETE` stops it). The door answers this itself, since it knows which phone is asking, and keeps them
   with the device in `devices.json`. Every 3 s `push::spawn` reads what the phone's home screen
   would show, and keeps each phone in step with it (`push/watch.rs`):
   - **News** is a notice: someone waiting (a question, a review stop, a permission ask, a spending
@@ -490,6 +490,9 @@ iPhone or another computer connects to it and keeps nothing but a key of its own
     when someone in work starts waiting: the read after the wait's notice, with ids only (the
     phone names the team) and the alert Apple requires, in words nobody wrote and with no sound.
     Once, until the phone gives that activity's own token or says it has none.
+  - **The widgets** get a push of their own (`widgets`, `content-changed`) whenever who waits or
+    which work is under way changes, news or not. It reloads them, and they read this computer
+    themselves, with the app closed or swiped away.
 
   A push carries only ids (`target`, `run`, `node`, `room`); the phone's notification extension
   reads the words from here over the person's Tailscale, so nothing anyone wrote passes through

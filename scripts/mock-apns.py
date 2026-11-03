@@ -7,7 +7,8 @@ body. A push to the token "gone" is answered 410, as Apple answers for an app th
 
 With SIM set to a simulator's id (`xcrun simctl list devices`), each app push (an alert, or a
 silent one that wakes the app) is also handed to that simulator's LoomWatch with `xcrun simctl
-push`. A Live Activity's own pushes are only written down: `simctl` delivers app pushes alone.
+push`. A Live Activity's and the widgets' own pushes are only written down: `simctl` delivers
+app pushes alone.
 
 Usage: python3 scripts/mock-apns.py [port] [log]   (default 4300, ./pushes.jsonl)
 """

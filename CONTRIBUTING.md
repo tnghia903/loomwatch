@@ -56,7 +56,8 @@ requests that make it run a command, write a file or hand out research.
 To see what LoomWatch pushes to a paired iPhone, point it at the stand-in for Apple's push service
 in [scripts/mock-apns.py](scripts/mock-apns.py), which writes each push to a file, one JSON line
 each, and answers as Apple does. With `SIM` set to a simulator's id it also hands each app push to
-that simulator. Keep a push key made for the trial (`loomwatchd push-key set`, any P-256 `.p8`):
+that simulator; a Live Activity's and the widgets' own pushes are only written down. Keep a push
+key made for the trial (`loomwatchd push-key set`, any P-256 `.p8`):
 
 ```sh
 python3 scripts/mock-apns.py 4300 /tmp/lw-trial/pushes.jsonl &
