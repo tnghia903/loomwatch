@@ -72,6 +72,16 @@ describe('PermissionModeMenu', () => {
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
   })
 
+  it('switches when a choice is clicked in Safari, where pressing a button gives it no focus', () => {
+    // WebKit blurs the focused item with no relatedTarget on mousedown, before the click lands.
+    const onChange = vi.fn()
+    render(<PermissionModeMenu mode="ask" onChange={onChange} />)
+    fireEvent.click(screen.getByRole('button', { name: /Ask me/ }))
+    fireEvent.blur(screen.getByRole('menuitemradio', { name: /Ask me/ }), { relatedTarget: null })
+    fireEvent.click(screen.getByRole('menuitemradio', { name: /Auto/ }))
+    expect(onChange).toHaveBeenCalledWith('auto')
+  })
+
   it('is a statement, not a control, when the team cannot be changed from here', () => {
     render(<PermissionModeMenu mode="auto" />)
     expect(screen.getByRole('button', { name: /Auto/ })).toBeDisabled()
