@@ -2368,6 +2368,33 @@ fn decide(to: Option<&Target>, live: &[RunRecord]) -> Decided {
     }
 }
 
+/// Answer the question `agent` asked you in `run_id`, if it is waiting on one, with the chat message
+/// `note` that just queued for it (ADR 0110). The chat's box says the message goes to that agent,
+/// so it reaches it as the Answer button's words would, and the agent is not left asking again.
+/// The run's record once answered; `None` when nothing was answered and the note simply waits.
+async fn answer_its_question(
+    state: &ChatState,
+    run_id: &str,
+    agent: &str,
+    note: &str,
+    text: String,
+) -> Option<RunRecord> {
+    let desk = state.registry.operator_desk(state.archive.as_ref());
+    let waiting = desk.waiting_for(run_id, agent)?;
+    if waiting.kind != crate::operator::StopKind::Question {
+        return None;
+    }
+    let answer = crate::operator::OperatorAnswer {
+        text,
+        send_back: None,
+        answer_event_id: crate::engine::new_event_id(),
+        unanswered: false,
+        note: Some(note.to_owned()),
+    };
+    // The question was answered another way in the meantime: the note waits, as any note does.
+    desk.deliver(run_id, agent, answer).await.ok()
+}
+
 /// Refuse a message the rule cannot route: empty, oversized, or addressed to someone who is not an
 /// agent of this team.
 fn check_message(text: &str, to: Option<&Target>, team: &TeamConfig) -> Result<(), ApiError> {
@@ -2760,8 +2787,24 @@ async fn send_message(
             reply: replied.as_ref().map(crate::Replied::quoted),
             files: message.files.clone(),
         };
+        let answer = note.text.clone();
         match state.registry.queue_note(run_id, note) {
             Ok(record) => {
+                // Boxed, as is the answer below: held over the awaits inline, they take every
+                // caller of `send_message` over Clippy's 16 KB `large_futures` limit.
+                let mut record = Box::new(record);
+                // An agent waiting on its question to you takes this as the answer (ADR 0110).
+                if let Some(answered) = Box::pin(answer_its_question(
+                    &state,
+                    run_id,
+                    agent,
+                    &message.id,
+                    answer,
+                ))
+                .await
+                {
+                    *record = answered;
+                }
                 message.route = Route::Note;
                 message.run_id = Some(run_id.clone());
                 message.agent_id = Some(agent.clone());
@@ -5003,6 +5046,105 @@ mod tests {
             "{}",
             writer[0]
         );
+    }
+
+    /// ADR 0110: a message to an agent waiting on its question to you is the answer. The question
+    /// closes, the agent's next turn is your words as its answer, and a note that waited for it
+    /// goes in the same turn, so neither is held back behind the agent asking again.
+    #[tokio::test]
+    async fn a_message_to_an_agent_waiting_on_its_question_answers_it() {
+        use crate::test_support::{stand_in, turn};
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        let (researcher, _) = stand_in(vec![
+            turn(&["today's digest"], "asked and stopped").calling(
+                "ask_user",
+                json!({"question": "Which region?"}),
+                "\"parked\":true",
+            ),
+            turn(
+                &["Record where this work stands"],
+                "## Done\nwork\n\n## Next\nnothing",
+            ),
+            turn(&[], "researcher covered Asia, briefly").in_order(&[
+                "## Direction from you",
+                "Asia only",
+                "## Also from you while you waited",
+                "and keep it short",
+            ]),
+        ]);
+        let (writer, _) = agent("writer", FirstTurn::Answered);
+        std::fs::write(
+            dir.0.join("news.yaml"),
+            format!(
+                "schemaVersion: 1\nid: news-desk\nname: News desk\nentrypoint: researcher\nagents:\n  - id: researcher\n    name: Researcher\n    role: find the news\n    model: {researcher}\n  - id: writer\n    name: Writer\n    role: write the digest\n    model: {writer}\nedges:\n  - from: researcher\n    to: writer\n    layer: configured\n    kind: sequence\n    ts: 2026-09-13T00:00:00Z\n"
+            ),
+        )
+        .unwrap();
+        let rig = rig(pool, &dir);
+        let (_, started) = send(
+            &rig.app,
+            json!({"teamPath": "news.yaml", "text": "today's digest", "to": {"kind": "team"}}),
+        )
+        .await;
+        let run_id = started["run"]["runId"].as_str().unwrap().to_owned();
+        let asked = wait_for(&rig.registry, &run_id, |run| run.waiting_on.is_some()).await;
+        assert_eq!(
+            asked.waiting_on.as_ref().unwrap()["question"],
+            "Which region?"
+        );
+        // A note that reached it before it asked, still waiting for its turn to end.
+        rig.registry
+            .queue_note(
+                &run_id,
+                QueuedNote {
+                    id: "earlier".to_owned(),
+                    agent: "researcher".to_owned(),
+                    text: "and keep it short".to_owned(),
+                    sent_at: now(),
+                    now: false,
+                    reply: None,
+                    files: Vec::new(),
+                },
+            )
+            .unwrap();
+
+        // What the chat's box says goes to Researcher while it works.
+        let (status, sent) = send(
+            &rig.app,
+            json!({"teamPath": "news.yaml", "text": "Asia only", "to": {"kind": "agent", "agent": "researcher"}}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{sent}");
+        assert_eq!(sent["route"], "note");
+        // The question closed when the message was sent, as the Answer button closes it.
+        assert!(
+            sent["run"].is_object() && sent["run"]["waitingOn"].is_null(),
+            "{sent}"
+        );
+
+        let done = wait_for(&rig.registry, &run_id, |run| run.status.is_terminal()).await;
+        assert_eq!(done.status, RunStatus::Succeeded, "{done:?}");
+        assert!(
+            done.waiting_on.is_none() && done.queued_notes.is_empty(),
+            "{done:?}"
+        );
+        let researcher = prompts(&rig.archive, &run_id, "researcher").await;
+        assert_eq!(researcher.len(), 3, "it asked nothing more: {researcher:?}");
+
+        // The question is closed by the message, and the run view pairs them.
+        let questions = rig.archive.questions().list(&run_id).await.unwrap();
+        assert_eq!(questions.len(), 1, "{questions:?}");
+        let answer_id = questions[0].answer_event_id.clone().expect("answered");
+        let id = sent["message"]["id"].as_str().unwrap();
+        let events = rig.archive.load_session(&run_id).await.unwrap();
+        let answer = events.iter().find(|event| event.id == answer_id).unwrap();
+        assert_eq!(answer.payload["content"]["text"], "Asia only");
+        assert_eq!(answer.raw.as_ref().unwrap()["noteId"], id);
+        // Both are marked as reaching it.
+        let store = rig.registry.chat_store().unwrap();
+        let message = store.get(id).await.unwrap().unwrap();
+        assert!(message.delivered_at.is_some(), "{message:?}");
     }
 
     /// ADR 0083, decision 10: only `LoomWatch` marks a message as a team's handed-back work. A page

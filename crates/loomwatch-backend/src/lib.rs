@@ -1075,7 +1075,7 @@ async fn run_pipeline_nodes(
         // from there — so the reply this pipeline goes on to use is the one after the answer.
         let mut session = StageSession { process, recorder };
         while let Some(wait) = bus.take_pending_question(agent_id).await {
-            let (resumed, answer) = answer_a_parked_question(
+            let (resumed, turn) = answer_a_parked_question(
                 AskedQuestion {
                     team,
                     agent,
@@ -1094,7 +1094,7 @@ async fn run_pipeline_nodes(
             session = resumed;
             reply = session
                 .process
-                .prompt_turn(&mut session.recorder, &turn_for(&answer))
+                .prompt_turn(&mut session.recorder, &turn)
                 .await
                 .with_context(|| format!("pipeline node {} failed after your answer", agent.id))?;
         }
@@ -1450,7 +1450,7 @@ pub(crate) async fn answer_parked_questions(
     while let Some(wait) = asked.bus.take_pending_question(&asked.agent.id).await {
         // Boxed: parking and reopening the session is most of a round's future, and the rounds
         // that await this would be over Clippy's 16 KB `large_futures` limit with it inline.
-        let (resumed, answer) = Box::pin(answer_a_parked_question(
+        let (resumed, turn) = Box::pin(answer_a_parked_question(
             AskedQuestion { ..asked },
             session,
             wait,
@@ -1459,18 +1459,20 @@ pub(crate) async fn answer_parked_questions(
         session = resumed;
         reply = session
             .process
-            .prompt_turn(&mut session.recorder, &turn_for(&answer))
+            .prompt_turn(&mut session.recorder, &turn)
             .await?;
     }
     Ok((session, reply))
 }
 
-/// Park a stage that called `ask_user`, wait for the answer, and bring its session back.
+/// Park a stage that called `ask_user`, wait for the answer, and bring its session back. Returns
+/// the session and the turn the answer becomes, which carries every note the person sent the agent
+/// while it waited (ADR 0110).
 async fn answer_a_parked_question(
     asked: AskedQuestion<'_>,
     mut session: StageSession,
     wait: operator::OperatorWait,
-) -> Result<(StageSession, operator::OperatorAnswer)> {
+) -> Result<(StageSession, String)> {
     let agent_id = asked.agent.id.as_str();
     let run_id = asked.shared_log.map(EventLog::session_id);
     let boundary = StageBoundary {
@@ -1527,10 +1529,32 @@ async fn answer_a_parked_question(
         asked.exit_timeout,
     )
     .await?;
-    let session = park.into_session().with_context(|| {
+    let mut session = park.into_session().with_context(|| {
         format!("{agent_id}'s session could not be reopened to take your answer")
     })?;
-    Ok((session, answer))
+    // Notes sent to it while it waited go in with the answer, not after it asks nothing more: a
+    // second question would otherwise hold them back again.
+    let notes = match (asked.lineage.operator.as_ref(), run_id) {
+        (Some(desk), Some(run_id)) => {
+            let notes = desk.registry().take_notes(run_id, agent_id);
+            // A "Send now" while it waited stopped no turn, and must not cut short this one.
+            if let Some(interrupt) = &session.recorder.interrupt {
+                interrupt.clear();
+            }
+            hand_over_notes(
+                desk,
+                &mut session,
+                asked.shared_log,
+                agent_id,
+                &notes,
+                answer.note.as_deref(),
+            )
+            .await?;
+            notes
+        }
+        _ => Vec::new(),
+    };
+    Ok((session, turn_for(&answer, &notes)))
 }
 
 /// Say, on the run record, that the agent behind a question is now parked.
@@ -1606,40 +1630,7 @@ impl<'a> Work<'a> {
             if let Some(interrupt) = &session.recorder.interrupt {
                 interrupt.clear();
             }
-            if let Some(log) = log {
-                for note in &notes {
-                    // Archived exactly like a note to a kept-alive agent: under the reserved
-                    // operator id, addressed `to` the agent, so the run view shows it as a note
-                    // and pairs it with the turn that answers it.
-                    log.append(
-                        config::RESERVED_OPERATOR_ID,
-                        EventKind::Message,
-                        json!({"role": "user", "content": {"type": "text", "text": note.text}}),
-                        Some(json!({
-                            "source": "loomwatch",
-                            "phase": "operator_answer",
-                            "to": self.agent_id,
-                            "noteId": note.id,
-                        })),
-                    )
-                    .await?;
-                }
-            }
-            if let Some(store) = desk.registry().chat_store() {
-                let ids = notes.iter().map(|note| note.id.clone()).collect::<Vec<_>>();
-                store.mark_delivered(&ids).await;
-            }
-            session.process.show_pictures(
-                notes
-                    .iter()
-                    .flat_map(|note| chat_files::pictures(&note.files)),
-            );
-            // A note is the operator's own words: its links may be read too (ADR 0104).
-            session.process.allow_links(
-                notes
-                    .iter()
-                    .flat_map(|note| agent::tools::links_written_in(&note.text)),
-            );
+            hand_over_notes(desk, session, log, &self.agent_id, &notes, None).await?;
             reply = session
                 .process
                 .prompt_turn(&mut session.recorder, &note_turn(&notes))
@@ -1647,6 +1638,60 @@ impl<'a> Work<'a> {
                 .with_context(|| format!("{} failed after your note", self.agent_id))?;
         }
     }
+}
+
+/// Everything about handing `notes` to the agent but the turn itself: each is archived, the chat
+/// marks it delivered, and its pictures and links reach the session. `answering` is the note that
+/// is the answer to the agent's question, archived as that answer already (ADR 0110).
+async fn hand_over_notes(
+    desk: &operator::OperatorDesk,
+    session: &mut StageSession,
+    log: Option<&EventLog>,
+    agent_id: &str,
+    notes: &[runs::QueuedNote],
+    answering: Option<&str>,
+) -> Result<()> {
+    if notes.is_empty() {
+        return Ok(());
+    }
+    if let Some(log) = log {
+        for note in notes
+            .iter()
+            .filter(|note| Some(note.id.as_str()) != answering)
+        {
+            // Archived exactly like a note to a kept-alive agent: under the reserved operator id,
+            // addressed `to` the agent, so the run view shows it as a note and pairs it with the
+            // turn that answers it.
+            log.append(
+                config::RESERVED_OPERATOR_ID,
+                EventKind::Message,
+                json!({"role": "user", "content": {"type": "text", "text": note.text}}),
+                Some(json!({
+                    "source": "loomwatch",
+                    "phase": "operator_answer",
+                    "to": agent_id,
+                    "noteId": note.id,
+                })),
+            )
+            .await?;
+        }
+    }
+    if let Some(store) = desk.registry().chat_store() {
+        let ids = notes.iter().map(|note| note.id.clone()).collect::<Vec<_>>();
+        store.mark_delivered(&ids).await;
+    }
+    session.process.show_pictures(
+        notes
+            .iter()
+            .flat_map(|note| chat_files::pictures(&note.files)),
+    );
+    // A note is the operator's own words: its links may be read too (ADR 0104).
+    session.process.allow_links(
+        notes
+            .iter()
+            .flat_map(|note| agent::tools::links_written_in(&note.text)),
+    );
+    Ok(())
 }
 
 impl Drop for Work<'_> {
@@ -1666,8 +1711,18 @@ fn note_turn(notes: &[runs::QueuedNote]) -> String {
     // A note written as a reply says first what it replies to, so the agent knows which part of
     // the work it is about. The quote is the agent's own words or another's: what the note is
     // about, not more direction.
-    let words = notes
-        .iter()
+    let words = notes_said(notes.iter());
+    format!(
+        "## A note from you\nThe person running this team sent you this while you were working. \
+         This is direction: follow it, and where it conflicts with anything earlier, it wins.\n\n\
+         {words}\n\nCarry on with it in mind, and reply with your complete, updated result."
+    )
+}
+
+/// What notes say, as the agent is given them: each one's words with its files, after what it
+/// replies to.
+fn notes_said<'n>(notes: impl Iterator<Item = &'n runs::QueuedNote>) -> String {
+    notes
         .map(|note| {
             // The files sent with it are part of what it says (ADR 0082).
             let said = chat_files::with_files(note.text.trim(), &note.files);
@@ -1679,12 +1734,7 @@ fn note_turn(notes: &[runs::QueuedNote]) -> String {
             }
         })
         .collect::<Vec<_>>()
-        .join("\n\n");
-    format!(
-        "## A note from you\nThe person running this team sent you this while you were working. \
-         This is direction: follow it, and where it conflicts with anything earlier, it wins.\n\n\
-         {words}\n\nCarry on with it in mind, and reply with your complete, updated result."
-    )
+        .join("\n\n")
 }
 
 /// How many times an agent is handed back what it delegated before its session closes. Each
@@ -1784,12 +1834,33 @@ fn answer_turn(answer: &str) -> String {
 
 /// The turn a parked question's answer becomes: the person's direction, or, when nobody answered
 /// in time, `LoomWatch` saying so (ADR 0090). That one is not framed as the person's words.
-fn turn_for(answer: &operator::OperatorAnswer) -> String {
-    if answer.unanswered {
-        format!("## No answer came\n{}", answer.text)
-    } else {
-        answer_turn(&answer.text)
+///
+/// `notes` are what the person sent the agent while it waited (ADR 0110). The one the answer is
+/// stands as the answer, with its files and what it replies to; the others follow it as notes.
+fn turn_for(answer: &operator::OperatorAnswer, notes: &[runs::QueuedNote]) -> String {
+    use std::fmt::Write as _;
+    let answered_by = answer
+        .note
+        .as_deref()
+        .and_then(|id| notes.iter().find(|note| note.id == id));
+    let mut turn = match answered_by {
+        Some(note) => answer_turn(&notes_said(std::iter::once(note))),
+        None if answer.unanswered => format!("## No answer came\n{}", answer.text),
+        None => answer_turn(&answer.text),
+    };
+    let others = notes_said(
+        notes
+            .iter()
+            .filter(|note| Some(note.id.as_str()) != answer.note.as_deref()),
+    );
+    if !others.is_empty() {
+        let _ = write!(
+            turn,
+            "\n\n## Also from you while you waited\nThe person sent you this in the chat while \
+             you waited for the answer. It is direction too.\n\n{others}"
+        );
     }
+    turn
 }
 
 /// A review stop: the pipeline pauses on the operator the way it would on any stage.
@@ -2004,6 +2075,10 @@ async fn archive_operator_answer(
                 // Not the person's words: nobody answered in time, and `LoomWatch` did (ADR 0090).
                 if answer.unanswered {
                     raw["noAnswer"] = serde_json::json!(true);
+                }
+                // Written in the chat (ADR 0110): the chat's message and this answer are one.
+                if let Some(note) = &answer.note {
+                    raw["noteId"] = serde_json::json!(note);
                 }
                 raw
             }),
@@ -10952,6 +11027,7 @@ mod tests {
             send_back: send_back.map(str::to_owned),
             answer_event_id: uuid::Uuid::new_v4().to_string(),
             unanswered: false,
+            note: None,
         }
     }
 
@@ -11704,6 +11780,43 @@ mod tests {
         assert!(point.done.contains("the findings so far"), "{point:?}");
         assert_eq!(point.source, memory::CheckpointSource::Coordinator);
         Ok(())
+    }
+
+    /// ADR 0110: an answer written in the chat is given to the agent as that message is, with
+    /// what it replies to and its files, and the other notes that waited follow it.
+    #[test]
+    fn an_answer_from_the_chat_keeps_its_quote_and_files() {
+        let note = |id: &str, text: &str| crate::runs::QueuedNote {
+            id: id.to_owned(),
+            agent: "a".to_owned(),
+            text: text.to_owned(),
+            sent_at: "2026-11-03T04:44:14Z".to_owned(),
+            now: false,
+            reply: None,
+            files: Vec::new(),
+        };
+        let mut answering = note("n1", "Asia only");
+        answering.reply = Some("Researcher's question:\n> Which region?".to_owned());
+        answering.files = vec![crate::chat_files::ChatFile {
+            name: "regions.csv".to_owned(),
+            path: "/chat/regions.csv".to_owned(),
+            bytes: 12,
+            picture: false,
+        }];
+        let notes = [note("n0", "and keep it short"), answering];
+        let mut answer = answer("Asia only", None);
+        answer.note = Some("n1".to_owned());
+        let turn = turn_for(&answer, &notes);
+        let at = |fragment: &str| {
+            turn.find(fragment)
+                .unwrap_or_else(|| panic!("{fragment:?} is missing: {turn}"))
+        };
+        assert!(at("## Direction from you") < at("> Which region?"));
+        assert!(at("> Which region?") < at("Asia only"));
+        assert!(at("regions.csv") < at("## Also from you while you waited"));
+        assert!(at("## Also from you while you waited") < at("and keep it short"));
+        // The answer is said once: it is not a note after itself.
+        assert_eq!(turn.matches("Asia only").count(), 1, "{turn}");
     }
 
     /// **`ask_user` returns immediately, the turn ends normally, and the answer is the next turn.**

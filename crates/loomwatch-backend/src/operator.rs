@@ -215,6 +215,10 @@ pub struct OperatorAnswer {
     /// (ADR 0090): [`Self::text`] tells the agent to go on with its best assumption, and the
     /// archive marks the answer as not the person's.
     pub unanswered: bool,
+    /// The chat message this answer is, when the person wrote it in the chat to the agent that
+    /// asked (ADR 0110): it waits on the run as a note, so the agent is given its files and what it
+    /// replies to, and the chat shows it delivered once the agent has it.
+    pub note: Option<String>,
 }
 
 impl OperatorAnswer {
@@ -230,6 +234,7 @@ impl OperatorAnswer {
             send_back: None,
             answer_event_id: crate::engine::new_event_id(),
             unanswered: true,
+            note: None,
         }
     }
 }

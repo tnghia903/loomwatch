@@ -2124,6 +2124,21 @@ impl RunRegistry {
         mine
     }
 
+    /// The notes waiting for `agent_id`, taken off the record, while it goes on working: they go
+    /// in with the answer to its question (ADR 0110) rather than after it asks nothing more.
+    pub(crate) fn take_notes(&self, run_id: &str, agent_id: &str) -> Vec<QueuedNote> {
+        let mut inner = self.inner.write().unwrap_or_else(PoisonError::into_inner);
+        let Some(entry) = inner.runs.get_mut(run_id) else {
+            return Vec::new();
+        };
+        let (mine, others): (Vec<QueuedNote>, Vec<QueuedNote>) =
+            std::mem::take(&mut entry.record.queued_notes)
+                .into_iter()
+                .partition(|note| note.agent == agent_id);
+        entry.record.queued_notes = others;
+        mine
+    }
+
     /// Stop showing `agent_id` as working, whatever is waiting for it: its work ended without
     /// reaching [`Self::settle_work`]. Notes still waiting stay in the chat, unsent.
     pub(crate) fn end_work(&self, run_id: &str, agent_id: &str) {
@@ -4504,6 +4519,7 @@ async fn answer_run(
             // The id of the `message` event the run is about to archive the answer as.
             answer_event_id: crate::engine::new_event_id(),
             unanswered: false,
+            note: None,
         },
     )
     .await
@@ -7655,6 +7671,7 @@ pub(crate) mod tests {
                 send_back: None,
                 answer_event_id: "answer-2".into(),
                 unanswered: false,
+                note: None,
             },
         )
         .await

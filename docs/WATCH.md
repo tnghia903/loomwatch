@@ -92,6 +92,7 @@ Who said what to whom is read from the record, not from the team file as it is n
 | `operator_answer` message, `raw` | `askedBy` | Whose question or review your answer closes. |
 | `operator_answer` message, `raw` | `sendBack` | The stage your answer sent the work back to; absent for an approval. |
 | `operator_answer` message, `raw` | `to` | The kept-alive agent a follow-up of yours went to; its next turn is shown as the answer. |
+| `operator_answer` message, `raw` | `noteId` | The chat message this was: a note you sent an agent at work, or an answer you wrote in the chat to the question it was waiting on. |
 
 All five are additive: runs archived before them still read, and a handover sender that had to be
 taken from the team's connections says so when its row is opened.
