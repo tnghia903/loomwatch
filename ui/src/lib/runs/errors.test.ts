@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { failedAgent, plainRunError, problemAction } from './errors'
+import { failedAgent, plainRunError, problemAction, runAgents, runStop } from './errors'
 
 const agents = new Map([['helper', { name: 'Helper' }]])
 
@@ -8,9 +8,9 @@ describe('plainRunError', () => {
   // Runs recorded while LoomWatch drove AI apps: the agent's app failed to start.
   it('names the agent a recorded run could not start, and the cause', () => {
     expect(plainRunError('failed to spawn ACP harness for agent helper: No such file or directory (os error 2)', agents))
-      .toBe('Helper couldn’t start: No such file or directory (os error 2)')
+      .toBe('Helper couldn’t start. No such file or directory (os error 2)')
     expect(plainRunError('failed to spawn ACP harness for pipeline node writer: Permission denied (os error 13)'))
-      .toBe('writer couldn’t start: Permission denied (os error 13)')
+      .toBe('Writer couldn’t start. Permission denied (os error 13)')
   })
 
   // acp.rs `AppReportedError`, wrapped by the pipeline stage it stopped (2026-10-14).
@@ -22,19 +22,50 @@ describe('plainRunError', () => {
       .toBe('Codex reported an error instead of an answer: Quota exceeded.')
   })
 
-  // The daemon's `who_stopped` (team_requests.rs) says the same of a team's stop: same cases.
-  it('names the stage that didn’t finish, with its cause, not the run’s words for it', () => {
+  // The daemon's `plain_stop` (team_requests.rs) says the same of a team's stop: same cases.
+  it('names the stage that didn’t finish, then its cause once, not the run’s words for it', () => {
     const named = new Map([['planner', { name: 'Route finder' }]])
     const outOfCredits = 'Your OpenRouter account is out of credits. Add credits at openrouter.ai, then try again.'
-    expect(plainRunError(`pipeline node planner failed: ${outOfCredits}`, named)).toBe(`Route finder didn’t finish: ${outOfCredits}`)
-    expect(plainRunError('pipeline node planner failed after your answer: timed out', named)).toBe('Route finder didn’t finish: timed out')
-    expect(plainRunError('failed to spawn ACP harness for pipeline node planner: Permission denied', named)).toBe('Route finder couldn’t start: Permission denied')
+    expect(plainRunError(`pipeline node planner failed: ${outOfCredits}`, named)).toBe(`Route finder didn’t finish. ${outOfCredits}`)
+    expect(plainRunError('pipeline node planner failed after your answer: timed out', named)).toBe('Route finder didn’t finish. Timed out')
+    expect(plainRunError('failed to spawn ACP harness for agent planner: Permission denied', named)).toBe('Route finder couldn’t start. Permission denied')
+    expect(plainRunError('failed to spawn ACP harness for pipeline node planner: Permission denied', named)).toBe('Route finder couldn’t start. Permission denied')
+    expect(plainRunError('pipeline node planner failed: Codex reported an error instead of an answer: Quota exceeded.', named))
+      .toBe('Route finder didn’t finish. Codex reported an error instead of an answer: Quota exceeded.')
     expect(plainRunError('pipeline node planner failed: LoomWatch couldn\'t reach ChatGPT: the connection failed'))
-      .toBe('planner didn’t finish: LoomWatch couldn\'t reach ChatGPT: the connection failed')
+      .toBe('Planner didn’t finish. LoomWatch couldn\'t reach ChatGPT: the connection failed')
   })
 
-  it('leaves every other error exactly as the daemon wrote it', () => {
-    expect(plainRunError('protocol failure: session execution failed', agents)).toBe('protocol failure: session execution failed')
+  it('keeps every other error in the daemon’s words, as a sentence', () => {
+    expect(plainRunError('protocol failure: session execution failed', agents)).toBe('Protocol failure: session execution failed')
+  })
+
+  it('names agents as a run record does', () => {
+    expect(plainRunError('pipeline node planner failed: it broke', runAgents({ planner: 'Route finder' }))).toBe('Route finder didn’t finish. It broke')
+    expect(plainRunError('pipeline node planner failed: it broke', runAgents(undefined))).toBe('Planner didn’t finish. It broke')
+  })
+})
+
+// A card says who didn't finish in bold and the reason once after it, so the two come apart.
+describe('runStop', () => {
+  const named = new Map([['planner', { name: 'Route finder' }]])
+
+  it('says who didn’t finish as a sentence of its own, and why apart from it', () => {
+    expect(runStop('pipeline node planner failed: This agent runs on your Claude API credit.', named))
+      .toEqual({ lead: 'Route finder didn’t finish.', reason: 'This agent runs on your Claude API credit.' })
+    expect(runStop('pipeline node planner failed: Codex reported an error instead of an answer: Quota exceeded.', named))
+      .toEqual({ lead: 'Route finder didn’t finish.', reason: 'Codex reported an error instead of an answer: Quota exceeded.' })
+    expect(runStop('failed to spawn ACP harness for agent planner: Permission denied', named))
+      .toEqual({ lead: 'Route finder couldn’t start.', reason: 'Permission denied' })
+    // The reason is a sentence of its own, with a capital.
+    expect(runStop('pipeline node planner failed after your answer: timed out', named))
+      .toEqual({ lead: 'Route finder didn’t finish.', reason: 'Timed out' })
+  })
+
+  it('names nobody when the error doesn’t, keeping its words as a sentence', () => {
+    expect(runStop('timed out after 600s', named)).toEqual({ lead: null, reason: 'Timed out after 600s' })
+    expect(runStop('partial ACP session is recoverable with session_id=run-1: Codex reported an error instead of an answer: Quota exceeded.'))
+      .toEqual({ lead: null, reason: 'Codex reported an error instead of an answer: Quota exceeded.' })
   })
 })
 

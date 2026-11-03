@@ -305,7 +305,8 @@ describe('a turn its app reported as failed', () => {
       harnessLabels: new Map([['gatherer', 'Codex']]),
       answered: false,
     })
-    expect(receipt.lines).toEqual([{ tone: 'bad', text: 'Gatherer stopped (Codex reported an error)', agentId: 'gatherer' }])
+    // "Didn't finish", the one word for a failure: "stopped" is only work you stopped.
+    expect(receipt.lines).toEqual([{ tone: 'bad', text: 'Gatherer didn’t finish (Codex reported an error)', agentId: 'gatherer' }])
     expect(receipt.checks).toContainEqual({ tone: 'warn', text: `Codex reported an error instead of an answer: ${REFUSAL}`, agentId: 'gatherer', evidenceId: undefined })
   })
 
@@ -434,7 +435,7 @@ describe('LoomWatch’s own check of the answer, when its turn failed', () => {
       agents: [{ id: 'writer', name: 'Writer', operator: false, runtime: { status: 'failed' } }],
       projection, evidenceByAgent: new Map(), harnessLabels: new Map([['writer', 'GPT-6.1 Sol']]), answered: false,
     })
-    expect(receipt.lines).toEqual([{ tone: 'bad', text: `Writer stopped. ${LIMIT}`, agentId: 'writer' }])
+    expect(receipt.lines).toEqual([{ tone: 'bad', text: `Writer didn’t finish. ${LIMIT}`, agentId: 'writer' }])
     expect(receipt.checks.map((line) => line.text)).toEqual(['The run ended without an answer'])
     // Its sentence for a rate limit was written for an agent of the team, so it goes on its line.
     const limited = 'ChatGPT is limiting how fast LoomWatch can make requests. Wait a minute, then try again.'
@@ -446,7 +447,24 @@ describe('LoomWatch’s own check of the answer, when its turn failed', () => {
       attempt: 3, prompt: 'Make the launch video.', phase: 'failed', elapsed: '1m',
       agents: [{ id: 'writer', name: 'Writer', operator: false, runtime: { status: 'failed' } }],
       projection: slowed, evidenceByAgent: new Map(), harnessLabels: new Map([['writer', 'GPT-6.1 Sol']]), answered: false,
-    }).lines).toEqual([{ tone: 'bad', text: `Writer stopped. ${limited}`, agentId: 'writer' }])
+    }).lines).toEqual([{ tone: 'bad', text: `Writer didn’t finish. ${limited}`, agentId: 'writer' }])
+  })
+
+  // "Stopped" is only work you stopped (lib/state/words.ts): an agent whose process ended with the
+  // run says so when you stopped the run, and didn't finish when the run failed.
+  it('says an agent was stopped only when you stopped the run', () => {
+    const projection = projectRun([
+      event(0, 'process', { phase: 'spawned', pid: 7 }),
+      event(1, 'message', { role: 'user', content: { type: 'text', text: 'Make the launch video.' } }),
+      event(2, 'process', { phase: 'exited', exitCode: 143 }),
+    ])
+    const ended = (phase: RunPhase) => buildReceipt({
+      attempt: 1, prompt: 'Make the launch video.', phase, elapsed: '1m',
+      agents: [{ id: 'writer', name: 'Writer', operator: false, runtime: { status: 'stopped' } }],
+      projection, evidenceByAgent: new Map(), harnessLabels: new Map(), answered: false,
+    }).lines[0].text
+    expect(ended('cancelled')).toBe('Writer was stopped before it finished')
+    expect(ended('failed')).toBe('Writer didn’t finish (exit code 143)')
   })
 
   it('forgets the reason once a later turn of the same agent ends as usual', () => {

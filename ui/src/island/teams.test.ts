@@ -19,6 +19,16 @@ describe('what the island shows of each team', () => {
     expect(teams.find((team) => team.runId === 'stopped')?.result).toBe('Your OpenRouter credit ran out.')
   })
 
+  // "Video studio didn't finish" over "Clip editor didn't finish. This agent runs on your Claude
+  // API…" said it twice, and the two lines cut off the fix. The agent that didn't finish is the
+  // figure, in its red glow, and the words under the team are only why.
+  it('draws the step that didn’t finish, and says only why under the team', () => {
+    const [team] = teamsNow([run('stopped', { status: 'failed', finishedAt: iso(5), agentIds: ['researcher', 'writer'], error: `pipeline node researcher failed: ${OUT_OF_CREDITS}`, agentNames: { researcher: 'Shot finder', writer: 'Clip editor' } })], at(1), none, nobody)
+    expect(team).toMatchObject({ moment: 'fail', agent: 'researcher', agentName: 'Shot finder', result: OUT_OF_CREDITS })
+    const [silent] = teamsNow([run('silent', { status: 'failed', finishedAt: iso(5) })], at(1), none, nobody)
+    expect(silent.result).toBe('It didn’t say why.')
+  })
+
   it('shows a result only while it is news: ended since the island started watching, and not yet seen', () => {
     const records = [
       run('before', { status: 'succeeded', finishedAt: iso(0) }),

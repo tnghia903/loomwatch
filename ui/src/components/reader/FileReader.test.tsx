@@ -532,12 +532,14 @@ describe('reading a file an agent made', () => {
     expect(within(answerCard()!).queryByRole('button', { name: /^Reply/ })).toBeNull()
   })
 
-  it('says when the work stopped, or nothing came back', async () => {
+  it('says when the work didn’t finish, or nothing came back', async () => {
     const { rerender } = renderReader({ asked: [part({ state: 'failed', by: 'writer', text: 'The AI could not be reached.' })] })
     fireEvent.click(await screen.findByRole('button', { name: 'Writer didn’t finish answering about “Sales grew 12% in Q3.”' }))
     expect(screen.getByRole('button', { name: 'Writer didn’t finish answering about “Sales grew 12% in Q3.”' })).toHaveAttribute('title', 'Didn’t finish · Explain this part in plain words.')
     expect(document.querySelector('.rd-mark')).toHaveClass('failed')
-    expect(answerCard()).toHaveTextContent('stopped')
+    // "Didn't finish", the one word for a failure, as the chat says it.
+    expect(answerCard()).toHaveTextContent('didn’t finish')
+    expect(answerCard()).not.toHaveTextContent('stopped')
     expect(answerCard()).toHaveTextContent('The AI could not be reached.')
     rerender({ asked: [part({ state: 'none', why: 'lost' })] })
     expect(answerCard()).toHaveTextContent('No answer came back.')

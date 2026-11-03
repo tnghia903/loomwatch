@@ -4,6 +4,7 @@ import { useLayoutEffect, useRef, useState, type CSSProperties, type Ref } from 
 import { clockTime, dayLabel } from '../../lib/chat/format'
 import { ToldWhy } from '../../lib/files/reader'
 import { askedInChat, partLook, partQuote, yourWords, type AskedPassage, type PassageAnswer as Answer } from '../../lib/files/passage'
+import { STATE_WORDS } from '../../lib/state/words'
 import { AvatarFace } from '../agents/AvatarFace'
 import { InlineMarkdown, Markdown } from '../ui/Markdown'
 
@@ -62,7 +63,7 @@ export function PassageAnswer({ passage, earlier = NO_TURNS, name, hue, place, g
         : answer.state === 'asking' ? 'asks you first'
         : answer.state === 'sending' ? 'Sending your question…'
           : answer.state === 'unsent' ? 'Not sent'
-            : answer.state === 'failed' ? 'stopped'
+            : answer.state === 'failed' ? STATE_WORDS.failed
               : answer.state === 'held' ? (answer.why === 'send' ? 'Waits for Send' : 'Waits its turn on this file') : ''
   const inChat = onShowInChat && askedInChat(passage)
   // With no answer to read, the way on is in the chat, said in words.

@@ -73,6 +73,10 @@ export interface HandedBack {
   /** How the team's work ended: its answer, or that it failed, was stopped or never started.
       Absent in messages from before it was kept. */
   outcome?: HandedOutcome | null
+  /** The team's step that didn't finish, as the team names it, when its run says which: the chat
+      names it once, with the team, over the reason alone. Absent otherwise, and in messages from
+      before it was kept. */
+  step?: string | null
 }
 
 /** How a team's handed-back work ended (the daemon's `chat::HandedOutcome`). */

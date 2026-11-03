@@ -5,7 +5,7 @@ import type { NoteAnswering } from '../lib/chat/client'
 import { listNames } from '../lib/chat/format'
 import { historyRunUrl } from '../lib/runs/history'
 import type { RunRecord } from '../lib/runs/client'
-import { plainRunError } from '../lib/runs/errors'
+import { failedAgent, runAgents, runStop } from '../lib/runs/errors'
 import { answerableAtAGlance } from '../lib/runs/permissionRequests'
 import type { TeamRequest } from '../lib/runs/teamRequests'
 import { ticketsFrom, type Ticket } from '../lib/story/needsYou'
@@ -94,7 +94,7 @@ export function teamsNow(
       asks,
       askers: Object.fromEntries(asks.map((ask) => [ask.id, askerOf(record, ask, last)])),
       quick: live ? (record.permissionRequests ?? []).filter(answerableAtAGlance).map((request) => `${record.runId}:permission:${request.id}`) : [],
-      result: moment === 'done' ? firstLine(record.reply) || 'The answer is ready.' : moment === 'fail' ? (record.error ? plainRunError(record.error).split('\n')[0] : '') || 'Something went wrong before it finished.' : null,
+      result: moment === 'done' ? firstLine(record.reply) || 'The answer is ready.' : moment === 'fail' ? (record.error ? runStop(record.error, runAgents(record.agentNames)).reason.split('\n')[0] : '') || 'It didn’t say why.' : null,
       link: historyRunUrl({ id: record.runId, teamPath: record.teamPath }),
       chat: false,
     })
@@ -137,7 +137,7 @@ function noteNow(note: NoteAnswering, since: number, seen: ReadonlySet<string>):
     startedAt: note.createdAt,
     asks: [],
     quick: [],
-    result: moment === 'done' ? firstLine(said[0].text) || 'The answer is ready.' : moment === 'fail' ? plainRunError(failed[0].error).split('\n')[0] || 'Something went wrong before it answered.' : null,
+    result: moment === 'done' ? firstLine(said[0].text) || 'The answer is ready.' : moment === 'fail' ? runStop(failed[0].error).reason.split('\n')[0] || 'It didn’t say why.' : null,
     link: teamHref(note.teamPath, 'chat'),
     chat: true,
   }
@@ -151,7 +151,10 @@ function whoDidNotAnswer(note: NoteAnswering, ids: readonly string[]): string | 
 
 function agentOf(record: RunRecord, moment: Moment, ask: Ticket | undefined, last: string | null): string | null {
   if (moment === 'ask' && ask) return askerOf(record, ask, last)
-  return record.working?.[0] ?? last ?? (moment === 'work' ? null : record.agentIds.at(-1) ?? null)
+  // A run that didn't finish is drawn by the agent it stopped at, whose red glow says who: the
+  // words under it are only why.
+  const failed = moment === 'fail' ? failedAgent(record) : null
+  return failed ?? record.working?.[0] ?? last ?? (moment === 'work' ? null : record.agentIds.at(-1) ?? null)
 }
 
 /** The agent `ask` is about: a permission's or a question's asker; a review stop is about the work

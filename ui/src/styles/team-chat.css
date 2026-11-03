@@ -445,14 +445,15 @@
 .tc-answer .chat-under .delivery-link { font-size: 12px; }
 .tc-stopped { display: grid; gap: 8px; margin: 10px 0 2px 42px; padding: 10px 14px; border-radius: 12px; border: 1px solid var(--color-hairline); background: var(--color-panel-solid); font-size: 13px; color: var(--color-ink-2); }
 .tc-stopped p { margin: 0; }
-/* A stopped piece of work, and a team's handed-back work that failed or never started, marked the
+/* Work that didn't finish, and a team's handed-back work that didn't finish or start, marked the
    same way. The words in ink: the red on the dark card reads at APCA Lc 44. The red edge and the
-   failed glyph carry the colour. */
+   failed glyph carry the colour. The lead names who, so it holds to the type scale's 600. */
 .tc-stopped.bad, .tc-from-team .chat-bubble.bad { border-color: color-mix(in srgb, var(--color-alert) 55%, transparent); }
-.tc-stopped.bad b, .tc-from-team .tc-team-stop b { color: var(--color-ink); }
+.tc-stopped.bad b, .tc-from-team .tc-team-stop b { color: var(--color-ink); font-weight: 600; }
 .tc-stopped.bad b svg, .tc-from-team .tc-team-stop b svg { display: inline-block; margin-right: 5px; vertical-align: -1px; }
-/* Its own line, outside the bubble's text, so it wraps a long team name as that text does. */
-.tc-from-team .tc-team-stop { margin: 0 0 4px; overflow-wrap: anywhere; }
+/* Its own line, outside the bubble's text, so it wraps a long team name as that text does, in
+   even lines rather than one word left alone. */
+.tc-from-team .tc-team-stop { margin: 0 0 4px; overflow-wrap: anywhere; text-wrap: balance; }
 /* Its way out, under the bubble as under a stopped piece of work. A team's name has no length
    limit, so "Open <Team>" wraps rather than being cut at the chat's edge. */
 .tc-from-team .tc-team-acts { margin-top: 8px; }

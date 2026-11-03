@@ -1,6 +1,6 @@
 import { baseName } from '../files/paths'
 import type { RunRecord } from '../runs/client'
-import { plainRunError } from '../runs/errors'
+import { plainRunError, runAgents } from '../runs/errors'
 import { dueAt } from '../chat/format'
 import { permissionSentence, permissionWhat } from '../runs/permissionRequests'
 import { dollars, openStops, stopActions, stopSentence } from '../runs/spend'
@@ -137,7 +137,7 @@ export function ticketsFrom(records: readonly RunRecord[], names: ReadonlyMap<st
           node: null,
           sendBackTo: null,
           asker: teamName,
-          text: (record.error ? plainRunError(record.error) : '').split('\n')[0] || 'The run stopped before it finished.',
+          text: (record.error ? plainRunError(record.error, runAgents(record.agentNames)) : '').split('\n')[0] || 'It didn’t say why.',
           context: null,
           since: record.finishedAt ?? record.createdAt,
         })

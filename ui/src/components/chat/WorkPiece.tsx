@@ -13,7 +13,8 @@ import { clockTime, dayKey, dayLabel, listNames, took } from '../../lib/chat/for
 import { triesLine, tryingAgain } from '../../lib/chat/tries'
 import { checkReactions, talkReactions, targets, yoursOn, type AgentReaction, type Face, type ReactionAbout } from '../../lib/chat/reactions'
 import { answerRun, cancelRun, isTerminalRun, stopHelper, type RunAskedBy, type RunRecord } from '../../lib/runs/client'
-import { failedAgent, fixKey, plainRunError, problemAction } from '../../lib/runs/errors'
+import { failedAgent, fixKey, problemAction, runStop } from '../../lib/runs/errors'
+import { stateAfterName } from '../../lib/state/words'
 import { teamHref } from '../../lib/team-file/teamHref'
 import { openStops, stopSentence } from '../../lib/runs/spend'
 import { useRunSession } from '../../lib/runs/useRunSession'
@@ -758,9 +759,23 @@ function Request({ run, request, flash = false, fixFill = null, pieceFix = null,
   )
 }
 
-/** What a face on a team's handed-back message is on: its answer, or, when it stopped, its message. */
+/** What a face on a team's handed-back message is on: its answer, or, when it didn't finish or
+    start, its message. */
 function fromTeamSaid(handed: HandedBack): string {
-  return `${handed.teamName}'s ${!handed.outcome || handed.outcome === 'answered' ? 'answer' : 'message'}`
+  return `${possessive(handed.teamName)} ${!handed.outcome || handed.outcome === 'answered' ? 'answer' : 'message'}`
+}
+
+/** "Video studio’s", and "Planners’" for a name that ends in s. */
+function possessive(name: string): string {
+  const trimmed = name.trim()
+  return `${trimmed}${/s$/i.test(trimmed) ? '’' : '’s'}`
+}
+
+/** A team and its step, named once: "Video studio’s Clip editor"; the team alone when no step is
+    named, or the step has the team's name. */
+function teamStep(team: string, step: string | null | undefined): string {
+  if (!step?.trim() || step.trim().toLowerCase() === team.trim().toLowerCase()) return team
+  return `${possessive(team)} ${step.trim()}`
 }
 
 /**
@@ -774,9 +789,10 @@ function FromTeam({ message, handed, said, to, flash, fixFill = null, pieceFix =
     ? agentFigure({ id: handed.agent, from: handed.fromAgent ? { agent: handed.fromAgent, version: 0 } : undefined }, saved)
     : figureFor(handed.teamPath)
   // A team that failed or never started is marked as a stop, as a piece of work that stopped is,
-  // naming the team: the agent's own work may stop under it too. "Didn't finish" is the one word
-  // for a failure; one someone stopped on purpose is not something wrong.
-  const stop = handed.outcome === 'failed' ? `${handed.teamName} didn’t finish.` : handed.outcome === 'notStarted' ? 'It didn’t start.' : null
+  // naming the team, and its step that didn't finish when the daemon says which, once: the agent's
+  // own work may stop under it too. "Didn't finish" is the one word for a failure; one someone
+  // stopped on purpose is not something wrong.
+  const stop = handed.outcome === 'failed' ? `${stateAfterName(teamStep(handed.teamName, handed.step), 'failed')}.` : handed.outcome === 'notStarted' ? 'It didn’t start.' : null
   // The way out, as under a stopped piece of work: the fix LoomWatch's words name for a failure,
   // unless this piece's own stop already offers it; and the team itself when the words say to
   // open it.
@@ -934,12 +950,17 @@ export function FixIt({ message, filled }: { message: string | null; filled: boo
     : <a className={className} href={action.href}>{action.label}</a>
 }
 
-/** The work stopped: in plain words, with the way to try again. */
+/**
+ * Work that didn't finish, or that you stopped, with the way to try again. A failure says who
+ * didn't finish in bold, then why, once: "Clip editor didn't finish. This agent runs on your Claude
+ * API credit…". "Stopped" is only ever work you stopped (`lib/state/words.ts`).
+ */
 function Stopped({ run, name, fixFilled, onTryAgain, onDetails }: { run: RunRecord; name: (id: string) => string; fixFilled: boolean; onTryAgain: () => void; onDetails?: () => void }) {
   if (run.status === 'failed') {
+    const { lead, reason } = failure(run, name)
     return (
       <Appearing className="tc-stopped bad" role="status">
-        <p><b><StatusGlyph status="failed" size={10} />The work stopped.</b> {run.error ? plainRunError(run.error.split('\n')[0], new Map(run.agentIds.map((id) => [id, { name: name(id) }]))) : run.errorCode === 'missing_canonical_response' ? `${name(run.responder)} finished without an answer.` : 'Its record says why.'}</p>
+        <p><b><StatusGlyph status="failed" size={10} />{lead}</b> {reason}</p>
         <div className="tc-acts">
           <FixIt message={run.error} filled={fixFilled} />
           <button type="button" className="btn" onClick={onTryAgain}><RotateCcw size={13} aria-hidden="true" />Try again</button>
@@ -954,6 +975,16 @@ function Stopped({ run, name, fixFilled, onTryAgain, onDetails }: { run: RunReco
       <div className="tc-acts"><button type="button" className="btn" onClick={onTryAgain}><RotateCcw size={13} aria-hidden="true" />Try again</button></div>
     </Appearing>
   )
+}
+
+/** Who a failed run's card says didn't finish, and why: the agent its error names, or the one it
+    ran; the work itself when that is nobody. */
+function failure(run: RunRecord, name: (id: string) => string): { lead: string; reason: string } {
+  const stop = run.error ? runStop(run.error.split('\n')[0], new Map(run.agentIds.map((id) => [id, { name: name(id) }]))) : null
+  const missing = !run.error && run.errorCode === 'missing_canonical_response'
+  const who = failedAgent(run) ?? (missing ? run.responder : null)
+  const lead = stop?.lead ?? `${stateAfterName(who ? name(who) : 'The work', 'failed')}.`
+  return { lead, reason: stop?.reason ?? (missing ? 'It gave no answer.' : 'It didn’t say why.') }
 }
 
 /**

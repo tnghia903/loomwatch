@@ -2,7 +2,7 @@ import { quoteLine, replyWords } from '../chat/reply'
 import { stillAnswering, type ChatItem, type ChatMessage, type ChatTarget, type PartAt, type ReplyTo } from '../chat/client'
 import type { RunRecord } from '../runs/client'
 import type { ChangeState } from './changes'
-import { plainRunError } from '../runs/errors'
+import { plainRunError, runAgents } from '../runs/errors'
 import { stateLabel } from '../state/words'
 
 /**
@@ -225,7 +225,7 @@ function workAnswer(run: RunRecord, from: string): PassageAnswer {
   const by = run.responder || run.onlyAgent || from
   const asks = run.permissionRequests?.[0]
   if (LIVE_RUN.has(run.status)) return asks ? { state: 'asking', by: asks.agent } : { state: 'working', by: run.working?.[0] ?? by }
-  if (run.status === 'failed') return { state: 'failed', by, text: (run.error ? plainRunError(run.error).split('\n')[0] : '') || 'It stopped before it answered.' }
+  if (run.status === 'failed') return { state: 'failed', by, text: (run.error ? plainRunError(run.error, runAgents(run.agentNames)).split('\n')[0] : '') || 'It didn’t say why.' }
   if (run.status === 'succeeded' && run.reply?.trim()) return { state: 'said', by, text: run.reply, at: run.finishedAt }
   return { state: 'none', why: run.status === 'cancelled' ? 'stopped' : 'lost' }
 }

@@ -191,6 +191,11 @@ pub struct HandedBack {
     /// it was kept.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outcome: Option<HandedOutcome>,
+    /// The team's step that didn't finish, as the team names it, when its run says which: the
+    /// chat names it once, with the team ("Video studio's Clip editor didn't finish."), over the
+    /// reason alone. `None` otherwise, and in messages from before it was kept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step: Option<String>,
 }
 
 /// How a team's work handed back to the agent that asked for it ended.
@@ -5248,6 +5253,7 @@ mod tests {
                 request: "Plan Friday".to_owned(),
                 heading: Some(TEAMS.to_owned()),
                 outcome: Some(HandedOutcome::Answered),
+                step: None,
             }),
             false,
             None,
@@ -5787,6 +5793,7 @@ mod tests {
                 request: "Find the paper".to_owned(),
                 heading: Some(heading.to_owned()),
                 outcome: Some(HandedOutcome::Answered),
+                step: None,
             }),
             false,
             None,
@@ -5875,6 +5882,7 @@ mod tests {
                 request: "Find the paper".to_owned(),
                 heading: Some(heading.to_owned()),
                 outcome: Some(HandedOutcome::Answered),
+                step: None,
             }),
             false,
             None,
@@ -7515,6 +7523,7 @@ mod tests {
                 request: "Read the digest".to_owned(),
                 heading: None,
                 outcome: Some(HandedOutcome::Answered),
+                step: None,
             }),
             false,
             None,

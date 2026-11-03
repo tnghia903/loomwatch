@@ -7,7 +7,7 @@ import { useAiStatus } from '../../lib/ai/useKeyStatus'
 import { FIRST_FIGURE, askFirstAgent, firstAgentNow, forMeRequest, keepFirstAgent } from '../../lib/firstrun/firstAgent'
 import { EMPTY_ABOUT, QUESTIONS, aboutFrom, aboutLine, type QuickAbout } from '../../lib/firstrun/quickAbout'
 import { markFirstRun } from '../../lib/firstrun/store'
-import { plainRunError } from '../../lib/runs/errors'
+import { plainRunError, runAgents } from '../../lib/runs/errors'
 import { isTerminalRun, type RunRecord } from '../../lib/runs/client'
 import { useRunSession } from '../../lib/runs/useRunSession'
 import { announceYou, saveYou, toldNothing, useYou } from '../../lib/you/client'
@@ -262,7 +262,7 @@ function FirstAnswer({ turn, about, name, onSettled, onRetry }: { turn: Turn; ab
     const why = record.error?.split('\n')[0]?.trim()
     return (
       <div className="fr-answer stopped" role="alert">
-        <p>{why ? plainRunError(why) : 'Your agent stopped before it had an answer.'}</p>
+        <p>{why ? plainRunError(why, runAgents(record.agentNames)) : status === 'cancelled' ? 'You stopped your agent before it answered.' : 'Your agent didn’t finish.'}</p>
         <button type="button" className="btn" onClick={onRetry}>Try again</button>
       </div>
     )

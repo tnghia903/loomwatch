@@ -105,7 +105,7 @@ describe('what an answer’s record holds to check', () => {
       on('writer', 5, 'process', { phase: 'exited', exitCode: 0 }),
     ]
     const { verdict } = check({ record: record({ mode: 'team', onlyAgent: undefined }), projection: projectRun(events, Infinity, { status: 'succeeded', evidenceComplete: true }), parties: [parties[1]] })
-    expect(verdict.findings.map((line) => line.text)).toContain('Writer’s helper 2 stopped (exit code 1)')
+    expect(verdict.findings.map((line) => line.text)).toContain('Writer’s helper 2 didn’t finish (exit code 1)')
   })
 
   it('waits for the whole record before saying anything, and says so while the answer is written', () => {
