@@ -49,7 +49,7 @@ jobs:
           fetch-depth: 0
       # The page's live figures are built from the app's own code (ui/src/site), so the site needs
       # ui's packages, with the same Node and pnpm as CI.
-      - uses: pnpm/setup@fbda4c85fc2e1e08721cd8763afea8f48d60f024 # v3.0.0
+      - uses: pnpm/setup@fa36a5ef7dcdefc3a7cb25655c122e00cf6e636e # v3.1.2
         with:
           node-version-file: .node-version
           cache: true
