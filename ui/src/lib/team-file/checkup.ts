@@ -11,7 +11,7 @@
 // Pure and framework-free like agentPlace.ts, so every rule is testable without a canvas.
 
 import { type ModelEfforts, effortWord, modelEfforts, placeEffort } from '../ai/efforts'
-import { OVERTHINKING_EFFORTS, canonicalModel, makerSlug, modelForJob, modelForTier, modelNameFromId, parseModelRef, tierOfModel } from '../ai/modelIds'
+import { OVERTHINKING_EFFORTS, canonicalModel, jobTier, makerSlug, modelForJob, modelForTier, modelNameFromId, parseModelRef, tierOfModel } from '../ai/modelIds'
 import { ROLE_PRESETS, type RolePreset } from '../library/roles'
 import type { TeamUsage } from './runLessons'
 import { NEW_SEND_BACK, sendBackOf } from './sendBack'
@@ -354,14 +354,17 @@ export function checkup({ agents, edges, entrypoint, responder, scheduled = fals
       })
     }
 
-    // A gatherer on the strongest model (ADR 0057): it feeds the agent that writes the answer, so a
-    // faster model does its work and leaves the strong one for the step that writes. Never for the
-    // agent whose reply is the team's answer, and only for one on the default strong model: a model
-    // the operator chose on purpose is theirs.
+    // A gatherer on the strongest model (ADR 0057), where the person's priority puts gatherers on
+    // the fast tier (ADR 0112): it feeds the agent that writes the answer, so a faster model does its
+    // work and leaves the strong one for the step that writes. Never for the agent whose reply is the
+    // team's answer, and only for one on a strong model of the table's, now or as Highest quality
+    // has it (what a team made before was given): a model the operator chose on purpose is theirs.
     const job = jobFor(agent)
-    if (job?.tier === 'fast' && !final && tierOfModel(agent.model ?? '') === 'strong') {
-      // The faster model on the agent's own source: how it is paid stays as the person chose.
-      const fast = { ...modelForJob(job), model: modelForTier('fast', [parseModelRef(agent.model).source]) }
+    // The faster model on the agent's own source: how it is paid stays as the person chose.
+    const fastNow = modelForTier('fast', [parseModelRef(agent.model).source])
+    const onStrong = tierOfModel(agent.model ?? '') === 'strong' || tierOfModel(agent.model ?? '', 'quality') === 'strong'
+    if (job && jobTier(job.id, job.tier) === 'fast' && !final && onStrong && canonicalModel(agent.model) !== fastNow) {
+      const fast = { ...modelForJob(job), model: fastNow }
       const named = (id: string) => modelNames?.get(id) ?? modelNameFromId(id)
       const writer = responder ? name(responder) : 'the next step'
       add({

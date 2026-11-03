@@ -292,7 +292,19 @@ companies in end-to-end checks.
 
 Each model tier (`schemas/model-tiers.json`, ADR 0057) names its model first; then a connected plan
 that offers it pays, else OpenRouter, else a connected plan's own model for the tier
-(`ModelTiers::model_on`, and `modelForTier` in the app).
+(`ModelTiers::model_on_at`, and `modelForTier` in the app).
+
+What new agents' models lean to is one setting, Saving, Balanced or Highest quality (ADR 0112): the
+Your agents' models slider in the Ask panel and on Usage. Agents already made keep their models. `ai/priority.rs` keeps it in
+`<state dir>/model-priority.json`; `GET /api/ai` says it as `priority` and `PUT /api/ai/priority`
+changes it. The table's top is Highest quality, and new installs start there (`defaultPriority`);
+its `priorities` say only what Balance and Saving change: a tier's model, a job's tier, a kind of
+work's tier, a plan's stand-in, and `jobModels`, a job's own pick where a cheaper model does that
+work nearly as well. A pick nothing connected can run gives way to the job's tier
+(`ModelTiers::job_model_on`, `modelForJobId` in the app). Ask, its jobs, `LoomWatch`'s own check of
+an answer, templates, new agents, the checkup and every model suggestion choose from the person's
+column; `LoomWatch`'s own help (Ask itself, reading a message, learning, rewriting instructions)
+stays on Highest quality's models.
 
 `ai/models.rs` holds the model catalogue. It is OpenRouter's public model list, cut down to the
 models that can use tools. It is fetched when first asked for, kept for an hour, and saved in
@@ -319,8 +331,9 @@ list. The app suggests a model from an agent's name and a few words of its instr
 `needsReading`), its model list shows how sure the suggestion is, and with the toggle on, an open
 list asks `POST /api/models/reading`. The daemon then asks TypeSafe's Jev (`typesafe/jev-1.14`,
 pinned) on OpenRouter's Decisions API, with the operator's key, which kind of work the agent
-does: gather, produce or check. The app's rules still apply after it: the team's answer stays on
-the strongest model, and a check step uses another maker's model. Each answer is kept in
+does: gather, produce or check, and the table's `kinds` give that kind's tier at the person's
+priority, the tier a placed Researcher gets for gathering. The app's rules still apply after it:
+the team's answer stays on the strongest model, and a check step uses another maker's model. Each answer is kept in
 `model-readings.json` under a hash of exactly what was sent, so a setup is paid for once. The
 daemon makes one call at a time, at most 50 a day, and none for ten minutes after one fails.
 `model-reading.json` holds the switch and what readings have cost. Only the agent's own setup is
@@ -333,7 +346,9 @@ agent's. Picking the suggestion of a model that reasons sets `thinkingEffort` wi
 
 An agent with `followsSuggestion: true` in its team file follows its suggestion (ADR 0072): a team's
 own agent added in the app starts that way, picking the suggestion in its model list sets it, and
-picking any other model takes it out. `ui/src/lib/team-file/useModelFollowing.ts` watches the open
+picking any other model takes it out. Moving the Your agents' models slider moves a following agent's
+suggestion too, and a team opened later moves those still on what their suggestion was at another
+stop (ADR 0112). `ui/src/lib/team-file/useModelFollowing.ts` watches the open
 team: when a following agent's configuration settles after a change, it works the suggestion out
 again (with a reading when Let AI choose is on) and moves `model`, and the model list says what it
 was, with Undo, which pins it back. `thinkingEffort` moves with it, on a model that reasons, while
@@ -687,7 +702,9 @@ Ask builds from what the person has (ADR 0096). Its first turn names their teams
 the ids a team points at), skills, connected tools and ways of paying. `list_jobs` and `read_job`
 give LoomWatch's built-in jobs from `schemas/built-in-jobs.json`, the list the app's palette and
 agent builder place from (`ui/src/lib/library/roles.ts`), on the models `schemas/model-tiers.json`
-gives each job. `list_my_agents` lists the person's agents, which a proposal points at with
+gives each job at the person's priority; `list_models`' `choosing` also gives each kind of work's
+model and the other priorities' jobs, and every message tells Ask the setting ("Your agents' models:
+Balanced."). `list_my_agents` lists the person's agents, which a proposal points at with
 `from: {agent}`. `list_tools` lists the connected tools by what each reads and changes.
 `find_files` (`control/find.rs`) finds a folder or file by the person's words: first among what
 their teams and agents already read, then below their home folder and, on a Mac, iCloud Drive and

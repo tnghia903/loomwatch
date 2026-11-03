@@ -289,20 +289,53 @@ impl Control {
 }
 
 /// The built-in Checker job (ADR 0096): its instructions, and the model and thinking effort it runs
-/// on — another maker's model where the person's sources have one. `LoomWatch`'s own check of an
-/// answer is this job (ADR 0098).
+/// on at the person's priority (ADR 0112) — another maker's model where the person's sources have
+/// one. `LoomWatch`'s own check of an answer is this job (ADR 0098).
 pub(crate) fn checker_job() -> (String, String, String) {
     let job = jobs::named("checker").expect("schemas/built-in-jobs.json has the checker job");
-    let (model, effort) = job.model();
+    let (model, effort) = job.model_at(priority());
     (job.role(), model, effort)
 }
 
-/// The model `tier` runs on, paid by a connected plan that offers it, else `OpenRouter` (ADR 0073,
-/// `ModelTiers::model_on`); `OpenRouter`'s when nothing says.
+/// What agents' models lean to now (ADR 0112): the person's setting, else the table's default.
+pub(crate) fn priority() -> crate::ai::Priority {
+    crate::ai::installed().map_or(
+        crate::ai::MODEL_TIERS.default_priority,
+        crate::ai::Ai::priority,
+    )
+}
+
+/// The model `tier` runs on for `LoomWatch`'s own help (Ask itself, reading a message, learning):
+/// Highest quality's, whatever agents lean to.
 pub(crate) fn tier_model(tier: &str) -> String {
+    tier_model_at(tier, crate::ai::Priority::Quality)
+}
+
+/// The model `tier` runs on at `priority`, paid by a connected plan that offers it, else
+/// `OpenRouter` (ADR 0073, `ModelTiers::model_on_at`); `OpenRouter`'s when nothing says.
+pub(crate) fn tier_model_at(tier: &str, priority: crate::ai::Priority) -> String {
+    on_the_sources(&|connected, offers| {
+        crate::ai::MODEL_TIERS.model_on_at(tier, priority, connected, offers)
+    })
+}
+
+/// The model the built-in job `job` runs on at `priority`: its own pick there where something
+/// connected can run it, else its tier's (`ModelTiers::job_model_on`, ADR 0112).
+pub(crate) fn job_model_at(job: &str, priority: crate::ai::Priority) -> String {
+    on_the_sources(&|connected, offers| {
+        crate::ai::MODEL_TIERS.job_model_on(job, priority, connected, offers)
+    })
+}
+
+/// Whether a connected plan offers a model.
+type Offers<'a> = &'a dyn Fn(&crate::ai::ModelRef) -> bool;
+
+/// `choose` on the sources connected now and what each plan offers; nothing connected when no
+/// daemon's settings are installed.
+fn on_the_sources(choose: &dyn Fn(&[crate::ai::Source], Offers) -> String) -> String {
     use crate::ai::{ModelRef, Source};
     let Some(ai) = crate::ai::installed() else {
-        return crate::ai::MODEL_TIERS.model_on(tier, &[], &|_| true);
+        return choose(&[], &|_| true);
     };
     let claude = ai.claude_status();
     let plan = ai.chatgpt_status();
@@ -316,7 +349,7 @@ pub(crate) fn tier_model(tier: &str) -> String {
         }
         Source::OpenRouter => true,
     };
-    crate::ai::MODEL_TIERS.model_on(tier, &ai.connected_sources(), &offers)
+    choose(&ai.connected_sources(), &offers)
 }
 
 /// Where a run opens in the app: its team's page on that run, or, for a run of an agent's own chat
@@ -541,7 +574,7 @@ async fn converse(
         } else {
             None
         };
-        let prompt = compose_prompt(&control, &turn, has.as_deref());
+        let prompt = compose_prompt(&control, &turn, has.as_deref(), priority());
         first = false;
         control
             .record(
@@ -615,8 +648,14 @@ async fn fail(control: &Control, conversation: &Conversation, message: &str) {
 }
 
 /// What the app is told. The first turn carries the instructions and what the person has (`has`);
-/// every turn says where the person is, so the app never has to ask a tool for it.
-fn compose_prompt(control: &Control, turn: &Turn, has: Option<&str>) -> String {
+/// every turn says where the person is, so the app never has to ask a tool for it, and what their
+/// agents' models lean to now (`priority`, ADR 0112), which they can move between messages.
+fn compose_prompt(
+    control: &Control,
+    turn: &Turn,
+    has: Option<&str>,
+    priority: crate::ai::Priority,
+) -> String {
     let mut prompt = String::new();
     if let Some(has) = has {
         prompt.push_str(mcp::INSTRUCTIONS);
@@ -626,7 +665,9 @@ fn compose_prompt(control: &Control, turn: &Turn, has: Option<&str>) -> String {
     }
     prompt.push_str("## Where the person is\n");
     prompt.push_str(&describe_context(control, &turn.context));
-    prompt.push_str("\n\n## The person's message\n");
+    prompt.push_str("\nYour agents' models: ");
+    prompt.push_str(priority.label());
+    prompt.push_str(".\n\n## The person's message\n");
     prompt.push_str(turn.text.trim());
     prompt
 }

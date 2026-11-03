@@ -1,5 +1,5 @@
 import builtInJobs from '../../../../schemas/built-in-jobs.json'
-import { jobNeeds, modelForJob, type EffortTier, type ModelTier } from '../ai/modelIds'
+import { jobNeeds, jobTier, modelForJob, type EffortTier, type ModelTier } from '../ai/modelIds'
 import type { AgentAllow, AgentLink, CapabilityRef } from '../team-file/types'
 import { callsFor, type ToolAllow } from '../tools/allow'
 import { knowledgeOf, type AgentRead } from './reads'
@@ -80,11 +80,14 @@ interface BuiltInJob {
 
 const isRoleIcon = (icon: string): icon is RoleIcon => (ROLE_ICON_IDS as readonly string[]).includes(icon)
 
-/** One built-in job as the palette places it, on its tiers from `schemas/model-tiers.json`. */
+/**
+ * One built-in job as the palette places it, on its tiers from `schemas/model-tiers.json` as Highest
+ * quality has them: what the person's priority changes is read where it is placed (`modelForPreset`).
+ */
 function presetOf(job: BuiltInJob): RolePreset {
   if (!isRoleIcon(job.icon)) throw new Error(`schemas/built-in-jobs.json gives ${job.id} an icon the app doesn't draw: ${job.icon}`)
   return {
-    id: job.id, label: job.label, does: job.does, icon: job.icon, ...jobNeeds(job.id),
+    id: job.id, label: job.label, does: job.does, icon: job.icon, ...jobNeeds(job.id, 'quality'),
     ...(job.allow ? { allow: job.allow } : {}),
     doneWhen: job.doneWhen,
     role: job.role.join('\n'),
@@ -98,10 +101,10 @@ function presetOf(job: BuiltInJob): RolePreset {
  */
 export const ROLE_PRESETS: readonly RolePreset[] = (builtInJobs.jobs as BuiltInJob[]).map(presetOf)
 
-/** The model and effort a job places its agent on: a saved job's own, else its tiers'. */
+/** The model and effort a job places its agent on: a saved job's own, else its tiers' at the person's priority. */
 export function modelForPreset(preset: RolePreset): { model: string; thinkingEffort?: string } {
   if (preset.model) return { model: preset.model, ...(preset.thinkingEffort ? { thinkingEffort: preset.thinkingEffort } : {}) }
-  return modelForJob(preset)
+  return modelForJob({ ...preset, tier: jobTier(preset.id, preset.tier) })
 }
 
 /**

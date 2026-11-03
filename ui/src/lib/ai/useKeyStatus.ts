@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import { type AiStatus, type KeyStatus, fetchAiStatus } from './client'
-import { setConnectedSources } from './modelIds'
+import { DEFAULT_PRIORITY, setConnectedSources, setPriority } from './modelIds'
 import { connectedSources, offeredModels } from './sources'
 
 // How agents' models are paid, shared by everything that waits on it: the connection cards, Ask,
@@ -16,6 +16,7 @@ export function announceAiStatus(status: Partial<AiStatus> & Pick<AiStatus, 'ope
   const merged = { ...(known ?? { openrouter: { connected: false }, anthropic: { connected: false }, chatgpt: { available: false, connected: false, planUse: false } }), ...status } as AiStatus
   known = merged
   setConnectedSources(connectedSources(merged), offeredModels(merged))
+  setPriority(merged.priority ?? DEFAULT_PRIORITY)
   for (const listener of listeners) listener(merged)
 }
 
@@ -59,4 +60,5 @@ export function forgetKeyStatus() {
   known = null
   pending = null
   setConnectedSources([])
+  setPriority(DEFAULT_PRIORITY)
 }

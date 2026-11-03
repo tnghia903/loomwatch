@@ -26,7 +26,7 @@ import { describe, expect, it } from 'vitest'
 
 import { type JobKind, type SetupReading, needsReading, setupOf } from './agentSetup'
 import { suggestModel } from './modelSuggestion'
-import { type SuggestionCase, type Tier, exampleCases, renamedCases, tierOf, writtenCases } from './suggestionCases'
+import { MEASURED_AT, type SuggestionCase, type Tier, exampleCases, renamedCases, writtenCases } from './suggestionCases'
 import type { TeamDocument } from './types'
 
 const examples = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../examples')
@@ -44,15 +44,12 @@ const COST_CHOICES = new Set([
   'daily-tech-digest: Writer',
   // A researcher left on the default model; its job says gatherer.
   'capability-delivery: Market Researcher',
-  // Researchers their examples put on the faster model, while quality comes first and the table
-  // (schemas/model-tiers.json) keeps researchers on the strongest one.
-  'research-team: Researcher',
-  'team-memory: Researcher',
 ])
 
 const KIND_FOR: Record<Tier, JobKind> = { strong: 'produce', fast: 'gather', check: 'check' }
 const sure = (tier: Tier): SetupReading => ({ kind: KIND_FOR[tier], probabilities: { [KIND_FOR[tier]]: 0.95 }, confidence: 0.95 })
-const got = (one: SuggestionCase, reading?: SetupReading | null) => tierOf(suggestModel({ agent: one.agent, team: one.team, reading }).model)
+// The tier the suggestion placed it on: a job's own pick at Balance (ADR 0112) is another model, on that job's tier.
+const got = (one: SuggestionCase, reading?: SetupReading | null) => suggestModel({ agent: one.agent, team: one.team, reading, priority: MEASURED_AT }).tier
 
 describe('model suggestion, measured', () => {
   it('sends every agent the keywords misread to be read', () => {

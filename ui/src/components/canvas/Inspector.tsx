@@ -1,7 +1,7 @@
 import { X } from '../ui/icon'
 import { createElement, useRef } from 'react'
 
-import { canonicalModel } from '../../lib/ai/modelIds'
+import { type Priority, canonicalModel } from '../../lib/ai/modelIds'
 import type { AgentNode } from '../../lib/library/nodeFromDrop'
 import { splitModelSelector } from '../../lib/models'
 import type { AgentUsage } from '../../lib/team-file/runLessons'
@@ -41,7 +41,7 @@ export interface InspectorProps {
   /** The model picked, and whether it now follows its suggestion (ADR 0072). */
   onModelChange: (value: string, follow: boolean, effort?: string) => void
   /** Its model just moved with its configuration (ADR 0072): from what, and Undo. */
-  modelMove?: { from: string; fromEffort?: string; onUndo: () => void }
+  modelMove?: { from: string; fromEffort?: string; priority?: Priority; onUndo: () => void }
   /** The agent's own guard on what one run may spend on it, or none with `null` (ADR 0068). */
   onSpendChange?: (perRun: number | null) => void
   /** `undefined` takes the effort out, so the model runs at its own default. */

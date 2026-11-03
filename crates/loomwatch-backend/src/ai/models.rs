@@ -38,7 +38,8 @@ pub static MODEL_TIERS: LazyLock<ModelTiers> = LazyLock::new(|| {
         .expect("schemas/model-tiers.json is the model table")
 });
 
-/// The model table: a model per tier, an effort per effort tier, and each job's two tiers.
+/// The model table: a model per tier, an effort per effort tier, and each job's two tiers, as
+/// Highest quality has them, and what Balance and Saving change (`priorities`, ADR 0112).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelTiers {
@@ -54,12 +55,64 @@ pub struct ModelTiers {
     pub new_agent: JobNeeds,
     /// Each built-in job, by id.
     pub jobs: BTreeMap<String, JobNeeds>,
+    /// The tier of each kind of work a reading of an agent's setup tells apart (`gather`,
+    /// `produce`, `check`), for an agent no built-in job places.
+    pub kinds: BTreeMap<String, String>,
     /// The tiers' models on the sources besides `OpenRouter`: source → tier → model, as a team file
     /// writes it.
     pub by_source: BTreeMap<Source, BTreeMap<String, String>>,
     /// For each tier, which source to take a model from first, when several are connected. The ones
     /// the person already pays for as a plan come first.
     pub preference: BTreeMap<String, Vec<Source>>,
+    /// The priority a new install starts on.
+    pub default_priority: Priority,
+    /// What each priority but Highest quality changes from the table above.
+    pub priorities: BTreeMap<Priority, PriorityChanges>,
+}
+
+/// What the person leans to when `LoomWatch` chooses agents' models (ADR 0112): less spent, a
+/// balance, or the best answer whatever it costs. One setting for every way an agent is made.
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum Priority {
+    Saving,
+    Balance,
+    #[default]
+    Quality,
+}
+
+impl Priority {
+    /// Every priority, least spent first: the slider's stops.
+    pub const ALL: [Self; 3] = [Self::Saving, Self::Balance, Self::Quality];
+
+    /// As the slider names it.
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Saving => "Saving",
+            Self::Balance => "Balanced",
+            Self::Quality => "Highest quality",
+        }
+    }
+}
+
+/// What a priority changes from Highest quality's table. Anything it doesn't name is as there.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PriorityChanges {
+    /// A tier's model: tier → the `OpenRouter` id.
+    pub models: BTreeMap<String, String>,
+    /// A tier's model on a plan: source → tier → model.
+    pub by_source: BTreeMap<Source, BTreeMap<String, String>>,
+    /// A job's tier: job → tier.
+    pub jobs: BTreeMap<String, String>,
+    /// A kind of work's tier: kind → tier.
+    pub kinds: BTreeMap<String, String>,
+    /// A job's own model, where it does that work nearly as well for much less: job → the
+    /// `OpenRouter` id.
+    pub job_models: BTreeMap<String, String>,
 }
 
 /// One kind of agent's model tier and effort tier.
@@ -83,13 +136,53 @@ impl ModelTiers {
         )
     }
 
-    /// The model `tier` runs on (ADR 0073, ruled 2026-10-19). The tier names its model first
-    /// (`models`), and then who pays: a connected plan that offers it (the Claude credit for
-    /// Anthropic's models, the `ChatGPT` plan for `OpenAI`'s), else `OpenRouter` when its key is in.
-    /// Only when neither can run it does a connected plan's own model for the tier stand in
-    /// (`bySource`, in `preference` order), so an agent made with just a `ChatGPT` plan still runs.
-    /// With nothing connected it is the `OpenRouter` model. `offers` says whether a connected plan
-    /// lists a model. The same rules live in `ui/src/lib/ai/modelIds.ts` (`modelForTier`).
+    /// What `job` needs at `priority`: its tier there and its effort. A job the table doesn't name
+    /// needs what an agent made from nothing does.
+    #[must_use]
+    pub fn needs(&self, job: &str, priority: Priority) -> JobNeeds {
+        let base = self.jobs.get(job).unwrap_or(&self.new_agent);
+        let tier = self
+            .priorities
+            .get(&priority)
+            .and_then(|changes| changes.jobs.get(job))
+            .unwrap_or(&base.tier);
+        JobNeeds {
+            tier: tier.clone(),
+            effort: base.effort.clone(),
+        }
+    }
+
+    /// The tier a kind of work (`gather`, `produce`, `check`) runs on at `priority`.
+    #[must_use]
+    pub fn kind_tier(&self, kind: &str, priority: Priority) -> &str {
+        self.priorities
+            .get(&priority)
+            .and_then(|changes| changes.kinds.get(kind))
+            .or_else(|| self.kinds.get(kind))
+            .map_or(&self.new_agent.tier, |tier| tier)
+    }
+
+    /// The model `tier` names first at `priority`, as an `OpenRouter` id.
+    #[must_use]
+    pub fn tier_model(&self, tier: &str, priority: Priority) -> &str {
+        self.priorities
+            .get(&priority)
+            .and_then(|changes| changes.models.get(tier))
+            .or_else(|| self.models.get(tier))
+            .map_or(DEFAULT_MODEL, String::as_str)
+    }
+
+    /// A plan's own model for `tier` at `priority`, standing in when nothing connected can run the
+    /// tier's first choice.
+    fn stand_in(&self, source: Source, tier: &str, priority: Priority) -> Option<String> {
+        self.priorities
+            .get(&priority)
+            .and_then(|changes| changes.by_source.get(&source)?.get(tier))
+            .or_else(|| self.by_source.get(&source)?.get(tier))
+            .cloned()
+    }
+
+    /// [`Self::model_on_at`] Highest quality: the table as it is, for `LoomWatch`'s own help.
     #[must_use]
     pub fn model_on(
         &self,
@@ -97,34 +190,77 @@ impl ModelTiers {
         connected: &[Source],
         offers: &dyn Fn(&ModelRef) -> bool,
     ) -> String {
-        let first = self
-            .models
-            .get(tier)
-            .map_or(DEFAULT_MODEL, String::as_str)
-            .to_owned();
-        let named = ModelRef {
-            source: Source::OpenRouter,
-            id: first.clone(),
-        };
-        let paid_by_plan = [Source::Anthropic, Source::ChatGpt]
-            .into_iter()
-            .filter(|plan| connected.contains(plan))
-            .filter_map(|plan| named.on(plan))
-            .find(|on| offers(on));
-        if let Some(on) = paid_by_plan {
-            return on.selector();
-        }
-        if connected.contains(&Source::OpenRouter) {
-            return first;
+        self.model_on_at(tier, Priority::Quality, connected, offers)
+    }
+
+    /// The model `tier` runs on at `priority` (ADR 0073, ruled 2026-10-19; ADR 0112). The tier
+    /// names its model first (`models`, as `priority` changes it), and then who pays: a connected
+    /// plan that offers it (the Claude credit for Anthropic's models, the `ChatGPT` plan for
+    /// `OpenAI`'s), else `OpenRouter` when its key is in. Only when neither can run it does a
+    /// connected plan's own model for the tier stand in (`bySource`, in `preference` order), so an
+    /// agent made with just a `ChatGPT` plan still runs. With nothing connected it is the
+    /// `OpenRouter` model. `offers` says whether a connected plan lists a model. The same rules
+    /// live in `ui/src/lib/ai/modelIds.ts` (`modelForTier`).
+    #[must_use]
+    pub fn model_on_at(
+        &self,
+        tier: &str,
+        priority: Priority,
+        connected: &[Source],
+        offers: &dyn Fn(&ModelRef) -> bool,
+    ) -> String {
+        let first = self.tier_model(tier, priority).to_owned();
+        if let Some(placed) = placed(&first, connected, offers) {
+            return placed;
         }
         self.preference
             .get(tier)
             .map_or(&[][..], Vec::as_slice)
             .iter()
             .filter(|source| **source != Source::OpenRouter && connected.contains(source))
-            .find_map(|source| self.by_source.get(source)?.get(tier).cloned())
+            .find_map(|source| self.stand_in(*source, tier, priority))
             .unwrap_or(first)
     }
+
+    /// The model the job `job` runs on at `priority` (ADR 0112): the priority's own pick for that
+    /// job (`jobModels`) when something connected can run it, paid as a tier's model is, else the
+    /// model of the job's tier there. The same rules live in `ui/src/lib/ai/modelIds.ts`
+    /// (`modelForJob`).
+    #[must_use]
+    pub fn job_model_on(
+        &self,
+        job: &str,
+        priority: Priority,
+        connected: &[Source],
+        offers: &dyn Fn(&ModelRef) -> bool,
+    ) -> String {
+        let pick = self
+            .priorities
+            .get(&priority)
+            .and_then(|changes| changes.job_models.get(job));
+        if let Some(placed) = pick.and_then(|model| placed(model, connected, offers)) {
+            return placed;
+        }
+        self.model_on_at(&self.needs(job, priority).tier, priority, connected, offers)
+    }
+}
+
+/// Who pays for `model`, an `OpenRouter` id: a connected plan that offers it, else `OpenRouter`
+/// when its key is in, or anything when nothing is connected yet. `None` when nothing connected can.
+fn placed(model: &str, connected: &[Source], offers: &dyn Fn(&ModelRef) -> bool) -> Option<String> {
+    let named = ModelRef {
+        source: Source::OpenRouter,
+        id: model.to_owned(),
+    };
+    let paid_by_plan = [Source::Anthropic, Source::ChatGpt]
+        .into_iter()
+        .filter(|plan| connected.contains(plan))
+        .filter_map(|plan| named.on(plan))
+        .find(|on| offers(on));
+    if let Some(on) = paid_by_plan {
+        return Some(on.selector());
+    }
+    (connected.is_empty() || connected.contains(&Source::OpenRouter)).then(|| model.to_owned())
 }
 
 /// The `OpenRouter` id for a team file's `model`, written for an app `LoomWatch` no longer runs or
@@ -700,6 +836,112 @@ mod tests {
         }
         assert_eq!(tiers.choose(&tiers.jobs["editor"]), (DEFAULT_MODEL, "low"));
         assert_eq!(tiers.choose(&tiers.new_agent), (DEFAULT_MODEL, "medium"));
+    }
+
+    /// Highest quality is the table as ruled: it changes nothing, and new installs start on it.
+    /// Balance and Saving name only tiers, jobs, kinds and plans the table has, and each priority
+    /// puts a placed Researcher where a reading of a gatherer goes, so Ask and the suggestion agree.
+    #[test]
+    fn each_priority_changes_only_what_the_table_has() {
+        let tiers = &*MODEL_TIERS;
+        assert_eq!(tiers.default_priority, Priority::Quality);
+        assert!(!tiers.priorities.contains_key(&Priority::Quality));
+        for (priority, changes) in &tiers.priorities {
+            for tier in changes.models.keys().chain(changes.jobs.values()) {
+                assert!(tiers.models.contains_key(tier), "{priority:?}: {tier}");
+            }
+            for job in changes.jobs.keys() {
+                assert!(tiers.jobs.contains_key(job), "{priority:?}: {job}");
+            }
+            for (kind, tier) in &changes.kinds {
+                assert!(tiers.kinds.contains_key(kind) && tiers.models.contains_key(tier));
+            }
+            for (source, models) in &changes.by_source {
+                for tier in models.keys() {
+                    assert!(tiers.by_source[source].contains_key(tier), "{priority:?}");
+                }
+            }
+        }
+        for priority in Priority::ALL {
+            assert_eq!(
+                tiers.needs("researcher", priority).tier,
+                tiers.kind_tier("gather", priority),
+                "{priority:?}"
+            );
+            assert_eq!(tiers.needs("checker", priority).tier, "check");
+        }
+        // Gathering costs less below Highest quality, and the writer keeps the strongest at Balance.
+        assert_eq!(tiers.needs("researcher", Priority::Quality).tier, "strong");
+        assert_eq!(tiers.needs("researcher", Priority::Balance).tier, "fast");
+        assert_eq!(
+            tiers.tier_model(
+                &tiers.needs("writer", Priority::Balance).tier,
+                Priority::Balance
+            ),
+            DEFAULT_MODEL
+        );
+        assert_ne!(tiers.tier_model("strong", Priority::Saving), DEFAULT_MODEL);
+        assert_eq!(tiers.needs("nobody", Priority::Saving).effort, "standard");
+    }
+
+    /// At every priority, a tier names its model and the same paying rules apply: a connected plan
+    /// that offers it, else `OpenRouter`, else a plan's own model for that priority's tier.
+    #[test]
+    fn every_priority_pays_for_its_models_the_same_way() {
+        let tiers = &*MODEL_TIERS;
+        let all = |_: &ModelRef| true;
+        for priority in Priority::ALL {
+            for tier in tiers.models.keys() {
+                let first = tiers.tier_model(tier, priority);
+                assert_eq!(tiers.model_on_at(tier, priority, &[], &all), first);
+                for source in Source::ALL {
+                    let model =
+                        ModelRef::parse(&tiers.model_on_at(tier, priority, &[source], &all));
+                    assert_eq!(model.source, source, "{priority:?} {tier}");
+                }
+            }
+        }
+        // A plan that can't run the tier's first choice stands in with that priority's own model.
+        assert_eq!(
+            tiers.model_on_at("check", Priority::Saving, &[Source::Anthropic], &all),
+            "anthropic:claude-sonnet-5-5"
+        );
+        assert_eq!(
+            tiers.model_on_at("check", Priority::Quality, &[Source::Anthropic], &all),
+            "anthropic:claude-opus-5-5"
+        );
+        assert_eq!(
+            tiers.model_on_at("strong", Priority::Saving, &[Source::ChatGpt], &all),
+            "chatgpt:gpt-6-luna"
+        );
+        // A job's own pick, where something connected runs it; else its tier's model there.
+        let pick = &tiers.priorities[&Priority::Balance].job_models["sheet"];
+        assert_eq!(
+            &tiers.job_model_on("sheet", Priority::Balance, &[Source::OpenRouter], &all),
+            pick
+        );
+        assert_eq!(
+            tiers.job_model_on("sheet", Priority::Balance, &[Source::Anthropic], &all),
+            tiers.model_on_at("strong", Priority::Balance, &[Source::Anthropic], &all)
+        );
+        assert_eq!(
+            tiers.job_model_on("sheet", Priority::Quality, &[Source::OpenRouter], &all),
+            DEFAULT_MODEL
+        );
+        // Saving names its own models, and its own stand-ins on a plan that can't run them.
+        let saving = Priority::Saving;
+        assert_eq!(
+            tiers.model_on_at("fast", saving, &[Source::OpenRouter], &all),
+            tiers.tier_model("fast", saving)
+        );
+        assert_ne!(
+            tiers.model_on_at("strong", saving, &[Source::Anthropic], &all),
+            tiers.model_on("strong", &[Source::Anthropic], &all)
+        );
+        assert_eq!(
+            tiers.model_on("strong", &[Source::Anthropic], &all),
+            tiers.model_on_at("strong", Priority::Quality, &[Source::Anthropic], &all)
+        );
     }
     use serde_json::json;
 

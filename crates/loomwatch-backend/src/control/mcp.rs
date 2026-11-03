@@ -96,7 +96,8 @@ Give each agent what its part needs, and nothing it doesn't: what an agent is gi
 Hold each agent to its result:
 - Give each agent a `doneWhen`: two or three short, checkable things its kind of result must always have, such as "Every story links to its source". Put in its `part`'s `doneWhen` each thing the person asked of that agent's result (their length, their style, every part they named, a time window they named, such as only what is dated this week, with anything undated said apart, a whole test suite passing rather than some tests). The agent checks both, its part's first, before it replies, and says which it could not meet. Never more than five in each: what isn't in `doneWhen` isn't checked.
 - When the result must be right (facts, figures, code), end with a check step: an agent that checks the work it is handed against the other agent's `doneWhen` without rewriting it, connected after that agent and set to `checks: <its id>`; its findings show on the answer. Check the work the person will see, and make sure the agent it checks can fix whatever the check finds: give that agent the folders and files the check uses (the spreadsheet the figures come from, not only the figures it was handed) and the web when a fix may need a new source. Give the check step what it needs to judge each item: the same folders, files and skills as the agent it checks. A check step that checks only the person's own files or tests (a spreadsheet, their notes, a project's tests) gets no web: write its `allow` without `web`, keeping `commands` when it must run the tests. Only a check step that opens sources on the web keeps it. When the work rests on the person's own material that isn't public (new prices, a draft plan, their notes), tell the check step in its part to check against that material and not against what the web says now, which may still be the old version. Where a judgement call matters (which competitors, whether a changed test was wrong), put it in that agent's part's `doneWhen` as something the check can confirm, such as "Says why each competitor was chosen". Add `sendBack: {rounds: 2, whenStillNotMet: ask}`, so what the check finds goes back to be fixed before the person sees the answer, and the run stops to ask them if it still isn't met; write `whenStillNotMet: answer` if they would rather see the answer with the problems marked, and leave `sendBack` off only if they want a report of the problems instead. A check step is a whole extra session, so leave it out of quick or low-stakes teams: work only the person reads, such as a weekly summary for themselves, gets its own `doneWhen` and no check step. Add one when the work goes out to others (a board, customers, the public), when they said it must be right, or when it changes code.
-- Give each agent the `model` and `thinkingEffort` that `list_models`' `choosing` gives its kind of work, the same table LoomWatch's own templates use: `jobs` lists the usual kinds, `tiers` says which model each kind of agent runs on, and `efforts` how hard it thinks. Use another recommended model only when the person asks for one. Set `thinkingEffort` only for a model `list_models` marks as reasoning, and never `xhigh` or `max`: thinking is paid for like writing, and the top settings mostly overthink. A free model is limited per day and its maker may learn from what it's sent, so use one only if the person asks.
+- Give each agent the `model` and `thinkingEffort` that `list_models`' `choosing` gives its kind of work, the same table LoomWatch's own templates and model suggestions use, at the person's setting for their agents' models ("Your agents' models" under "Where the person is": Saving, Balanced or Highest quality, which they set themselves): `jobs` for an agent started from a job, `kinds` for any other agent by what it does, `tiers` says which model each tier runs on, and `efforts` how hard it thinks. Ask `list_models` again when that setting has changed since you last did. Only when the person asks in their words for this team to cost less, or to be as good as it can be, take its agents from `otherPriorities`' Saving or Highest quality, and say so in a few words. Use another recommended model only when the person names one. Set `thinkingEffort` only for a model `list_models` marks as reasoning, and never `xhigh` or `max`: thinking is paid for like writing, and the top settings mostly overthink. A free model is limited per day and its maker may learn from what it's sent, so use one only if the person asks.
+- A check step runs on another maker's model than the agent it checks, so it doesn't share that agent's blind spots: when the `checker` job's model is from the same maker (`openai/…` and `chatgpt:…` are one maker, `anthropic/…` and `anthropic:…` another), give the check step `tiers`' strong model instead, and if that is the same maker too, keep the checker's.
 - A new team can spend at most $1.00 a run, or $2.00 when it has three or more agents or a check step that sends work back, unless it sets `spend: {perRun: <dollars>}`; set one only when the person names a figure. A run that reaches it stops and asks them whether to carry on, but a scheduled run has nobody to ask, so it stops without an answer. For a team of three or more agents, or one with a check step, add to your reply what each run can spend and that they can tell you if it needs more.
 
 A team file is YAML. A complete pipeline with a review step:
@@ -711,31 +712,75 @@ async fn list_models() -> Result<Value, String> {
     }))
 }
 
-/// The model table (`schemas/model-tiers.json`) as Ask chooses from it: what each tier runs on and
-/// is for, what each effort tier is for, and the model and effort of each usual kind of agent.
+/// The kinds of work an agent no built-in job places does, as Ask tells them apart: the kinds a
+/// reading of an agent's setup tells apart (`ai/reading.rs`).
+const KINDS: [(&str, &str); 3] = [
+    (
+        "gather",
+        "collects, reads or sorts information for another agent, which writes or decides the result",
+    ),
+    ("produce", "makes or decides the result itself"),
+    ("check", "checks another agent's finished work"),
+];
+
+/// The model table (`schemas/model-tiers.json`) as Ask chooses from it, at the person's priority
+/// (ADR 0112).
 pub(super) fn choosing() -> Value {
+    choosing_at(super::priority())
+}
+
+/// The table at `priority`: what each tier runs on and is for, what each effort tier is for, the
+/// model and effort of each usual kind of agent and each kind of work, and each job at the other
+/// priorities, for a team the person asks to cost less or to be as good as it can be.
+pub(super) fn choosing_at(priority: crate::ai::Priority) -> Value {
+    use crate::ai::Priority;
     let tiers = &*crate::ai::MODEL_TIERS;
     // Each tier's model, paid by a connected plan that offers it, else OpenRouter (ADR 0073).
-    let pick = |needs: &crate::ai::JobNeeds| {
+    let pick = |needs: &crate::ai::JobNeeds, at: Priority| {
         let (_, effort) = tiers.choose(needs);
-        json!({"model": super::tier_model(&needs.tier), "thinkingEffort": effort})
+        json!({"model": super::tier_model_at(&needs.tier, at), "thinkingEffort": effort})
+    };
+    let jobs = |at: Priority| {
+        tiers
+            .jobs
+            .keys()
+            .map(|job| {
+                let (_, effort) = tiers.choose(&tiers.needs(job, at));
+                json!({"job": job, "model": super::job_model_at(job, at), "thinkingEffort": effort})
+            })
+            .collect::<Vec<_>>()
+    };
+    let kind = |kind: &str| crate::ai::JobNeeds {
+        tier: tiers.kind_tier(kind, priority).to_owned(),
+        effort: if kind == "check" {
+            tiers.needs("checker", priority).effort
+        } else {
+            tiers.new_agent.effort.clone()
+        },
     };
     json!({
+        "priority": priority.label(),
         "tiers": tiers.models.keys().map(|tier| json!({
             "tier": tier,
-            "model": super::tier_model(tier),
+            "model": super::tier_model_at(tier, priority),
             "for": tiers.tiers.get(tier),
         })).collect::<Vec<_>>(),
         "efforts": tiers.efforts.iter().map(|(tier, effort)| json!({
             "thinkingEffort": effort,
             "for": tiers.effort_for.get(tier),
         })).collect::<Vec<_>>(),
-        "jobs": tiers.jobs.iter().map(|(job, needs)| {
-            let mut choice = pick(needs);
-            choice["job"] = json!(job);
+        "jobs": jobs(priority),
+        "kinds": KINDS.iter().map(|(name, does)| {
+            let mut choice = pick(&kind(name), priority);
+            choice["kind"] = json!(name);
+            choice["for"] = json!(format!("an agent that {does}"));
             choice
         }).collect::<Vec<_>>(),
-        "anyOtherAgent": pick(&tiers.new_agent),
+        "anyOtherAgent": pick(&tiers.needs("", priority), priority),
+        "otherPriorities": Priority::ALL.iter().filter(|other| **other != priority).map(|other| json!({
+            "priority": other.label(),
+            "jobs": jobs(*other),
+        })).collect::<Vec<_>>(),
     })
 }
 

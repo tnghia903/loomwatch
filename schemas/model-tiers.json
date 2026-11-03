@@ -1,5 +1,5 @@
 {
-  "$comment": "Which model and thinking effort each kind of agent starts on (ADR 0057 tiers, ADR 0062 efforts). The one table: the app reads it in ui/src/lib/ai/modelIds.ts for templates, the builder and new agents, and the daemon reads it for Ask's list_models, so every way of making an agent chooses alike. Quality comes first (2026-10-18): every job that gathers for the work, produces it, decides it or checks it is on the strong or check tier. Moving one to the fast tier is a one-line change here, to try once the quality benchmark shows the work stays as good. `models` name each tier's model first, as OpenRouter ids; who pays for it comes after (ADR 0073, ruled 2026-10-19): a connected plan that offers it (the Claude API credit for Anthropic's models, the ChatGPT plan for OpenAI's), else OpenRouter. Only when neither can run it does a connected plan's own model for the tier stand in: `bySource` names it, and `preference` says which connected plan's comes first.",
+  "$comment": "Which model and thinking effort each kind of agent starts on (ADR 0057 tiers, ADR 0062 efforts), at each priority a person can choose on the Agents' models slider (ADR 0112): Saving, Balance or Highest quality. The one table: the app reads it in ui/src/lib/ai/modelIds.ts for templates, the builder, new agents and every model suggestion, and the daemon reads it for Ask's list_models, its jobs and LoomWatch's own check, so every way of making an agent chooses alike. The table at the top is Highest quality, and it stays as ruled (2026-10-18): every job that gathers for the work, produces it, decides it or checks it is on the strong or check tier. `priorities` says only what Balance and Saving change from it; a tier, job, kind or plan they don't name is as Highest quality has it. `jobModels` is a job's own pick at that priority, where public evaluations show a model does that work nearly as well for much less (ADR 0112 lists the evidence); when nothing connected can run it, the job's tier stands in. `defaultPriority` is what a new install starts on: moving it to balance is a one-line change here, to make once the quality benchmark shows the work stays as good. `models` name each tier's model first, as OpenRouter ids; who pays for it comes after (ADR 0073, ruled 2026-10-19): a connected plan that offers it (the Claude API credit for Anthropic's models, the ChatGPT plan for OpenAI's), else OpenRouter. Only when neither can run it does a connected plan's own model for the tier stand in: `bySource` names it, and `preference` says which connected plan's comes first. `kinds` are the kinds of work a reading of an agent's setup tells apart (gather, produce, check), for an agent no built-in job places; a job's `kind` says the same of it.",
   "models": {
     "strong": "anthropic/claude-opus-5.5",
     "fast": "anthropic/claude-sonnet-5.5",
@@ -37,13 +37,14 @@
     "standard": "most work",
     "deep": "checking, analysis and code"
   },
+  "kinds": { "gather": "strong", "produce": "strong", "check": "check" },
   "newAgent": { "tier": "strong", "effort": "standard" },
   "jobs": {
-    "researcher": { "tier": "strong", "effort": "standard" },
+    "researcher": { "tier": "strong", "effort": "standard", "kind": "gather" },
     "writer": { "tier": "strong", "effort": "standard" },
     "editor": { "tier": "strong", "effort": "light" },
     "reviewer": { "tier": "strong", "effort": "deep" },
-    "checker": { "tier": "check", "effort": "deep" },
+    "checker": { "tier": "check", "effort": "deep", "kind": "check" },
     "coder": { "tier": "strong", "effort": "deep" },
     "designer": { "tier": "strong", "effort": "standard" },
     "lead": { "tier": "strong", "effort": "standard" },
@@ -54,5 +55,42 @@
     "chart": { "tier": "strong", "effort": "standard" },
     "dashboard": { "tier": "strong", "effort": "standard" },
     "video": { "tier": "strong", "effort": "standard" }
+  },
+  "defaultPriority": "quality",
+  "priorities": {
+    "balance": {
+      "jobs": { "researcher": "fast", "editor": "fast" },
+      "kinds": { "gather": "fast" },
+      "jobModels": {
+        "reviewer": "anthropic/claude-sonnet-5.5",
+        "analyst": "openai/gpt-6.1-sol",
+        "document": "anthropic/claude-sonnet-5.5",
+        "sheet": "openai/gpt-6.1-terra"
+      }
+    },
+    "saving": {
+      "models": {
+        "strong": "anthropic/claude-haiku-5.5",
+        "fast": "anthropic/claude-haiku-5.5",
+        "check": "openai/gpt-6.1-terra"
+      },
+      "bySource": {
+        "chatgpt": { "strong": "chatgpt:gpt-6-luna", "fast": "chatgpt:gpt-6-luna" },
+        "anthropic": {
+          "strong": "anthropic:claude-haiku-5-5",
+          "fast": "anthropic:claude-haiku-5-5",
+          "check": "anthropic:claude-sonnet-5-5"
+        }
+      },
+      "jobs": { "researcher": "fast", "editor": "fast" },
+      "kinds": { "gather": "fast" },
+      "jobModels": {
+        "writer": "google/gemini-3.8-flash",
+        "editor": "google/gemini-3.8-flash",
+        "coder": "openai/gpt-6.1-sol",
+        "analyst": "openai/gpt-6.1-terra",
+        "sheet": "openai/gpt-6-luna"
+      }
+    }
   }
 }

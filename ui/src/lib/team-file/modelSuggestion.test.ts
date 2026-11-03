@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { CHECK_MODEL, DEFAULT_MODEL, FAST_MODEL, NEW_AGENT, effortFor, jobNeeds } from '../ai/modelIds'
+import { CHECK_MODEL, DEFAULT_MODEL, FAST_MODEL, NEW_AGENT, effortFor, jobFirstModel, jobNeeds, modelForTier, modelNameFromId } from '../ai/modelIds'
 import { CHECKER_ROLE } from '../library/checker'
 import { onTheFastTier } from '../library/onTheFastTier'
 import { ROLE_PRESETS } from '../library/roles'
@@ -11,9 +11,34 @@ const researcher = { id: 'researcher', name: 'Researcher', role: 'Find sources o
 const writer = { id: 'writer', name: 'Writer', role: 'Write the article from what you are handed.', model: DEFAULT_MODEL }
 
 describe('suggestModel', () => {
-  it('keeps a researcher on the strongest model while its job is on the strong tier', () => {
+  it('keeps a researcher on the strongest model at Highest quality, and says it is the setting', () => {
     const suggestion = suggestModel({ agent: researcher, team: { agents: [researcher, writer], responder: 'writer' } })
-    expect(suggestion).toEqual({ model: DEFAULT_MODEL, tier: 'strong', effort: 'medium', why: 'A researcher finds and checks sources. That work decides the result, so it gets the strongest model.' })
+    expect(suggestion).toEqual({ model: DEFAULT_MODEL, tier: 'strong', first: DEFAULT_MODEL, effort: 'medium', why: 'It gathers facts for Writer to write up. With your agents’ models on Highest quality, it gets the strongest model too.' })
+  })
+
+  it('follows the person’s priority: Balance puts gathering and tidying on the faster model, Saving moves every tier down', () => {
+    const team = { agents: [researcher, writer], responder: 'writer' }
+    expect(suggestModel({ agent: researcher, team, priority: 'balance' })).toMatchObject({ model: FAST_MODEL, tier: 'fast', why: 'It gathers facts for Writer to write up. A faster model does that well, for less, and leaves the strongest one for the step that writes.' })
+    expect(suggestModel({ agent: writer, team, priority: 'balance' })).toMatchObject({ model: DEFAULT_MODEL, tier: 'strong' })
+    const editor = { id: 'editor', name: 'Editor', role: 'Tighten the draft.' }
+    expect(suggestModel({ agent: editor, priority: 'balance' })).toMatchObject({ model: FAST_MODEL, tier: 'fast', why: expect.stringMatching(/With your agents’ models on Balanced, it gets a faster model, for less\.$/) })
+    // Saving's tiers are its own models, each below Highest quality's.
+    const lead = { id: 'lead', name: 'Research lead', role: 'Plan the research and hand it out.' }
+    const saving = suggestModel({ agent: lead, team, priority: 'saving' })
+    expect(saving).toMatchObject({ model: modelForTier('strong', undefined, undefined, 'saving'), tier: 'strong', why: expect.stringContaining('With your agents’ models on Saving, it gets a lower-cost model, as most agents do.') })
+    expect(saving.model).not.toBe(DEFAULT_MODEL)
+    expect(suggestModel({ agent: researcher, team, priority: 'saving' }).model).toBe(modelForTier('fast', undefined, undefined, 'saving'))
+  })
+
+  it('gives a job its own pick at a priority, says so, and its tier where nothing connected runs the pick', () => {
+    const sheet = { id: 'sheet', name: 'Spreadsheet maker', role: 'Make the Excel file.' }
+    const own = jobFirstModel('sheet', 'strong', 'balance')
+    expect(own).not.toBe(DEFAULT_MODEL)
+    expect(suggestModel({ agent: sheet, priority: 'balance' })).toMatchObject({ model: own, first: own, tier: 'strong', why: `A spreadsheet maker makes Excel files whose totals update. With your agents’ models on Balanced, it gets ${modelNameFromId(own)}, which does this work well for what it costs.` })
+    // The Claude credit alone can't run an OpenAI model: the job's tier runs on it instead.
+    expect(suggestModel({ agent: sheet, priority: 'balance', sources: ['anthropic'] })).toMatchObject({ model: 'anthropic:claude-opus-5-5', first: own, why: expect.stringContaining('That work decides the result') })
+    // Highest quality has no picks of its own.
+    expect(suggestModel({ agent: sheet })).toMatchObject({ model: DEFAULT_MODEL, first: DEFAULT_MODEL })
   })
 
   it('puts a gatherer on the faster model when another agent writes the answer', onTheFastTier(() => {
@@ -29,7 +54,7 @@ describe('suggestModel', () => {
   }))
 
   it('follows the job alone while the agent is built on its own', onTheFastTier(() => {
-    expect(suggestModel({ agent: researcher })).toEqual({ model: FAST_MODEL, tier: 'fast', effort: 'medium', why: expect.stringContaining('for another agent to write up') })
+    expect(suggestModel({ agent: researcher })).toEqual({ model: FAST_MODEL, tier: 'fast', first: FAST_MODEL, effort: 'medium', why: expect.stringContaining('for another agent to write up') })
   }))
 
   it('reads a check on another maker’s model than the work it checks', () => {
@@ -44,7 +69,7 @@ describe('suggestModel', () => {
   })
 
   it('gives work that decides the result the strongest model, and says why in the job’s words', () => {
-    expect(suggestModel({ agent: writer })).toEqual({ model: DEFAULT_MODEL, tier: 'strong', effort: 'medium', why: 'A writer drafts the finished piece. That work decides the result, so it gets the strongest model.' })
+    expect(suggestModel({ agent: writer })).toEqual({ model: DEFAULT_MODEL, tier: 'strong', first: DEFAULT_MODEL, effort: 'medium', why: 'A writer drafts the finished piece. That work decides the result, so it gets the strongest model.' })
     expect(suggestModel({ agent: { id: 'a', name: 'Numbers', role: 'Analyse the sales sheet.' } }).why).toMatch(/^An analyst answers questions about your data\./)
   })
 
@@ -83,10 +108,12 @@ describe('suggestModel with a reading of the whole setup', () => {
   const sure = (kind: SetupReading['kind'], probability = 0.9): SetupReading => ({ kind, probabilities: { [kind]: probability }, confidence: 0.9 })
   const team = { agents: [gatherer, writer], responder: 'writer' }
 
-  it('puts a gatherer the keywords call a writer on the faster model, and says it was read', () => {
-    expect(suggestModel({ agent: gatherer, team }).model).toBe(DEFAULT_MODEL)
-    const read = suggestModel({ agent: gatherer, team, reading: sure('gather') })
-    expect(read).toEqual({ model: FAST_MODEL, tier: 'fast', effort: 'medium', read: true, why: 'Its configuration says it gathers for Writer rather than writing the answer. A faster model does that well, for less, and leaves the strongest one for the step that writes.' })
+  it('puts a gatherer the keywords call a writer where its priority puts gathering, and says it was read', () => {
+    expect(suggestModel({ agent: gatherer, team, priority: 'balance' }).model).toBe(DEFAULT_MODEL)
+    const read = suggestModel({ agent: gatherer, team, reading: sure('gather'), priority: 'balance' })
+    expect(read).toEqual({ model: FAST_MODEL, tier: 'fast', first: FAST_MODEL, effort: 'medium', read: true, why: 'Its configuration says it gathers for Writer rather than writing the answer. A faster model does that well, for less, and leaves the strongest one for the step that writes.' })
+    // At Highest quality a gatherer AI read gets what a placed Researcher gets: the strongest model, as Ask gives it.
+    expect(suggestModel({ agent: gatherer, team, reading: sure('gather') })).toEqual({ model: DEFAULT_MODEL, tier: 'strong', first: DEFAULT_MODEL, effort: 'medium', read: true, why: 'Its configuration says it gathers for Writer rather than writing the answer. With your agents’ models on Highest quality, it gets the strongest model too.' })
   })
 
   it('keeps the team’s answer on the strongest model whatever the reading says', () => {

@@ -10,9 +10,11 @@
 //   name none. Labelled by hand: a judgement, not a measurement.
 //
 // Every case sits in a team whose answer comes from a Writer, unless it says otherwise, so a
-// gatherer can be told apart from the agent that writes the answer.
+// gatherer can be told apart from the agent that writes the answer. Every label is a tier at
+// Balance (`MEASURED_AT`, ADR 0112), the priority where gathering and producing run on different
+// tiers; at Highest quality both are on the strong one, and nothing would tell a misreading apart.
 
-import { DEFAULT_MODEL, canonicalModel, tierOfModel } from '../ai/modelIds'
+import { DEFAULT_MODEL, type Priority, canonicalModel, jobTier, tierOfModel } from '../ai/modelIds'
 import { ROLE_PRESETS } from '../library/roles'
 import type { SuggestedAgent } from './agentSetup'
 import { pipelineTerminal } from './pipelineOrder'
@@ -20,8 +22,10 @@ import { answeringAgent } from '../library/checker'
 import type { TeamDocument } from './types'
 
 export type Tier = 'strong' | 'fast' | 'check'
-/** The tier `model` is, on whichever source it is paid through. */
-export const tierOf = (model: string): Tier | null => tierOfModel(model)
+/** The priority every label is a tier at. */
+export const MEASURED_AT: Priority = 'balance'
+/** The tier `model` is at Balance, on whichever source it is paid through. */
+export const tierOf = (model: string): Tier | null => tierOfModel(model, MEASURED_AT)
 
 export interface SuggestionCase {
   source: 'example' | 'renamed' | 'written'
@@ -53,7 +57,8 @@ export function exampleCases(teams: Record<string, TeamDocument>): SuggestionCas
 
 export const renamedCases: SuggestionCase[] = ROLE_PRESETS.map((preset) => {
   const agent: SuggestedAgent = { id: 'step-2', name: 'Step 2', role: preset.role }
-  const want: Tier = preset.tier === 'fast' ? 'fast' : preset.tier === 'check' ? 'check' : 'strong'
+  const tier = jobTier(preset.id, preset.tier, MEASURED_AT)
+  const want: Tier = tier === 'fast' ? 'fast' : tier === 'check' ? 'check' : 'strong'
   return { source: 'renamed', label: `${preset.label} as “Step 2”`, agent, team: { agents: [agent, WRITER], responder: 'writer' }, want }
 })
 
