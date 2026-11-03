@@ -18,7 +18,7 @@ mod teams;
 use std::sync::Arc;
 
 use axum::body::{Body, to_bytes};
-use axum::extract::{Request, State};
+use axum::extract::{DefaultBodyLimit, Query, Request, State};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -69,12 +69,14 @@ pub const ALLOWED: &[(&str, &str)] = &[
     ("DELETE", "/api/ask/conversations/{}"),
 ];
 
-/// The most a phone may send in one request. Messages, answers and approvals are small.
+/// The most a phone may send in one request, to its own routes or on to the daemon. Messages,
+/// answers and approvals are small.
 const BODY_LIMIT: usize = 1024 * 1024;
 
 /// The calls on [`ALLOWED`] that carry a file's bytes rather than words: raw bytes only
 /// (`application/octet-stream`), as the daemon takes them, and up to a chat file's size
-/// ([`crate::chosen_knowledge::MAX_FILE_BYTES`]) in place of [`BODY_LIMIT`].
+/// ([`crate::chosen_knowledge::MAX_FILE_BYTES`]) in place of [`BODY_LIMIT`]. One of My agents'
+/// own chats is written first when it has none yet ([`pinned::chat_for_files`]).
 const FILES: &[(&str, &str)] = &[("PUT", "/api/chat/files")];
 
 /// The phone's side of the door: `LoomWatch` here, and what each live run's agents were last seen
@@ -114,6 +116,9 @@ pub fn router(helper: Arc<Phone>) -> Router {
         .route("/phone/v0/team", get(team_view).post(team_save))
         .fallback(forward)
         .layer(CompressionLayer::new())
+        // The phone's own routes read JSON, whose default limit is axum's 2 MB. `forward` reads
+        // the raw body with its own limit, so a chat file still gets [`FILES`]' size.
+        .layer(DefaultBodyLimit::max(BODY_LIMIT))
         .with_state(helper)
 }
 
@@ -320,6 +325,13 @@ struct TeamPath {
     path: String,
 }
 
+/// `?teamPath=` on a chat file sent through [`forward`].
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TeamFile {
+    team_path: String,
+}
+
 /// One team's settings and workflow ([`teams::team_view`]).
 async fn team_view(
     State(helper): State<Arc<Phone>>,
@@ -512,12 +524,19 @@ async fn forward(State(helper): State<Arc<Phone>>, request: Request) -> Response
     } else {
         BODY_LIMIT
     };
+    let team_path = file
+        .then(|| Query::<TeamFile>::try_from_uri(request.uri()).ok())
+        .flatten();
     let Ok(body) = to_bytes(request.into_body(), limit).await else {
         return problem(
             StatusCode::PAYLOAD_TOO_LARGE,
             "That is too big to send from the phone.",
         );
     };
+    if let Some(Query(TeamFile { team_path })) = team_path {
+        // The chat says if it still can't keep the file.
+        let _ = pinned::chat_for_files(&helper.daemon, &team_path).await;
+    }
     let Ok(reply) = helper
         .daemon
         .send(method, &path_and_query, content_type, body)
