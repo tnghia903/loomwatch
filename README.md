@@ -1031,10 +1031,13 @@ running, and answers a question waiting on you when Auto would have. In Auto:
   LoomWatch's own), and unable to open or drive other apps. A script that fails there asks you when
   the agent runs it again.
 - Changes to files in the agent's own folder go ahead, whatever its **Edit files** switch.
-- Deleting a folder or forcing a delete (`rm -r`, `rm -f`), pushing, publishing, deploying, admin
-  rights, credentials, stopping programs and opening or controlling other apps always ask, with the
-  reason on the card. A plain delete of one file inside the agent's folder doesn't. So does a command that needs the network for
-  an agent allowed the web, and a change outside the agent's folder. The web keeps its own switch.
+- A command that deletes a folder or forces a delete (`rm -r`, `rm -f`), pushes, publishes,
+  deploys, needs admin rights, touches credentials, stops programs or opens or controls other apps
+  always asks, with the reason on the card. So does a command that needs the network for an agent
+  allowed the web, and a change outside the agent's folder. The web keeps its own switch.
+- Inside the agent's folder, Auto may change and delete files: a plain `rm notes.md`, or a script
+  that tidies up, runs without asking. Auto limits where a command writes, not what it reads: a
+  command it runs can read your other files, apart from the key and sign-in folders.
 - On Windows, where there is no sandbox, only the commands that read run without asking.
 
 LoomWatch decides this on your computer from the command itself; no model is asked and nothing is

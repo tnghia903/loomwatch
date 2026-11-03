@@ -812,11 +812,14 @@ Auto mode applies after the switches and after an earlier **Allow for this run**
 - An edit (`kind: edit`) goes ahead whatever `allow.edits` says when every file it names is inside
   the agent's folder and outside the folders above.
 
-A fixed list always asks: administrator commands, deleting, `git push`/`reset --hard`/`clean -f`,
-publishing, deploying, stopping programs, system settings, credential paths and driving other apps
-(`osascript`, `open`, `shortcuts`, `automator`), wherever it appears in the line. So does a command
-that names the network for an agent allowed the web, and an edit outside the agent's folder. Where
-there is no sandbox (Windows, Linux), a command that doesn't only read asks as above. The card says
+A fixed list always asks: administrator commands, deleting (`rm -r`/`-f`, `find -delete`),
+`git push`/`reset --hard`/`clean -f`, publishing, deploying, stopping programs, system settings,
+credential paths and driving other apps (`osascript`, `open`, `shortcuts`, `automator`), wherever it
+appears in the line. So does a command that names the network for an agent allowed the web, and an
+edit outside the agent's folder. What a script given as text does (`bash -c '…'`, `python3 -c '…'`)
+is the script's: the sandbox keeps it in, not the list, so it may change and delete files inside
+the agent's folder, and read files outside it apart from the key folders. Where there is no
+sandbox (Windows, Linux), a command that doesn't only read asks as above. The card says
 why Auto mode left it to you. The decision is made on this computer from the command line alone;
 `permission_answered` records `outcome: auto_approved` for a command that only read or an edit, and
 `auto_contained` for a command run in the tighter sandbox. LoomWatch's own check of an answer (ADR

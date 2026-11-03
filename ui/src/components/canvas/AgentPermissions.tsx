@@ -27,7 +27,7 @@ function autoTitle(key: AllowSwitch): string | null {
   if (key === 'edits') return 'Auto: changes to files in the folder it works in go ahead. Anything outside it asks you.'
   if (key !== 'commands') return null
   return isMac()
-    ? 'Auto: commands run on their own, without the web, changing files only in the folder it works in. Publishing and the like ask you.'
+    ? 'Auto: commands run on their own, changing and deleting files only in the folder it works in. Publishing and the like ask you.'
     : 'Auto: commands that only read files or download pages run on their own. Anything else asks you.'
 }
 

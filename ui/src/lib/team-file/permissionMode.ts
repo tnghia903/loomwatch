@@ -10,6 +10,6 @@ import type { PermissionMode } from './types'
 export function modeSays(mode: PermissionMode, onMac = isMac()): string {
   if (mode === 'ask') return 'It waits for your answer.'
   return onMac
-    ? 'It goes ahead, changing files only in the folder it works in. Publishing, the web and anything outside that folder still wait for you.'
+    ? 'It goes ahead in the folder it works in, where it may change and delete files. Publishing, and changing anything outside that folder, still wait for you.'
     : 'It changes files in the folder it works in, and runs commands that only read or download, without asking. Anything else still waits for you.'
 }

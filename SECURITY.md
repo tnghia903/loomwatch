@@ -103,8 +103,9 @@ yourself.
   only read files, or download pages for an agent allowed the web, run without asking, and so do
   changes to files in the agent's own folder. On a Mac, other commands run without asking in a
   tighter sandbox: off the network, away from your keys and sign-ins, and unable to open or drive
-  other apps. Deleting a folder, publishing, admin commands, credentials and the like still ask.
-  Auto limits where a command writes, not what it reads outside those key folders.
+  other apps. A command that deletes a folder outright, publishes, needs admin rights or touches
+  credentials still asks, though a script may still delete files inside the agent's folder. Auto
+  limits where a command writes, not what it reads outside those key folders.
 - **Give agents no tools that reach past the run.** An agent's tools are its files, the web,
   commands, its plan and the Team Bus to its teammates. None of them publishes, posts or sends a
   message anywhere, except a command working in an app you let LoomWatch control, such as Mail. Tools set up in another AI app's settings (MCP servers) are not given to
