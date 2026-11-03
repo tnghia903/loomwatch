@@ -210,3 +210,34 @@ async fn a_door_not_shared_is_left_alone_until_the_person_asks() {
         "nothing was shared"
     );
 }
+
+/// Linux won't run a file some process holds open for writing ("text file busy"). A stand-in still
+/// held for a moment, as one is when another test forks while it is written, is run once it is let
+/// go, not reported as Tailscale failing to start.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn a_busy_program_file_is_run_once_it_is_let_go() {
+    let tailscale = StandIn::new("busy", &other_on_443(), &other_and_door());
+    let held = std::fs::OpenOptions::new()
+        .write(true)
+        .open(tailscale.program())
+        .unwrap();
+    let let_go = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(100));
+        drop(held);
+    });
+    let reached = reach(
+        Some(&tailscale.program()),
+        3440,
+        Duration::from_secs(5),
+        true,
+    )
+    .await;
+    let_go.join().unwrap();
+    assert_eq!(
+        reached,
+        Reach::Ready {
+            address: format!("https://{NAME}:8443")
+        }
+    );
+}
