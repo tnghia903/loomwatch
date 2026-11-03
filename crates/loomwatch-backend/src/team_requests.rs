@@ -27,6 +27,7 @@ use uuid::Uuid;
 
 use crate::api::ApiError;
 use crate::archive::EventArchive;
+use crate::chat::HandedOutcome;
 use crate::runs::{
     LaunchError, RunAskedBy, RunRegistry, RunStatus, StartRunOutcome, StartRunRequest,
 };
@@ -325,7 +326,13 @@ async fn start(state: &TeamRequestsState, request: TeamRequest) -> TeamRequest {
         state,
         &failed,
         &text,
-        Some(handed_back(state, &failed, None, Some(heading))),
+        Some(handed_back(
+            state,
+            &failed,
+            None,
+            Some(heading),
+            HandedOutcome::NotStarted,
+        )),
         true,
     )
     .await;
@@ -386,7 +393,7 @@ async fn hand_back(state: TeamRequestsState, id: String, run_id: String) {
         return;
     };
     // The agent reads whose answer follows; the chat shows the answer as the team's.
-    let (status, problem, text, heading) = match &record {
+    let (status, problem, text, heading, outcome) = match &record {
         Some(record) if record.status == RunStatus::Succeeded => {
             let answer = record.reply.as_deref().unwrap_or_default().trim();
             let answer = crate::cap_middle_text(answer, ANSWER_KEPT_CHARS);
@@ -396,17 +403,29 @@ async fn hand_back(state: TeamRequestsState, id: String, run_id: String) {
                 None,
                 format!("{heading}\n\n{answer}"),
                 Some(heading),
+                HandedOutcome::Answered,
             )
         }
         Some(record) => {
             let problem = stopped_because(record.status, record.error.as_deref());
             let (text, heading) = told_stopped(&request, &problem);
-            (Status::Failed, Some(problem), text, Some(heading))
+            let outcome = if record.status == RunStatus::Cancelled {
+                HandedOutcome::Cancelled
+            } else {
+                HandedOutcome::Failed
+            };
+            (Status::Failed, Some(problem), text, Some(heading), outcome)
         }
         None => {
             let problem = "LoomWatch lost track of its run.".to_owned();
             let (text, heading) = told_stopped(&request, &problem);
-            (Status::Failed, Some(problem), text, Some(heading))
+            (
+                Status::Failed,
+                Some(problem),
+                text,
+                Some(heading),
+                HandedOutcome::Failed,
+            )
         }
     };
     let Some(request) = update(&id, |request| {
@@ -417,18 +436,19 @@ async fn hand_back(state: TeamRequestsState, id: String, run_id: String) {
         return;
     };
     let responder = record.as_ref().map(|record| record.responder.as_str());
-    let handed = handed_back(&state, &request, responder, heading);
+    let handed = handed_back(&state, &request, responder, heading, outcome);
     tell(&state, &request, &text, Some(handed), false).await;
 }
 
 /// What the chat shows a message from `request`'s team as: the team, the agent of it that answers
-/// (`responder`, or the one its file names when no run says), and what it was asked, with `heading`
-/// the words before the team's own answer.
+/// (`responder`, or the one its file names when no run says), what it was asked and how its work
+/// ended, with `heading` the words before the team's own answer.
 fn handed_back(
     state: &TeamRequestsState,
     request: &TeamRequest,
     responder: Option<&str>,
     heading: Option<String>,
+    outcome: HandedOutcome,
 ) -> crate::chat::HandedBack {
     let team = crate::config::TeamConfig::load_in(
         &state.teams_root.join(&request.team.path),
@@ -450,6 +470,7 @@ fn handed_back(
         from_agent,
         request: request.request.clone(),
         heading,
+        outcome: Some(outcome),
     }
 }
 
@@ -573,6 +594,9 @@ mod tests {
             if request.prompt().contains("'s answer to “") {
                 return Some(Completion::text(WRITES_IT_UP));
             }
+            if request.prompt().contains("stopped before it finished “") {
+                return Some(Completion::text("Trip planner couldn't finish your plan."));
+            }
             if let Some(Message::Tool { content, .. }) = request.messages.last() {
                 return Some(Completion::text(&format!("The tool said: {content}")));
             }
@@ -600,6 +624,14 @@ mod tests {
 
     /// A teams folder with Maya pinned and her chat written, and a Trip planner team.
     async fn rig(maya_model: &str) -> Rig {
+        let planner = crate::engine::demo_model(Demo::scripted(vec![Completion::text(
+            "Day 1: the lake. Day 2: the train. Day 3: the market.",
+        )]));
+        rig_with(maya_model, &planner).await
+    }
+
+    /// [`rig`], with the Trip planner's agent on `planner`.
+    async fn rig_with(maya_model: &str, planner: &str) -> Rig {
         let pool = crate::db::Db::temp().await;
         let archive = EventArchive::new(pool.clone());
         let registry = RunRegistry::durable(RunStore::new(pool));
@@ -618,9 +650,6 @@ mod tests {
             ),
         )
         .unwrap();
-        let planner = crate::engine::demo_model(Demo::scripted(vec![Completion::text(
-            "Day 1: the lake. Day 2: the train. Day 3: the market.",
-        )]));
         std::fs::write(
             dir.0.join("trips.yaml"),
             format!(
@@ -867,6 +896,7 @@ mod tests {
                 "fromAgent": null,
                 "request": "Plan 3 gentle days in Đà Lạt",
                 "heading": "Trip planner's answer to “Plan 3 gentle days in Đà Lạt”:",
+                "outcome": "answered",
             }),
             "{from_team}"
         );
@@ -971,6 +1001,162 @@ mod tests {
         )
         .await;
         assert_eq!(missing, StatusCode::NOT_FOUND);
+    }
+
+    /// ADR 0083, decision 10: a team that fails hands the agent that asked why, marked as a
+    /// failure, so its chat shows a stop and not the team's answer.
+    #[tokio::test]
+    async fn a_team_that_fails_hands_back_a_failure() {
+        let planner = crate::engine::demo_model(Demo::failing_after(
+            Vec::new(),
+            "the planner's model is down",
+        ));
+        let rig = rig_with(&maya("trips.yaml"), &planner).await;
+        let first = ask_maya(&rig, ".jobs/.bench/maya.yaml").await;
+        let request = asked_from(&first.run_id).remove(0);
+        let (status, started) = call(
+            &rig.requests,
+            "POST",
+            &format!("/api/team-requests/{}", request.id),
+            Some(json!({"decision": "start"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{started}");
+        let handed = handed_back_to_maya(&rig, &first.run_id).await;
+        assert_eq!(handed["outcome"], "failed", "{handed}");
+        assert_eq!(
+            handed["heading"],
+            "Trip planner stopped before it finished “Plan 3 gentle days in Đà Lạt”:"
+        );
+    }
+
+    /// Someone stopping the team is not the team failing: it is handed back as stopped, so the
+    /// chat marks no failure.
+    #[tokio::test]
+    async fn a_team_someone_stopped_hands_back_a_stop_not_a_failure() {
+        let (planner, _hold) = Demo::held(vec![Completion::text("never sent")]);
+        let planner = crate::engine::demo_model(planner);
+        let rig = rig_with(&maya("trips.yaml"), &planner).await;
+        let first = ask_maya(&rig, ".jobs/.bench/maya.yaml").await;
+        let request = asked_from(&first.run_id).remove(0);
+        let (status, started) = call(
+            &rig.requests,
+            "POST",
+            &format!("/api/team-requests/{}", request.id),
+            Some(json!({"decision": "start"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{started}");
+        rig.registry
+            .cancel(started["runId"].as_str().expect("a run"));
+        let handed = handed_back_to_maya(&rig, &first.run_id).await;
+        assert_eq!(handed["outcome"], "cancelled", "{handed}");
+    }
+
+    /// A team that can't start while the agent that asked is still at work is handed back to that
+    /// turn as not started.
+    #[tokio::test]
+    async fn a_team_that_cannot_start_while_she_works_is_handed_back_as_not_started() {
+        let (maya, hold) = Demo::responder_holding(
+            |request| {
+                Some(if request.prompt().contains("didn't start “") {
+                    Completion::text("The Trip planner didn't start.")
+                } else if request.after_tool() {
+                    Completion::text("I asked the Trip planner.")
+                } else {
+                    Completion::calls(
+                        "",
+                        vec![ToolCall {
+                            id: "ask-1".to_owned(),
+                            name: "ask_team".to_owned(),
+                            arguments: json!({"team": "trips.yaml", "request": "Plan Friday"})
+                                .to_string(),
+                        }],
+                    )
+                })
+            },
+            // Still at work once the team is asked.
+            crate::agent::SeenRequest::after_tool,
+            "",
+        );
+        let rig = rig(&crate::engine::demo_model(maya)).await;
+        let (status, sent) = call(
+            &rig.chat,
+            "POST",
+            "/api/chat/messages",
+            Some(json!({"teamPath": ".jobs/.bench/maya.yaml", "text": "Plan Friday", "to": {"kind": "agent", "agent": "maya"}, "work": true})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED, "{sent}");
+        let run_id = sent["run"]["runId"].as_str().unwrap().to_owned();
+        tokio::time::timeout(Duration::from_secs(20), async {
+            while asked_from(&run_id).is_empty() || hold.waiting() == 0 {
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        })
+        .await
+        .expect("Maya asked the team and is still at work");
+        let request = asked_from(&run_id).remove(0);
+        std::fs::remove_file(rig.dir.0.join("trips.yaml")).unwrap();
+        let (status, failed) = call(
+            &rig.requests,
+            "POST",
+            &format!("/api/team-requests/{}", request.id),
+            Some(json!({"decision": "start"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{failed}");
+        let queued = rig.registry.get(&run_id).unwrap().queued_notes;
+        assert_eq!(
+            queued
+                .iter()
+                .map(|note| note.from_team.as_deref())
+                .collect::<Vec<_>>(),
+            [Some("Trip planner")],
+            "{queued:?}"
+        );
+        let (status, page) = call(
+            &rig.chat,
+            "GET",
+            "/api/chat?teamPath=.jobs%2F.bench%2Fmaya.yaml",
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{page}");
+        let handed = page["items"][0]["notes"][0]["handedBack"].clone();
+        assert_eq!(handed["outcome"], "notStarted", "{page}");
+        hold.release(8);
+        wait_for(&rig.registry, |runs| {
+            runs.iter()
+                .any(|run| run.run_id == run_id && run.status.is_terminal())
+        })
+        .await;
+    }
+
+    /// What the chat of Maya, who asked in `asked_in`, shows the team's handed-back work as.
+    async fn handed_back_to_maya(rig: &Rig, asked_in: &str) -> Value {
+        wait_for(&rig.registry, |runs| {
+            runs.iter().any(|run| {
+                run.team_path == ".jobs/.bench/maya.yaml"
+                    && run.run_id != asked_in
+                    && run.status.is_terminal()
+            })
+        })
+        .await;
+        let (status, page) = call(
+            &rig.chat,
+            "GET",
+            "/api/chat?teamPath=.jobs%2F.bench%2Fmaya.yaml",
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{page}");
+        page["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find_map(|item| item["request"].get("handedBack").cloned())
+            .unwrap_or_else(|| panic!("Maya's chat shows the team's work: {page}"))
     }
 
     #[tokio::test]

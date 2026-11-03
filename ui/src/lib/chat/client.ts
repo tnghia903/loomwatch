@@ -70,7 +70,13 @@ export interface HandedBack {
       which tell the agent whose words follow and hold what is for it alone. `null`: the chat shows
       the whole message. */
   heading: string | null
+  /** How the team's work ended: its answer, or that it failed, was stopped or never started.
+      Absent in messages from before it was kept. */
+  outcome?: HandedOutcome | null
 }
+
+/** How a team's handed-back work ended (the daemon's `chat::HandedOutcome`). */
+export type HandedOutcome = 'answered' | 'failed' | 'cancelled' | 'notStarted'
 
 /** What the chat shows of a team's handed-back message: its answer or its reason, without the
     words before it that are for the agent. */

@@ -604,6 +604,38 @@ describe('the team’s chat', () => {
     expect(within(said).queryByRole('button', { name: /^React to/ })).toBeNull()
   })
 
+  // A team that failed or never started is marked as a stop, in words and the failed glyph, not
+  // only its edge's colour; one someone stopped, or that answered, is not something wrong.
+  it('marks a team’s handed-back work that failed or never started as a stop', async () => {
+    const handed = (teamName: string, outcome: 'answered' | 'failed' | 'cancelled' | 'notStarted') => ({ teamPath: `${teamName}.yaml`, teamName, agent: null, fromAgent: null, request: 'Plan Friday', heading: `${teamName}:`, outcome })
+    const piece = (id: string, teamName: string, outcome: 'answered' | 'failed' | 'cancelled' | 'notStarted', reason: string) => ({
+      kind: 'work' as const,
+      run: run({ runId: id, onlyAgent: 'writer', responder: 'writer', agentIds: ['writer'], reply: 'Noted.', createdAt: `2026-10-06T0${id.length}:00:00.000Z` }),
+      request: message({ id: `m-${id}`, route: 'agent', agentId: 'writer', runId: id, text: `${teamName}: ${reason}`, handedBack: handed(teamName, outcome) }),
+      notes: [],
+    })
+    page = [
+      piece('a', 'Planners', 'failed', 'Timed out after 600s.'),
+      piece('bb', 'Readers', 'notStarted', 'Readers can’t run as it is.'),
+      piece('ccc', 'Writers', 'cancelled', 'It was stopped.'),
+      piece('dddd', 'Editors', 'answered', 'Here is the plan.'),
+    ]
+    renderChat({ team: { ...team, solo: 'writer' } })
+    const log = await screen.findByRole('log', { name: 'Messages' })
+    const from = async (teamName: string) => (await within(log).findByText(teamName)).closest<HTMLElement>('.chat-msg')!
+    const failed = await from('Planners')
+    expect(within(failed).getByText('Planners stopped.')).toBeInTheDocument()
+    expect(failed.querySelector('.chat-bubble')).toHaveClass('bad')
+    await waitFor(() => expect(within(failed).getByText('Timed out after 600s.')).toBeInTheDocument())
+    const notStarted = await from('Readers')
+    expect(within(notStarted).getByText('It didn’t start.')).toBeInTheDocument()
+    expect(notStarted.querySelector('.chat-bubble')).toHaveClass('bad')
+    for (const quiet of [await from('Writers'), await from('Editors')]) {
+      expect(quiet.querySelector('.chat-bubble')).not.toHaveClass('bad')
+      expect(quiet.querySelector('.tc-team-stop')).toBeNull()
+    }
+  })
+
   // ADR 0051: the answer lives in the chat only, so what its record says about it sits under it.
   it('puts the answer’s status and what you do with it under the answer', async () => {
     said.read = true

@@ -258,6 +258,22 @@ describe('messages between agents', () => {
     expect(messages[0]).toMatchObject({ kind: 'question', from: 'lead', state: 'answered', reply: { from: 'loomwatch:app', noAnswer: true } })
   })
 
+  // ADR 0083, decision 10: a team's answer handed back to the agent that asked for it is passed on
+  // by LoomWatch. It is never said as yours, and never closes a question waiting on you.
+  it('passes on a team’s answer as LoomWatch’s note, leaving a question for you open', () => {
+    seq = 0
+    const { messages } = projectRun([
+      bus(1, 'lead', 'u', 'ask_user', { question: 'Which budget applies?' }),
+      settled(1, 'lead', 'u', { parked: true }),
+      event(1, 'lead', 'session_meta', { phase: 'awaiting_operator', kind: 'question', node: 'lead', question: 'Which budget applies?' }, loomwatch('awaiting_operator')),
+      answer(20, 'operator', 'Trip planner’s answer to “Plan Friday”:\n\nThe lake at nine.', { to: 'lead', noteId: 'n-team', fromTeam: 'Trip planner' }),
+    ])
+    expect(messages).toEqual([
+      expect.objectContaining({ kind: 'question', from: 'lead', state: 'pending', reply: null }),
+      expect.objectContaining({ kind: 'note', from: 'loomwatch:app', to: 'lead', text: 'Trip planner’s answer to “Plan Friday”:\n\nThe lake at nine.' }),
+    ])
+  })
+
   it('turns a permission request LoomWatch put to you into a message, settled by your answer or the clock', () => {
     seq = 0
     const asked = (seconds: number, agentId: string, requestId: string, extra: Record<string, unknown> = {}) =>

@@ -762,6 +762,10 @@ function FromTeam({ message, handed, said, to, flash, reactions, children }: { m
   const figure = handed.agent
     ? agentFigure({ id: handed.agent, from: handed.fromAgent ? { agent: handed.fromAgent, version: 0 } : undefined }, saved)
     : figureFor(handed.teamPath)
+  // A team that failed or never started is marked as a stop, as a piece of work that stopped is,
+  // naming the team: the agent's own work may stop under it too. One someone stopped on purpose
+  // is not something wrong.
+  const stop = handed.outcome === 'failed' ? `${handed.teamName} stopped.` : handed.outcome === 'notStarted' ? 'It didn’t start.' : null
   return (
     <div className={`chat-msg tc-from-team${flash ? ' flash' : ''}`} data-said={said}>
       <span className="chat-gutter">
@@ -773,7 +777,12 @@ function FromTeam({ message, handed, said, to, flash, reactions, children }: { m
         <div className="chat-meta" title={`What ${to} asked ${handed.teamName}: “${handed.request}”`}>
           <span className="chat-name hue-quiet">{handed.teamName}</span><span className="tc-to">to {to}</span><time>{clockTime(message.createdAt)}</time>
         </div>
-        {reactions(<div className="chat-bubble"><div className="chat-text"><Markdown>{handedBackText(message.text, handed)}</Markdown></div></div>)}
+        {reactions(
+          <div className={`chat-bubble${stop ? ' bad' : ''}`}>
+            {stop && <p className="tc-team-stop"><b><StatusGlyph status="failed" size={10} />{stop}</b></p>}
+            <div className="chat-text"><Markdown>{handedBackText(message.text, handed)}</Markdown></div>
+          </div>,
+        )}
         {children}
       </div>
     </div>

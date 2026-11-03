@@ -980,7 +980,13 @@ at a little desk, whose workbench opens while it is pointed at. For the agent in
   is sent back into the agent's chat, which starts the agent's next turn. That message is stored
   with `handed_back` (the team, its answering agent, the request and the words before the answer),
   so the chat shows it as the team's, under its name and that agent's figure, not as the person's.
-  Only the daemon sets it: `POST /api/chat/messages` ignores one sent from a page.
+  Only the daemon sets it: `POST /api/chat/messages` ignores one sent from a page. It also says how
+  the team's work ended (`outcome`: `answered`, `failed`, `cancelled` or `notStarted`), and the chat
+  marks a failure or a refused start as a stop. The message is never the person's words: its links
+  ask first (ADR 0104), it teaches nothing (ADR 0078), and when it joins a turn as a note
+  (`QueuedNote.from_team`) it never answers the agent's question to the person (ADR 0110), the agent
+  reads it under "## From a team you asked" rather than as direction, a failed turn names the team,
+  and the archive marks it `fromTeam`, so the run's record shows it as LoomWatch passing it on.
 
 `notch_panel.rs` is the one module in the workspace that calls `AppKit` directly.
 
