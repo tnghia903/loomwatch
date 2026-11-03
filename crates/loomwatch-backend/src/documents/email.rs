@@ -8,7 +8,7 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::Path;
 
-use mail_parser::{Address, Message, MessageParser, MimeHeaders as _};
+use mail_parser::{AddressList, MessageParser, MessageRef};
 
 /// How many messages inside messages are read: one forwarded as an attachment of one forwarded as
 /// an attachment, and so on. Past that, an attached message is named like any attachment.
@@ -29,17 +29,21 @@ pub(super) fn text(path: &Path, name: &str) -> Result<String, String> {
         })
         .ok_or_else(|| format!("{name} isn't an email LoomWatch can read: it may be damaged."))?;
     let mut out = String::new();
-    write_message(&mut out, &message, 0);
+    write_message(&mut out, message.root(), 0);
     Ok(out)
 }
 
-fn write_message(out: &mut String, message: &Message<'_>, depth: usize) {
+fn write_message(out: &mut String, message: MessageRef<'_>, depth: usize) {
     for (label, address) in [
         ("From", message.from()),
         ("To", message.to()),
         ("Cc", message.cc()),
     ] {
-        if let Some(people) = address.map(listed).filter(|people| !people.is_empty()) {
+        if let Some(people) = address
+            .as_ref()
+            .map(listed)
+            .filter(|people| !people.is_empty())
+        {
             let _ = writeln!(out, "{label}: {people}");
         }
     }
@@ -49,16 +53,15 @@ fn write_message(out: &mut String, message: &Message<'_>, depth: usize) {
     if let Some(subject) = message.subject() {
         let _ = writeln!(out, "Subject: {subject}");
     }
-    for index in 0..message.text_body_count() {
-        if let Some(words) = message.body_text(index) {
-            out.push('\n');
-            out.push_str(words.trim_end());
-            out.push('\n');
-        }
+    // An HTML body comes out as its text.
+    for words in message.text_bodies() {
+        out.push('\n');
+        out.push_str(words.trim_end());
+        out.push('\n');
     }
     let mut named = Vec::new();
     for part in message.attachments() {
-        match part.message() {
+        match part.nested() {
             Some(inner) if depth < NESTED_MESSAGES => {
                 out.push_str("\n--- Attached message ---\n");
                 write_message(out, inner, depth + 1);
@@ -69,7 +72,7 @@ fn write_message(out: &mut String, message: &Message<'_>, depth: usize) {
             _ => match part.attachment_name() {
                 Some(file) => named.push(format!(
                     "- {file} ({})",
-                    crate::chosen_knowledge::human_size(part.len() as u64)
+                    crate::chosen_knowledge::human_size(part.decoded_len() as u64)
                 )),
                 None if part.is_message() => named.push("- an attached message".to_owned()),
                 None => {}
@@ -85,10 +88,10 @@ fn write_message(out: &mut String, message: &Message<'_>, depth: usize) {
     }
 }
 
-/// "Lan Nguyen <lan@example.com>, team@example.com".
-fn listed(address: &Address<'_>) -> String {
+/// "Lan Nguyen <lan@example.com>, team@example.com", with the members of a group listed.
+fn listed(address: &AddressList<'_>) -> String {
     address
-        .iter()
+        .mailboxes()
         .filter_map(|person| match (person.name(), person.address()) {
             (Some(name), Some(address)) if !name.is_empty() => Some(format!("{name} <{address}>")),
             (_, Some(address)) => Some(address.to_owned()),
