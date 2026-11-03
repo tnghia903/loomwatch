@@ -288,27 +288,30 @@ async fn start(state: &TeamRequestsState, request: TeamRequest) -> TeamRequest {
             tokio::spawn(hand_back(state.clone(), started.id.clone(), run_id));
             return started;
         }
-        Ok(StartRunOutcome::IdempotencyConflict { .. }) => {
-            (format!("{} is already starting.", request.team.name), None)
-        }
+        // Read at the notch and in the asking agent's chat, each beside a way to open the team, so
+        // they say what to do there and who to ask again.
+        Ok(StartRunOutcome::IdempotencyConflict { .. }) => (
+            format!("{} was already starting this.", request.team.name),
+            None,
+        ),
         Err(LaunchError::NeedsReview(_)) => (
             format!(
                 "{0}, or one of its agents, changed outside LoomWatch, so it didn't run. Open {0} \
-                 and press Run team to see what it will do, then ask again.",
-                request.team.name
+                 and press Run team to see what it will do, then ask {1} again.",
+                request.team.name, request.asked_by.name
             ),
             None,
         ),
         Err(LaunchError::StaleRevision { .. }) => (
             format!(
-                "{} changed while it was starting, so it didn't run. Ask again.",
-                request.team.name
+                "{} changed while it was starting, so it didn't run. Ask {} again.",
+                request.team.name, request.asked_by.name
             ),
             None,
         ),
         Err(LaunchError::Api(error)) => (
             format!(
-                "{} can't run as it is. Open it in LoomWatch to see what to fix.",
+                "{0} can't run as it is. Open {0} to see what to fix.",
                 request.team.name
             ),
             Some(error.message),
@@ -327,8 +330,8 @@ async fn start(state: &TeamRequestsState, request: TeamRequest) -> TeamRequest {
         &failed,
         &text,
         Some(handed_back(
-            state,
             &failed,
+            team_of(state, &failed).as_ref(),
             None,
             Some(heading),
             HandedOutcome::NotStarted,
@@ -392,6 +395,7 @@ async fn hand_back(state: TeamRequestsState, id: String, run_id: String) {
     let Some(request) = get_request(&id) else {
         return;
     };
+    let team = team_of(&state, &request);
     // The agent reads whose answer follows; the chat shows the answer as the team's.
     let (status, problem, text, heading, outcome) = match &record {
         Some(record) if record.status == RunStatus::Succeeded => {
@@ -407,7 +411,7 @@ async fn hand_back(state: TeamRequestsState, id: String, run_id: String) {
             )
         }
         Some(record) => {
-            let problem = stopped_because(record.status, record.error.as_deref());
+            let problem = stopped_because(record.status, record.error.as_deref(), team.as_ref());
             let (text, heading) = told_stopped(&request, &problem);
             let outcome = if record.status == RunStatus::Cancelled {
                 HandedOutcome::Cancelled
@@ -436,30 +440,33 @@ async fn hand_back(state: TeamRequestsState, id: String, run_id: String) {
         return;
     };
     let responder = record.as_ref().map(|record| record.responder.as_str());
-    let handed = handed_back(&state, &request, responder, heading, outcome);
+    let handed = handed_back(&request, team.as_ref(), responder, heading, outcome);
     tell(&state, &request, &text, Some(handed), false).await;
+}
+
+/// `request`'s team file as it is now, when it opens.
+fn team_of(state: &TeamRequestsState, request: &TeamRequest) -> Option<crate::config::TeamConfig> {
+    crate::config::TeamConfig::load_in(
+        &state.teams_root.join(&request.team.path),
+        &state.teams_root,
+    )
+    .ok()
 }
 
 /// What the chat shows a message from `request`'s team as: the team, the agent of it that answers
 /// (`responder`, or the one its file names when no run says), what it was asked and how its work
 /// ended, with `heading` the words before the team's own answer.
 fn handed_back(
-    state: &TeamRequestsState,
     request: &TeamRequest,
+    team: Option<&crate::config::TeamConfig>,
     responder: Option<&str>,
     heading: Option<String>,
     outcome: HandedOutcome,
 ) -> crate::chat::HandedBack {
-    let team = crate::config::TeamConfig::load_in(
-        &state.teams_root.join(&request.team.path),
-        &state.teams_root,
-    )
-    .ok();
     let agent = responder
         .map(str::to_owned)
-        .or_else(|| team.as_ref().and_then(|team| team.responder_id().ok()));
+        .or_else(|| team.and_then(|team| team.responder_id().ok()));
     let from_agent = team
-        .as_ref()
         .zip(agent.as_deref())
         .and_then(|(team, id)| team.agents.iter().find(|each| each.id == id))
         .and_then(|each| each.from_agent.clone());
@@ -474,8 +481,13 @@ fn handed_back(
     }
 }
 
-/// Why a team's run ended without an answer, in plain words, as a sentence of its own.
-fn stopped_because(status: RunStatus, error: Option<&str>) -> String {
+/// Why a team's run ended without an answer, in plain words, as a sentence of its own: the
+/// agent that stopped by its name in `team` rather than the run's own words for it.
+fn stopped_because(
+    status: RunStatus,
+    error: Option<&str>,
+    team: Option<&crate::config::TeamConfig>,
+) -> String {
     if status == RunStatus::Cancelled {
         return "It was stopped.".to_owned();
     }
@@ -485,7 +497,7 @@ fn stopped_because(status: RunStatus, error: Option<&str>) -> String {
         .map_or_else(
             || "It failed without saying why.".to_owned(),
             |error| {
-                let line = first_line(error, 300);
+                let line = first_line(&who_stopped(error, team), 300);
                 let mut chars = line.chars();
                 chars
                     .next()
@@ -493,6 +505,36 @@ fn stopped_because(status: RunStatus, error: Option<&str>) -> String {
                     .unwrap_or_default()
             },
         )
+}
+
+/// `error` with the run's words for the agent it stopped at ("pipeline node writer failed: …",
+/// "failed to spawn ACP harness for agent writer: …") said as the person would ("Writer didn't
+/// finish: …", "Writer couldn't start: …"), the agent named as `team` names it. Anything else is
+/// left as it is. The app says the same of a run's error (`plainRunError` in
+/// `ui/src/lib/runs/errors.ts`, with the same test cases).
+fn who_stopped(error: &str, team: Option<&crate::config::TeamConfig>) -> String {
+    let named = |id: &str| {
+        team.and_then(|team| crate::helpers::name_on(team, id))
+            .unwrap_or_else(|| id.to_owned())
+    };
+    let first = error.lines().next().unwrap_or_default();
+    // The lines after the first stay, so a cut still says something was left out.
+    let more = &error[first.len()..];
+    let spawn = first
+        .strip_prefix("failed to spawn ACP harness for pipeline node ")
+        .or_else(|| first.strip_prefix("failed to spawn ACP harness for agent "));
+    if let Some((id, cause)) = spawn.and_then(|rest| rest.split_once(": ")) {
+        return format!("{} couldn't start: {cause}{more}", named(id));
+    }
+    let stage = first
+        .strip_prefix("pipeline node ")
+        .and_then(|rest| rest.split_once(' '))
+        .filter(|(_, rest)| rest.starts_with("failed"))
+        .and_then(|(id, rest)| Some((id, rest.split_once(": ")?.1)));
+    match stage {
+        Some((id, cause)) => format!("{} didn't finish: {cause}{more}", named(id)),
+        None => error.to_owned(),
+    }
 }
 
 /// The first line of `text`, at most `limit` characters, with "…" when anything was left out.
@@ -1030,6 +1072,47 @@ mod tests {
         );
     }
 
+    /// A step of a team with several that fails is named as the team names it, with its reason,
+    /// at the notch and in the chat: not as the run's words for a step ("pipeline node …").
+    #[tokio::test]
+    async fn a_step_that_fails_is_named_as_the_team_names_it() {
+        let rig = rig(&maya("relay.yaml")).await;
+        let scout = crate::engine::demo_model(Demo::scripted(vec![Completion::text(
+            "Three lakes near Đà Lạt.",
+        )]));
+        let finder = crate::engine::demo_model(Demo::failing_after(
+            Vec::new(),
+            "the route finder's model is down",
+        ));
+        std::fs::write(
+            rig.dir.0.join("relay.yaml"),
+            format!(
+                "schemaVersion: 1\nid: relay\nname: Relay\nentrypoint: scout\nagents:\n  - id: scout\n    name: Scout\n    role: find places\n    model: {scout}\n  - id: planner\n    name: Route finder\n    role: plan the route\n    model: {finder}\nedges:\n  - from: scout\n    to: planner\n    layer: configured\n    kind: sequence\n    ts: 2026-11-03T00:00:00Z\n"
+            ),
+        )
+        .unwrap();
+        let first = ask_maya(&rig, ".jobs/.bench/maya.yaml").await;
+        let request = asked_from(&first.run_id).remove(0);
+        let (status, started) = call(
+            &rig.requests,
+            "POST",
+            &format!("/api/team-requests/{}", request.id),
+            Some(json!({"decision": "start"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{started}");
+        let handed = handed_back_to_maya(&rig, &first.run_id).await;
+        assert_eq!(handed["outcome"], "failed", "{handed}");
+        let request = asked_from(&first.run_id).remove(0);
+        assert_eq!(
+            request.problem.as_deref(),
+            Some(
+                "Route finder didn't finish: OpenRouter reported an error: the route finder's model is down"
+            ),
+            "{request:?}"
+        );
+    }
+
     /// Someone stopping the team is not the team failing: it is handed back as stopped, so the
     /// chat marks no failure.
     #[tokio::test]
@@ -1179,13 +1262,64 @@ mod tests {
         let problem = failed["problem"].as_str().unwrap();
         assert_eq!(
             problem,
-            "Trip planner can't run as it is. Open it in LoomWatch to see what to fix."
+            "Trip planner can't run as it is. Open Trip planner to see what to fix."
         );
         assert!(
             rig.registry
                 .list()
                 .iter()
                 .all(|run| run.team_path != "trips.yaml")
+        );
+    }
+
+    /// A team's agent that stopped is named as the team names it, without the run's words for it.
+    #[test]
+    fn a_teams_stop_names_the_agent_that_stopped() {
+        let team = crate::config::TeamConfig::parse(
+            "schemaVersion: 1\nid: trips\nname: Trip planner\nentrypoint: planner\nagents:\n  - id: planner\n    name: Route finder\n    role: plan\n    model: fake/offline\n",
+        )
+        .unwrap();
+        let out_of_credits = "Your OpenRouter account is out of credits. Add credits at openrouter.ai, then try again.";
+        assert_eq!(
+            stopped_because(
+                RunStatus::Failed,
+                Some(&format!("pipeline node planner failed: {out_of_credits}")),
+                Some(&team),
+            ),
+            format!("Route finder didn't finish: {out_of_credits}")
+        );
+        assert_eq!(
+            stopped_because(
+                RunStatus::Failed,
+                Some("pipeline node planner failed after your answer: timed out\nmore"),
+                Some(&team),
+            ),
+            "Route finder didn't finish: timed out…"
+        );
+        assert_eq!(
+            stopped_because(
+                RunStatus::Failed,
+                Some("failed to spawn ACP harness for agent planner: Permission denied"),
+                Some(&team),
+            ),
+            "Route finder couldn't start: Permission denied"
+        );
+        assert_eq!(
+            stopped_because(
+                RunStatus::Failed,
+                Some("failed to spawn ACP harness for pipeline node planner: Permission denied"),
+                Some(&team),
+            ),
+            "Route finder couldn't start: Permission denied"
+        );
+        // Without the team file, by its id.
+        assert_eq!(
+            stopped_because(
+                RunStatus::Failed,
+                Some("pipeline node planner failed: it broke"),
+                None
+            ),
+            "Planner didn't finish: it broke"
         );
     }
 
@@ -1210,23 +1344,24 @@ mod tests {
         let shown = |text: &str, heading: &str| {
             text.strip_prefix(heading).map(str::trim).map(str::to_owned)
         };
-        let problem = "Trip planner can't run as it is. Open it in LoomWatch to see what to fix.";
+        let problem = "Trip planner can't run as it is. Open Trip planner to see what to fix.";
         let (text, heading) =
             told_not_started(&request, problem, Some("agents[0].model is missing"));
         assert_eq!(
             text,
             "Trip planner didn't start “Plan Friday” (agents[0].model is missing): Trip planner \
-             can't run as it is. Open it in LoomWatch to see what to fix."
+             can't run as it is. Open Trip planner to see what to fix."
         );
         assert_eq!(shown(&text, &heading).as_deref(), Some(problem));
-        let (text, heading) = told_stopped(&request, &stopped_because(RunStatus::Cancelled, None));
+        let (text, heading) =
+            told_stopped(&request, &stopped_because(RunStatus::Cancelled, None, None));
         assert_eq!(shown(&text, &heading).as_deref(), Some("It was stopped."));
         assert_eq!(
-            stopped_because(RunStatus::Failed, Some("timed out after 600s\nmore")),
+            stopped_because(RunStatus::Failed, Some("timed out after 600s\nmore"), None),
             "Timed out after 600s…"
         );
         assert_eq!(
-            stopped_because(RunStatus::Failed, None),
+            stopped_because(RunStatus::Failed, None, None),
             "It failed without saying why."
         );
     }

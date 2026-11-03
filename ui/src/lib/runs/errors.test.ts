@@ -17,9 +17,20 @@ describe('plainRunError', () => {
   it('names the stage its app refused, in the app’s own words', () => {
     const refused = 'pipeline node gatherer failed: Codex reported an error instead of an answer: The \'gpt-6.1-sol\' model is not supported when using Codex with a ChatGPT account.'
     expect(plainRunError(refused, new Map([['gatherer', { name: 'Gatherer' }]])))
-      .toBe('Gatherer stopped. Codex reported an error instead of an answer: The \'gpt-6.1-sol\' model is not supported when using Codex with a ChatGPT account.')
+      .toBe('Gatherer didn’t finish. Codex reported an error instead of an answer: The \'gpt-6.1-sol\' model is not supported when using Codex with a ChatGPT account.')
     expect(plainRunError('partial ACP session is recoverable with session_id=run-1: Codex reported an error instead of an answer: Quota exceeded.'))
       .toBe('Codex reported an error instead of an answer: Quota exceeded.')
+  })
+
+  // The daemon's `who_stopped` (team_requests.rs) says the same of a team's stop: same cases.
+  it('names the stage that didn’t finish, with its cause, not the run’s words for it', () => {
+    const named = new Map([['planner', { name: 'Route finder' }]])
+    const outOfCredits = 'Your OpenRouter account is out of credits. Add credits at openrouter.ai, then try again.'
+    expect(plainRunError(`pipeline node planner failed: ${outOfCredits}`, named)).toBe(`Route finder didn’t finish: ${outOfCredits}`)
+    expect(plainRunError('pipeline node planner failed after your answer: timed out', named)).toBe('Route finder didn’t finish: timed out')
+    expect(plainRunError('failed to spawn ACP harness for pipeline node planner: Permission denied', named)).toBe('Route finder couldn’t start: Permission denied')
+    expect(plainRunError('pipeline node planner failed: LoomWatch couldn\'t reach ChatGPT: the connection failed'))
+      .toBe('planner didn’t finish: LoomWatch couldn\'t reach ChatGPT: the connection failed')
   })
 
   it('leaves every other error exactly as the daemon wrote it', () => {

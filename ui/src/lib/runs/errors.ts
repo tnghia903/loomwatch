@@ -9,6 +9,10 @@ export interface ErrorAgent {
 const SPAWN_FAILURE = /failed to spawn ACP harness for (?:agent|pipeline node) ([^:\s]+): ([\s\S]*)$/
 const APP_ERROR = /Codex reported an error instead of an answer: (.*)/
 const STAGE_FAILURE = /^pipeline node ([^:\s]+) failed/
+// A stage's failure with its cause: "pipeline node writer failed: …", "… failed after your
+// answer: …". The daemon says the same of a team's stop it hands back (`who_stopped` in
+// `team_requests.rs`, with the same test cases).
+const STAGE_CAUSE = /^pipeline node ([^:\s]+) failed[^:]*: ([\s\S]*)$/
 
 /**
  * The agent a failed run stopped at: the one its error names, or the only one it ran. `null` when
@@ -33,12 +37,18 @@ export function plainRunError(message: string, agents: ReadonlyMap<string, Error
   if (reported) {
     const id = STAGE_FAILURE.exec(message.trim())?.[1]
     const who = id ? agents.get(id)?.name || id : null
-    return `${who ? `${who} stopped. ` : ''}Codex reported an error instead of an answer: ${reported[1].trim()}`
+    // "Didn't finish", the one word for a failure ("stopped" is only work you stopped).
+    return `${who ? `${who} didn’t finish. ` : ''}Codex reported an error instead of an answer: ${reported[1].trim()}`
   }
   const spawn = SPAWN_FAILURE.exec(message.trim())
-  if (!spawn) return message
-  const [, id, cause] = spawn
-  return `${agents.get(id)?.name || id} couldn’t start: ${cause.trim()}`
+  if (spawn) {
+    const [, id, cause] = spawn
+    return `${agents.get(id)?.name || id} couldn’t start: ${cause.trim()}`
+  }
+  const stage = STAGE_CAUSE.exec(message.trim())
+  if (!stage) return message
+  const [, id, cause] = stage
+  return `${agents.get(id)?.name || id} didn’t finish: ${cause.trim()}`
 }
 
 /** The way out of a stop LoomWatch named (ADR 0073): where to fix it, in one button. */
@@ -62,4 +72,10 @@ const ACTIONS: readonly [RegExp, ProblemAction][] = [
 export function problemAction(message: string | null | undefined): ProblemAction | null {
   if (!message) return null
   return ACTIONS.find(([pattern]) => pattern.test(message))?.[1] ?? null
+}
+
+/** Which stop in a chat message a way out is for (a note's failed answer, a team's failure), so
+    the chat can fill only the newest one's. A piece of work's own stop is keyed by its run. */
+export function fixKey(messageId: string, error: string): string {
+  return `${messageId}\n${error}`
 }

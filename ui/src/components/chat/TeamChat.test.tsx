@@ -614,26 +614,110 @@ describe('the team’s chat', () => {
       request: message({ id: `m-${id}`, route: 'agent', agentId: 'writer', runId: id, text: `${teamName}: ${reason}`, handedBack: handed(teamName, outcome) }),
       notes: [],
     })
+    const asNote = (id: string, teamName: string, reason: string) => ({
+      kind: 'work' as const,
+      run: run({ runId: id, onlyAgent: 'writer', responder: 'writer', agentIds: ['writer'], reply: 'Noted.', createdAt: `2026-10-06T0${id.length}:00:00.000Z` }),
+      request: message({ id: `m-${id}`, route: 'agent', agentId: 'writer', runId: id, text: '@Writer plan Friday' }),
+      notes: [message({ id: `n-${id}`, route: 'note', agentId: 'writer', runId: id, text: `${teamName}: ${reason}`, handedBack: handed(teamName, 'failed'), deliveredAt: '2026-10-06T07:03:00.000Z' })],
+    })
     page = [
-      piece('a', 'Planners', 'failed', 'Timed out after 600s.'),
-      piece('bb', 'Readers', 'notStarted', 'Readers can’t run as it is.'),
+      piece('a', 'Planners', 'failed', 'Planner didn\'t finish: This agent runs on your Claude API credit. Add your Claude API key on LoomWatch\'s Connections page, then run the team again.'),
+      piece('bb', 'Readers', 'notStarted', 'Readers can\'t run as it is. Open Readers to see what to fix.'),
       piece('ccc', 'Writers', 'cancelled', 'It was stopped.'),
       piece('dddd', 'Editors', 'answered', 'Here is the plan.'),
+      piece('eeeee', 'Cutters', 'failed', 'Timed out after 600s.'),
+      piece('ffffff', 'Movers', 'notStarted', 'Movers changed while it was starting, so it didn\'t run. Ask Writer again.'),
+      asNote('ggggggg', 'Sorters', 'Your OpenRouter account is out of credits. Add credits at openrouter.ai, then try again.'),
     ]
     renderChat({ team: { ...team, solo: 'writer' } })
     const log = await screen.findByRole('log', { name: 'Messages' })
     const from = async (teamName: string) => (await within(log).findByText(teamName)).closest<HTMLElement>('.chat-msg')!
     const failed = await from('Planners')
-    expect(within(failed).getByText('Planners stopped.')).toBeInTheDocument()
+    // "Didn't finish", the one word for a failure: "stopped" is only work someone stopped.
+    expect(within(failed).getByText('Planners didn’t finish.')).toBeInTheDocument()
     expect(failed.querySelector('.chat-bubble')).toHaveClass('bad')
-    await waitFor(() => expect(within(failed).getByText('Timed out after 600s.')).toBeInTheDocument())
+    await waitFor(() => expect(within(failed).getByText(/^Planner didn't finish: This agent runs on your Claude API credit/)).toBeInTheDocument())
+    // Its way out, as under a stopped piece of work, and its face is on its message, not an answer.
+    expect(within(failed).getByRole('link', { name: 'Open Connections' })).toHaveAttribute('href', '/connections')
+    expect(within(failed).getByRole('group', { name: 'Reactions to Planners\'s message' })).toBeInTheDocument()
     const notStarted = await from('Readers')
     expect(within(notStarted).getByText('It didn’t start.')).toBeInTheDocument()
     expect(notStarted.querySelector('.chat-bubble')).toHaveClass('bad')
+    const openTeam = within(notStarted).getByRole('link', { name: 'Open Readers' })
+    expect(openTeam).toHaveAttribute('href', '/?path=Readers.yaml')
+    // Its only way out wears the gold ring the other ways out do, never the fill.
+    expect(openTeam).toHaveClass('btn-ring')
+    expect(isGoldFill(openTeam)).toBe(false)
+    // A team to open only when its words say to open it: asking again is done in this chat.
+    const askAgain = await from('Movers')
+    expect(within(askAgain).getByText('It didn’t start.')).toBeInTheDocument()
+    expect(within(askAgain).queryByRole('link')).toBeNull()
+    // A failure LoomWatch can't name a fix for gets none.
+    expect(within(await from('Cutters')).queryByRole('link')).toBeNull()
+    // Joining the agent's turn as a note, the same: marked, its way out under it after who took
+    // it, and a face on its message.
+    const joined = await from('Sorters')
+    expect(within(joined).getByText('Sorters didn’t finish.')).toBeInTheDocument()
+    const way = within(joined).getByRole('link', { name: 'Add OpenRouter credits' })
+    expect(within(joined).getByText('Writer took it in its next turn').compareDocumentPosition(way) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(within(joined).getByRole('group', { name: 'Reactions to Sorters\'s message' })).toBeInTheDocument()
     for (const quiet of [await from('Writers'), await from('Editors')]) {
       expect(quiet.querySelector('.chat-bubble')).not.toHaveClass('bad')
       expect(quiet.querySelector('.tc-team-stop')).toBeNull()
+      expect(within(quiet).queryByRole('link')).toBeNull()
     }
+    expect(within(await from('Editors')).getByRole('group', { name: 'Reactions to Editors\'s answer' })).toBeInTheDocument()
+  })
+
+  // One gold fill per screen (DESIGN_LANGUAGE §8): a team's failure handed back is a stop like any
+  // other, so its way out is the fill when it is the newest, and a ring when a newer stop has it.
+  it('fills a team’s failure’s way out only when it is the newest stop', async () => {
+    const outOfCredits = 'Your OpenRouter account is out of credits. Add credits at openrouter.ai, then try again.'
+    const handed = { teamPath: 'trips.yaml', teamName: 'Trip planner', agent: null, fromAgent: null, request: 'Plan Friday', heading: 'Trip planner:', outcome: 'failed' as const }
+    const fromTeam: ChatItem = { kind: 'work', run: run({ runId: 'turn', onlyAgent: 'writer', responder: 'writer', agentIds: ['writer'], reply: 'Noted.', createdAt: '2026-10-06T02:00:00.000Z' }), request: message({ id: 'm-team', route: 'agent', agentId: 'writer', runId: 'turn', text: `Trip planner: Planner stopped: ${outOfCredits}`, handedBack: handed }), notes: [] }
+    const stopped: ChatItem = { kind: 'work', run: run({ runId: 'run-new', sessionId: 'run-new', status: 'failed', reply: null, error: `pipeline node writer failed: ${outOfCredits}`, errorCode: 'app_error', createdAt: '2026-10-06T03:00:00.000Z' }), request: message({ id: 'm-new', runId: 'run-new', text: '@team Moon facts' }), notes: [] }
+    page = [fromTeam]
+    renderChat({ team: { ...team, solo: 'writer' } })
+    const alone = await screen.findByRole('link', { name: 'Add OpenRouter credits' })
+    expect(isGoldFill(alone)).toBe(true)
+    expect(goldFilled()).toEqual(['Add OpenRouter credits'])
+
+    cleanup()
+    page = [fromTeam, stopped]
+    renderChat({ team: { ...team, solo: 'writer' } })
+    await waitFor(() => expect(screen.getAllByRole('link', { name: 'Add OpenRouter credits' })).toHaveLength(2))
+    const [team1, newer] = screen.getAllByRole('link', { name: 'Add OpenRouter credits' })
+    expect(team1.closest('.tc-from-team')).not.toBeNull()
+    expect(isGoldFill(team1)).toBe(false)
+    expect(isGoldFill(newer)).toBe(true)
+
+    // Joining the newest piece as a note, after an older stop: its way out is the fill.
+    cleanup()
+    const joined: ChatItem = { kind: 'work', run: run({ runId: 'turn-2', onlyAgent: 'writer', responder: 'writer', agentIds: ['writer'], reply: 'Noted.', createdAt: '2026-10-06T04:00:00.000Z' }), request: message({ id: 'm-2', route: 'agent', agentId: 'writer', runId: 'turn-2', text: '@Writer plan Friday' }), notes: [message({ id: 'n-team', route: 'note', agentId: 'writer', runId: 'turn-2', text: `Trip planner: Planner didn't finish: ${outOfCredits}`, handedBack: handed, deliveredAt: '2026-10-06T04:01:00.000Z' })] }
+    page = [stopped, joined]
+    renderChat({ team: { ...team, solo: 'writer' } })
+    await waitFor(() => expect(screen.getAllByRole('link', { name: 'Add OpenRouter credits' })).toHaveLength(2))
+    const [older, note] = screen.getAllByRole('link', { name: 'Add OpenRouter credits' })
+    expect(note.closest('.tc-from-team')).not.toBeNull()
+    expect(isGoldFill(note)).toBe(true)
+    expect(isGoldFill(older)).toBe(false)
+
+    // When the agent's own work stops on the same thing right after, its stop alone offers it:
+    // one way out per piece, not two of the same.
+    cleanup()
+    const both: ChatItem = { ...fromTeam, run: run({ runId: 'turn', sessionId: 'turn', onlyAgent: 'writer', responder: 'writer', agentIds: ['writer'], status: 'failed', reply: null, error: outOfCredits, errorCode: 'app_error', createdAt: '2026-10-06T02:00:00.000Z' }) }
+    page = [both]
+    renderChat({ team: { ...team, solo: 'writer' } })
+    const only = await screen.findByRole('link', { name: 'Add OpenRouter credits' })
+    expect(only.closest('.tc-from-team')).toBeNull()
+    expect(screen.getAllByRole('link', { name: 'Add OpenRouter credits' })).toHaveLength(1)
+
+    // While the schedule tries that work again, its stop offers no way out, so the team's does.
+    cleanup()
+    page = [{ ...both, run: { ...both.run, nextTryAt: '2026-10-06T02:10:00.000Z' } }]
+    renderChat({ team: { ...team, solo: 'writer' } })
+    const team2 = await screen.findByRole('link', { name: 'Add OpenRouter credits' })
+    expect(team2.closest('.tc-from-team')).not.toBeNull()
   })
 
   // ADR 0051: the answer lives in the chat only, so what its record says about it sits under it.
@@ -1886,7 +1970,7 @@ describe('a piece of work', () => {
     page = [{ kind: 'work', run: run({ status: 'failed', reply: null, error, errorCode: 'app_error' }), request: message({}), notes: [] }]
     renderChat()
     const stopped = (await screen.findByText('The work stopped.')).closest('p')
-    expect(stopped).toHaveTextContent('The work stopped. Researcher stopped. Codex reported an error instead of an answer: The \'gpt-6.1-sol\' model is not supported when using Codex with a ChatGPT account.')
+    expect(stopped).toHaveTextContent('The work stopped. Researcher didn’t finish. Codex reported an error instead of an answer: The \'gpt-6.1-sol\' model is not supported when using Codex with a ChatGPT account.')
   })
 })
 

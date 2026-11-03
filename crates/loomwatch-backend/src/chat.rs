@@ -5896,6 +5896,103 @@ mod tests {
         wait_for(&rig.registry, &run_id, |run| run.status.is_terminal()).await;
     }
 
+    /// A turn that breaks on a note says so with the agent's name, as the person calls it, never
+    /// its id, and as when it broke, not as what broke it.
+    #[tokio::test]
+    async fn a_turn_that_breaks_after_a_note_names_the_agent() {
+        let (lead, hold) = crate::agent::Demo::held_then_failing(
+            vec![crate::agent::Completion::text("planned")],
+            "the model is down",
+        );
+        let lead = crate::engine::demo_model(lead);
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        let yaml = format!(
+            "schemaVersion: 1\nid: lab\nname: Lab\nentrypoint: lead\nagents:\n  - id: lead\n    name: Research lead\n    role: plan the research\n    model: {lead}\nedges: []\n"
+        );
+        std::fs::write(dir.0.join("lab.yaml"), yaml).unwrap();
+        let rig = rig(pool, &dir);
+        let (status, started) = send(
+            &rig.app,
+            json!({"teamPath": "lab.yaml", "text": "plan the research", "to": {"kind": "agent", "agent": "lead"}}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED, "{started}");
+        let run_id = started["run"]["runId"].as_str().unwrap().to_owned();
+        tokio::time::timeout(Duration::from_secs(20), async {
+            while hold.waiting() == 0 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the lead is at work");
+        let (status, noted) = send(
+            &rig.app,
+            json!({"teamPath": "lab.yaml", "text": "only papers from this year", "to": {"kind": "agent", "agent": "lead"}}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{noted}");
+        assert_eq!(noted["route"], "note", "{noted}");
+        hold.release(2);
+        let failed = wait_for(&rig.registry, &run_id, |run| run.status.is_terminal()).await;
+        assert_eq!(failed.status, RunStatus::Failed, "{failed:?}");
+        let error = failed.error.unwrap_or_default();
+        assert!(
+            error.starts_with("Research lead couldn't finish after your note: "),
+            "{error}"
+        );
+    }
+
+    /// The same for a step of a team with several: the step that breaks on a note is named as the
+    /// team names it.
+    #[tokio::test]
+    async fn a_step_that_breaks_after_a_note_is_named() {
+        let (researcher, hold) = crate::agent::Demo::held_then_failing(
+            vec![crate::agent::Completion::text("three stories")],
+            "the model is down",
+        );
+        let researcher = crate::engine::demo_model(researcher);
+        let (writer, _) = agent("writer", FirstTurn::Answered);
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        std::fs::write(
+            dir.0.join("news.yaml"),
+            format!(
+                "schemaVersion: 1\nid: news-desk\nname: News desk\nentrypoint: researcher\nagents:\n  - id: researcher\n    name: Story finder\n    role: find the news\n    model: {researcher}\n  - id: writer\n    name: Writer\n    role: write the digest\n    model: {writer}\nedges:\n  - from: researcher\n    to: writer\n    layer: configured\n    kind: sequence\n    ts: 2026-09-13T00:00:00Z\n"
+            ),
+        )
+        .unwrap();
+        let rig = rig(pool, &dir);
+        let (_, started) = send(
+            &rig.app,
+            json!({"teamPath": "news.yaml", "text": "today's digest", "to": {"kind": "team"}}),
+        )
+        .await;
+        let run_id = started["run"]["runId"].as_str().unwrap().to_owned();
+        tokio::time::timeout(Duration::from_secs(20), async {
+            while hold.waiting() == 0 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the first step is at work");
+        let (status, noted) = send(
+            &rig.app,
+            json!({"teamPath": "news.yaml", "text": "Asia only", "to": {"kind": "agent", "agent": "researcher"}}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{noted}");
+        assert_eq!(noted["route"], "note", "{noted}");
+        hold.release(2);
+        let failed = wait_for(&rig.registry, &run_id, |run| run.status.is_terminal()).await;
+        assert_eq!(failed.status, RunStatus::Failed, "{failed:?}");
+        let error = failed.error.unwrap_or_default();
+        assert!(
+            error.starts_with("Story finder couldn't finish after your note: "),
+            "{error}"
+        );
+    }
+
     /// ADR 0082, a team with no fixed order: its lead is handed the files and shown the pictures;
     /// "Start the team on this" under a team note hands on that note's files; and the next work's
     /// conversation lists a piece's files with its request.

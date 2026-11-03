@@ -416,6 +416,8 @@
 .tc-acts { display: flex; flex-wrap: wrap; gap: 8px; }
 /* Approve fills gold here, and a gold fill is never under 32 px (DESIGN_LANGUAGE §4). */
 .tc-acts .btn { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; padding: 6px 12px; min-height: 32px; }
+/* A finger needs 44 px where a pointer is coarse. */
+@media (pointer: coarse) { .tc-acts .btn { min-height: 44px; } }
 .tc-tip { margin: 0; font-size: 12px; color: var(--color-ink-3); }
 .tc-piece .permission-prompt.inline {
   margin: 10px 0 2px 42px;
@@ -451,6 +453,10 @@
 .tc-stopped.bad b svg, .tc-from-team .tc-team-stop b svg { display: inline-block; margin-right: 5px; vertical-align: -1px; }
 /* Its own line, outside the bubble's text, so it wraps a long team name as that text does. */
 .tc-from-team .tc-team-stop { margin: 0 0 4px; overflow-wrap: anywhere; }
+/* Its way out, under the bubble as under a stopped piece of work. A team's name has no length
+   limit, so "Open <Team>" wraps rather than being cut at the chat's edge. */
+.tc-from-team .tc-team-acts { margin-top: 8px; }
+.tc-from-team .tc-team-acts .btn { max-width: 100%; height: auto; white-space: normal; overflow-wrap: anywhere; text-align: start; }
 .tc-continue { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; margin: 8px 0 0 42px; }
 /* What the agents learned from your feedback on the work (ADR 0078): a quiet line each, with Undo. */
 .tc-learned { display: grid; gap: 4px; margin: 8px 0 0 42px; }

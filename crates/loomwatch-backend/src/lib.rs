@@ -1047,7 +1047,13 @@ async fn run_pipeline_nodes(
         if shared_log.is_none() {
             shared_log = process.event_log();
         }
-        let work = Work::begin(lineage, shared_log.as_ref(), agent_id, &mut recorder);
+        let work = Work::begin(
+            lineage,
+            shared_log.as_ref(),
+            agent_id,
+            helpers::shown(agent),
+            &mut recorder,
+        );
         let mut reply = process
             .prompt_turn(&mut recorder, &composed.text)
             .await
@@ -1275,7 +1281,7 @@ async fn run_pipeline_nodes(
             // send a note back to it, so it is parked rather than kept answerable.
             parked = Some(
                 ParkedStage::park(
-                    agent_id,
+                    agent,
                     spec.clone(),
                     StageSession { process, recorder },
                     exit_timeout,
@@ -1410,6 +1416,7 @@ pub(crate) async fn work_round(
         asked.lineage,
         asked.shared_log,
         &asked.agent.id,
+        helpers::shown(asked.agent),
         &mut session.recorder,
     );
     let reply = session
@@ -1496,7 +1503,7 @@ async fn answer_a_parked_question(
     boundary.record(agent_id, &answer).await;
 
     let mut park =
-        ParkedStage::park(agent_id, asked.spec.clone(), session, asked.exit_timeout).await?;
+        ParkedStage::park(asked.agent, asked.spec.clone(), session, asked.exit_timeout).await?;
     if let (Some(desk), Some(run_id)) = (asked.lineage.operator.as_ref(), run_id) {
         note_parked(desk, run_id, asked.agent).await;
     }
@@ -1566,13 +1573,8 @@ async fn note_parked(desk: &operator::OperatorDesk, run_id: &str, agent: &config
     let Some(mut waiting) = desk.waiting_for(run_id, &agent.id) else {
         return;
     };
-    let name = if agent.name.is_empty() {
-        agent.id.as_str()
-    } else {
-        agent.name.as_str()
-    };
     waiting.park = operator::ParkTier::Reloadable;
-    waiting.park_note = operator::ParkTier::Reloadable.sentence(Some(name));
+    waiting.park_note = operator::ParkTier::Reloadable.sentence(Some(helpers::shown(agent)));
     waiting.send_back_available = true;
     desk.repark(run_id, &waiting).await;
 }
@@ -1588,6 +1590,8 @@ struct Work<'a> {
     desk: Option<&'a operator::OperatorDesk>,
     run_id: String,
     agent_id: String,
+    /// What the person calls it, for words they read when its turn fails.
+    agent_name: String,
 }
 
 impl<'a> Work<'a> {
@@ -1595,6 +1599,7 @@ impl<'a> Work<'a> {
         lineage: &'a RunLineage,
         log: Option<&EventLog>,
         agent_id: &str,
+        agent_name: &str,
         recorder: &mut engine::Recorder,
     ) -> Self {
         let run_id = log.map(EventLog::session_id).unwrap_or_default().to_owned();
@@ -1606,6 +1611,7 @@ impl<'a> Work<'a> {
             desk,
             run_id,
             agent_id: agent_id.to_owned(),
+            agent_name: agent_name.to_owned(),
         }
     }
 
@@ -1635,13 +1641,14 @@ impl<'a> Work<'a> {
                 .process
                 .prompt_turn(&mut session.recorder, &note_turn(&notes))
                 .await
-                .with_context(|| failed_after(&self.agent_id, &notes))?;
+                .with_context(|| failed_after(&self.agent_name, &notes))?;
         }
     }
 }
 
-/// Why `agent`'s turn on `notes` failed, naming whose they were: the person's, or the teams'
-/// whose work was handed back to it (an answer, or why the team stopped).
+/// Why `agent`'s turn on `notes` failed, by the name the person calls it, naming whose the notes
+/// were: the person's, or the teams' whose work was handed back to it (an answer, or why the team
+/// stopped). Said as when it happened, not as what caused it.
 fn failed_after(agent: &str, notes: &[runs::QueuedNote]) -> String {
     let mut teams: Vec<&str> = Vec::new();
     for team in notes.iter().filter_map(|note| note.from_team.as_deref()) {
@@ -1661,7 +1668,7 @@ fn failed_after(agent: &str, notes: &[runs::QueuedNote]) -> String {
             earlier.join(", ")
         )),
     }
-    format!("{agent} failed after {}", after.join(" and "))
+    format!("{agent} couldn't finish after {}", after.join(" and "))
 }
 
 /// Everything about handing `notes` to the agent but the turn itself: each is archived, the chat
@@ -2449,6 +2456,8 @@ pub(crate) struct StageSession {
 /// operator's answer, or a note sent back to it.
 struct ParkedStage {
     agent_id: String,
+    /// What the person calls it.
+    agent_name: String,
     /// What to spawn to get this session back.
     spec: ProcessSpec,
     state: ParkedState,
@@ -2469,14 +2478,15 @@ impl ParkedStage {
     ///
     /// Returns an error when the session's conversation cannot be kept or its park recorded.
     async fn park(
-        agent_id: &str,
+        agent: &config::AgentConfig,
         spec: ProcessSpec,
         mut session: StageSession,
         exit_timeout: Duration,
     ) -> Result<Self> {
-        let session_id = park_open_session(agent_id, &mut session, exit_timeout).await?;
+        let session_id = park_open_session(&agent.id, &mut session, exit_timeout).await?;
         Ok(Self {
-            agent_id: agent_id.to_owned(),
+            agent_id: agent.id.clone(),
+            agent_name: helpers::shown(agent).to_owned(),
             spec,
             state: ParkedState::Parked { session_id },
         })
@@ -2503,16 +2513,22 @@ impl ParkedStage {
         exit_timeout: Duration,
     ) -> Result<String> {
         self.reopen(bus, archive, shared_log, exit_timeout).await?;
-        let agent_id = self.agent_id.clone();
+        let (agent_id, agent_name) = (self.agent_id.clone(), self.agent_name.clone());
         let session = self
             .session_mut()
             .context("a reopened stage always has a session")?;
-        let work = Work::begin(lineage, shared_log, &agent_id, &mut session.recorder);
+        let work = Work::begin(
+            lineage,
+            shared_log,
+            &agent_id,
+            &agent_name,
+            &mut session.recorder,
+        );
         let reply = session
             .process
             .prompt_turn(&mut session.recorder, note)
             .await
-            .with_context(|| format!("{agent_id} failed to answer your note"))?;
+            .with_context(|| format!("{agent_name} couldn't answer your note"))?;
         work.deliver_notes(session, shared_log, reply).await
     }
 
@@ -11523,6 +11539,67 @@ mod tests {
         Ok(())
     }
 
+    /// Work sent back from a review stop that breaks says so with the agent's name, as the person
+    /// calls it, never its id.
+    #[tokio::test]
+    async fn work_sent_back_that_breaks_names_the_agent() -> Result<()> {
+        const NOTE: &str = "add the dates";
+        let pool = crate::db::Db::temp().await;
+        let drafter = crate::agent::Demo::limited(
+            vec![crate::agent::Completion::text("first draft")],
+            |request| request.prompt().contains(NOTE),
+        );
+        let model = crate::engine::demo_model(drafter);
+        let team = Arc::new(TeamConfig {
+            agents: vec![
+                pipeline_agent("a", &model),
+                operator_node("review", "Approve the draft, or say what to change."),
+            ],
+            ..shape(&[], &["a>review"])
+        });
+        let archive = EventArchive::new(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let (_registry, desk, run_id) = operator_desk(&team, &archive);
+        let answering = tokio::spawn({
+            let desk = desk.clone();
+            let run_id = run_id.clone();
+            async move {
+                let first = wait_for_stop(&desk, &run_id, |_| true).await;
+                desk.deliver(&run_id, &first.node, answer(NOTE, Some("a")))
+                    .await
+                    .expect("the stop takes a send-back");
+            }
+        });
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(30),
+            run_pipeline_mode(
+                &team,
+                &team_path,
+                archive.clone(),
+                "go",
+                Duration::from_secs(5),
+                Some(EventLog::new(archive.clone(), run_id.clone())),
+                &Arc::new(memory::TeamMemory::default()),
+                &RunLineage {
+                    operator: Some(desk.clone()),
+                    ..RunLineage::default()
+                },
+            ),
+        )
+        .await
+        .expect("the run ends");
+        answering.await?;
+        let Err(error) = outcome else {
+            panic!("the redo broke, so the run did too");
+        };
+        let error = format!("{error:#}");
+        assert!(
+            error.starts_with("a name couldn't answer your note: "),
+            "{error}"
+        );
+        Ok(())
+    }
+
     /// **Send back re-prompts the warm predecessor, and the stop runs again on what it produces.**
     ///
     /// Stage `a` panics if the note never arrives, so a send-back that quietly did nothing fails
@@ -11938,20 +12015,20 @@ mod tests {
         let trips = queued("t", "Trip planner's answer", Some("Trip planner"));
         let news = queued("s", "News desk's answer", Some("News desk"));
         assert_eq!(
-            failed_after("maya", std::slice::from_ref(&yours)),
-            "maya failed after your note"
+            failed_after("Maya", std::slice::from_ref(&yours)),
+            "Maya couldn't finish after your note"
         );
         assert_eq!(
-            failed_after("maya", std::slice::from_ref(&trips)),
-            "maya failed after Trip planner's message"
+            failed_after("Maya", std::slice::from_ref(&trips)),
+            "Maya couldn't finish after Trip planner's message"
         );
         assert_eq!(
-            failed_after("maya", &[trips.clone(), yours, trips.clone()]),
-            "maya failed after your note and Trip planner's message"
+            failed_after("Maya", &[trips.clone(), yours, trips.clone()]),
+            "Maya couldn't finish after your note and Trip planner's message"
         );
         assert_eq!(
-            failed_after("maya", &[trips, news]),
-            "maya failed after the messages from Trip planner and News desk"
+            failed_after("Maya", &[trips, news]),
+            "Maya couldn't finish after the messages from Trip planner and News desk"
         );
     }
 

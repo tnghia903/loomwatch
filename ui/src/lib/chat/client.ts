@@ -84,6 +84,12 @@ export function handedBackText(text: string, handed: HandedBack): string {
   return handed.heading && text.startsWith(handed.heading) ? text.slice(handed.heading.length).trim() : text
 }
 
+/** Why a team's work handed back in `message` failed, as the chat shows it; `null` when it didn't
+    fail, or isn't a team's. */
+export function teamFailure(message: ChatMessage): string | null {
+  return message.handedBack?.outcome === 'failed' ? handedBackText(message.text, message.handedBack) : null
+}
+
 /** A file pasted or dropped into the chat, as the daemon keeps it beside the team (`chat_files::ChatFile`). */
 export interface ChatFile {
   /** Its name in the chat's folder: the name it had, numbered when another file had it. */
