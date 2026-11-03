@@ -1042,7 +1042,8 @@ mod tests {
     }
 
     /// The tighter sandbox's rules name each folder by a parameter it is handed, so a folder's
-    /// name never becomes part of the profile.
+    /// name never becomes part of the profile. Its paths are a Mac's, `/`-separated.
+    #[cfg(unix)]
     #[test]
     fn the_tighter_sandbox_names_its_folders_as_parameters() {
         let tighter = Tighter::with(

@@ -340,7 +340,9 @@ async fn declined_answered_and_edited_requests_each_reach_the_model() {
 #[tokio::test]
 async fn a_command_that_failed_in_auto_modes_sandbox_asks_the_next_time() {
     let folder = Folder::new();
-    let failing = json!({"command": "echo nope; exit 3"});
+    // cmd.exe reads `;` as text, so on Windows the command after it never runs.
+    let failing =
+        json!({"command": if cfg!(windows) { "echo nope & exit 3" } else { "echo nope; exit 3" }});
     let demo = Demo::scripted(vec![
         Completion::calls("", vec![call("a", "run_command", &failing)]),
         Completion::calls("", vec![call("b", "run_command", &failing)]),
