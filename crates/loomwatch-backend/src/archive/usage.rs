@@ -65,6 +65,10 @@ pub struct SourceUsage {
     /// did in the window.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_problem: Option<LastProblem>,
+    /// The last call through this source that answered, if one did in the window. A limit hit
+    /// before it has reset.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_answer_at: Option<String>,
 }
 
 /// Calls, tokens and dollars.
@@ -221,6 +225,7 @@ impl EventArchive {
                 active_days: 0,
                 peak_day_tokens: 0,
                 last_problem: None,
+                last_answer_at: None,
             });
         }
         let recent = self
@@ -231,6 +236,7 @@ impl EventArchive {
             .await?;
         let days_used = self.days_since(&since).await?;
         let problems = self.problems_since(&since).await?;
+        let answers = self.last_answers_since(&since).await?;
         for entry in &mut sources {
             let find = |tallies: &[(String, Tally)]| {
                 tallies
@@ -248,6 +254,10 @@ impl EventArchive {
                 .iter()
                 .find(|(source, _)| *source == entry.source)
                 .map(|(_, problem)| problem.clone());
+            entry.last_answer_at = answers
+                .iter()
+                .find(|(source, _)| *source == entry.source)
+                .map(|(_, at)| at.clone());
         }
         Ok(UsageReport {
             agents: self.agents_since(&since).await?,
@@ -427,6 +437,20 @@ impl EventArchive {
     }
 
     /// The last limit or credit stop of each source since `since`.
+    /// When each source last answered a call since `since`.
+    async fn last_answers_since(&self, since: &str) -> Result<Vec<(String, String)>> {
+        let rows = sqlx::query(
+            "SELECT source, MAX(ts) AS at FROM model_calls WHERE ts >= $1 GROUP BY source",
+        )
+        .bind(since)
+        .fetch_all(self.db.reader())
+        .await
+        .context("couldn't read usage")?;
+        rows.iter()
+            .map(|row| Ok((row.try_get("source")?, row.try_get("at")?)))
+            .collect()
+    }
+
     async fn problems_since(&self, since: &str) -> Result<Vec<(String, LastProblem)>> {
         let rows = sqlx::query(
             "SELECT json_extract(payload, '$.problem.source') AS source,
@@ -609,6 +633,11 @@ mod tests {
                 .map(|problem| problem.kind.as_str()),
             Some("plan_limit")
         );
+        // The limit came after the plan's last answer, so it still stands.
+        assert_eq!(
+            plan.last_answer_at.as_deref(),
+            Some("2026-10-19T10:00:00.000Z")
+        );
 
         let claude = source("anthropic");
         assert!((claude.total.cost_usd - 0.25).abs() < 1e-9 && claude.total.cost_estimated);
@@ -746,6 +775,42 @@ mod tests {
         // Each day says its own share too: the counted calls fall on the day they were made.
         let own_by_day: f64 = report.days.iter().map(|day| day.loomwatch.cost_usd).sum();
         assert!((own_by_day - 0.114_02).abs() < 1e-9);
+        Ok(())
+    }
+
+    /// A call that answers after a limit hit says the limit has reset.
+    #[tokio::test]
+    async fn an_answer_after_a_limit_is_reported() -> Result<()> {
+        let archive = EventArchive::new(Db::temp().await);
+        let now: chrono::DateTime<chrono::Utc> = "2026-10-19T14:00:00Z".parse()?;
+        let mut events = archived();
+        events.push(event(
+            "r:6",
+            "r",
+            "writer",
+            "2026-10-19T13:00:00.000Z",
+            EventKind::Usage,
+            call("chatgpt:gpt-6.1-sol", 10, 2, 0.0, Some("chatgpt")),
+        ));
+        for event in &events {
+            archive.append(event).await?;
+        }
+        let report = archive.model_usage(now, 30).await?;
+        let plan = report
+            .sources
+            .iter()
+            .find(|entry| entry.source == "chatgpt")
+            .unwrap();
+        assert_eq!(
+            plan.last_problem
+                .as_ref()
+                .map(|problem| problem.at.as_str()),
+            Some("2026-10-19T11:30:00.000Z")
+        );
+        assert_eq!(
+            plan.last_answer_at.as_deref(),
+            Some("2026-10-19T13:00:00.000Z")
+        );
         Ok(())
     }
 }

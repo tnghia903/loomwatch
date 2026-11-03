@@ -1,6 +1,6 @@
 import { CHATGPT_USAGE_PAGE, CLAUDE_BILLING_PAGE } from '../ai/sources'
 import { formatCost } from '../watch/usage'
-import { type UsageReport, cycleStart, readClaudePlan, spentSince } from './client'
+import { type UsageReport, cycleStart, planLimit, readClaudePlan, spentSince } from './client'
 
 const DAY_MS = 86_400_000
 
@@ -11,11 +11,11 @@ export interface Notice {
   label: string
 }
 
-/** What is worth a heads-up from a usage report, now: a plan's limit hit today, credit nearly spent. */
+/** What is worth a heads-up from a usage report, now: a plan's limit hit today and not reset, credit nearly spent. */
 export function usageNotices(report: UsageReport, now: Date, openRouterLeft?: number | null): Notice[] {
   const notices: Notice[] = []
-  const plan = report.sources.find((entry) => entry.source === 'chatgpt')
-  if (plan?.lastProblem?.kind === 'plan_limit' && now.getTime() - new Date(plan.lastProblem.at).getTime() < DAY_MS) {
+  const limit = planLimit(report.sources.find((entry) => entry.source === 'chatgpt'))
+  if (limit?.stands && now.getTime() - new Date(limit.at).getTime() < DAY_MS) {
     notices.push({ key: 'chatgpt', text: 'LoomWatch hit a usage limit on your ChatGPT plan today.', href: CHATGPT_USAGE_PAGE, label: 'Manage usage' })
   }
   const claude = readClaudePlan()
