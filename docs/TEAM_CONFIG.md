@@ -1078,7 +1078,9 @@ limits a wait. It bounded how long a session could be kept running while the ope
 a parked agent has nothing running. Older team files may keep it.
 
 `ask_user` is available in either mode in a run started from the app. It records a question and
-tells the agent to end its turn at once; the answer arrives as the agent's next turn.
+tells the agent to end its turn at once; the answer arrives as the agent's next turn. A message to
+that agent in the team chat while it waits is the answer too, and notes that waited for it go in the
+same turn (ADR 0110).
 
 See [operator-stop.yaml](../examples/operator-stop.yaml) for an example that runs offline, on
 `fake/offline`, with no key.
