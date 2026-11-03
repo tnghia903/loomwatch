@@ -338,6 +338,63 @@ impl Devices {
         }
     }
 
+    /// Forgets device `id`'s Live Activity when its token is still `token`: it ended, or Apple
+    /// said the token is no good. The phone gives the next one.
+    pub fn forget_activity(&self, id: &str, token: &str) {
+        let mut state = self.state();
+        let Some(push) = state
+            .devices
+            .iter_mut()
+            .find(|device| device.id == id)
+            .and_then(|device| device.push.as_mut())
+        else {
+            return;
+        };
+        if push
+            .activity
+            .as_ref()
+            .is_some_and(|activity| activity.token == token)
+        {
+            push.activity = None;
+            self.save(&state);
+        }
+    }
+
+    /// Forgets device `id`'s token for starting a Live Activity when it is still `token`: Apple
+    /// said it's no good. The phone gives a new one when it has it.
+    pub fn forget_start_token(&self, id: &str, token: &str) {
+        let mut state = self.state();
+        let Some(push) = state
+            .devices
+            .iter_mut()
+            .find(|device| device.id == id)
+            .and_then(|device| device.push.as_mut())
+        else {
+            return;
+        };
+        if push.start_token.as_deref() == Some(token) {
+            push.start_token = None;
+            self.save(&state);
+        }
+    }
+
+    /// Forgets device `id`'s widget token when it is still `token`: Apple said it's no good.
+    pub fn forget_widget_token(&self, id: &str, token: &str) {
+        let mut state = self.state();
+        let Some(push) = state
+            .devices
+            .iter_mut()
+            .find(|device| device.id == id)
+            .and_then(|device| device.push.as_mut())
+        else {
+            return;
+        };
+        if push.widget_token.as_deref() == Some(token) {
+            push.widget_token = None;
+            self.save(&state);
+        }
+    }
+
     /// Connects a device of `kind` whose key is `key`, as pairing would.
     #[cfg(test)]
     fn connect_for_test(&self, kind: Kind, key: &str) -> Device {

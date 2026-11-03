@@ -53,6 +53,18 @@ Add any key starting `sk-or-v1-mock`. `LOOMWATCH_OPENROUTER_URL` is taken only f
 this computer, so a key can never be sent anywhere else. The script's opening comment lists the
 requests that make it run a command, write a file or hand out research.
 
+To see what LoomWatch pushes to a paired iPhone, point it at the stand-in for Apple's push service
+in [scripts/mock-apns.py](scripts/mock-apns.py), which writes each push to a file, one JSON line
+each, and answers as Apple does. With `SIM` set to a simulator's id it also hands each app push to
+that simulator; a Live Activity's and the widgets' own pushes are only written down. Keep a push
+key made for the trial (`loomwatchd push-key set`, any P-256 `.p8`):
+
+```sh
+python3 scripts/mock-apns.py 4300 /tmp/lw-trial/pushes.jsonl &
+LOOMWATCH_APNS_URL=http://127.0.0.1:4300 LOOMWATCH_KEY_STORE=file \
+  LOOMWATCH_STATE_DIR=/tmp/lw-trial ./target/debug/loomwatchd serve --teams-root /tmp/lw-trial/teams
+```
+
 To try the ChatGPT plan and the Claude API credit the same way, add the stand-ins for OpenAI and
 Anthropic in [scripts/mock-vendors.py](scripts/mock-vendors.py): Anthropic on the port you give it,
 OpenAI on the next one.

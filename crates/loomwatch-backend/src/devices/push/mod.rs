@@ -1,14 +1,18 @@
 //! Push to a connected iPhone: when someone waits for the person, or a run finishes, this computer
-//! tells Apple's push service, which wakes the phone at once, closed or locked.
+//! tells Apple's push service, which wakes the phone at once, closed or locked. Whatever changes,
+//! news or not (a wait answered on this computer, work starting or ending), the phone's badge,
+//! notices, widgets and Live Activity are brought in step with it as well.
 //!
 //! Sent with the person's own Apple push key ([`key`]), straight from here to Apple ([`apns`]); a
 //! relay that sends for people without a key of their own can stand in behind [`Sender`] later.
 //! A push says only which thing it is about, by its ids. The phone reads the words from here
-//! itself, over the person's own Tailscale, so nothing anyone wrote passes through Apple.
+//! itself, over the person's own Tailscale, so nothing anyone wrote passes through Apple. That
+//! holds for the Live Activity too: its state goes as ids, and the phone says it in its own words.
 //!
-//! A phone gives its push token and its notification settings at `PUT /phone/v0/push`, kept with
-//! the device in `devices.json`; `DELETE` stops pushes to it. [`spawn`] watches what needs the
-//! person, as the phone's home screen shows it, and sends what is new ([`watch`]).
+//! A phone gives its push token, its notification settings and its Live Activity's own token at
+//! `PUT /phone/v0/push`, kept with the device in `devices.json`; `DELETE` stops pushes to it.
+//! [`spawn`] watches what needs the person, as the phone's home screen shows it, and sends what
+//! changed ([`watch`]).
 
 pub mod apns;
 pub mod key;
@@ -42,6 +46,10 @@ const EVERY: Duration = Duration::from_secs(3);
 /// How long after finding no key, or Apple refusing it, the key is read again.
 const KEY_AGAIN: Duration = Duration::from_mins(1);
 
+/// Where pushes go instead of Apple, for a stand-in on this computer: honoured only for a loopback
+/// address, so nothing outside can take them.
+pub const APNS_URL_ENV: &str = "LOOMWATCH_APNS_URL";
+
 /// Which of Apple's push services a phone's token belongs to: an app built from Xcode gets
 /// sandbox tokens, one from `TestFlight` or the App Store production ones.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -65,6 +73,28 @@ pub struct PushTarget {
     /// Hours when only a permission ask rings; the rest waits for them to end.
     #[serde(default)]
     pub quiet: Option<Quiet>,
+    /// The Live Activity the phone shows now, which this computer keeps in step while the app is
+    /// closed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activity: Option<ActivityTarget>,
+    /// The phone's token for starting a Live Activity from here, in hex, when it has none and
+    /// someone starts waiting. Absent when its Live Activities are turned off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_token: Option<String>,
+    /// The token of the phone's widgets, in hex, so they read this computer again whenever what
+    /// they show changes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub widget_token: Option<String>,
+}
+
+/// A Live Activity on the phone: the work it follows, and its own push token from `ActivityKit`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivityTarget {
+    /// In hex. Not the app's token: Apple gives each Live Activity its own.
+    pub token: String,
+    /// The run it follows.
+    pub run: String,
 }
 
 fn yes() -> bool {
@@ -101,11 +131,20 @@ impl Quiet {
 
 impl PushTarget {
     fn valid(&self) -> bool {
-        (32..=200).contains(&self.token.len())
-            && self.token.chars().all(|c| c.is_ascii_hexdigit())
+        let hex = |token: &str, most: usize| {
+            (32..=most).contains(&token.len()) && token.chars().all(|c| c.is_ascii_hexdigit())
+        };
+        hex(&self.token, 200)
             && self.quiet.as_ref().is_none_or(|quiet| {
                 quiet.from < 24 * 60 && quiet.to < 24 * 60 && quiet.time_zone.len() <= 64
             })
+            && self.activity.as_ref().is_none_or(|activity| {
+                hex(&activity.token, 400) && (1..=200).contains(&activity.run.len())
+            })
+            && [&self.start_token, &self.widget_token]
+                .into_iter()
+                .flatten()
+                .all(|token| hex(token, 400))
     }
 }
 
@@ -139,7 +178,9 @@ pub enum About {
 
 impl Notice {
     /// What Apple delivers. The words are the phone's to fill in from here (`mutable-content`);
-    /// these are what shows when it can't reach this computer.
+    /// these are what shows when it can't reach this computer. It also wakes the app
+    /// (`content-available`), which reads this computer and brings its widgets, Live Activity and
+    /// other notices in step.
     #[must_use]
     pub fn payload(&self) -> Value {
         let (body, category, thread) = match self.about {
@@ -154,6 +195,7 @@ impl Notice {
         let mut aps = json!({
             "alert": { "title": "LoomWatch", "body": body },
             "mutable-content": 1,
+            "content-available": 1,
             "thread-id": thread,
             "badge": self.waiting,
         });
@@ -192,6 +234,108 @@ impl Notice {
     }
 }
 
+/// One push to a phone.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Push {
+    /// Something new: someone waits for the person, or work finished.
+    Notice(Notice),
+    /// What the phone shows changed with nothing new to tell, such as a wait answered on this
+    /// computer or work that started: the badge, set at once, and the app woken to bring its
+    /// widgets, Live Activity and notices in step. Silent, so it goes in quiet hours too.
+    Changed { waiting: usize },
+    /// The Live Activity's new state, by ids, as the phone's `WorkActivity.ContentState` reads it;
+    /// or its end, with the last state it had.
+    Activity {
+        state: Option<Value>,
+        end: bool,
+        /// Someone now waits for the person: shown at once, not when the phone next saves power.
+        urgent: bool,
+    },
+    /// A Live Activity started from here on a phone that has none, for run `run` of the team at
+    /// `path`, showing `state`. Its attributes are ids too: the phone names the team.
+    Start {
+        run: String,
+        path: String,
+        state: Value,
+    },
+    /// What the phone's widgets show changed: they read this computer again, closed app or not.
+    Widgets,
+}
+
+impl Push {
+    /// What Apple delivers, as at `now`.
+    #[must_use]
+    pub fn payload(&self, now: DateTime<Utc>) -> Value {
+        match self {
+            Self::Notice(notice) => notice.payload(),
+            Self::Changed { waiting } => json!({
+                "aps": { "badge": waiting, "content-available": 1 },
+            }),
+            Self::Activity { state, end, .. } => {
+                let mut aps = json!({
+                    "timestamp": now.timestamp(),
+                    "event": if *end { "end" } else { "update" },
+                });
+                if let Some(state) = state {
+                    aps["content-state"] = state.clone();
+                }
+                if *end {
+                    // Gone from the Lock Screen at once, as the app ends it: left there, it would show
+                    // an Approve for work that no longer waits.
+                    aps["dismissal-date"] = json!(now.timestamp());
+                }
+                json!({ "aps": aps })
+            }
+            Self::Start { run, path, state } => json!({
+                "aps": {
+                    "timestamp": now.timestamp(),
+                    "event": "start",
+                    "content-state": state,
+                    "attributes-type": "WorkActivity",
+                    "attributes": { "team": "", "path": path, "runId": run },
+                    // Apple starts one only with an alert. Words nobody wrote, and no sound: the
+                    // wait's own notice went a read before, and rang if it rings.
+                    "alert": { "title": "LoomWatch", "body": "Something needs you" },
+                    // A token of its own, which the phone gives here as it does for one it started.
+                    "input-push-token": 1,
+                },
+            }),
+            Self::Widgets => json!({ "aps": { "content-changed": true } }),
+        }
+    }
+
+    /// Apple's push type: an activity's own, or one for the app.
+    #[must_use]
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Activity { .. } | Self::Start { .. } => "liveactivity",
+            Self::Widgets => "widgets",
+            Self::Notice(_) | Self::Changed { .. } => "alert",
+        }
+    }
+
+    /// 10 delivers at once; 5 when the phone saves power, and doesn't count against the Live
+    /// Activity's budget.
+    #[must_use]
+    pub fn priority(&self) -> u8 {
+        match self {
+            Self::Activity { urgent: false, .. } => 5,
+            _ => 10,
+        }
+    }
+
+    /// Apple keeps only the newest push with the same id for a phone that is offline.
+    #[must_use]
+    pub fn collapse_id(&self) -> Option<String> {
+        match self {
+            Self::Notice(notice) => Some(notice.collapse_id()),
+            Self::Changed { .. } => Some("changed".to_owned()),
+            Self::Widgets => Some("widgets".to_owned()),
+            Self::Activity { .. } | Self::Start { .. } => None,
+        }
+    }
+}
+
 /// How a push went.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Sent {
@@ -203,10 +347,12 @@ pub enum Sent {
     Failed(String),
 }
 
-/// What sends a push: Apple's service with the person's own key today.
+/// What sends a push: Apple's service with the person's own key today. A Live Activity's push
+/// goes to `to.activity`'s token, a start to `to.start_token`, the widgets' to
+/// `to.widget_token`, the rest to the app's.
 #[async_trait]
 pub trait Sender: Send + Sync {
-    async fn send(&self, to: &PushTarget, notice: &Notice) -> Sent;
+    async fn send(&self, to: &PushTarget, push: &Push) -> Sent;
 }
 
 /// `PUT` or `DELETE` [`ROUTE`] from `device`, a phone the door has let in. The answer says whether
@@ -293,23 +439,43 @@ pub fn spawn(devices: Arc<Devices>, keys: KeyPlace, home: &str) {
             };
             let home = super::phone::home::home_view(&runs, &requests.unwrap_or_default());
             let mut pending = watch.next(&home, &phones, Utc::now()).into_iter();
-            while let Some((id, target, notice)) = pending.next() {
-                match send.send(&target, &notice).await {
-                    Sent::Done => {}
-                    Sent::Gone => devices.forget_push_token(&id, &target.token),
+            while let Some((id, target, push)) = pending.next() {
+                match send.send(&target, &push).await {
+                    Sent::Done => {
+                        // An ended Live Activity takes no more pushes; the phone gives the next one.
+                        if let (Push::Activity { end: true, .. }, Some(activity)) =
+                            (&push, &target.activity)
+                        {
+                            devices.forget_activity(&id, &activity.token);
+                        }
+                    }
+                    Sent::Gone => match (&push, &target.activity, &target.start_token) {
+                        (Push::Activity { .. }, Some(activity), _) => {
+                            devices.forget_activity(&id, &activity.token);
+                        }
+                        (Push::Start { .. }, _, Some(token)) => {
+                            devices.forget_start_token(&id, token);
+                        }
+                        (Push::Widgets, _, _) => {
+                            if let Some(token) = &target.widget_token {
+                                devices.forget_widget_token(&id, token);
+                            }
+                        }
+                        _ => devices.forget_push_token(&id, &target.token),
+                    },
                     // Tried again on the next read: something waiting for the person must not
                     // be lost to a moment without a network.
                     Sent::Failed(why) => {
                         eprintln!("warning: a push didn't go: {why}");
-                        watch.unsay(&id, &notice.target);
+                        watch.undo(&id, &push);
                     }
                     Sent::KeyRefused(reason) => {
                         eprintln!(
                             "warning: Apple refused the push key ({reason}); it is read again in a minute"
                         );
-                        watch.unsay(&id, &notice.target);
-                        for (id, _, notice) in pending.by_ref() {
-                            watch.unsay(&id, &notice.target);
+                        watch.undo(&id, &push);
+                        for (id, _, push) in pending.by_ref() {
+                            watch.undo(&id, &push);
                         }
                         sender = None;
                     }
