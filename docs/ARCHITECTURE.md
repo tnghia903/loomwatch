@@ -463,9 +463,9 @@ iPhone or another computer connects to it and keeps nothing but a key of its own
   words that say so. When the other computer can't be reached or has removed this one, a page says
   which, with Try again and Use LoomWatch on this computer, which forgets the connection and exits
   with 76 again. `loomwatchd disconnect` does the same from a terminal.
-- **Push to an iPhone.** A paired phone gives its Apple push token, its notification settings
-  and its Live Activity's own token with the run it follows at `PUT /phone/v0/push` (`DELETE`
-  stops it). The door answers this itself, since it knows which phone is asking, and keeps them
+- **Push to an iPhone.** A paired phone gives its Apple push token, its notification settings,
+  its Live Activity's own token with the run it follows, and its token for starting one at
+  `PUT /phone/v0/push` (`DELETE` stops it). The door answers this itself, since it knows which phone is asking, and keeps them
   with the device in `devices.json`. Every 3 s `push::spawn` reads what the phone's home screen
   would show, and keeps each phone in step with it (`push/watch.rs`):
   - **News** is a notice: someone waiting (a question, a review stop, a permission ask, a spending
@@ -486,6 +486,10 @@ iPhone or another computer connects to it and keeps nothing but a key of its own
     in its own words. A new wait's notice goes first and the Live Activity on the next read, so the
     phone has read the words by then. Priority 10 when someone starts waiting, else 5, which
     doesn't count against the activity's budget.
+  - **A Live Activity is started from here** on a phone that has none and gave its start token,
+    when someone in work starts waiting: the read after the wait's notice, with ids only (the
+    phone names the team) and the alert Apple requires, in words nobody wrote and with no sound.
+    Once, until the phone gives that activity's own token or says it has none.
 
   A push carries only ids (`target`, `run`, `node`, `room`); the phone's notification extension
   reads the words from here over the person's Tailscale, so nothing anyone wrote passes through

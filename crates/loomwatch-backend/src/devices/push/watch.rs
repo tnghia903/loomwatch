@@ -28,6 +28,20 @@ struct Phone {
     shown: Option<Shown>,
     /// Its Live Activity's token, and what it shows.
     activity: Option<(String, Live)>,
+    /// Starting one from here, while it has none.
+    starting: Starting,
+}
+
+/// Starting a Live Activity on a phone that has none.
+#[derive(Default)]
+enum Starting {
+    #[default]
+    Idle,
+    /// For this run's wait, on the next read: its notice went first.
+    Next(String),
+    /// Started for this run, when the phone had these settings. None starts again until the
+    /// phone gives that activity's token, or says it has none.
+    Sent { run: String, to: PushTarget },
 }
 
 /// A phone's Live Activity.
@@ -75,6 +89,7 @@ impl Watch {
                 told: current.clone(),
                 shown: Some(shown.clone()),
                 activity: None,
+                starting: Starting::Idle,
             });
             let quiet = target.quiet.as_ref().is_some_and(|quiet| quiet.holds(now));
             let told_now = phone.tell(&items, target, quiet);
@@ -95,16 +110,16 @@ impl Watch {
                 phone.shown = Some(shown.clone());
             }
 
-            match &target.activity {
-                Some(activity) => {
-                    let told: Vec<&str> = told_now.iter().map(|n| n.target.as_str()).collect();
-                    if let Some(next) =
-                        phone.follow(activity, activity_state(home, &activity.run), &told)
-                    {
-                        push(next);
-                    }
-                }
-                None => phone.activity = None,
+            let next = if let Some(activity) = &target.activity {
+                phone.starting = Starting::Idle;
+                let told: Vec<&str> = told_now.iter().map(|n| n.target.as_str()).collect();
+                phone.follow(activity, activity_state(home, &activity.run), &told)
+            } else {
+                phone.activity = None;
+                phone.start(home, target, &told_now)
+            };
+            if let Some(next) = next {
+                push(next);
             }
         }
         self.phones
@@ -128,6 +143,7 @@ impl Watch {
                     *live = Live::Shows(if *end { state.clone() } else { None });
                 }
             }
+            Push::Start { run, .. } => phone.starting = Starting::Next(run.clone()),
         }
     }
 }
@@ -160,6 +176,43 @@ impl Phone {
             }
         }
         out
+    }
+
+    /// A Live Activity to start on a phone that has none, if it is time: when someone in work
+    /// starts waiting and its notice goes, on the next read, so the phone has read the words for
+    /// it by then. Once, until the phone gives that activity's token or says it has none.
+    fn start(&mut self, home: &Value, target: &PushTarget, told: &[Notice]) -> Option<Push> {
+        if target.start_token.is_none() {
+            self.starting = Starting::Idle;
+            return None;
+        }
+        match std::mem::take(&mut self.starting) {
+            Starting::Sent { run, to } if to == *target => {
+                self.starting = Starting::Sent { run, to };
+                None
+            }
+            Starting::Next(run) => {
+                let state = activity_state(home, &run).filter(|state| {
+                    state.get("state").and_then(Value::as_str) == Some("waiting")
+                })?;
+                let path = team_path(home, &run)?;
+                self.starting = Starting::Sent {
+                    run: run.clone(),
+                    to: target.clone(),
+                };
+                Some(Push::Start { run, path, state })
+            }
+            Starting::Idle | Starting::Sent { .. } => {
+                if let Some(run) = told
+                    .iter()
+                    .filter(|notice| matches!(notice.about, About::Waiting { .. }))
+                    .find_map(|notice| notice.run.clone())
+                {
+                    self.starting = Starting::Next(run);
+                }
+                None
+            }
+        }
     }
 
     /// What brings the Live Activity in step with `state` (its work's now, or `None` once it is
@@ -290,6 +343,16 @@ fn activity_state(home: &Value, run: &str) -> Option<Value> {
         state["approval"] = json!({ "run": run, "node": text(waiting_on, "node"), "who": "" });
     }
     Some(state)
+}
+
+/// The team file of run `run`, as the home screen gives it.
+fn team_path(home: &Value, run: &str) -> Option<String> {
+    list(home, "needsYou")
+        .filter_map(|need| need.get("run"))
+        .chain(list(home, "working"))
+        .find(|summary| text(summary, "runId") == run)
+        .map(|summary| text(summary, "teamPath").to_owned())
+        .filter(|path| !path.is_empty())
 }
 
 /// What could be news on `home`: everything that needs the person, and runs that finished. A

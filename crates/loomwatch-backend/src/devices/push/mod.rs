@@ -77,6 +77,10 @@ pub struct PushTarget {
     /// closed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub activity: Option<ActivityTarget>,
+    /// The phone's token for starting a Live Activity from here, in hex, when it has none and
+    /// someone starts waiting. Absent when its Live Activities are turned off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_token: Option<String>,
 }
 
 /// A Live Activity on the phone: the work it follows, and its own push token from `ActivityKit`.
@@ -133,6 +137,10 @@ impl PushTarget {
             && self.activity.as_ref().is_none_or(|activity| {
                 hex(&activity.token, 400) && (1..=200).contains(&activity.run.len())
             })
+            && self
+                .start_token
+                .as_ref()
+                .is_none_or(|token| hex(token, 400))
     }
 }
 
@@ -239,6 +247,13 @@ pub enum Push {
         /// Someone now waits for the person: shown at once, not when the phone next saves power.
         urgent: bool,
     },
+    /// A Live Activity started from here on a phone that has none, for run `run` of the team at
+    /// `path`, showing `state`. Its attributes are ids too: the phone names the team.
+    Start {
+        run: String,
+        path: String,
+        state: Value,
+    },
 }
 
 impl Push {
@@ -265,6 +280,20 @@ impl Push {
                 }
                 json!({ "aps": aps })
             }
+            Self::Start { run, path, state } => json!({
+                "aps": {
+                    "timestamp": now.timestamp(),
+                    "event": "start",
+                    "content-state": state,
+                    "attributes-type": "WorkActivity",
+                    "attributes": { "team": "", "path": path, "runId": run },
+                    // Apple starts one only with an alert. Words nobody wrote, and no sound: the
+                    // wait's own notice went a read before, and rang if it rings.
+                    "alert": { "title": "LoomWatch", "body": "Something needs you" },
+                    // A token of its own, which the phone gives here as it does for one it started.
+                    "input-push-token": 1,
+                },
+            }),
         }
     }
 
@@ -272,7 +301,7 @@ impl Push {
     #[must_use]
     pub fn kind(&self) -> &'static str {
         match self {
-            Self::Activity { .. } => "liveactivity",
+            Self::Activity { .. } | Self::Start { .. } => "liveactivity",
             Self::Notice(_) | Self::Changed { .. } => "alert",
         }
     }
@@ -293,7 +322,7 @@ impl Push {
         match self {
             Self::Notice(notice) => Some(notice.collapse_id()),
             Self::Changed { .. } => Some("changed".to_owned()),
-            Self::Activity { .. } => None,
+            Self::Activity { .. } | Self::Start { .. } => None,
         }
     }
 }
@@ -310,7 +339,7 @@ pub enum Sent {
 }
 
 /// What sends a push: Apple's service with the person's own key today. A Live Activity's push
-/// goes to `to.activity`'s token, the rest to the app's.
+/// goes to `to.activity`'s token, a start to `to.start_token`, the rest to the app's.
 #[async_trait]
 pub trait Sender: Send + Sync {
     async fn send(&self, to: &PushTarget, push: &Push) -> Sent;
@@ -410,9 +439,12 @@ pub fn spawn(devices: Arc<Devices>, keys: KeyPlace, home: &str) {
                             devices.forget_activity(&id, &activity.token);
                         }
                     }
-                    Sent::Gone => match (&push, &target.activity) {
-                        (Push::Activity { .. }, Some(activity)) => {
+                    Sent::Gone => match (&push, &target.activity, &target.start_token) {
+                        (Push::Activity { .. }, Some(activity), _) => {
                             devices.forget_activity(&id, &activity.token);
+                        }
+                        (Push::Start { .. }, _, Some(token)) => {
+                            devices.forget_start_token(&id, token);
                         }
                         _ => devices.forget_push_token(&id, &target.token),
                     },

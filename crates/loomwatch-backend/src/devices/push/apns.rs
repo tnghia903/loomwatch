@@ -121,6 +121,12 @@ impl Sender for Apns {
                     format!("{}.push-type.liveactivity", self.key.topic),
                 )
             }
+            Push::Start { .. } => {
+                let Some(token) = &to.start_token else {
+                    return Sent::Failed("the phone can't start a Live Activity".to_owned());
+                };
+                (token, format!("{}.push-type.liveactivity", self.key.topic))
+            }
             Push::Notice(_) | Push::Changed { .. } => (&to.token, self.key.topic.clone()),
         };
         let mut request = self

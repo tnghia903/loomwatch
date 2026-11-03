@@ -38,6 +38,7 @@ fn target() -> PushTarget {
         tell_done: true,
         quiet: None,
         activity: None,
+        start_token: None,
     }
 }
 
@@ -684,6 +685,213 @@ fn a_phones_live_activity_is_kept_with_it_until_it_ends() {
         target(),
         "the app's own token stays"
     );
+    assert!(devices.set_push(&phone.id, Some(startable())));
+    devices.forget_start_token(&phone.id, "another");
+    assert_eq!(devices.push_targets()[0].1, startable());
+    devices.forget_start_token(&phone.id, START);
+    assert_eq!(devices.push_targets()[0].1, target());
+}
+
+/// The phone's token for starting a Live Activity.
+const START: &str =
+    "5a7a87a3a5a7a87a3a5a7a87a3a5a7a87a3a5a7a87a3a5a7a87a3a5a7a87a3a5a7a87a3a5a7a87a3";
+
+fn startable() -> PushTarget {
+    PushTarget {
+        start_token: Some(START.to_owned()),
+        ..target()
+    }
+}
+
+#[test]
+fn a_phone_with_no_live_activity_gets_one_when_someone_in_work_starts_waiting() {
+    let now = Utc::now();
+    let waits = [
+        ("question", question("r1"), "answer-r1-writer"),
+        ("review", review_of("r1"), "answer-r1-check"),
+        ("permission", asks("r1", "p1"), "permission-r1-p1"),
+        ("spend", spend("r1", "s1"), "spend-r1-s1"),
+    ];
+    for (kind, wait, key) in waits {
+        let mut watch = Watch::default();
+        let phones = [("phone".to_owned(), startable())];
+        watch.next(&home_at(&[], &[at_work("r1")], &[]), &phones, now);
+        let waiting = home_at(&[wait], &[at_work("r1")], &[]);
+        assert_eq!(
+            pushes(&watch.next(&waiting, &phones, now)).len(),
+            1,
+            "{kind}: the notice first, so the phone reads its words"
+        );
+        let sent = watch.next(&waiting, &phones, now);
+        let [(_, _, start)] = sent.as_slice() else {
+            panic!("{kind}: {sent:?}");
+        };
+        let Push::Start { run, path, state } = start else {
+            panic!("{kind}: {start:?}");
+        };
+        assert_eq!((run.as_str(), path.as_str()), ("r1", "teams/research.yaml"));
+        assert_eq!(state["state"], "waiting", "{kind}");
+        assert_eq!(state["kind"], kind);
+        assert_eq!(state["visit"], key);
+        assert_eq!(start.kind(), "liveactivity");
+        assert_eq!(start.priority(), 10);
+        assert_eq!(start.collapse_id(), None);
+        let payload = start.payload(now);
+        assert_eq!(payload["aps"]["event"], "start");
+        assert_eq!(payload["aps"]["attributes-type"], "WorkActivity");
+        assert_eq!(
+            payload["aps"]["attributes"],
+            json!({ "team": "", "path": "teams/research.yaml", "runId": "r1" }),
+            "{kind}: ids only; the phone names the team"
+        );
+        assert_eq!(
+            payload["aps"]["alert"],
+            json!({ "title": "LoomWatch", "body": "Something needs you" }),
+            "{kind}: words nobody wrote, and no sound: the notice rang if it rings"
+        );
+        assert_eq!(payload["aps"]["input-push-token"], 1);
+        assert_eq!(payload["aps"]["content-state"], *state);
+        assert!(
+            watch.next(&waiting, &phones, now).is_empty(),
+            "{kind}: one, until the phone says"
+        );
+
+        // The phone gives the new activity's token: it is followed from there, as one it started.
+        let mut followed = startable();
+        followed.activity = Some(ActivityTarget {
+            token: ACTIVITY.to_owned(),
+            run: "r1".to_owned(),
+        });
+        let phones = [("phone".to_owned(), followed)];
+        assert!(watch.next(&waiting, &phones, now).is_empty(), "{kind}");
+        let answered = watch.next(&home_at(&[], &[at_work("r1")], &[]), &phones, now);
+        assert!(
+            matches!(
+                pushes(&answered).as_slice(),
+                [Push::Changed { .. }, Push::Activity { end: false, .. }]
+            ),
+            "{kind}: {answered:?}"
+        );
+    }
+}
+
+#[test]
+fn a_live_activity_is_started_once_until_the_phone_says_it_has_none() {
+    let now = Utc::now();
+    let mut watch = Watch::default();
+    let phones = [("phone".to_owned(), startable())];
+    watch.next(
+        &home_at(&[], &[at_work("r1"), at_work("r2")], &[]),
+        &phones,
+        now,
+    );
+    let first = home_at(&[spend("r1", "s1")], &[at_work("r1"), at_work("r2")], &[]);
+    watch.next(&first, &phones, now);
+    assert!(matches!(
+        pushes(&watch.next(&first, &phones, now)).as_slice(),
+        [Push::Start { .. }]
+    ));
+    let both = home_at(
+        &[spend("r1", "s1"), question("r2")],
+        &[at_work("r1"), at_work("r2")],
+        &[],
+    );
+    watch.next(&both, &phones, now);
+    assert!(
+        !pushes(&watch.next(&both, &phones, now))
+            .iter()
+            .any(|push| matches!(push, Push::Start { .. })),
+        "not a second one beside the first"
+    );
+
+    // It says it has none (the activity was swiped away, or never came): the next wait starts one.
+    let mut spoke = startable();
+    spoke.tell_done = false;
+    let phones = [("phone".to_owned(), spoke)];
+    let again = home_at(
+        &[spend("r1", "s1"), question("r2"), asks("r2", "p1")],
+        &[at_work("r1"), at_work("r2")],
+        &[],
+    );
+    watch.next(&again, &phones, now);
+    assert!(matches!(
+        pushes(&watch.next(&again, &phones, now)).as_slice(),
+        [Push::Start { run, .. }] if run == "r2"
+    ));
+}
+
+#[test]
+fn no_live_activity_is_started_when_the_phone_cant_or_the_wait_is_gone() {
+    let now = Utc::now();
+    for (why, phone) in [
+        ("no start token", target()),
+        ("one under way", {
+            let mut phone = startable();
+            phone.activity = Some(ActivityTarget {
+                token: ACTIVITY.to_owned(),
+                run: "r9".to_owned(),
+            });
+            phone
+        }),
+    ] {
+        let mut watch = Watch::default();
+        let phones = [("phone".to_owned(), phone)];
+        watch.next(&home_at(&[], &[at_work("r1")], &[]), &phones, now);
+        let waiting = home_at(&[spend("r1", "s1")], &[at_work("r1")], &[]);
+        watch.next(&waiting, &phones, now);
+        assert!(
+            !pushes(&watch.next(&waiting, &phones, now))
+                .iter()
+                .any(|push| matches!(push, Push::Start { .. })),
+            "{why}"
+        );
+    }
+    let mut watch = Watch::default();
+    let phones = [("phone".to_owned(), startable())];
+    watch.next(&home_at(&[], &[at_work("r1")], &[]), &phones, now);
+    watch.next(
+        &home_at(&[spend("r1", "s1")], &[at_work("r1")], &[]),
+        &phones,
+        now,
+    );
+    assert!(
+        !pushes(&watch.next(&home_at(&[], &[at_work("r1")], &[]), &phones, now))
+            .iter()
+            .any(|push| matches!(push, Push::Start { .. })),
+        "answered before the next read: nothing to show"
+    );
+    let mut watch = Watch::default();
+    watch.next(&home(&[], &[]), &phones, now);
+    watch.next(&home(&[team_request("t1")], &[]), &phones, now);
+    assert!(
+        watch
+            .next(&home(&[team_request("t1")], &[]), &phones, now)
+            .is_empty(),
+        "a team's request has no work to follow"
+    );
+}
+
+#[tokio::test]
+async fn a_start_goes_to_the_phones_start_token() {
+    let seen: Seen = Arc::default();
+    let apns = Apns::at(push_key(), &apple(seen.clone()).await);
+    let start = Push::Start {
+        run: "r1".to_owned(),
+        path: "teams/research.yaml".to_owned(),
+        state: json!({ "line": "", "state": "waiting", "startedAt": 0.0 }),
+    };
+    assert_eq!(apns.send(&startable(), &start).await, Sent::Done);
+    assert!(
+        matches!(apns.send(&target(), &start).await, Sent::Failed(_)),
+        "no start token, no push"
+    );
+    let seen = seen.lock().unwrap();
+    assert_eq!(seen.len(), 1);
+    assert_eq!(seen[0]["token"], START);
+    assert_eq!(seen[0]["topic"], "loomwatch.phone.push-type.liveactivity");
+    assert_eq!(seen[0]["type"], "liveactivity");
+    assert_eq!(seen[0]["priority"], "10");
+    assert_eq!(seen[0]["body"]["aps"]["event"], "start");
 }
 
 #[test]
@@ -799,6 +1007,15 @@ async fn a_phone_gives_its_own_token_at_the_door_and_hears_whether_this_computer
         })
     );
     followed["activity"]["token"] = json!("not hex");
+    assert_eq!(put("phone-key", followed.clone()).await.status(), 400);
+    followed["activity"]["token"] = json!(ACTIVITY);
+    followed["startToken"] = json!(START);
+    assert_eq!(put("phone-key", followed.clone()).await.status(), 200);
+    assert_eq!(
+        devices.push_targets()[0].1.start_token.as_deref(),
+        Some(START)
+    );
+    followed["startToken"] = json!("not hex");
     assert_eq!(put("phone-key", followed).await.status(), 400);
     // A computer has no push token: the route is the phone's.
     assert_ne!(put("computer-key", body).await.status(), 200);
