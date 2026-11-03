@@ -62,7 +62,7 @@ cron = "0.17"
 chrono-tz = "0.10"
 toml = { version = "1", default-features = false, features = ["parse", "serde", "std"] }
 # Ask LoomWatch checks a proposed team against the same schema the editor enforces before saving.
-jsonschema = { version = "0.58.2", default-features = false }
+jsonschema = { version = "0.60.2", default-features = false }
 # Resolved paths without Windows' `\\?\` prefix, which cmd.exe refuses as a working folder and
 # which never compares equal to a path the operator typed. On other systems it is std's own
 # `canonicalize`.
