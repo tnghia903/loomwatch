@@ -57,8 +57,11 @@ export function PermissionModeMenu({ mode, onChange }: PermissionModeControl) {
         close()
       }}
       onBlur={(event) => {
-        // Tabbing out of the menu closes it, as a click outside does.
-        if (open && !root.current?.contains(event.relatedTarget as Node | null)) setOpen(false)
+        // Tabbing out of the menu closes it, as a click outside does. A blur that names no new
+        // target is Safari pressing a button, which it never focuses: closing then would drop the
+        // click on a choice, and a click outside is closed by the pointerdown listener anyway.
+        const next = event.relatedTarget as Node | null
+        if (open && next && !root.current?.contains(next)) setOpen(false)
       }}>
       <button
         ref={chip}
