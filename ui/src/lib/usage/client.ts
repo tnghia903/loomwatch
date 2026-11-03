@@ -30,6 +30,8 @@ export interface SourceUsage {
   peakDayTokens: number
   /** The last time a call through it stopped at a limit or ran out of credit, if one did. */
   lastProblem?: { kind: string; at: string }
+  /** The last call through it that answered, if one did. A limit hit before it has reset. */
+  lastAnswerAt?: string
 }
 
 export interface DayUsage extends Tally {
@@ -106,6 +108,14 @@ export const saveNextSteps = (on: boolean) => nextStepsCall({
 })
 
 /** Every token, read or written. */
+/** The plan limit LoomWatch last hit, and whether it still stands: no call has answered since. */
+export function planLimit(entry?: SourceUsage): { at: string; stands: boolean } | undefined {
+  const problem = entry?.lastProblem
+  if (problem?.kind !== 'plan_limit') return undefined
+  const answered = entry?.lastAnswerAt !== undefined && new Date(entry.lastAnswerAt).getTime() > new Date(problem.at).getTime()
+  return { at: problem.at, stands: !answered }
+}
+
 export function tokensOf(tally: Pick<Tally, 'inputTokens' | 'cachedTokens' | 'outputTokens'>): number {
   return tally.inputTokens + tally.cachedTokens + tally.outputTokens
 }

@@ -6,7 +6,7 @@ import type { ModelSource } from '../../lib/ai/modelIds'
 import { CHATGPT_USAGE_PAGE, CLAUDE_BILLING_PAGE, SOURCE_INFO } from '../../lib/ai/sources'
 import { nameWithHelpers } from '../../lib/chat/helpers'
 import { useAiStatus } from '../../lib/ai/useKeyStatus'
-import { type AgentUsage, type ClaudePlan, type Feature, type FeatureUsage, type NextSteps, type SourceUsage, type UsageReport, cycleStart, fetchNextSteps, fetchUsage, keepClaudePlan, readClaudePlan, saveNextSteps, spentSince, tokensOf } from '../../lib/usage/client'
+import { type AgentUsage, type ClaudePlan, type Feature, type FeatureUsage, type NextSteps, type SourceUsage, type UsageReport, cycleStart, fetchNextSteps, fetchUsage, keepClaudePlan, planLimit, readClaudePlan, saveNextSteps, spentSince, tokensOf } from '../../lib/usage/client'
 import { announceReadingStatus, fetchReadingStatus, saveReadingEnabled, type ReadingStatus } from '../../lib/ai/reading'
 import { isMac } from '../../lib/platform'
 import { formatCost, formatTokens } from '../../lib/watch/usage'
@@ -123,7 +123,7 @@ export function UsagePage() {
 
 function PlanCard({ entry, days }: { entry?: SourceUsage; days: DayValue[] }) {
   const total = entry?.total
-  const limit = entry?.lastProblem?.kind === 'plan_limit' ? entry.lastProblem : undefined
+  const limit = planLimit(entry)
   return <>
     <p className="t-meta lw-source-cost">Plus plans have a 5-hour limit shared with every app that uses your plan; Pro plans don’t. You can also cap LoomWatch’s weekly share, from 10% to 100%, in ChatGPT’s settings.</p>
     <dl className="usage-figures">
@@ -131,7 +131,7 @@ function PlanCard({ entry, days }: { entry?: SourceUsage; days: DayValue[] }) {
       <div><dt className="t-meta">Last 7 days</dt><dd className="t-body-m">{requests(entry?.lastSevenDays.calls ?? 0)}</dd><dd className="t-meta">{formatTokens(entry ? tokensOf(entry.lastSevenDays) : 0)} tokens</dd></div>
       <div><dt className="t-meta">Last 30 days</dt><dd className="t-body-m">{formatTokens(total ? tokensOf(total) : 0)} tokens</dd><dd className="t-meta">busiest day {formatTokens(entry?.peakDayTokens ?? 0)} · {entry?.activeDays ?? 0} active days</dd></div>
     </dl>
-    <p className={`t-meta ${limit ? 'inline-error' : ''}`}>{limit ? `LoomWatch hit a limit on ${when(limit.at)}. ChatGPT doesn’t say when it resets.` : 'No limit hit in the last 30 days.'} ChatGPT doesn’t tell apps how much is left: see it in ChatGPT.</p>
+    <p className={`t-meta ${limit?.stands ? 'inline-error' : ''}`}>{!limit ? 'No limit hit in the last 30 days.' : limit.stands ? `LoomWatch hit a limit on ${when(limit.at)}. ChatGPT doesn’t say when it resets.` : `LoomWatch last hit a limit on ${when(limit.at)}. LoomWatch has used your plan again since then.`} ChatGPT doesn’t tell apps how much is left: see it in ChatGPT.</p>
     <TrackLine entry={entry} plan />
     <DailyBars days={days} title="Tokens a day" summary={`${formatTokens(total ? tokensOf(total) : 0)} tokens in 30 days`} />
     <div className="lw-settings-actions"><a className="btn btn-primary" href={CHATGPT_USAGE_PAGE} target="_blank" rel="noreferrer"><ExternalLink size={14} aria-hidden="true" />Manage usage</a></div>

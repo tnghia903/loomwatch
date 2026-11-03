@@ -83,7 +83,7 @@ describe('Usage', () => {
     render(<UsagePage />)
     const plan = await screen.findByRole('region', { name: 'Your ChatGPT plan' })
     expect(within(plan).getByText('3 requests')).toBeInTheDocument()
-    expect(within(plan).getByText(/LoomWatch hit a limit on .*ChatGPT doesn’t say when it resets/)).toBeInTheDocument()
+    expect(within(plan).getByText(/LoomWatch hit a limit on .*ChatGPT doesn’t say when it resets/)).toHaveClass('inline-error')
     expect(within(plan).getByRole('link', { name: 'Manage usage' })).toHaveAttribute('href', 'https://chatgpt.com/settings/usage')
     // Its chart counts tokens, never dollars.
     expect(within(plan).getByRole('img', { name: /Tokens a day/ })).toBeInTheDocument()
@@ -232,6 +232,22 @@ describe('Usage', () => {
       { url: '/api/next-steps', body: { on: false } },
       { url: '/api/models/reading', body: { enabled: true } },
     ])
+  })
+
+  it('stops showing a plan limit as standing once a call has worked since', async () => {
+    const hit = new Date(Date.now() - 3_600_000)
+    const plan = report.sources[0]
+    const reset: UsageReport = { ...report, sources: [{ ...plan, lastProblem: { kind: 'plan_limit', at: hit.toISOString() }, lastAnswerAt: new Date().toISOString() }, ...report.sources.slice(1)] }
+    vi.mocked(fetch).mockImplementation((url) => String(url).startsWith('/api/usage') ? respond(reset) : respond({ openrouter: { connected: false }, anthropic: { connected: true }, chatgpt: { available: true, connected: true, planUse: true } }))
+    render(<UsagePage />)
+    const card = await screen.findByRole('region', { name: 'Your ChatGPT plan' })
+    const said = within(card).getByText(/LoomWatch last hit a limit on .*LoomWatch has used your plan again since then/)
+    expect(said).not.toHaveClass('inline-error')
+    expect(within(card).queryByText(/doesn’t say when it resets/)).toBeNull()
+    expect(usageNotices(reset, new Date(), null)).toEqual([])
+    // An answer from before the limit leaves it standing.
+    const before: UsageReport = { ...reset, sources: [{ ...reset.sources[0], lastAnswerAt: new Date(hit.getTime() - 60_000).toISOString() }] }
+    expect(usageNotices(before, new Date(), null).map((notice) => notice.key)).toEqual(['chatgpt'])
   })
 
   it('gives a heads-up for a limit hit today and credit nearly spent, and nothing otherwise', () => {
