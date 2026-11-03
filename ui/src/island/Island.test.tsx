@@ -1236,9 +1236,16 @@ describe('the box: any of My agents, and its workbench', () => {
     tellPage({ kind: 'place', notch: { width: 188, height: 32 }, menuBar: 32 })
     // Maya stands beside the notch once the page has read who is pinned.
     await waitFor(() => expect(container.querySelector('.island-head img')).toBeTruthy())
-    tellPage({ kind: 'compose' })
-    // The box takes longer than findBy's 1 s on a busy CI machine.
-    await within(container).findByRole('textbox', { name: 'Message Maya' }, { timeout: 5_000 })
+    // ⌃⌥Space finds the box only once the page holds it, an effect after Maya stands there. The
+    // Mac app presses it only after the page has said whom the box opens with; outside it nothing
+    // hears that, so this presses until the box is there. On a busy machine a first press can come
+    // too soon and find no box. Never while it is open: a press then puts it away.
+    const box = () => within(container).queryByRole('textbox', { name: 'Message Maya' })
+    for (let tries = 0; !box() && tries < 50; tries += 1) {
+      tellPage({ kind: 'compose' })
+      if (!box()) await new Promise((resolve) => setTimeout(resolve, 100))
+    }
+    expect(box()).toBeTruthy()
     expect(within(container).queryByLabelText('Hold Control-Option-Space to talk to Maya')).toBeNull()
     expect(container.querySelector('.island-talk')).toBeNull()
   }, 15_000)
