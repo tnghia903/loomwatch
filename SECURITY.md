@@ -100,8 +100,11 @@ yourself.
   changes a command before it runs, this once. **Answer instead** sends your words back to the
   agent as the tool's answer, and nothing runs. A request nobody answers within 10 minutes is
   declined; a scheduled run waits 12 hours, then declines it. In Auto mode, commands that
-  only read files, or download pages for an agent allowed the web, run without asking; everything
-  else still asks.
+  only read files, or download pages for an agent allowed the web, run without asking, and so do
+  changes to files in the agent's own folder. On a Mac, other commands run without asking in a
+  tighter sandbox: off the network, away from your keys and sign-ins, and unable to open or drive
+  other apps. Deleting a folder, publishing, admin commands, credentials and the like still ask.
+  Auto limits where a command writes, not what it reads outside those key folders.
 - **Give agents no tools that reach past the run.** An agent's tools are its files, the web,
   commands, its plan and the Team Bus to its teammates. None of them publishes, posts or sends a
   message anywhere, except a command working in an app you let LoomWatch control, such as Mail. Tools set up in another AI app's settings (MCP servers) are not given to
@@ -148,7 +151,7 @@ yourself.
 - Sandbox commands on Windows. A command an agent runs there can read and change every file your
   Windows account can, and reach the internet even when the agent may not use the web. Approving
   each command is the only line, and in Auto mode LoomWatch's own reading of the command line is
-  all that lets a read-only command through. On Windows, keep **Run commands** off for any agent
+  all that lets a read-only command through; nothing else runs there without asking. On Windows, keep **Run commands** off for any agent
   whose job doesn't need it, and read each command before you allow it.
 - Sandbox commands on Linux yet. There too, approving each command is the only line.
 - Protect you from a model that is itself compromised, or from a prompt that talks an agent into

@@ -59,6 +59,20 @@ const OFF_NETWORK: &str = "\n(The sandbox kept this command off the network: thi
                            use the web. Use read_page or search_web for the web: they ask the \
                            person first when they need to.)";
 
+/// What a command Auto mode ran without asking is followed by when it fails (ADR 0109): the
+/// tighter sandbox may be why, and the same command again goes to the person.
+const CONTAINED: &str = "\n(Auto mode ran this on its own, in a sandbox that keeps it off the \
+                         network, out of other apps and away from keys. If it needs any of \
+                         those, run exactly the same command again: that asks the person.)";
+
+/// [`CONTAINED`] for an agent that may not use the web: allowing its command again would not give
+/// it the network (ADR 0104), so it is pointed at the tools that ask for the web.
+const CONTAINED_OFFLINE: &str = "\n(Auto mode ran this on its own, in a sandbox that keeps it out \
+                                 of other apps and away from keys. This agent's commands never \
+                                 reach the web: use read_page or search_web, which ask the person \
+                                 for it. If it needs other apps, run exactly the same command \
+                                 again: that asks the person.)";
+
 /// How commands run for one agent.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct CommandSettings {
@@ -66,6 +80,16 @@ pub(crate) struct CommandSettings {
     pub network: bool,
     /// Extra folders a command may write to, such as a granted output folder.
     pub writable: Vec<PathBuf>,
+    /// Auto mode let this command run without asking anyone (ADR 0109): it runs in the tighter
+    /// sandbox, off the network.
+    pub contained: bool,
+}
+
+impl CommandSettings {
+    /// Whether the command may reach the network.
+    pub(crate) const fn reaches_network(&self) -> bool {
+        self.network && !self.contained
+    }
 }
 
 pub(super) async fn run(input: &Value, context: &Context<'_>) -> Output {
@@ -92,7 +116,7 @@ pub(super) async fn run(input: &Value, context: &Context<'_>) -> Output {
         process.env("PATH", path);
     }
     // Kept until the command ends. A folder that can't be made leaves Python its own name.
-    let python = if context.command.network {
+    let python = if context.command.reaches_network() {
         PythonName::new().ok()
     } else {
         None
@@ -199,7 +223,13 @@ fn answer(
             if left_running {
                 text.push_str(LEFT_RUNNING);
             }
-            if offline {
+            if context.command.contained && sandbox::available() {
+                text.push_str(if context.command.network {
+                    CONTAINED
+                } else {
+                    CONTAINED_OFFLINE
+                });
+            } else if offline {
                 text.push_str(OFF_NETWORK);
             } else if let Some(program) = sandbox::runs_as_another_user(&text) {
                 let instead = if Path::new(&program).file_name() == Some(OsStr::new("ps")) {

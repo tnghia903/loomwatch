@@ -1,22 +1,32 @@
-//! Auto mode (ADR 0061): a team whose file says `permissions: {mode: auto}` lets its agents run
-//! the commands that only read or download without asking the operator.
+//! Auto mode (ADR 0061, ADR 0109): a team whose file says `permissions: {mode: auto}` gets on
+//! with its work without asking the operator, inside limits it can't cross.
 //!
 //! An agent's own `allow:` switches still answer first (ADR 0037), then an earlier "Allow for this
 //! run". A command they leave to the operator is read here, from its command line alone:
 //!
 //! 1. A fixed list ([`never_auto`]) always goes to the operator, with the reason: administrator
-//!    commands, deleting, pushing, publishing, deploying, credentials, and any command built from
-//!    text — a script passed to an interpreter or shell, `eval`, substitution.
-//! 2. A command runs without asking when every part of it is known to only read or download
-//!    ([`reads_only`]): a few reading programs, read-only `git`, and `sed` that only prints or
-//!    substitutes, on paths inside the agent's folder, its knowledge or the temporary folder; and
-//!    plain `curl`/`wget` downloads for an agent allowed the web. Output may go to the temporary
-//!    folder, or into the agent's folder when it may edit files there.
-//! 3. Anything else goes to the operator exactly as without Auto mode (ADR 0040).
+//!    commands, deleting, pushing, publishing, deploying, stopping programs, system settings and
+//!    credentials.
+//! 2. A command runs without asking, as it is, when every part of it is known to only read or
+//!    download ([`reads_only`]): a few reading programs, read-only `git`, and `sed` that only
+//!    prints or substitutes, on paths inside the agent's folder, its knowledge or the temporary
+//!    folder; and plain `curl`/`wget` downloads for an agent allowed the web. Output may go to the
+//!    temporary folder, or into the agent's folder when it may edit files there.
+//! 3. Where there is a sandbox (a Mac), any other command runs without asking in a tighter one
+//!    ([`Verdict::Contained`]): off the network, changing files only in the agent's folder and the
+//!    temporary ones, and kept from keys, other apps and other programs
+//!    (`agent::sandbox::Tighter`). A script built from text is one of these: the sandbox, not its
+//!    words, is what keeps it in. Two go to the operator instead: a command that names the
+//!    network, for an agent allowed the web, since it would need the network the sandbox takes
+//!    away; and a command that already failed in the sandbox in this session.
+//! 4. Anything else goes to the operator exactly as without Auto mode (ADR 0040).
+//!
+//! File edits inside the agent's own folder go ahead too ([`decide`]), outside its protected
+//! folders, as a command in the tighter sandbox may change them. The web keeps its own switch,
+//! and an MCP tool is not a command whatever kind its app gives it.
 //!
 //! Nothing leaves the computer to decide, it costs nothing, and the same command always gets the
-//! same answer. Auto mode decides commands only: the web and file edits keep their own switches,
-//! and an MCP tool is not a command whatever kind its app gives it.
+//! same answer.
 
 use std::path::{Path, PathBuf};
 
@@ -27,8 +37,11 @@ use crate::permissions::{PermissionPolicy, resolve};
 /// What Auto mode made of one permission request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Verdict {
-    /// The command only reads or downloads: it runs without asking.
+    /// The command only reads or downloads, or the edit lands in the agent's own folder: it goes
+    /// ahead without asking.
     Approved,
+    /// The command runs without asking, in the tighter sandbox and off the network (ADR 0109).
+    Contained,
     /// Left to the operator, and why, in the words the request's card shows.
     Undecided(String),
 }
@@ -37,28 +50,91 @@ const NEVER: &str = "Auto mode never runs this without you";
 const MORE: &str =
     "Auto mode leaves this to you: it may do more than read files or download a page";
 const NO_WEB: &str = "Auto mode leaves this to you: it downloads from the web, which this agent may not use on its own";
+const NETWORK: &str =
+    "Auto mode leaves this to you: it uses the web, and Auto mode runs commands without it";
+const FAILED: &str =
+    "Auto mode tried this on its own, without the web or other apps, and it didn't work";
+const OUTSIDE: &str =
+    "Auto mode leaves this to you: it changes a file outside the folder this agent works in";
 /// Longest command Auto mode reads; a longer one is left to the operator.
 const LONGEST: usize = 4_000;
 
-/// What Auto mode makes of one permission request from an agent working under `policy`. `None`
-/// when the request is not one of the app's own commands, so Auto mode has nothing to say.
+/// What Auto mode makes of one permission request from an agent working under `policy`: one of
+/// the app's own commands, or a file edit. `None` for anything else, so Auto mode has nothing to
+/// say.
 #[must_use]
 pub fn decide(request: &Value, policy: &PermissionPolicy) -> Option<Verdict> {
-    decide_in(request, policy, &temp_folders())
+    if let Some(verdict) = decide_edit(request, policy) {
+        return Some(verdict);
+    }
+    decide_in(
+        request,
+        policy,
+        &temp_folders(),
+        crate::agent::sandbox::available(),
+    )
 }
 
-/// [`decide`], with `temps` as the temporary folders.
-fn decide_in(request: &Value, policy: &PermissionPolicy, temps: &[PathBuf]) -> Option<Verdict> {
+/// What `LoomWatch`'s own check of an answer runs without asking (ADR 0098): only the commands
+/// that read or download, never in the tighter sandbox, and no edits. A check measures the work;
+/// it never changes it.
+#[must_use]
+pub fn decide_reading(request: &Value, policy: &PermissionPolicy) -> Option<Verdict> {
+    decide_in(request, policy, &temp_folders(), false)
+}
+
+/// An edit Auto mode lets through: every file it names inside the agent's own folder, outside the
+/// folders no agent edits ([`PermissionPolicy::may_edit`]). `None` when the request is no edit.
+fn decide_edit(request: &Value, policy: &PermissionPolicy) -> Option<Verdict> {
+    let call = request.pointer("/params/toolCall")?;
+    if call.get("kind").and_then(Value::as_str) != Some("edit")
+        || crate::permissions::grant_scope(request).starts_with("mcp:")
+    {
+        return None;
+    }
+    let paths: Vec<&str> = call
+        .get("locations")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|location| location.get("path").and_then(Value::as_str))
+        .collect();
+    let inside = !paths.is_empty() && paths.iter().all(|path| policy.may_edit(Path::new(path)));
+    Some(if inside {
+        Verdict::Approved
+    } else {
+        Verdict::Undecided(OUTSIDE.to_owned())
+    })
+}
+
+/// [`decide`] for a command, with `temps` as the temporary folders. `boxed`: a command that
+/// doesn't only read may run in the tighter sandbox.
+fn decide_in(
+    request: &Value,
+    policy: &PermissionPolicy,
+    temps: &[PathBuf],
+    boxed: bool,
+) -> Option<Verdict> {
     let command = command_of(request)?;
-    if let Some(reason) = never_auto(&command) {
+    let never = never_auto(&command);
+    if let Some(reason) = never.filter(|reason| !boxed || *reason != BUILDS) {
         return Some(Verdict::Undecided(format!("{NEVER}: {reason}")));
     }
-    if command.chars().count() > LONGEST {
-        return Some(Verdict::Undecided(MORE.to_owned()));
-    }
-    Some(match reads_only(&command, policy, temps) {
+    let failed_before = request
+        .pointer("/params/toolCall/_meta/loomwatch/failedContained")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let read = (never.is_none() && command.chars().count() <= LONGEST)
+        .then(|| reads_only(&command, policy, temps))
+        .flatten();
+    Some(match read {
         Some(false) => Verdict::Approved,
         Some(true) if policy.allow().web => Verdict::Approved,
+        _ if boxed && failed_before => Verdict::Undecided(FAILED.to_owned()),
+        _ if boxed && policy.allow().web && crate::agent::sandbox::reaches_network(&command) => {
+            Verdict::Undecided(NETWORK.to_owned())
+        }
+        _ if boxed => Verdict::Contained,
         Some(true) => Verdict::Undecided(NO_WEB.to_owned()),
         None => Verdict::Undecided(MORE.to_owned()),
     })
@@ -117,22 +193,21 @@ fn program_name(word: &str) -> &str {
 
 const BUILDS: &str = "it runs a script or command it was given as text";
 
-/// Why a command is never run without asking: the boundary Auto mode cannot cross. `None` when
-/// [`reads_only`] may decide it.
+/// Why a command is never run without asking as it is: the boundary Auto mode cannot cross.
+/// `None` when [`reads_only`] may decide it. A command built from text (`BUILDS`) is only that
+/// when nothing in it is named for anything worse: the tighter sandbox may still run it (ADR
+/// 0109), where a named risk always goes to the operator.
 ///
 /// A command is read as the simple commands it chains (`;`, `&&`, `||`, `|`, `&`, new lines), each
 /// judged by its program and arguments. Quotes are not parsed here, so a separator inside quotes
 /// only makes a command look like more programs, never fewer.
 #[must_use]
 pub fn never_auto(command: &str) -> Option<&'static str> {
-    if command.contains("$(")
+    let mut built = command.contains("$(")
         || command.contains('`')
         || command.contains("<(")
         || command.contains(">(")
-        || command.contains("\\\n")
-    {
-        return Some(BUILDS);
-    }
+        || command.contains("\\\n");
     let secrets = [
         ".env",
         ".ssh",
@@ -175,14 +250,16 @@ pub fn never_auto(command: &str) -> Option<&'static str> {
         if first.starts_with(['"', '\'', '\\', '$', '=', '-'])
             || first.starts_with(|c: char| c.is_ascii_digit())
         {
-            return Some(BUILDS);
+            built = true;
+            continue;
         }
-        let reason = program_risk(program_name(first), args);
-        if reason.is_some() {
-            return reason;
+        match program_risk(program_name(first), args) {
+            Some(BUILDS) => built = true,
+            Some(reason) => return Some(reason),
+            None => {}
         }
     }
-    None
+    built.then_some(BUILDS)
 }
 
 /// Why one simple command — its program and the words after it — is never run without asking.
@@ -200,13 +277,13 @@ fn program_risk(program: &str, args: &[&str]) -> Option<&'static str> {
         "sudo" | "doas" | "su" | "pkexec" | "runas" => Some("it runs as an administrator"),
         "eval" | "exec" | "source" | "." | "xargs" | "parallel" => Some(BUILDS),
         shell if is_shell(shell) => Some(BUILDS),
-        "node" | "bun" | "deno" | "python" | "python3" | "ruby" | "perl" | "php" | "osascript"
+        "osascript" | "open" | "shortcuts" | "automator" => Some("it opens or controls other apps"),
+        "node" | "bun" | "deno" | "python" | "python3" | "ruby" | "perl" | "php"
             if has_flag(&['e', 'c', 'p'], &["--eval", "--print", "-c"])
                 || script_from_input(args) =>
         {
             Some(BUILDS)
         }
-        "osascript" => Some("it drives other apps"),
         "rm" if has_flag(&['r', 'R', 'f'], &["--recursive", "--force"]) => Some("it deletes files"),
         "find"
             if args
@@ -1352,7 +1429,7 @@ mod tests {
                 "{reading}"
             );
             assert_eq!(
-                decide_in(&command(&reading), &policy, &temps),
+                decide_in(&command(&reading), &policy, &temps, false),
                 Some(Verdict::Approved),
                 "{reading}"
             );
@@ -1431,7 +1508,7 @@ mod tests {
         for more in more {
             assert_eq!(reads_only(&more, &policy, &temps), None, "{more}");
             assert_eq!(
-                decide_in(&command(&more), &policy, &temps),
+                decide_in(&command(&more), &policy, &temps, false),
                 Some(Verdict::Undecided(MORE.to_owned())),
                 "{more}"
             );
@@ -1490,12 +1567,12 @@ mod tests {
                 "{download}"
             );
             assert_eq!(
-                decide_in(&command(&download), &web, &temps),
+                decide_in(&command(&download), &web, &temps, false),
                 Some(Verdict::Approved),
                 "{download}"
             );
             assert_eq!(
-                decide_in(&command(&download), &offline, &temps),
+                decide_in(&command(&download), &offline, &temps, false),
                 Some(Verdict::Undecided(NO_WEB.to_owned())),
                 "{download}"
             );
@@ -1528,6 +1605,133 @@ mod tests {
         }
     }
 
+    /// ADR 0109: where there is a sandbox, a script or any program Auto mode can't read runs in its
+    /// tighter sandbox without asking. A named risk anywhere in the line still asks, and so do a
+    /// command an agent allowed the web would need the network for, and a command that already
+    /// failed in the sandbox.
+    #[test]
+    fn in_its_sandbox_auto_mode_runs_scripts_but_never_a_named_risk() {
+        let scratch = Scratch::new();
+        let temps = scratch.temps();
+        let decide = |text: &str, allow: AgentAllow| {
+            decide_in(&command(text), &scratch.policy(allow), &temps, true)
+        };
+        for script in [
+            "python3 - <<'PY'\nfrom pptx import Presentation\nprint(1)\nPY",
+            "python3 -c \"print(2 ** 10)\"",
+            "ffprobe -v error -show_entries format=duration -of json video/cut.mp4",
+            "swift build2/render.swift",
+            "echo $(date) > made.txt",
+            "node build.js && cat out.txt",
+        ] {
+            assert_eq!(
+                decide(script, NOTHING),
+                Some(Verdict::Contained),
+                "{script}"
+            );
+            assert_eq!(decide(script, WEB), Some(Verdict::Contained), "{script}");
+        }
+        for named in [
+            "python3 -c \"print(1)\" && git push",
+            "python3 - <<'PY'\nprint(1)\nPY\nrm -rf build",
+            "bash -c 'echo hi'; kill 1234",
+            "sudo python3 build.py",
+            "python3 read.py ~/.ssh/id_rsa",
+            "osascript -e 'tell application \"Finder\" to quit'",
+            "rm -rf $(pwd)",
+            "echo `date` && git push",
+            "\"$PY\" build.py && git push",
+            "automator run.workflow",
+            "open -a TextEdit notes.md",
+            "shortcuts run \"Clean up\"",
+        ] {
+            assert!(
+                matches!(decide(named, NOTHING), Some(Verdict::Undecided(ref why)) if why.starts_with(NEVER)),
+                "{named}: {:?}",
+                decide(named, NOTHING)
+            );
+        }
+        assert_eq!(
+            decide("pip install requests", WEB),
+            Some(Verdict::Undecided(NETWORK.to_owned()))
+        );
+        assert_eq!(
+            decide(
+                "python3 -c \"import urllib.request as r; r.urlopen('https://example.com')\"",
+                WEB
+            ),
+            Some(Verdict::Undecided(NETWORK.to_owned())),
+            "it would need the network the sandbox takes away"
+        );
+        assert_eq!(
+            decide("pip install requests", NOTHING),
+            Some(Verdict::Contained),
+            "an agent without the web gets no network asking either (ADR 0104)"
+        );
+        assert_eq!(
+            decide("cat notes.md", NOTHING),
+            Some(Verdict::Approved),
+            "what only reads runs as it is"
+        );
+        let mut again = command("python3 build.py");
+        again["params"]["toolCall"]["_meta"] = json!({"loomwatch": {"failedContained": true}});
+        assert_eq!(
+            decide_in(&again, &scratch.policy(NOTHING), &temps, true),
+            Some(Verdict::Undecided(FAILED.to_owned()))
+        );
+        assert_eq!(
+            decide_in(
+                &command("python3 build.py"),
+                &scratch.policy(NOTHING),
+                &temps,
+                false
+            ),
+            Some(Verdict::Undecided(MORE.to_owned())),
+            "without a sandbox, as before"
+        );
+    }
+
+    /// ADR 0109: Auto mode lets an edit inside the agent's own folder through, whatever its edits
+    /// switch, and never one outside it or in a folder no agent edits. `LoomWatch`'s own check gets
+    /// neither edits nor the sandbox.
+    #[test]
+    fn auto_mode_lets_edits_inside_the_agents_folder_through() {
+        let scratch = Scratch::new();
+        let policy = scratch.policy(NOTHING);
+        let edit = |paths: &[String]| {
+            json!({"params": {"toolCall": {"kind": "edit", "title": "Write",
+                "locations": paths.iter().map(|path| json!({"path": path})).collect::<Vec<_>>()}}})
+        };
+        let inside = scratch.path("agent/draft.md");
+        assert_eq!(
+            decide(&edit(&[inside.clone(), "src/new.rs".to_owned()]), &policy),
+            Some(Verdict::Approved)
+        );
+        for outside in [
+            scratch.path("elsewhere/private.md"),
+            scratch.path("notes/brief.md"),
+            scratch.path("agent/.git/hooks/pre-commit"),
+            scratch.path("agent/.claude/settings.json"),
+            "../elsewhere/x.md".to_owned(),
+        ] {
+            assert_eq!(
+                decide(&edit(&[inside.clone(), outside.clone()]), &policy),
+                Some(Verdict::Undecided(OUTSIDE.to_owned())),
+                "{outside}"
+            );
+        }
+        assert_eq!(
+            decide(&edit(&[]), &policy),
+            Some(Verdict::Undecided(OUTSIDE.to_owned())),
+            "an edit that names no file"
+        );
+        assert_eq!(decide_reading(&edit(&[inside]), &policy), None);
+        assert_ne!(
+            decide_reading(&command("python3 build.py"), &policy),
+            Some(Verdict::Contained)
+        );
+    }
+
     /// The decision as the run sees it: the fixed list's reason, or why it may do more.
     #[test]
     fn the_operator_is_told_why_auto_mode_left_a_command_to_them() {
@@ -1535,18 +1739,18 @@ mod tests {
         let temps = scratch.temps();
         let policy = scratch.policy(WEB);
         assert_eq!(
-            decide_in(&command("rm -rf build"), &policy, &temps),
+            decide_in(&command("rm -rf build"), &policy, &temps, false),
             Some(Verdict::Undecided(
                 "Auto mode never runs this without you: it deletes files".to_owned()
             ))
         );
         assert_eq!(
-            decide_in(&command(&"ls ".repeat(1_500)), &policy, &temps),
+            decide_in(&command(&"ls ".repeat(1_500)), &policy, &temps, false),
             Some(Verdict::Undecided(MORE.to_owned())),
             "too long to read"
         );
         let web = json!({"params": {"toolCall": {"kind": "fetch", "rawInput": {"query": "x"}}}});
-        assert_eq!(decide_in(&web, &policy, &temps), None);
+        assert_eq!(decide_in(&web, &policy, &temps, false), None);
     }
 
     #[test]

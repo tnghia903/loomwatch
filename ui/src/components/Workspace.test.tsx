@@ -53,6 +53,7 @@ const documentState = vi.hoisted(() => ({
   // ADR 0060 (taking a skill or tool off the canvas turns it off) and Your agents' links.
   turnOff: vi.fn(), turnBackOn: vi.fn(), applyAgentFields: vi.fn(),
   checkDiskRevision: vi.fn(async () => {}), currentRevision: () => 'rev-7',
+  teamPermissionMode: 'ask', updateTeamPermissionMode: vi.fn(),
 }))
 
 const sessionState = vi.hoisted(() => ({ events: [] as RunEvent[] }))
@@ -213,6 +214,17 @@ describe('Workspace', () => {
     expect(cascaded(own, ['inset', 'right'])).toBe('auto')
     expect(cascaded(own, ['inset', 'right'], { width: 900 })).toBe(clear)
     shell.remove()
+  })
+
+  // ADR 0109: the team's mode is chosen beside the chat's send button, and saved at once, so the
+  // daemon turns the team's running work to it too.
+  it('switches the team to Auto from the chat and saves it at once', async () => {
+    renderWorkspace()
+    fireEvent.click(screen.getByRole('button', { name: 'Run team' }))
+    fireEvent.click(screen.getByRole('button', { name: 'When an agent needs your OK: Ask me' }))
+    fireEvent.click(screen.getByRole('menuitemradio', { name: /Auto/ }))
+    expect(documentState.updateTeamPermissionMode).toHaveBeenCalledWith('auto')
+    await waitFor(() => expect(documentState.save).toHaveBeenCalled())
   })
 
   // ADR 0051: Run team opens the team's chat, where work starts only when you send @team.

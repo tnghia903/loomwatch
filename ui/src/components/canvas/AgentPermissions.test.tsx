@@ -32,12 +32,13 @@ describe('AgentPermissions', () => {
     expect(explained).not.toMatch(/cannot|only from what it is given/)
   })
 
-  it('says Auto on the commands switch when the team is in Auto mode, and only while that switch is off', () => {
+  it('says Auto on the commands and edits switches when the team is in Auto mode, and only while each is off', () => {
     const { rerender } = render(<AgentPermissions agent={agent()} onChange={vi.fn()} teamAuto />)
     expect(screen.getByRole('button', { name: /Run commands/ })).toHaveTextContent('CommandsAuto')
-    // Auto mode decides commands only: the web and edits still ask.
+    // ADR 0109: Auto mode also lets changes to the agent's own files through; the web keeps its switch.
+    expect(screen.getByRole('button', { name: /Edit files/ })).toHaveTextContent('Edit filesAuto')
+    expect(screen.getByRole('button', { name: /Edit files/ })).toHaveAttribute('title', expect.stringContaining('in the folder it works in go ahead'))
     expect(screen.getByRole('button', { name: /Search the web/ })).toHaveTextContent('WebAsks you')
-    expect(screen.getByRole('button', { name: /Edit files/ })).toHaveTextContent('Edit filesAsks you')
     rerender(<AgentPermissions agent={agent({ allow: { commands: true } })} onChange={vi.fn()} teamAuto />)
     expect(screen.getByRole('button', { name: /Run commands/ })).toHaveTextContent('CommandsAllowed')
   })

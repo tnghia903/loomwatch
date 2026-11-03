@@ -30,7 +30,7 @@ mod openrouter;
 mod permission;
 pub(crate) mod prompt;
 mod provider;
-mod sandbox;
+pub(crate) mod sandbox;
 mod session;
 mod skills;
 mod spend;

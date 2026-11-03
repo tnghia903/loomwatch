@@ -1008,7 +1008,8 @@ free model such as DeepSeek or Qwen through OpenRouter.
 LoomWatch decides, for every agent. Each agent's panel on the **Team** tab has three switches under **Allowed
 without asking**: **Search the web**, **Edit files** (only in the agent's own folder) and **Run
 commands**. They start off, except **Search the web** for researchers. LoomWatch always allows the
-team's own handovers and the tools, folders and files you connected to the agent.
+team's own handovers, the tools, folders and files you connected to the agent, and reading its
+teammates' work in the team's folder.
 
 Anything else waits for you. The agent pauses and asks in the team chat, as its own message, such
 as "Asks to use the web · Web search · …". You answer right below it: **Allow**, **Allow for this
@@ -1020,11 +1021,22 @@ as "You allowed it, this once". The same question shows up in the Needs-you tray
 any screen. If nobody answers within 10 minutes it is declined. A scheduled run waits 12 hours instead,
 then declines it (`waitForYouMinutes` in its schedule changes that).
 
-To ask less often, set `permissions: {mode: auto}` in the team file. A command an agent isn't allowed
-to run on its own then runs without asking when every part of it only reads inside the agent's
-folder, its knowledge or the temp folder, or is a plain download for an agent allowed the web.
-Anything that deletes, pushes, publishes, deploys, needs admin rights, touches credentials or runs a
-script given as text always asks, and so does everything else, with the reason on the card.
+For a team that gets on without you, choose **Auto** beside the chat's send button (**Ask me ⌄** →
+**Auto**), or set `permissions: {mode: auto}` in the team file. The switch reaches work already
+running, and answers a question waiting on you when Auto would have. In Auto:
+
+- A command that only reads, or downloads for an agent allowed the web, runs as it is.
+- On a Mac, any other command runs in a tighter sandbox: off the network, changing files only in
+  the agent's folder and the temp folder, away from your keys and sign-ins (`~/.ssh`, the Keychain,
+  LoomWatch's own), and unable to open or drive other apps. A script that fails there asks you when
+  the agent runs it again.
+- Changes to files in the agent's own folder go ahead, whatever its **Edit files** switch.
+- Deleting a folder or forcing a delete (`rm -r`, `rm -f`), pushing, publishing, deploying, admin
+  rights, credentials, stopping programs and opening or controlling other apps always ask, with the
+  reason on the card. A plain delete of one file inside the agent's folder doesn't. So does a command that needs the network for
+  an agent allowed the web, and a change outside the agent's folder. The web keeps its own switch.
+- On Windows, where there is no sandbox, only the commands that read run without asking.
+
 LoomWatch decides this on your computer from the command itself; no model is asked and nothing is
 sent anywhere.
 

@@ -464,6 +464,9 @@ pub struct Session {
     /// The person answered yes when the agent, its web switch off, asked for the web: from the
     /// next call on it has the provider's web tools, and its commands the network.
     web_granted: AtomicBool,
+    /// Commands Auto mode ran without asking, in its tighter sandbox, that failed there (ADR
+    /// 0109): the same command again goes to the person.
+    failed_contained: std::sync::Mutex<std::collections::BTreeSet<String>>,
 }
 
 impl Session {
@@ -507,6 +510,7 @@ impl Session {
             unsent_pictures: (0, 0),
             links: Vec::new(),
             web_granted: AtomicBool::new(false),
+            failed_contained: std::sync::Mutex::default(),
         }
     }
 
@@ -543,6 +547,7 @@ impl Session {
             unsent_pictures: (0, 0),
             links: snapshot.links,
             web_granted: AtomicBool::new(snapshot.web),
+            failed_contained: std::sync::Mutex::default(),
         }
     }
 
@@ -1325,7 +1330,7 @@ impl Session {
             return self.broken_arguments(call, cut).await.map(Begun::Answered);
         };
         Ok(match self.allow_builtin(tool, call, input).await? {
-            Ok(input) => Begun::Allowed(input),
+            Ok(allowed) => Begun::Allowed(allowed.input),
             Err(output) => Begun::Answered(self.for_conversation(&call.id, output.text)),
         })
     }
@@ -1343,7 +1348,7 @@ impl Session {
         let outputs = futures_util::future::join_all(
             reads
                 .iter()
-                .map(|read| self.finish_builtin(read.tool, read.call, &read.input, cancel)),
+                .map(|read| self.finish_builtin(read.tool, read.call, &read.input, false, cancel)),
         )
         .await;
         for (read, output) in reads.drain(..).zip(outputs) {
@@ -1387,9 +1392,10 @@ impl Session {
                 kind: ToolKind::Other,
                 input: json!({"server": ask.server, "tool": ask.call, "arguments": input}),
                 locations: Vec::new(),
+                failed_contained: false,
             };
             let refused = match self.permissions.request(&request).await {
-                Decision::Allow | Decision::AllowEdited(_) => None,
+                Decision::Allow | Decision::AllowContained | Decision::AllowEdited(_) => None,
                 Decision::Deny => Some(Output::failed(
                     "The person declined this. Carry on without it, or say what you need and why.",
                 )),
@@ -1439,7 +1445,10 @@ impl Session {
         cancel: &Cancel,
     ) -> Result<Output, AgentError> {
         match self.allow_builtin(tool, call, input).await? {
-            Ok(input) => self.finish_builtin(tool, call, &input, cancel).await,
+            Ok(allowed) => {
+                self.finish_builtin(tool, call, &allowed.input, allowed.contained, cancel)
+                    .await
+            }
             Err(answered) => Ok(answered),
         }
     }
@@ -1451,7 +1460,8 @@ impl Session {
         tool: Builtin,
         call: &ToolCall,
         mut input: Value,
-    ) -> Result<Result<Value, Output>, AgentError> {
+    ) -> Result<Result<Allowed, Output>, AgentError> {
+        let mut contained = false;
         let mut prepared = match tool.prepare(&input, &self.config.cwd, &self.config.knowledge) {
             Ok(prepared) => prepared,
             Err(said) => {
@@ -1487,9 +1497,11 @@ impl Session {
                 kind: prepared.kind,
                 input: input.clone(),
                 locations: prepared.locations.clone(),
+                failed_contained: tool == Builtin::RunCommand && self.failed_in_box(&input),
             };
             match self.permissions.request(&request).await {
                 Decision::Allow => self.grant_web(tool),
+                Decision::AllowContained => contained = true,
                 Decision::AllowEdited(edited) => {
                     if let Err(said) =
                         tool.prepare(&edited, &self.config.cwd, &self.config.knowledge)
@@ -1518,7 +1530,7 @@ impl Session {
                 }
             }
         }
-        Ok(Ok(input))
+        Ok(Ok(Allowed { input, contained }))
     }
 
     /// Whether a call for the web goes ahead without asking (ADR 0104): a link the person wrote,
@@ -1558,12 +1570,27 @@ impl Session {
         ))
     }
 
-    /// Runs an allowed call and records how it ended.
+    /// Whether Auto mode ran this command in its tighter sandbox earlier, and it failed there.
+    fn failed_in_box(&self, input: &Value) -> bool {
+        input
+            .get("command")
+            .and_then(Value::as_str)
+            .is_some_and(|command| {
+                self.failed_contained
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .contains(command)
+            })
+    }
+
+    /// Runs an allowed call and records how it ended. `contained`: Auto mode let it through
+    /// without asking, so a command runs in its tighter sandbox (ADR 0109).
     async fn finish_builtin(
         &self,
         tool: Builtin,
         call: &ToolCall,
         input: &Value,
+        contained: bool,
         cancel: &Cancel,
     ) -> Result<Output, AgentError> {
         let output = match tool {
@@ -1574,6 +1601,7 @@ impl Session {
                 let settings = CommandSettings {
                     network: self.uses_web(),
                     writable: self.config.writable.clone(),
+                    contained,
                 };
                 let context = Context {
                     cwd: &self.config.cwd,
@@ -1594,6 +1622,15 @@ impl Session {
                 tool.run(input, &context).await
             }
         };
+        if contained
+            && output.failed
+            && let Some(command) = input.get("command").and_then(Value::as_str)
+        {
+            self.failed_contained
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .insert(command.to_owned());
+        }
         let status = if output.failed {
             ToolStatus::Failed
         } else {
@@ -2043,6 +2080,15 @@ struct Read<'c> {
     tool: Builtin,
     /// The arguments it runs with, which the person may have changed.
     input: Value,
+}
+
+/// A call that may run.
+struct Allowed {
+    /// The arguments it runs with, which the person may have changed.
+    input: Value,
+    /// Auto mode let it through without asking anyone: a command runs in its tighter sandbox
+    /// (ADR 0109).
+    contained: bool,
 }
 
 /// What a call puts in the conversation: its text, and the pictures it opened.

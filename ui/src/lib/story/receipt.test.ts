@@ -64,8 +64,35 @@ describe('commands Auto mode ran without asking', () => {
 
   it('are carried on the projection, not as messages', () => {
     const projection = projectRun([event(0, 'process', { phase: 'spawned', pid: 7 }), autoRan(1, 'ls -la')])
-    expect(projection.autoRan).toEqual([{ agentId: 'writer', title: 'Bash', detail: 'ls -la', ts: at(1) }])
+    expect(projection.autoRan).toEqual([{ agentId: 'writer', title: 'Bash', detail: 'ls -la', kind: 'command', ts: at(1) }])
     expect(projection.messages).toEqual([])
+  })
+
+  // ADR 0109: Auto mode also runs commands in its sandbox and changes files in the agent's folder.
+  const boxed = (seq: number, command: string): RunEvent => ({
+    ...event(seq, 'session_meta', { phase: 'permission_answered', title: 'Bash', kind: 'execute', outcome: 'auto_contained', allowed: true, detail: command }),
+    raw: { source: 'loomwatch', phase: 'permission_answered' },
+  })
+  const edited = (seq: number, file: string): RunEvent => ({
+    ...event(seq, 'session_meta', { phase: 'permission_answered', title: `Write ${file}`, kind: 'edit', outcome: 'auto_approved', allowed: true }),
+    raw: { source: 'loomwatch', phase: 'permission_answered' },
+  })
+
+  it('say which ran in the sandbox, off the network, and which files changed', () => {
+    const projection = projectRun([event(0, 'process', { phase: 'spawned', pid: 7 }), boxed(1, 'python3 build.py'), edited(2, 'draft.md')])
+    expect(projection.autoRan).toEqual([
+      { agentId: 'writer', title: 'Bash', detail: 'python3 build.py', kind: 'command', boxed: true, ts: at(1) },
+      { agentId: 'writer', title: 'Write draft.md', detail: 'draft.md', kind: 'edit', ts: at(2) },
+    ])
+    const said = (events: RunEvent[]) => receiptFor(events).checks.find((check) => check.text.includes('Auto mode'))?.text
+    expect(said([boxed(1, 'python3 build.py'), edited(2, 'draft.md')]))
+      .toBe('Without asking you, Auto mode let Writer change 1 file in the folder it works in and run 1 command without the web: python3 build.py, draft.md')
+    expect(said([autoRan(1, 'ls -la'), boxed(2, 'python3 build.py')]))
+      .toBe('Without asking you, Auto mode let Writer run 2 commands: ls -la, python3 build.py')
+    expect(said([autoRan(1, 'ls -la'), edited(2, 'a.md')]))
+      .toBe('Without asking you, Auto mode let Writer change 1 file in the folder it works in and run 1 command that only read or download: ls -la, a.md')
+    expect(said([edited(1, 'a.md'), edited(2, 'b.md')]))
+      .toBe('Without asking you, Auto mode let Writer change 2 files in the folder it works in: a.md, b.md')
   })
 
   it('read as one aside per agent, naming the first few', () => {

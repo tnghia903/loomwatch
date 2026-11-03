@@ -278,9 +278,10 @@ pub struct RunRecord {
     /// 0051). Live only.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub queued_notes: Vec<QueuedNote>,
-    /// The team was in Auto mode when this run started (ADR 0061): commands the agents' switches
-    /// leave open run without asking when they only read or download. Fixed at launch, like
-    /// `deliver_title`, and not stored: a record read back after a restart runs nothing.
+    /// The team is in Auto mode (ADR 0061, ADR 0109): what the agents' switches leave open goes
+    /// ahead without asking, inside Auto mode's limits. Set at launch, and followed while the run
+    /// works when the person switches the team ([`RunRegistry::follow_mode`]). Not stored: a
+    /// record read back after a restart runs nothing.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub auto_mode: bool,
     /// The team file's `name` when this run started, so a client that has not read the team file
@@ -877,6 +878,9 @@ pub struct RunRegistry {
     /// 0098), set by a test. Unset, the read is the fast tier's and the check the Checker job's,
     /// once model settings are installed; a registry without them reads nothing.
     done_when_models: Arc<OnceLock<(String, String)>>,
+    /// Counts each time a live run's team changed mode (ADR 0109), so a request waiting on the
+    /// person can look again at what Auto mode makes of it.
+    modes: Arc<tokio::sync::watch::Sender<u64>>,
 }
 
 /// Opaque: the records are the API's to report, and the REST router's state only needs to be
@@ -902,6 +906,7 @@ impl RunRegistry {
             approvals: Arc::default(),
             learner_model: Arc::default(),
             done_when_models: Arc::default(),
+            modes: Arc::default(),
         }
     }
 
@@ -1045,8 +1050,42 @@ impl RunRegistry {
         self.approvals.get().cloned()
     }
 
-    /// Whether `run_id` is live and in Auto mode (ADR 0061): its agents' commands that only read
-    /// or download run without asking.
+    /// Every live run of the team at `team_path` (relative to the teams root, `/`-separated)
+    /// follows `mode` from its next request on, as Claude's own modes do when switched (ADR 0109):
+    /// the person turned the team to Auto as they walked away, or back to asking. Requests already
+    /// waiting look again ([`Self::mode_changes`]). How many runs changed.
+    pub(crate) fn follow_mode(
+        &self,
+        team_path: &str,
+        mode: crate::config::PermissionMode,
+    ) -> usize {
+        let auto = mode == crate::config::PermissionMode::Auto;
+        let changed = {
+            let mut inner = self.inner.write().unwrap_or_else(PoisonError::into_inner);
+            inner
+                .runs
+                .values_mut()
+                .filter(|entry| {
+                    entry.record.team_path == team_path
+                        && !entry.record.status.is_terminal()
+                        && entry.record.auto_mode != auto
+                })
+                .map(|entry| entry.record.auto_mode = auto)
+                .count()
+        };
+        if changed > 0 {
+            self.modes
+                .send_modify(|count| *count = count.wrapping_add(1));
+        }
+        changed
+    }
+
+    /// Wakes each time [`Self::follow_mode`] changes a live run.
+    pub(crate) fn mode_changes(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.modes.subscribe()
+    }
+
+    /// Whether `run_id` is live and in Auto mode (ADR 0061, ADR 0109).
     pub(crate) fn auto_mode(&self, run_id: &str) -> bool {
         let inner = self.inner.read().unwrap_or_else(PoisonError::into_inner);
         inner

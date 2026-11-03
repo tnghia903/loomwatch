@@ -70,6 +70,13 @@ export function whyItFailed(output: string, kind: EvidenceKind): Why {
   const known = (reason: string, code?: string): Why => ({ text: reason, code, known: true })
 
   // LoomWatch's own limits, named as such: it is the reason, whatever the program made of it.
+  // Auto mode's own box (ADR 0109) says so in its own note, which takes the place of the sandbox's.
+  const auto = text.indexOf('(Auto mode ran this on its own')
+  if (auto >= 0) {
+    const before = text.slice(0, auto)
+    if (/resolve|network|connect|getaddrinfo|nodename|urlopen error/i.test(before)) return known('Auto mode runs commands without the web.')
+    if (/operation not permitted|EPERM/i.test(before)) return known('Auto mode lets commands change files only in the folder it works in.')
+  }
   const sandbox = text.indexOf('(The sandbox blocked this')
   if (sandbox >= 0) {
     // The note names both limits, so it is what came before it that says which one this was.

@@ -81,11 +81,12 @@ impl Permissions for PolicyGate {
                         .map_or(Decision::Deny, Decision::AllowEdited)
                 }
                 AskOutcome::AnsweredInstead(answer) => Decision::Answer(answer.clone()),
+                AskOutcome::AutoContained => Decision::AllowContained,
                 other if other.allows() => Decision::Allow,
                 _ => Decision::Deny,
             };
             let option = match &decision {
-                Decision::Allow | Decision::AllowEdited(_) => "allow",
+                Decision::Allow | Decision::AllowContained | Decision::AllowEdited(_) => "allow",
                 Decision::Answer(_) => "answer",
                 Decision::Deny => "deny",
             };
@@ -248,6 +249,8 @@ impl PolicyGate {
             (AskOutcome::AllowedForRun, None)
         } else if verdict == Some(Verdict::Approved) {
             (AskOutcome::AutoApproved, None)
+        } else if verdict == Some(Verdict::Contained) {
+            (AskOutcome::AutoContained, None)
         } else if let Some(open) = asker.open(request, auto_note.clone()) {
             let request_id = open.request.id.clone();
             // What the card asks, recorded whole, so the team's chat can show the ask after the
@@ -263,7 +266,10 @@ impl PolicyGate {
                 "expiresAt": open.request.expires_at,
                 "autoNote": open.request.auto,
             }));
-            (open.wait().await, Some(request_id))
+            // Turning the team to Auto while this waits answers it, when Auto mode would have
+            // (ADR 0109).
+            let auto = asker.once_auto_allows(request, policy);
+            (open.wait_or(auto).await, Some(request_id))
         } else {
             (AskOutcome::NotAsked, None)
         };
@@ -465,6 +471,7 @@ mod tests {
             kind: ToolKind::Execute,
             input: json!({"command": text, "timeout_seconds": 30}),
             locations: Vec::new(),
+            failed_contained: false,
         }
     }
 
@@ -534,6 +541,154 @@ mod tests {
         assert_eq!(note["outcome"], "edited");
         assert_eq!(note["allowed"], true);
         assert_eq!(note["edited"], "rm -rf build/tmp");
+    }
+
+    /// ADR 0109: turning the team to Auto mode while an agent waits on the person answers its
+    /// request at once when Auto mode would have let it through, and the run says Auto mode did.
+    /// The team's other runs and a request Auto mode leaves to the person keep waiting.
+    #[tokio::test]
+    async fn turning_the_team_to_auto_answers_what_auto_mode_would_have_allowed() {
+        let (gate, registry, run_id, mut received) = gate();
+        let waiting = |registry: &RunRegistry| registry.get(&run_id).unwrap().permission_requests;
+        let turn_to_auto = async {
+            for _ in 0..200 {
+                if !waiting(&registry).is_empty() {
+                    assert_eq!(
+                        registry.follow_mode("other.yaml", crate::config::PermissionMode::Auto),
+                        0,
+                        "another team's switch"
+                    );
+                    assert_eq!(
+                        registry.follow_mode("t.yaml", crate::config::PermissionMode::Auto),
+                        1
+                    );
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+            panic!("the gate never asked");
+        };
+        let (decision, ()) = tokio::time::timeout(Duration::from_secs(5), async {
+            let reading = command("cat notes.md");
+            tokio::join!(gate.request(&reading), turn_to_auto)
+        })
+        .await
+        .expect("the switch answered the request");
+        assert_eq!(decision, Decision::Allow);
+        let (note, option) = answered(&mut received);
+        assert_eq!(option, "allow");
+        assert_eq!(note["outcome"], "auto_approved");
+        assert!(waiting(&registry).is_empty(), "the card went with it");
+
+        // Auto mode still leaves a deletion to the person, so the switch doesn't answer it.
+        let deleting = command("rm -rf build");
+        let (decision, ()) = tokio::join!(gate.request(&deleting), async {
+            for _ in 0..200 {
+                if let Some(open) = waiting(&registry).first() {
+                    assert!(
+                        open.auto
+                            .as_deref()
+                            .is_some_and(|why| why.contains("deletes"))
+                    );
+                    registry.follow_mode("t.yaml", crate::config::PermissionMode::Ask);
+                    registry.follow_mode("t.yaml", crate::config::PermissionMode::Auto);
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                    assert_eq!(waiting(&registry).len(), 1, "still the person's");
+                    registry
+                        .answer_permission(&run_id, &open.id, PermissionDecision::Deny, None)
+                        .unwrap();
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+            panic!("the gate never asked");
+        });
+        assert_eq!(decision, Decision::Deny);
+
+        // On a Mac, a script left waiting is run in the tighter sandbox once the team is in Auto.
+        if crate::agent::sandbox::available() {
+            registry.follow_mode("t.yaml", crate::config::PermissionMode::Ask);
+            let _ = std::iter::from_fn(|| received.try_recv().ok()).count();
+            let script = command("python3 build.py");
+            let (decision, ()) = tokio::time::timeout(Duration::from_secs(5), async {
+                tokio::join!(gate.request(&script), async {
+                    while waiting(&registry).is_empty() {
+                        tokio::time::sleep(Duration::from_millis(5)).await;
+                    }
+                    registry.follow_mode("t.yaml", crate::config::PermissionMode::Auto);
+                })
+            })
+            .await
+            .expect("the switch answered the script");
+            assert_eq!(decision, Decision::AllowContained);
+            assert_eq!(answered(&mut received).0["outcome"], "auto_contained");
+        }
+    }
+
+    /// ADR 0109: in Auto mode an edit inside the agent's own folder goes ahead whatever its edits
+    /// switch, one outside it asks, and on a Mac a script runs in the tighter sandbox without
+    /// asking.
+    #[tokio::test]
+    async fn auto_mode_lets_edits_in_the_folder_and_sandboxed_scripts_through() {
+        let (gate, registry, run_id, mut received) = gate();
+        registry.follow_mode("t.yaml", crate::config::PermissionMode::Auto);
+        let edit = |path: &str| PermissionRequest {
+            session_id: "s".to_owned(),
+            tool_call_id: "call-1".to_owned(),
+            title: "Write draft.md".to_owned(),
+            kind: ToolKind::Edit,
+            input: json!({"path": path, "content": "x"}),
+            locations: vec![Path::new(path).to_path_buf()],
+            failed_contained: false,
+        };
+        // Bounded: a request Auto mode should answer would otherwise wait on a person.
+        let inside = edit("/tmp/loomwatch-bridge-test/draft.md");
+        let decision = tokio::time::timeout(Duration::from_secs(5), gate.request(&inside))
+            .await
+            .expect("Auto mode answered the edit without asking");
+        assert_eq!(decision, Decision::Allow);
+        assert_eq!(answered(&mut received).0["outcome"], "auto_approved");
+
+        let elsewhere = edit("/tmp/elsewhere.md");
+        let (decision, ()) = tokio::join!(gate.request(&elsewhere), async {
+            for _ in 0..200 {
+                if let Some(open) = registry.get(&run_id).unwrap().permission_requests.first() {
+                    registry
+                        .answer_permission(&run_id, &open.id, PermissionDecision::Deny, None)
+                        .unwrap();
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+            panic!("an edit outside the folder never asked");
+        });
+        assert_eq!(decision, Decision::Deny);
+        let _ = answered(&mut received);
+
+        if crate::agent::sandbox::available() {
+            let script = command("python3 - <<'PY'\nprint(1)\nPY");
+            let decision = tokio::time::timeout(Duration::from_secs(5), gate.request(&script))
+                .await
+                .expect("Auto mode answered the script without asking");
+            assert_eq!(decision, Decision::AllowContained);
+            let records: Vec<Record> = std::iter::from_fn(|| received.try_recv().ok()).collect();
+            assert!(
+                !records.iter().any(
+                    |record| matches!(record, Record::Meta(note) if note["phase"] == "awaiting_permission")
+                ),
+                "no card opened for it"
+            );
+            let note = records
+                .iter()
+                .find_map(|record| match record {
+                    Record::Meta(note) if note["phase"] == "permission_answered" => Some(note),
+                    _ => None,
+                })
+                .expect("the answer is recorded");
+            assert_eq!(note["outcome"], "auto_contained");
+            assert_eq!(note["allowed"], true);
+            assert!(note["requestId"].is_null());
+        }
     }
 
     /// "Answer instead": nothing runs, and the agent reads the operator's words as the result.

@@ -201,7 +201,7 @@ export function expectsAnswer(kind: MessageKind): boolean {
 }
 
 /** How a permission request was settled, in a word for the bubble that says so. */
-const SETTLED: Record<PermissionOutcome, string> = { allow_once: 'allowed once', allow_run: 'allowed for this run', allow_team: 'allowed for the whole team', deny: 'denied', edited: 'allowed, changed', answered: 'answered instead', timed_out: 'declined, no answer' }
+const SETTLED: Record<PermissionOutcome, string> = { allow_once: 'allowed once', allow_run: 'allowed for this run', allow_team: 'allowed for the whole team', deny: 'denied', edited: 'allowed, changed', answered: 'answered instead', timed_out: 'declined, no answer', auto_approved: 'allowed by Auto', auto_contained: 'run by Auto, without the web' }
 
 /**
  * The bubbles of a run, in order: each message, then its answer right after it — so a question and

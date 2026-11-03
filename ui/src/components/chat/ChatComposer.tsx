@@ -15,6 +15,7 @@ import { ifNobodyAnswers } from '../../lib/story/needsYou'
 import { Swap } from './Appearing'
 import { ChipField, type ChipFieldHandle } from './ChipField'
 import { MentionChip } from './SaidText'
+import { PermissionModeMenu, type PermissionModeControl } from './PermissionModeMenu'
 import type { RunRecord } from '../../lib/runs/client'
 import { AttachButton, SendButton } from '../box/BoxButtons'
 
@@ -73,6 +74,8 @@ interface ChatComposerProps {
   notice?: string | null
   /** The line stays until it is let go here: absent, it goes by itself. */
   onDismissNotice?: () => void
+  /** The team's mode, Ask me or Auto (ADR 0109), beside the button that sends work. */
+  permissionMode?: PermissionModeControl
 }
 
 /**
@@ -81,7 +84,7 @@ interface ChatComposerProps {
  * after its current step", "Team note · starts nothing" — because only an @ starts work and
  * nothing is guessed from the words.
  */
-export function ChatComposer({ agents, names, steps, live, decision, disabled = null, value: text, onChange: setText, onSend, onAnswer, mentioned = 0, solo = null, replyTo = null, onCancelReply, onAddress, answerAsked = 0, attachments, notice = null, onDismissNotice }: ChatComposerProps) {
+export function ChatComposer({ agents, names, steps, live, decision, disabled = null, value: text, onChange: setText, onSend, onAnswer, mentioned = 0, solo = null, replyTo = null, onCancelReply, onAddress, answerAsked = 0, attachments, notice = null, onDismissNotice, permissionMode }: ChatComposerProps) {
   const [caret, setCaret] = useState(0)
   // Where the caret was left by letters typed; a caret moved there some other way, or by a
   // deletion, is not typing a name.
@@ -392,6 +395,7 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
           />
         </div>
         <div className="tc-send">
+          {permissionMode && <PermissionModeMenu {...permissionMode} />}
           {attachments && (
             <>
               <input ref={chooser} type="file" multiple hidden tabIndex={-1} aria-hidden="true" onChange={(event) => {

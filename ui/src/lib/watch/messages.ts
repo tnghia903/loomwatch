@@ -115,10 +115,14 @@ export interface HandedBy {
   via: string[]
 }
 
-/** How a permission request was settled, as the daemon recorded it (`permission_answered`). */
-export type PermissionOutcome = 'allow_once' | 'allow_run' | 'allow_team' | 'deny' | 'edited' | 'answered' | 'timed_out'
+/**
+ * How a permission request was settled, as the daemon recorded it (`permission_answered`). Auto mode
+ * settles one that was waiting on you when the team is switched to Auto (ADR 0109): `auto_approved`
+ * let it through as it was, `auto_contained` ran it in Auto mode's sandbox.
+ */
+export type PermissionOutcome = 'allow_once' | 'allow_run' | 'allow_team' | 'deny' | 'edited' | 'answered' | 'timed_out' | 'auto_approved' | 'auto_contained'
 
-const OUTCOMES: ReadonlySet<string> = new Set<PermissionOutcome>(['allow_once', 'allow_run', 'allow_team', 'deny', 'edited', 'answered', 'timed_out'])
+const OUTCOMES: ReadonlySet<string> = new Set<PermissionOutcome>(['allow_once', 'allow_run', 'allow_team', 'deny', 'edited', 'answered', 'timed_out', 'auto_approved', 'auto_contained'])
 const isOutcome = (value: unknown): value is PermissionOutcome => typeof value === 'string' && OUTCOMES.has(value)
 
 /** What a `permission` message asked, from the daemon's `awaiting_permission` record. */
@@ -479,7 +483,9 @@ export class Correspondence {
     message.permission.written = outcome === 'edited' ? words(event.payload.edited) : outcome === 'answered' ? words(event.payload.answer) : null
     if (outcome === 'timed_out') { message.state = 'delivered'; return }
     message.state = 'answered'
-    message.reply = { from: OPERATOR_ID, text: message.permission.written ?? '', ...this.at(event), source: null, sentBackTo: null }
+    // Auto mode's answer is LoomWatch's, never yours.
+    const auto = outcome === 'auto_approved' || outcome === 'auto_contained'
+    message.reply = { from: auto ? LOOMWATCH_ID : OPERATOR_ID, text: message.permission.written ?? '', ...this.at(event), source: null, sentBackTo: null }
   }
 
   /** `awaiting_operator`: an agent's question for you, or a review step starting to read its handover. */

@@ -780,28 +780,47 @@ whole team** when the run has more than one agent. A request is declined if nobo
 schedule's `waitForYouMinutes` (12 hours by default). The wait is counted by the clock, so a
 computer that slept through it declines the request on waking (ADR 0090). The agent is told the call was declined and carries on without it.
 
-A team in Auto mode lets its agents run, without asking, the commands that only read or download.
-It is set in the team file:
+In every mode, an agent reads and searches its teammates' work without asking: anything in the
+team's folder (`.loomwatch/<team>/` beside the team file), where each agent's work folder is.
+
+A team in Auto mode gets on with its work without the operator, inside limits it can't cross
+(ADR 0061, ADR 0109). It is chosen beside the team chat's send button (**Ask me** / **Auto**), or
+set in the team file:
 
 ```yaml
 permissions:
-  mode: auto # `ask` (the default) puts every command a switch leaves open to the operator
+  mode: auto # `ask` (the default) puts everything a switch leaves open to the operator
 ```
 
-Auto mode applies after the switches and after an earlier **Allow for this run**. A command
-(`kind: execute`) then runs without asking in two cases. The first is when every part of it is a
-reading program (`ls`, `cat`, `grep`, `wc`, `sort`, `jq`, …), `find` without actions, `sed` that
-only prints or substitutes, or read-only `git`, on paths inside the agent's folder, its knowledge
-or the temporary folder. The second is a plain `curl`/`wget` GET of an `http(s)` address, for an
-agent allowed the web. Output may go to the temporary folder, or into the agent's folder when it may
-edit files.
+Saving the mode reaches the team's runs that are working now, in each of its places: a request
+waiting on the operator is answered at once when Auto mode would have let it through.
+
+Auto mode applies after the switches and after an earlier **Allow for this run**:
+
+- A command (`kind: execute`) runs as it is when every part of it is a reading program (`ls`,
+  `cat`, `grep`, `wc`, `sort`, `jq`, …), `find` without actions, `sed` that only prints or
+  substitutes, or read-only `git`, on paths inside the agent's folder, its knowledge or the
+  temporary folder; or a plain `curl`/`wget` GET of an `http(s)` address, for an agent allowed the
+  web. Output may go to the temporary folder, or into the agent's folder when it may edit files.
+- On a Mac, any other command runs in a tighter sandbox without asking: off the network even for
+  an agent allowed the web; no writes to `.git`, `.claude`, `.agents` or `.loomwatch` in its folder;
+  no reads of `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.kube`, `~/.docker`, `~/.azure`, `~/.netrc`,
+  `~/.config/gh`, `~/.config/gcloud`, `~/Library/Keychains` or LoomWatch's state folder (its skills
+  apart); no starting `open`, `osascript`, `launchctl`, `shortcuts` or `automator`, nor the services
+  they use; and no signals to programs it didn't start. A script given as text is one of these. The
+  same command again, after it failed there, asks.
+- An edit (`kind: edit`) goes ahead whatever `allow.edits` says when every file it names is inside
+  the agent's folder and outside the folders above.
 
 A fixed list always asks: administrator commands, deleting, `git push`/`reset --hard`/`clean -f`,
-publishing, deploying, stopping programs, system settings, credential paths, and anything built
-from text — `$(…)`, `eval`, `xargs`, a shell, or an interpreter given `-c`, a here-document or its
-script on stdin. Everything else asks as above, and the card says why Auto mode left it to you.
-The decision is made on this computer from the command line alone; `permission_answered` records
-`outcome: auto_approved` for what ran.
+publishing, deploying, stopping programs, system settings, credential paths and driving other apps
+(`osascript`, `open`, `shortcuts`, `automator`), wherever it appears in the line. So does a command
+that names the network for an agent allowed the web, and an edit outside the agent's folder. Where
+there is no sandbox (Windows, Linux), a command that doesn't only read asks as above. The card says
+why Auto mode left it to you. The decision is made on this computer from the command line alone;
+`permission_answered` records `outcome: auto_approved` for a command that only read or an edit, and
+`auto_contained` for a command run in the tighter sandbox. LoomWatch's own check of an answer (ADR
+0098) runs only what reads, whatever the mode.
 
 ## Conversation
 

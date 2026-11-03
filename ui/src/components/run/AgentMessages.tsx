@@ -285,6 +285,8 @@ const SETTLED: Record<PermissionOutcome, (agent: ReactNode, written: string) => 
   edited: (_agent, written) => `You changed it, then allowed it: ${written}`,
   answered: (agent, written) => <>You answered instead: “<InlineMarkdown>{written}</InlineMarkdown>”. {agent} carries on with that</>,
   timed_out: () => 'Nobody answered in time, so it was declined',
+  auto_approved: () => 'Auto mode let it go ahead when the team was switched to it',
+  auto_contained: () => 'Auto mode ran it, without the web, when the team was switched to it',
 }
 
 function Notice({ bubble, member, flash, when }: { bubble: Bubble; member: (id: string) => Member; flash: boolean; when: (bubble: Bubble) => string }) {

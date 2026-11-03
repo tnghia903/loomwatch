@@ -4,7 +4,7 @@ import type { RunSpend } from '../runs/client'
 import type { AgentRuntime } from '../runs/graph'
 import { spendNote } from '../runs/spend'
 import type { AgentAllow, AllowSwitch } from '../team-file/types'
-import type { Evidence, RunPhase, RunProjection } from '../watch/events'
+import type { AutoRan, Evidence, RunPhase, RunProjection } from '../watch/events'
 import { formatTokens, type TokenSummary, type TurnPurpose, costWords } from '../watch/usage'
 import { failuresOf, readPhrase, workCount } from './reads'
 import { describeEvidence } from './weft'
@@ -105,6 +105,27 @@ export interface ReceiptInput {
 }
 
 const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`
+
+/**
+ * What Auto mode let one agent do without asking, and inside which limit: changes to files in the
+ * folder it works in, and commands that only read or download, or ran without the web.
+ */
+function autoSaid(name: string, ran: readonly AutoRan[], shown: string): string {
+  const commands = ran.filter((item) => item.kind !== 'edit')
+  const boxed = commands.filter((item) => item.boxed).length
+  const edits = ran.length - commands.length
+  if (edits === 0 && boxed === 0) {
+    return commands.length === 1
+      ? `Auto mode let ${name} run ${shown} without asking you: it only reads or downloads`
+      : `Auto mode let ${name} run ${commands.length} commands without asking you, each one only reading or downloading: ${shown}`
+  }
+  const how = boxed === 0 ? ' that only read or download' : boxed === commands.length ? ' without the web' : ''
+  const parts = [
+    edits > 0 && `change ${plural(edits, 'file')} in the folder it works in`,
+    commands.length > 0 && `run ${plural(commands.length, 'command')}${how}`,
+  ].filter(Boolean)
+  return `Without asking you, Auto mode let ${name} ${parts.join(' and ')}: ${shown}`
+}
 
 function workSummary(items: readonly Evidence[]): string {
   const { skills, read: count, searches, changed, commands, retried } = workCount(items)
@@ -320,15 +341,12 @@ export function buildReceipt(input: ReceiptInput): Receipt {
       checks.push({ tone: 'warn', text: `${app} ends ${agent.name}’s turn when a request is declined, so LoomWatch asked ${agent.name} to carry on without it${times}`, agentId: agent.id, aside: true })
     }
 
-    // Auto mode (ADR 0061): what ran without your answer, because it only read or downloaded.
+    // Auto mode (ADR 0061, ADR 0109): what went ahead without your answer, and inside which limit.
     const autoRan = (input.projection.autoRan ?? []).filter((ran) => ran.agentId === agent.id)
     if (autoRan.length > 0) {
       const shown = autoRan.slice(0, 3).map((ran) => ran.detail ?? ran.title).join(', ')
       const more = autoRan.length > 3 ? ` and ${autoRan.length - 3} more` : ''
-      const text = autoRan.length === 1
-        ? `Auto mode let ${agent.name} run ${shown} without asking you: it only reads or downloads`
-        : `Auto mode let ${agent.name} run ${autoRan.length} commands without asking you, each one only reading or downloading: ${shown}${more}`
-      checks.push({ tone: 'ok', text, agentId: agent.id, aside: true })
+      checks.push({ tone: 'ok', text: autoSaid(agent.name, autoRan, `${shown}${more}`), agentId: agent.id, aside: true })
     }
 
     for (const skill of run.requiredSkills ?? []) {

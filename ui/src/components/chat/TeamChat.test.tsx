@@ -101,6 +101,26 @@ async function talkLine(words: RegExp): Promise<HTMLElement> {
   return words_()!
 }
 
+// ADR 0109: the team's mode sits beside the send button, as Claude's own sits in its box, and stays
+// there whether or not the line above the box shows. An agent's own chat is no team: it has none.
+describe('the team’s mode beside the send button', () => {
+  it('shows in the team’s chat, and is changed from there', () => {
+    const onChange = vi.fn()
+    renderChat({ permissionMode: { mode: 'ask', onChange } })
+    const send = screen.getByRole('button', { name: /Send|Start/ })
+    const chip = screen.getByRole('button', { name: 'When an agent needs your OK: Ask me' })
+    expect(chip.closest('.tc-send')).toBe(send.closest('.tc-send'))
+    fireEvent.click(chip)
+    fireEvent.click(screen.getByRole('menuitemradio', { name: /Auto/ }))
+    expect(onChange).toHaveBeenCalledWith('auto')
+  })
+
+  it('is not in an agent’s own chat', () => {
+    renderChat({ team: { ...team, solo: 'writer' }, permissionMode: { mode: 'auto', onChange: vi.fn() } })
+    expect(screen.queryByRole('button', { name: /When an agent needs your OK/ })).toBeNull()
+  })
+})
+
 describe('the message box says where a message goes before it is sent', () => {
   const composer = (live: RunRecord[] = [], decision = null as Parameters<typeof ChatComposer>[0]['decision']) => {
     const onSend = vi.fn(async () => true)

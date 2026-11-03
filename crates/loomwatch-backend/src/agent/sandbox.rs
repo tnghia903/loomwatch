@@ -65,9 +65,157 @@ const ENTITLEMENTS: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 /// The folder of `LoomWatch`'s own programs, first on every command's `PATH` once made.
 static PROGRAMS: RwLock<Option<PathBuf>> = RwLock::new(None);
 
+/// Where the person keeps keys and sign-ins, under the home folder: a command Auto mode runs
+/// without asking reads none of them (ADR 0109).
+const SECRET_PLACES: [&str; 10] = [
+    ".ssh",
+    ".aws",
+    ".gnupg",
+    ".kube",
+    ".docker",
+    ".azure",
+    ".netrc",
+    ".config/gh",
+    ".config/gcloud",
+    "Library/Keychains",
+];
+
+/// Programs that act outside the sandbox, by starting or driving other apps or leaving a job with
+/// the system: a command Auto mode runs without asking starts none of them.
+const OUTSIDE_PROGRAMS: [&str; 5] = [
+    "/usr/bin/open",
+    "/usr/bin/osascript",
+    "/bin/launchctl",
+    "/usr/bin/shortcuts",
+    "/usr/bin/automator",
+];
+
+/// What Auto mode's tighter sandbox adds for every command it runs without asking: it may signal
+/// only what it started, and may not reach the services that open apps or send them Apple Events,
+/// which a copy of `open` or `osascript` would otherwise use.
+const TIGHTER: &str = "(deny signal)\n\
+                       (allow signal (target same-sandbox))\n\
+                       (deny mach-lookup\n  \
+                         (global-name \"com.apple.coreservices.launchservicesd\")\n  \
+                         (global-name \"com.apple.coreservices.appleevents\"))\n";
+
+/// What else Auto mode's tighter sandbox keeps from a command it runs without asking anyone
+/// (ADR 0109), on top of what every command is kept from. Such a command is also kept off the
+/// network, whatever the agent may do.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct Tighter {
+    /// Folders inside the work folder it may not change: where the agent is offered skills from,
+    /// what `LoomWatch` keeps, and git's own, whose hooks run code.
+    protected: Vec<PathBuf>,
+    /// What it may not read: the person's keys and sign-ins, and `LoomWatch`'s state folder.
+    secrets: Vec<PathBuf>,
+    /// What it still reads inside those: `LoomWatch`'s skills and own programs, and the work folder
+    /// when it is in there.
+    readable: Vec<PathBuf>,
+    /// Programs it may not start ([`OUTSIDE_PROGRAMS`] and `LoomWatch`'s own `osascript`).
+    programs: Vec<PathBuf>,
+}
+
+impl Tighter {
+    /// The tighter sandbox for a command working in `cwd`.
+    pub(crate) fn for_folder(cwd: &Path) -> Self {
+        let state = crate::ai::installed().map(|ai| (ai.state_dir(), ai.skills_folder()));
+        Self::with(
+            cwd,
+            std::env::var_os("HOME").map(PathBuf::from).as_deref(),
+            state
+                .as_ref()
+                .map(|(state, skills)| (state.as_path(), skills.as_path())),
+        )
+    }
+
+    /// [`Self::for_folder`] with `home` as the home folder and `state` as `LoomWatch`'s state
+    /// folder and its skills folder.
+    fn with(cwd: &Path, home: Option<&Path>, state: Option<(&Path, &Path)>) -> Self {
+        let work = canonical(cwd);
+        let mut secrets: Vec<PathBuf> = home
+            .map(canonical)
+            .iter()
+            .flat_map(|home| SECRET_PLACES.iter().map(move |place| home.join(place)))
+            .collect();
+        let mut readable = Vec::new();
+        if let Some((state, skills)) = state {
+            let state = canonical(state);
+            readable.push(canonical(skills));
+            readable.push(state.join("programs"));
+            if work != state && work.starts_with(&state) {
+                readable.push(work.clone());
+            }
+            secrets.push(state);
+        }
+        let own = PROGRAMS
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .map(|programs| programs.join("osascript"));
+        Self {
+            protected: crate::permissions::PROTECTED_FOLDERS
+                .iter()
+                .map(|folder| work.join(folder))
+                .collect(),
+            secrets,
+            readable,
+            programs: OUTSIDE_PROGRAMS
+                .iter()
+                .map(PathBuf::from)
+                .chain(own)
+                .collect(),
+        }
+    }
+
+    /// The rules, naming each path by the parameter [`Self::params`] fills in.
+    fn rules(&self) -> String {
+        let mut rules = String::new();
+        let mut each = |count: usize, rule: &str, name: &str| {
+            for index in 0..count {
+                let _ = writeln!(rules, "({rule} (param \"{name}_{index}\")))");
+            }
+        };
+        each(
+            self.protected.len(),
+            "deny file-write* (subpath",
+            "PROTECTED",
+        );
+        each(self.secrets.len(), "deny file-read* (subpath", "SECRET");
+        each(self.readable.len(), "allow file-read* (subpath", "OPEN");
+        each(self.programs.len(), "deny process-exec (literal", "PROGRAM");
+        rules.push_str(TIGHTER);
+        rules
+    }
+
+    /// Each path [`Self::rules`] names, as `NAME_<n>=path`.
+    fn params(&self) -> Vec<String> {
+        [
+            ("PROTECTED", &self.protected),
+            ("SECRET", &self.secrets),
+            ("OPEN", &self.readable),
+            ("PROGRAM", &self.programs),
+        ]
+        .into_iter()
+        .flat_map(|(name, paths)| {
+            paths
+                .iter()
+                .enumerate()
+                .map(move |(index, path)| format!("{name}_{index}={}", path.display()))
+        })
+        .collect()
+    }
+}
+
+/// Whether this computer has the sandbox, so Auto mode can run a command in it without asking
+/// (ADR 0109).
+pub(crate) fn available() -> bool {
+    cfg!(target_os = "macos") && Path::new(SANDBOX_EXEC).exists()
+}
+
 /// The profile. `WORK`, `TMP` and `CACHE` are filled in per command; `WRITABLE_<n>` for extra
-/// granted folders.
-fn profile(network: bool, extra: usize) -> String {
+/// granted folders, and [`Tighter`]'s own for a command Auto mode runs without asking.
+fn profile(network: bool, extra: usize, tighter: Option<&Tighter>) -> String {
     let mut profile = String::from(
         "(version 1)\n\
          (allow default)\n\
@@ -94,19 +242,38 @@ fn profile(network: bool, extra: usize) -> String {
     if !network {
         profile.push_str("(deny network-outbound (remote ip))\n");
     }
+    if let Some(tighter) = tighter {
+        profile.push_str(&tighter.rules());
+    }
     profile
 }
 
-/// `command` wrapped in the sandbox, or `None` where there is no sandbox to run it in.
+/// `command` wrapped in the sandbox, or `None` where there is no sandbox to run it in. A command
+/// Auto mode runs without asking ([`CommandSettings::contained`]) is wrapped in the tighter one.
 pub(crate) fn wrap(command: &str, cwd: &Path, settings: &CommandSettings) -> Option<Command> {
-    if !cfg!(target_os = "macos") || !Path::new(SANDBOX_EXEC).exists() {
+    if !available() {
         return None;
     }
+    let tighter = settings.contained.then(|| Tighter::for_folder(cwd));
+    Some(wrap_in(command, cwd, settings, tighter.as_ref()))
+}
+
+/// [`wrap`], in the tighter sandbox when there is one.
+fn wrap_in(
+    command: &str,
+    cwd: &Path,
+    settings: &CommandSettings,
+    tighter: Option<&Tighter>,
+) -> Command {
     let (temp, cache) = temp_and_cache();
     let mut process = Command::new(SANDBOX_EXEC);
     process
         .arg("-p")
-        .arg(profile(settings.network, settings.writable.len()))
+        .arg(profile(
+            settings.reaches_network(),
+            settings.writable.len(),
+            tighter,
+        ))
         .arg("-D")
         .arg(format!("WORK={}", canonical(cwd).display()))
         .arg("-D")
@@ -118,8 +285,11 @@ pub(crate) fn wrap(command: &str, cwd: &Path, settings: &CommandSettings) -> Opt
             .arg("-D")
             .arg(format!("WRITABLE_{index}={}", canonical(folder).display()));
     }
+    for param in tighter.into_iter().flat_map(Tighter::params) {
+        process.arg("-D").arg(param);
+    }
     process.arg("/bin/sh").arg("-c").arg(command);
-    Some(process)
+    process
 }
 
 fn canonical(path: &Path) -> PathBuf {
@@ -237,7 +407,8 @@ fn path_with(programs: &Path, path: Option<&OsStr>) -> Option<OsString> {
 ///   which the sandbox never answers with.
 /// - Without the web, curl and git only say they couldn't connect.
 pub(crate) fn denied(output: &str, cwd: &Path, settings: &CommandSettings) -> bool {
-    cfg!(target_os = "macos") && blocked(output, &writable(cwd, settings), settings.network)
+    cfg!(target_os = "macos")
+        && blocked(output, &writable(cwd, settings), settings.reaches_network())
 }
 
 /// Whether the sandbox kept `command` off the network it reaches for (ADR 0104): the agent may not
@@ -245,7 +416,7 @@ pub(crate) fn denied(output: &str, cwd: &Path, settings: &CommandSettings) -> bo
 /// tells the command nothing, and `curl -s` prints nothing, so this is read from the command line.
 pub(crate) fn keeps_off_network(command: &str, settings: &CommandSettings) -> bool {
     cfg!(target_os = "macos")
-        && !settings.network
+        && !settings.reaches_network()
         && Path::new(SANDBOX_EXEC).exists()
         && reaches_network(command)
 }
@@ -405,15 +576,15 @@ mod tests {
 
     #[test]
     fn the_profile_blocks_the_network_only_without_the_web() {
-        assert!(profile(false, 0).contains("(deny network-outbound (remote ip))"));
-        assert!(!profile(true, 0).contains("network"));
-        assert!(profile(true, 2).contains("WRITABLE_1"));
+        assert!(profile(false, 0, None).contains("(deny network-outbound (remote ip))"));
+        assert!(!profile(true, 0, None).contains("network"));
+        assert!(profile(true, 2, None).contains("WRITABLE_1"));
     }
 
     #[test]
     fn the_profile_keeps_every_command_off_the_microphone() {
         for (network, extra) in [(false, 0), (true, 0), (true, 2)] {
-            assert!(profile(network, extra).contains("(deny device-microphone)\n"));
+            assert!(profile(network, extra, None).contains("(deny device-microphone)\n"));
         }
     }
 
@@ -539,6 +710,7 @@ mod tests {
         let settings = CommandSettings {
             network: false,
             writable: vec![PathBuf::from("/Volumes/Shared/out/")],
+            contained: false,
         };
         let folders = writable(Path::new(WORK), &settings);
         let refused = |path: &str| format!("Error: EPERM: operation not permitted, open '{path}'");
@@ -766,5 +938,150 @@ mod tests {
             "the sandbox let a command write to the home folder"
         );
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// ADR 0109: a command Auto mode runs without asking stays in the tighter sandbox. It still
+    /// changes files in its folder, but not git's or the agent's settings there; it reads no key or
+    /// sign-in, nothing of `LoomWatch`'s state but its skills; it reaches no network, even for an
+    /// agent allowed the web; it starts no app; and it stops nothing it didn't start. The same
+    /// command in the usual sandbox, as the person allows it, does all of that.
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn on_a_mac_a_command_auto_mode_runs_stays_in_the_tighter_sandbox() {
+        let base = canonical(&std::env::temp_dir())
+            .join(format!("loomwatch-tighter-{}", uuid::Uuid::new_v4()));
+        let (work, home, state) = (base.join("work"), base.join("home"), base.join("state"));
+        for folder in [work.join(".git"), home.join(".ssh"), state.join("skills")] {
+            std::fs::create_dir_all(folder).unwrap();
+        }
+        std::fs::write(home.join(".ssh/id_ed25519"), "ssh key").unwrap();
+        std::fs::write(state.join("plans.json"), "sign-in").unwrap();
+        std::fs::write(state.join("skills/notes.md"), "skill\n").unwrap();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let mut other = std::process::Command::new("/bin/sleep")
+            .arg("60")
+            .spawn()
+            .unwrap();
+        let script = format!(
+            "echo made > made.txt && echo MADE\n\
+             echo x > .git/config && echo GIT\n\
+             cat '{ssh}' >/dev/null 2>&1 && echo SSH\n\
+             cat '{state}/plans.json' >/dev/null 2>&1 && echo SIGN-IN\n\
+             cat '{state}/skills/notes.md'\n\
+             curl -s -m 3 http://127.0.0.1:{port}/ >/dev/null 2>&1; [ $? -ne 7 ] && echo NETWORK\n\
+             /usr/bin/open -h >/dev/null 2>&1; [ $? -ne 126 ] && echo OPEN\n\
+             /usr/bin/lsappinfo front 2>/dev/null | grep -q ASN && echo APPS\n\
+             kill -0 {pid} 2>/dev/null && kill -TERM {pid} && echo STOPPED\n\
+             sleep 30 & kill $! && echo OWN\n",
+            ssh = home.join(".ssh/id_ed25519").display(),
+            state = state.display(),
+            pid = other.id(),
+        );
+        let settings = CommandSettings {
+            network: true,
+            contained: true,
+            ..CommandSettings::default()
+        };
+        let tighter = Tighter::with(&work, Some(&home), Some((&state, &state.join("skills"))));
+        let run = |tighter: Option<&Tighter>| {
+            let settings = CommandSettings {
+                contained: tighter.is_some(),
+                ..settings.clone()
+            };
+            let mut command = wrap_in(&script, &work, &settings, tighter);
+            command.current_dir(&work);
+            async move {
+                let output = command.output().await.unwrap();
+                String::from_utf8_lossy(&output.stdout).into_owned()
+            }
+        };
+        let tight = run(Some(&tighter)).await;
+        assert_eq!(
+            tight.split_whitespace().collect::<Vec<_>>(),
+            ["MADE", "skill", "OWN"],
+            "{tight}"
+        );
+        assert!(
+            other.try_wait().unwrap().is_none(),
+            "it stopped another program"
+        );
+
+        let usual = run(None).await;
+        for done in [
+            "MADE", "GIT", "SSH", "SIGN-IN", "skill", "OPEN", "STOPPED", "OWN",
+        ] {
+            assert!(usual.contains(done), "the usual sandbox: {usual}");
+        }
+        // The services that open apps answer only where this Mac has a front app to name, which a
+        // runner with no one logged in may not.
+        let front = std::process::Command::new("/usr/bin/lsappinfo")
+            .arg("front")
+            .output()
+            .is_ok_and(|output| String::from_utf8_lossy(&output.stdout).contains("ASN"));
+        if front {
+            assert!(usual.contains("APPS"), "the usual sandbox: {usual}");
+        }
+
+        // What a run takes: `wrap` builds the tighter sandbox for a command Auto mode allowed.
+        let contained = CommandSettings {
+            contained: true,
+            ..CommandSettings::default()
+        };
+        let mut wrapped = wrap("echo x > .git/config && echo GIT", &work, &contained)
+            .expect("macOS has sandbox-exec");
+        let wrapped = wrapped.current_dir(&work).output().await.unwrap();
+        assert!(
+            !String::from_utf8_lossy(&wrapped.stdout).contains("GIT"),
+            "wrap ran a contained command in the usual sandbox"
+        );
+        let _ = other.kill();
+        let _ = other.wait();
+        drop(listener);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// The tighter sandbox's rules name each folder by a parameter it is handed, so a folder's
+    /// name never becomes part of the profile. Its paths are a Mac's, `/`-separated.
+    #[cfg(unix)]
+    #[test]
+    fn the_tighter_sandbox_names_its_folders_as_parameters() {
+        let tighter = Tighter::with(
+            Path::new("/w"),
+            Some(Path::new("/h")),
+            Some((Path::new("/s"), Path::new("/s/skills"))),
+        );
+        let rules = profile(false, 0, Some(&tighter));
+        assert!(!rules.contains("/h/") && !rules.contains("\"/w"), "{rules}");
+        assert!(rules.contains("(deny file-read* (subpath (param \"SECRET_0\")))"));
+        assert!(rules.contains("(allow signal (target same-sandbox))"));
+        let params = tighter.params();
+        for expected in [
+            "PROTECTED_2=/w/.git",
+            "SECRET_0=/h/.ssh",
+            "SECRET_10=/s",
+            "OPEN_0=/s/skills",
+            "OPEN_1=/s/programs",
+            "PROGRAM_0=/usr/bin/open",
+        ] {
+            assert!(
+                params.iter().any(|param| param == expected),
+                "{expected}: {params:?}"
+            );
+        }
+        assert!(
+            !params.iter().any(|param| param.starts_with("OPEN_2")),
+            "a work folder outside the state folder needs no opening"
+        );
+        let inside = Tighter::with(
+            Path::new("/s/agents/coby"),
+            None,
+            Some((Path::new("/s"), Path::new("/s/skills"))),
+        );
+        assert!(
+            inside
+                .params()
+                .contains(&"OPEN_2=/s/agents/coby".to_owned())
+        );
     }
 }

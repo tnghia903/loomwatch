@@ -357,13 +357,20 @@ export interface CategoryCoverage {
   observed: number
 }
 
-/** One command Auto mode ran without asking (ADR 0061): it only read files or downloaded a page. */
+/**
+ * One thing Auto mode let an agent do without asking (ADR 0061, ADR 0109): a command that only read
+ * or downloaded, a command in its sandbox, or a change to a file in the agent's own folder.
+ */
 export interface AutoRan {
   agentId: string
-  /** The app's name for it: "Bash", "Run command". */
+  /** The app's name for it: "Bash", "Run command", "Write draft.md". */
   title: string
-  /** The command itself. */
+  /** The command itself, or the file changed. */
   detail: string | null
+  /** A command, or a change to a file. Absent on records from before Auto mode changed files. */
+  kind?: 'command' | 'edit'
+  /** A command that ran in Auto mode's sandbox, off the network, rather than one that only read. */
+  boxed?: boolean
   ts: string
 }
 
@@ -932,8 +939,15 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
             agent.thinking = false
             letters.turnFailed(event, p.message)
           }
-          if (p.phase === 'permission_answered' && p.outcome === 'auto_approved') {
-            autoRan.push({ agentId: agent.id, title: typeof p.title === 'string' ? p.title : 'A command', detail: typeof p.detail === 'string' ? p.detail : null, ts: event.ts })
+          if (p.phase === 'permission_answered' && (p.outcome === 'auto_approved' || p.outcome === 'auto_contained')) {
+            const title = typeof p.title === 'string' ? p.title : 'A command'
+            const detail = typeof p.detail === 'string' ? p.detail : null
+            if (p.kind === 'edit') {
+              // "Write draft.md" names the file in its title; the file is what was changed.
+              autoRan.push({ agentId: agent.id, title, detail: detail ?? title.replace(/^(Write|Edit) /, ''), kind: 'edit', ts: event.ts })
+            } else {
+              autoRan.push({ agentId: agent.id, title, detail, kind: 'command', ...(p.outcome === 'auto_contained' ? { boxed: true } : {}), ts: event.ts })
+            }
           }
           if (p.phase === 'prompt_sections' && agent.requiredSkills === undefined) agent.requiredSkills = skillReceipts(p.requiredSkills, 'prepared', event.id)
           const servers = p.phase === 'prompt_sections' && agent.connectedServers === undefined ? connectedServers(p.tools) : undefined

@@ -558,6 +558,43 @@
 .tc-send { display: flex; align-items: center; gap: 6px; flex: none; }
 .tc-send .btn { display: inline-flex; align-items: center; gap: 5px; height: 34px; padding: 0 12px; font-size: 13px; border-radius: 11px; }
 .tc-now { color: var(--color-live); }
+/* ---------- The team's mode (ADR 0109): Ask me or Auto, beside the send button ---------- */
+/* A hairline ring in Ask me, so it reads as a button like the ones beside it. Auto is the agent panel's
+   Auto (.allow-tile.auto): a dashed gold ring and a gold word, no tint (gold on the tint is under AA in
+   light) and never a fill: the send button holds the screen's fill. Same size as attach and send. */
+/* The menu lines up with the send row's right edge, not the chip's: two buttons sit right of the chip, and on a
+   phone a menu ending at the chip runs off the left edge. */
+.tc-send:has(> .tc-mode) { position: relative; }
+.tc-mode { flex: none; }
+.tc-mode-chip { display: inline-flex; align-items: center; gap: 3px; height: 40px; padding: 0 8px 0 10px; border: 1px solid var(--color-hairline); border-radius: var(--r-md); background: none; font: 500 13px/1 var(--font-sans); color: var(--color-ink-2); cursor: pointer; white-space: nowrap; }
+/* The chevron points the way the menu opens: up, and down while it is open. */
+.tc-mode-chip svg { color: var(--color-ink-3); rotate: 180deg; }
+.tc-mode-chip[aria-expanded='true'] svg { rotate: 0deg; }
+.tc-mode-chip.mode-ask:is(:hover:not(:disabled), :focus-visible, [aria-expanded='true']) { border-color: color-mix(in srgb, var(--color-ink) 32%, transparent); color: var(--color-ink); }
+.tc-mode-chip:disabled { cursor: default; }
+.tc-mode-chip.mode-auto { border-style: dashed; border-color: color-mix(in srgb, var(--color-accent) 45%, transparent); color: var(--color-accent); }
+.tc-mode-chip.mode-auto:is(:hover:not(:disabled), [aria-expanded='true']) { border-color: var(--color-accent); }
+.tc-mode-chip.mode-auto svg { color: var(--color-accent); }
+@media (max-width: 767px) { .tc-mode-chip { height: 44px; } }
+.tc-mode-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 6;
+  display: grid;
+  gap: 2px;
+  width: min(320px, calc(100cqi - 32px));
+  padding: 6px;
+  border-radius: var(--r-md);
+}
+.tc-mode-title { margin: 2px 8px 4px; font-size: 12px; font-weight: 600; color: var(--color-ink-2); }
+.tc-mode-item { display: grid; grid-template-columns: minmax(0, 1fr) 14px; align-items: center; gap: 2px 8px; padding: 7px 8px; border: 0; border-radius: 8px; background: none; font: inherit; text-align: left; color: var(--color-ink-2); cursor: pointer; }
+.tc-mode-item:hover { background: var(--color-accent-tint); }
+/* The tint alone is near invisible in dark: keyboard focus keeps the app's gold ring, drawn inside. */
+.tc-mode-item:focus-visible { background: var(--color-accent-tint); outline-offset: -2px; }
+.tc-mode-tick { color: var(--color-accent); }
+.tc-mode-name { font-size: 13px; font-weight: 600; color: var(--color-ink); }
+.tc-mode-says { grid-column: 1 / -1; font-size: 12px; line-height: 1.4; color: var(--color-ink-2); }
 .tc-disabled { margin: 0; font-size: 12px; color: var(--color-ink-3); }
 .tc-picker {
   position: absolute;
@@ -748,8 +785,10 @@ a mark.tc-find-hit { box-shadow: none; }
   .tc-sewn .tc-sewn-face { transform-box: fill-box; transform-origin: center bottom; animation: tc-look-up 420ms var(--ease-out) 820ms both; }
   .tc-member em, .tc-where { transition: color var(--t-move) var(--ease-out); }
   .tc-note .chat-bubble { transition: border-color var(--t-move) var(--ease-out), background-color var(--t-move) var(--ease-out); }
-  .tc-picker, .tc-jump { animation: tc-pop var(--t-quick) var(--ease-out) both; }
+  .tc-picker, .tc-jump, .tc-mode-menu { animation: tc-pop var(--t-quick) var(--ease-out) both; }
   .tc-picker { transform-origin: bottom left; }
+  .tc-mode-menu { transform-origin: bottom right; }
+  .tc-mode-chip svg { transition: rotate var(--t-quick) var(--ease-out); }
   .tc-go { transition: background-color var(--t-quick) var(--ease-out), color var(--t-quick) var(--ease-out); }
   .tc-details { animation: tc-slide var(--t-entrance) var(--ease-out) both; }
 }

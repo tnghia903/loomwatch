@@ -483,8 +483,8 @@ Response (`202 Accepted`):
   `"spend_stopped"` (`reason: "nobody_to_ask"`), each with the stop's `stopId`, `scope` (`team` or
   `agent`), `agent`, `limitUsd`, `spentUsd` and `addUsd`.
 - `permissionRequests` lists what an agent is waiting on the operator for: `{id, agent, name,
-  title, kind, switch, detail, since, expiresAt}`, plus `auto` (why Auto mode left a command to
-  you, in a run in Auto mode) and `edit` (`{field, value}`: the whole command, when it may be
+  title, kind, switch, detail, since, expiresAt}`, plus `auto` (why Auto mode left a command or an
+  edit to you, in a run in Auto mode) and `edit` (`{field, value}`: the whole command, when it may be
   changed before it runs). `kind` is the tool's kind (`read`, `search`, `edit`, `execute`, …) and
   `switch` the `allow:` switch that would let it through without asking. It is live only, emptied
   when the run ends and never stored. `POST /api/runs/{id}/permissions` with `{ "requestId": "…",
@@ -500,9 +500,12 @@ Response (`202 Accepted`):
   plus switching that switch on for the agent in the team file. The archive records `session_meta`
   events with `phase: "awaiting_permission"` (with the request's `requestId`, `title`, `kind`,
   `switch`, `detail`, `expiresAt` and `autoNote`) and `phase: "permission_answered"` (`outcome`:
-  `allow_once`, `allow_run`, `allow_team`, `allowed_for_run`, `auto_approved`, `deny`, `edited`
-  with the command that ran as `edited`, `answered` with your words as `answer`, `timed_out`, or
-  `not_asked` once the run has ended) between the request and the answer the agent gets. The team chat
+  `allow_once`, `allow_run`, `allow_team`, `allowed_for_run`, `auto_approved` (a command that only
+  read, or an edit in the agent's folder), `auto_contained` (a command Auto mode ran in its tighter
+  sandbox, ADR 0109), `deny`, `edited` with the command that ran as `edited`, `answered` with your
+  words as `answer`, `timed_out`, or `not_asked` once the run has ended) between the request and the
+  answer the agent gets. An asked request carries `requestId` in its answer too when Auto mode
+  answered it because the team was switched to Auto while it waited. The team chat
   shows each asked request as the agent's message to you, answered there, and keeps how it was
   settled in the conversation. While a request waits, Details says the agent is waiting for you,
   and its timeline names what it asked to do: the call is open in the record, but has not run.
