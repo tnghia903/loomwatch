@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 use tokio::sync::Mutex;
 
 use super::key::PushKey;
-use super::{Environment, Notice, PushTarget, Sender, Sent};
+use super::{APNS_URL_ENV, Environment, Push, PushTarget, Sender, Sent};
 
 /// Apple takes a token from 20 minutes to an hour old; a new one each time is refused as too many.
 const TOKEN_LIFE: Duration = Duration::from_mins(50);
@@ -43,16 +43,29 @@ pub struct Apns {
 }
 
 impl Apns {
+    /// Apple's own service, or the stand-in [`APNS_URL_ENV`] names on this computer.
+    ///
     /// # Errors
     ///
     /// When the key can't sign, or no client can be made.
     pub fn new(key: PushKey) -> Result<Self> {
-        let client = reqwest::Client::builder()
-            .http2_prior_knowledge()
-            .timeout(Duration::from_secs(20))
+        let stand_in = std::env::var(APNS_URL_ENV)
+            .ok()
+            .filter(|url| crate::agent::is_loopback_http(url));
+        let mut client = reqwest::Client::builder().timeout(Duration::from_secs(20));
+        if stand_in.is_none() {
+            client = client.http2_prior_knowledge();
+        }
+        let client = client
             .build()
             .context("couldn't make a client for Apple's push service")?;
-        Self::with(key, client, PRODUCTION, SANDBOX)
+        match stand_in {
+            Some(base) => {
+                let base = base.trim_end_matches('/');
+                Self::with(key, client, base, base)
+            }
+            None => Self::with(key, client, PRODUCTION, SANDBOX),
+        }
     }
 
     fn with(
@@ -93,22 +106,34 @@ impl Apns {
 
 #[async_trait]
 impl Sender for Apns {
-    async fn send(&self, to: &PushTarget, notice: &Notice) -> Sent {
+    async fn send(&self, to: &PushTarget, push: &Push) -> Sent {
         let base = match to.environment {
             Environment::Production => &self.production,
             Environment::Sandbox => &self.sandbox,
         };
-        let reply = self
+        let (token, topic) = match push {
+            Push::Activity { .. } => {
+                let Some(activity) = &to.activity else {
+                    return Sent::Failed("the phone has no Live Activity".to_owned());
+                };
+                (
+                    &activity.token,
+                    format!("{}.push-type.liveactivity", self.key.topic),
+                )
+            }
+            Push::Notice(_) | Push::Changed { .. } => (&to.token, self.key.topic.clone()),
+        };
+        let mut request = self
             .client
-            .post(format!("{base}/3/device/{}", to.token))
+            .post(format!("{base}/3/device/{token}"))
             .bearer_auth(self.token().await)
-            .header("apns-topic", &self.key.topic)
-            .header("apns-push-type", "alert")
-            .header("apns-priority", "10")
-            .header("apns-collapse-id", notice.collapse_id())
-            .json(&notice.payload())
-            .send()
-            .await;
+            .header("apns-topic", topic)
+            .header("apns-push-type", push.kind())
+            .header("apns-priority", push.priority().to_string());
+        if let Some(collapse) = push.collapse_id() {
+            request = request.header("apns-collapse-id", collapse);
+        }
+        let reply = request.json(&push.payload(chrono::Utc::now())).send().await;
         let reply = match reply {
             Ok(reply) => reply,
             Err(error) => return Sent::Failed(format!("couldn't reach Apple: {error}")),

@@ -463,22 +463,39 @@ iPhone or another computer connects to it and keeps nothing but a key of its own
   words that say so. When the other computer can't be reached or has removed this one, a page says
   which, with Try again and Use LoomWatch on this computer, which forgets the connection and exits
   with 76 again. `loomwatchd disconnect` does the same from a terminal.
-- **Push to an iPhone.** A paired phone gives its Apple push token and its notification settings
-  at `PUT /phone/v0/push` (`DELETE` stops it). The door answers this itself, since it knows
-  which phone is asking, and keeps the token with the device in `devices.json`. Every 3 s
-  `push::spawn` reads what the phone's home screen would show. It pushes what is new to each
-  phone: someone waiting, or a run that succeeded or failed (not cancelled, not one trying
-  again). It follows the phone's settings, and in quiet hours, in the phone's time zone, only a
-  permission ask rings. A run that wrote a message the person asked for at a time (`messageAt`,
-  below) is pushed as a message: it rings, in quiet hours too and whatever the phone says about
-  finished runs. What was there when LoomWatch started, or when a phone first gave its token,
-  isn't news. A push carries only ids (`target`, `run`, `node`, `room`); the phone's
-  notification extension reads the words from here over the person's Tailscale, so nothing
-  anyone wrote passes through Apple. Pushes go straight to Apple's service, signed (ES256) with
-  the person's own push key. `loomwatchd push-key set` keeps that key in the Keychain as
-  `LoomWatch.Push` (Credential Manager on Windows, `push-key.json` elsewhere). Apple saying a
-  token is gone forgets it; a push that fails goes again on the next read. A relay for people
-  without a key of their own fits behind `push::Sender` (`push/`).
+- **Push to an iPhone.** A paired phone gives its Apple push token, its notification settings
+  and its Live Activity's own token with the run it follows at `PUT /phone/v0/push` (`DELETE`
+  stops it). The door answers this itself, since it knows which phone is asking, and keeps them
+  with the device in `devices.json`. Every 3 s `push::spawn` reads what the phone's home screen
+  would show, and keeps each phone in step with it (`push/watch.rs`):
+  - **News** is a notice: someone waiting (a question, a review stop, a permission ask, a spending
+    limit, a team's request), or a run that succeeded or failed (not cancelled, not one trying
+    again). It follows the phone's settings, and in quiet hours, in the phone's time zone, only a
+    permission ask rings. A run that wrote a message the person asked for at a time
+    (`messageAt`, below) is pushed as a message: it rings, in quiet hours too and whatever the
+    phone says about finished runs. What was there when LoomWatch started, or when a phone first
+    gave its token, isn't news. A notice also wakes the app (`content-available`).
+  - **Any other change** to who waits or which work is under way (a wait answered on this
+    computer, work that started or ended, a wait the phone's settings keep quiet) is a silent
+    push with the badge count, which also wakes the app. Woken, the app reads this computer and
+    brings its widgets, Live Activity and notices in step. iOS decides when a woken app runs, and
+    never wakes one the person swiped away.
+  - **The Live Activity** follows its run by its own pushes (`liveactivity`), which reach it even
+    then: the first thing in the run that waits for the person, else who works on it, and its end
+    when the work is over. Its state goes as ids (`kind`, `agent`, `visit`), and the phone says it
+    in its own words. A new wait's notice goes first and the Live Activity on the next read, so the
+    phone has read the words by then. Priority 10 when someone starts waiting, else 5, which
+    doesn't count against the activity's budget.
+
+  A push carries only ids (`target`, `run`, `node`, `room`); the phone's notification extension
+  reads the words from here over the person's Tailscale, so nothing anyone wrote passes through
+  Apple. Pushes go straight to Apple's service, signed (ES256) with the person's own push key.
+  `loomwatchd push-key set` keeps that key in the Keychain as `LoomWatch.Push` (Credential
+  Manager on Windows, `push-key.json` elsewhere). Apple saying a token is gone forgets it (the
+  Live Activity's alone when it is that one's); a push that fails goes again on the next read. A
+  relay for people without a key of their own fits behind `push::Sender` (`push/`).
+  `LOOMWATCH_APNS_URL` sends pushes to a stand-in instead, taken only for an address on this
+  computer.
 
 ### Schedules
 
