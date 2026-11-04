@@ -3951,6 +3951,8 @@ mod tests {
         .await;
         assert_eq!(list["jobs"][0]["id"], "release-notes");
         assert_eq!(list["jobs"][0]["skills"][0], "release-style");
+        // ADR 0114: the app shows an agent's widgets switch from the daemon's default.
+        assert_eq!(list["widgetsDefault"], json!(crate::widgets::DEFAULT_ON));
         let teams = response_json(
             test_router(&root.0)
                 .oneshot(get("/api/teams"))

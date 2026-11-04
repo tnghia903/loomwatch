@@ -34,6 +34,8 @@ import type { AgentConfig } from '../../lib/team-file/types'
 import type { AlwaysAllowed } from '../../lib/tools/allow'
 import { AgentMessages } from '../run/AgentMessages'
 import { ChatFiles } from './ChatFiles'
+import { AnswerWidgets } from './widgets/AnswerWidgets'
+import type { KeptWidget, WidgetState } from '../../lib/widgets/types'
 import { MessageDoneWhen } from './MessageDoneWhen'
 import { PermissionActions, PermissionPrompt } from '../run/PermissionPrompt'
 import { SpendStopCard } from '../run/SpendStopCard'
@@ -133,6 +135,14 @@ interface WorkPieceProps {
   onShowReplied?: (reply: ReplyTo) => (() => void) | undefined
   /** Put your face on something said in this piece, or take it off. Absent, only the agents' faces show. */
   onReact?: (runId: string, target: string, face: Face | null, about?: ReactionAbout) => Promise<void>
+  /** Keep what you made of a widget under this piece's answer (ADR 0114). Absent: its widgets
+      aren't drawn. */
+  onWidgetChange?: (runId: string, n: number, state: WidgetState) => Promise<KeptWidget>
+  /** Tap one of the answer's choices: sent as your message, replying to it. Absent: they can't be
+      tapped now. */
+  onChoose?: (label: string, reply: ReplyTo) => Promise<boolean> | void
+  /** The choice the next message sent, when it replied to this answer with one. */
+  chosen?: string | null
   /** Take back something an agent learned from your feedback on this work (ADR 0078). */
   onUndoLesson?: (lesson: Lesson) => Promise<void>
   /** Move a lesson about you to About you, for every agent, once you said yes. */
@@ -145,7 +155,7 @@ interface WorkPieceProps {
  * you for, the files handed to you, and the answer. The line opens and folds the replies under it,
  * in the chat; Details, beside it, opens the full record.
  */
-export function WorkPiece({ item, newest = false, approveFilled = true, fixFilled = false, fixFill = null, reveal = null, followed, earlier = NO_TRIES, continuedFrom, team, draft, detailsOpen, answerOpen, recordOpen = detailsOpen && !answerOpen, onHandOver, onDetails, onOpenAnswer, onRun, onBaton, onLine, onTryAgain, onContinue, onDecided, onAlwaysAllow, onOpenFinding, onReply, onShowReplied, onReact, onUndoLesson, onTellAllLesson }: WorkPieceProps) {
+export function WorkPiece({ item, newest = false, approveFilled = true, fixFilled = false, fixFill = null, reveal = null, followed, earlier = NO_TRIES, continuedFrom, team, draft, detailsOpen, answerOpen, recordOpen = detailsOpen && !answerOpen, onHandOver, onDetails, onOpenAnswer, onRun, onBaton, onLine, onTryAgain, onContinue, onDecided, onAlwaysAllow, onOpenFinding, onReply, onShowReplied, onReact, onWidgetChange, onChoose, chosen = null, onUndoLesson, onTellAllLesson }: WorkPieceProps) {
   const { run, request, notes } = item
   const live = !isTerminalRun(run.status)
   // What the agents said is shown where the work is happening — the newest piece, and any piece
@@ -592,7 +602,14 @@ export function WorkPiece({ item, newest = false, approveFilled = true, fixFille
         </Handed>
       ))}
       <FileOriginContext.Provider value={fileOrigin}>
-      <Outcome tour={newest} run={record} tries={tryingAgain(ended) ? tries : null} fixFilled={fixFilled} answer={answer} touched={touched} folder={folder} written={written} streaming={streaming} name={name} hue={hue} open={answerOpen} flash={answerFlash !== null} solo={Boolean(team.solo)} reactions={reactOn(targets.answer, `${name(record.responder)}'s answer`, [])} onOpen={() => onOpenAnswer(run.runId)} onTryAgain={() => onTryAgain(item)} onDetails={loaded ? undefined : () => onDetails(run.runId)}>
+      <Outcome widgets={item.widgets?.length && record.status === 'succeeded' && onWidgetChange ? (
+        <AnswerWidgets
+          widgets={item.widgets}
+          onChange={(n, state) => onWidgetChange(run.runId, n, state)}
+          onChoose={onChoose ? (label) => onChoose(label, answerReply(item.request?.replyTo, { runId: run.runId, messageId: answerKey, from: run.responder, to: null, kind: 'answer', text: answer })) : undefined}
+          chosen={chosen}
+        />
+      ) : undefined} tour={newest} run={record} tries={tryingAgain(ended) ? tries : null} fixFilled={fixFilled} answer={answer} touched={touched} folder={folder} written={written} streaming={streaming} name={name} hue={hue} open={answerOpen} flash={answerFlash !== null} solo={Boolean(team.solo)} reactions={reactOn(targets.answer, `${name(record.responder)}'s answer`, [])} onOpen={() => onOpenAnswer(run.runId)} onTryAgain={() => onTryAgain(item)} onDetails={loaded ? undefined : () => onDetails(run.runId)}>
         <AnswerTools
           run={record}
           answer={answer}
@@ -927,6 +944,8 @@ interface AnswerProps {
   solo: boolean
   /** The answer with its reactions under it. */
   reactions: (said: ReactNode) => ReactNode
+  /** The widgets under it (ADR 0114), after its words and before its tools. */
+  widgets?: ReactNode
   children: ReactNode
 }
 
@@ -992,7 +1011,7 @@ function failure(run: RunRecord, name: (id: string) => string): { lead: string; 
  * message. A long one, or one with a title, is a document: a card with its title, its opening
  * words and its length, read in full in the pane beside the chat (lib/chat/document.ts).
  */
-function Answer({ tour, run, answer, touched, folder, written, streaming, name, hue, open, flash = false, onOpen, solo, reactions, children }: AnswerProps) {
+function Answer({ tour, run, answer, touched, folder, written, streaming, name, hue, open, flash = false, onOpen, solo, reactions, widgets, children }: AnswerProps) {
   const appear = useAppear()
   // Names listed under a folder, given from the agent's own folder, or of a file it wrote, read as
   // files in the sentence too; copy and save keep the agent's words.
@@ -1021,6 +1040,7 @@ function Answer({ tour, run, answer, touched, folder, written, streaming, name, 
             <div className="chat-text"><SaidText text={shown} /></div>
           </div>
         ))}
+        {widgets}
         {children}
       </div>
     </div>

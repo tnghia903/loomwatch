@@ -42,6 +42,9 @@ export interface AgentDraft {
   /** `false`: it brings in none of your other agents from My agents (ADR 0092). Absent, it may,
       when its team lists them. */
   bringsIn?: false
+  /** Whether it may put widgets under its answer (ADR 0114). Absent: LoomWatch's default, which
+      `useSavedJobs().widgetsDefault` says. */
+  widgets?: boolean
   /** The figure it wears in Your agents; `null` wears the one its id picks. A team never copies it. */
   figure: FigureChoice | null
 }
@@ -75,6 +78,7 @@ export function draftFromJob(job: JobSpec): AgentDraft {
     allow: { ...(onlyOn(job.allow) ?? {}) },
     ...(job.helpers === false ? { helpers: false as const } : {}),
     ...(job.bringsIn === false ? { bringsIn: false as const } : {}),
+    ...(job.widgets !== undefined ? { widgets: job.widgets } : {}),
     figure: isFigureChoice(job.figure) ? { ...job.figure } : null,
   }
 }
@@ -119,6 +123,7 @@ export function specFromDraft(draft: AgentDraft, note = ''): JobSpec {
     ...(allow ? { allow } : {}),
     ...(draft.helpers === false ? { helpers: false as const } : {}),
     ...(draft.bringsIn === false ? { bringsIn: false as const } : {}),
+    ...(draft.widgets !== undefined ? { widgets: draft.widgets } : {}),
     ...(note.trim() ? { note: note.trim() } : {}),
   }
 }
@@ -144,6 +149,7 @@ export function makesNewVersion(draft: AgentDraft, saved: AgentDraft): boolean {
     || SWITCHES.some((key) => Boolean(draft.allow[key]) !== Boolean(saved.allow[key]))
     || (draft.helpers !== false) !== (saved.helpers !== false)
     || (draft.bringsIn !== false) !== (saved.bringsIn !== false)
+    || draft.widgets !== saved.widgets
 }
 
 /** Whether there is anything to save at all, including the palette's line and the figure it wears. */
@@ -172,6 +178,7 @@ export function agentFromDraft(draft: AgentDraft, model = draft.model, link?: { 
     ...(allow ? { allow } : {}),
     ...(draft.helpers === false ? { allowRecruiting: false } : {}),
     ...(draft.bringsIn === false ? { allowMyAgents: false } : {}),
+    ...(draft.widgets !== undefined ? { widgets: draft.widgets } : {}),
     ...(link?.job ? { from: { agent: link.id, version: versionOf(link.job) } } : {}),
   }
 }

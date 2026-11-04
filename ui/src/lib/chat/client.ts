@@ -4,6 +4,7 @@ import { readRun, type RunRecord } from '../runs/client'
 import type { Lesson } from '../lessons/client'
 import type { Face, Reaction, ReactionAbout } from './reactions'
 import type { SentChange } from '../files/changes'
+import type { KeptWidget } from '../widgets/types'
 
 /**
  * A team's chat (ADR 0051): its runs and what you wrote to it, read as one conversation.
@@ -226,7 +227,7 @@ export type ChatItem =
    * A piece of work: a run, the message that started it, and the notes you sent into it. With what
    * the agents learned from your feedback on it (ADR 0078).
    */
-  | { kind: 'work'; run: RunRecord; request: ChatMessage | null; notes: ChatMessage[]; reactions?: Reaction[]; lessons?: Lesson[] }
+  | { kind: 'work'; run: RunRecord; request: ChatMessage | null; notes: ChatMessage[]; reactions?: Reaction[]; lessons?: Lesson[]; widgets?: KeptWidget[] }
   /** A team note: it started nothing, and the next work reads it. With your reactions to it and to its replies. */
   | { kind: 'note'; message: ChatMessage; reactions?: Reaction[]; lessons?: Lesson[] }
 

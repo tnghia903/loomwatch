@@ -367,6 +367,13 @@ pub(crate) fn fill_entry(entry: &mut Mapping, agent: &str, spec: &JobSpec) {
     } else {
         set(entry, "allowMyAgents", false);
     }
+    // ADR 0114: absent stays absent, so the team follows `LoomWatch`'s default as the agent does.
+    match spec.widgets {
+        Some(on) => set(entry, "widgets", on),
+        None => {
+            entry.remove("widgets");
+        }
+    }
     let mut from = Mapping::new();
     from.insert("agent".into(), agent.into());
     set(entry, "from", Value::Mapping(from));

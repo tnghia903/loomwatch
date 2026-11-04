@@ -83,6 +83,16 @@ them. A read that failed says so in one quiet line; a message with nothing to ch
 At a check's stop, **Send back** works with no note: the checks still open say what is wrong.
 `ui/src/lib/chat/doneWhen.ts` reads the run's `done_when` records.
 
+An answer can have things to use under its words (ADR 0114), when the agent that wrote it has
+**Adds choices, checklists and calculators to its answers** on: choices to tap, a checklist to tick, a calculator, or steps
+to tap through. A choice goes as your message, replying to the answer, and only the newest
+answer's choices can be tapped while nothing is at work; the one sent stays marked. A calculator
+shows its results first and works them out again as you change an input, with the sum written out
+when it is plain arithmetic; a number outside the input's range says what it takes and isn't kept.
+Ticks and values are kept (`POST /api/chat/widgets`) and the next work reads what you changed, with
+the results worked out again. Copy, Notion, search, the notch and the phone read the answer's words
+only.
+
 Who said what to whom is read from the record, not from the team file as it is now:
 
 | Recorded on | Field | Says |
@@ -319,6 +329,12 @@ backend's own tests use scripted stand-ins of the same provider, which can also 
 (`crates/loomwatch-backend/src/agent/demo.rs`). Put the team file in a scratch `--teams-root` so
 the demo never lands next to real teams.
 
+`scripts/mock-openrouter.py` stands in for OpenRouter in the real app and can call any tool the
+agent is offered: `MOCK-TOOL: <tool> <json>` in a message makes it call that tool once, with the
+JSON on one line, then reply. For example, to see a widget under an answer (an agent with
+`widgets: true`): `MOCK-TOOL: show_widget {"kind":"checklist","title":"Before Wednesday","items":[{"text":"Print 32 copies"}]}`.
+A message ending in "?" is read as a question and answered without work, so no tool is called.
+
 ## Evidence transport
 
 These **session** endpoints read the archive. Starting and stopping runs is *Run control*, below:
@@ -361,6 +377,7 @@ always has its archive; a router built without one (tests) answers 503.
 | `GET /api/runs` | Every run since the daemon started, newest first; `?preview=true` cuts each `reply` to its first 400 characters, which is what the browser's lists read; `?finishedWithin=<seconds>` keeps the runs still under way and those that finished in that many seconds, which is what the Mac menu bar, the island at a MacBook's notch and the Windows notification-area menu read |
 | `GET /api/runs/{id}` | One run record, or 404 |
 | `GET /api/chat/answering` | The messages agents are answering in the team chat themselves, where no run starts (a greeting, or a quick question such as **Explain** on a part of a file), and those answered in the last hour, oldest first; `?finishedWithin=<seconds>` keeps the ones still being answered and those answered in that many seconds. Each answer is cut to its first 400 characters; an agent whose answer failed (out of credit, too slow) is listed under `answers.failed` with why, in a stopped run's words. Kept in memory for an hour; a restart clears it. The island at a MacBook's notch reads it beside `GET /api/runs` |
+| `POST /api/chat/widgets` | `{"teamPath", "runId", "n", "state"}` keeps what you made of widget `n` under that run's answer (ADR 0114): `{"checked": [true, false]}` for a checklist, one per item, or `{"values": {"pupils": 30, "round_up": true}}` for a calculator, any of its inputs. 200 with the widget as kept (`state`, `changedAt`); 400 for state the widget doesn't take or a value outside its input's range; 404 when the run isn't this team's or has no such widget. The chat page's `work` items carry `widgets: [{n, spec, state?, changedAt?}]` |
 | `POST /api/runs/{id}/done-when` | `{"item": 0, "checked": false}` takes item 0 of what the run's message said done looks like off the check, `true` puts it back (ADR 0098): 200 with the `done_when` record as it now stands; 409 when the run isn't checking its message, has no such item, or its check has ended |
 | `POST /api/runs/{id}/cancel` | Abort a live run: 200 with the record; 409 with the record when it already finished; 404 when unknown |
 | `GET /api/pinned-agent` | `{"agent": "<id>", "notchShown": true}`, the one of My agents pinned to the notch, which the Mac app's box (⌃⌥Space) opens with, or `{"agent": null, …}`; an agent taken out of My agents is no longer pinned. The box pins the first of My agents it sends to while none is pinned (`PUT /api/pinned-agent`); another is pinned in My agents. `notchShown` is `false` while Show at the notch is unticked in the Mac app's menu (it keeps `app-notch-off` in the state folder): the pin stays, but there is no island or ⌃⌥Space to reach the agent, so My agents says to turn it on. The island reads it beside `GET /api/runs`, and a message from its box goes into that agent's own chat through `POST /api/chat/messages` |

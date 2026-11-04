@@ -224,6 +224,7 @@ fn bus_tools(out: &mut String) {
         front_desk: false,
         my_agents: false,
         own_chat: false,
+        answers: false,
     };
     let stage = BusSeat {
         mode: TeamBusMode::Pipeline,
@@ -279,6 +280,29 @@ fn bus_tools(out: &mut String) {
         out,
         "bus: message_me_at, once set",
         crate::team_bus::MESSAGE_ME_AT_SET.text(),
+    );
+    // ADR 0114: the tool the agent whose reply is the answer is offered, and what it is told once
+    // a calculator is shown, with its results worked out.
+    section(
+        out,
+        "bus: show_widget",
+        &serde_json::to_string_pretty(&crate::widgets::tool_definition()).expect("tool"),
+    );
+    let calculator = crate::widgets::read(&serde_json::json!({
+        "kind": "calculator",
+        "title": "Zoo trip: cost per family",
+        "inputs": [
+            {"id": "pupils", "label": "Pupils", "start": 32},
+            {"id": "bus", "label": "Bus", "start": 2_400_000, "unit": "₫"},
+            {"id": "ticket", "label": "Ticket", "start": 60000, "unit": "₫"}
+        ],
+        "results": [{"id": "each", "label": "Each family pays", "formula": "(bus + pupils * ticket) / pupils", "unit": "₫"}]
+    }))
+    .expect("a calculator");
+    section(
+        out,
+        "bus: show_widget, once shown",
+        &serde_json::to_string_pretty(&crate::widgets::shown(&calculator)).expect("shown"),
     );
 }
 

@@ -1134,6 +1134,215 @@ Search the web. This asks the person first; their yes gives you web search and p
 None of the person's other agents can be brought in here now. Do the work with the agents you have.
 ===== bus: message_me_at, once set
 Tell the person in a few words when the message comes, then end your turn.
+===== bus: show_widget
+{
+  "description": "Put something the person can use under your answer, drawn by LoomWatch: choices they tap to reply, a checklist they tick, a calculator whose results LoomWatch works out as they change its inputs, or steps they tap through one at a time. Use one only when it helps more than words: numbers they may want to change, a choice of what to do next, things for them to do, or the steps of a process. For a simple answer, words alone are better. Call it before you write your answer. Then write the answer in words: give the main result in a sentence, since a copy of the answer and the phone show only your words, and call what you showed by what it is, such as \"the calculator below\".",
+  "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "inputs": {
+        "description": "calculator: up to 8 values the person can change. A number has start, and may have unit, prefix, min, max and step; a switch has on instead",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "description": "Lowercase letters, digits and _, used in formulas",
+              "minLength": 1,
+              "type": "string"
+            },
+            "label": {
+              "description": "A few words the person reads",
+              "minLength": 1,
+              "type": "string"
+            },
+            "max": {
+              "description": "The most it may be",
+              "type": "number"
+            },
+            "min": {
+              "description": "The least it may be",
+              "type": "number"
+            },
+            "on": {
+              "description": "A switch's starting value",
+              "type": "boolean"
+            },
+            "prefix": {
+              "description": "Written before the number, such as $",
+              "type": "string"
+            },
+            "start": {
+              "description": "A number's starting value",
+              "type": "number"
+            },
+            "step": {
+              "description": "How much one press changes it",
+              "type": "number"
+            },
+            "unit": {
+              "description": "Written after the number, such as ₫, km or %",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "label"
+          ],
+          "type": "object"
+        },
+        "maxItems": 8,
+        "type": "array"
+      },
+      "items": {
+        "description": "checklist: 1 to 20 things to do, in order",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "note": {
+              "description": "A few words beside it, such as a day",
+              "type": "string"
+            },
+            "text": {
+              "description": "The thing to do",
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "text"
+          ],
+          "type": "object"
+        },
+        "maxItems": 20,
+        "type": "array"
+      },
+      "kind": {
+        "description": "choices, checklist, calculator or steps. Fill in only that kind's fields.",
+        "enum": [
+          "choices",
+          "checklist",
+          "calculator",
+          "steps"
+        ],
+        "type": "string"
+      },
+      "options": {
+        "description": "choices: 2 to 6 replies the person may tap. A tap sends the label as their message, so write it as they would say it.",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "detail": {
+              "description": "A few more words under the label",
+              "type": "string"
+            },
+            "label": {
+              "description": "A few words the person reads",
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "label"
+          ],
+          "type": "object"
+        },
+        "maxItems": 6,
+        "type": "array"
+      },
+      "repeats": {
+        "description": "steps: true when the last step leads back to the first, as in a cycle",
+        "type": "boolean"
+      },
+      "results": {
+        "description": "calculator: 1 to 4 figures LoomWatch works out, in order",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "decimals": {
+              "description": "Decimal places shown; without it, up to 2",
+              "maximum": 6,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "formula": {
+              "description": "Worked out by LoomWatch from the inputs and the results above this one, by id: numbers, + - * / and brackets, one comparison (< <= > >= == !=, giving 1 or 0), min, max, round(x, digits), ceil(x, digits), floor(x, digits), abs, if(condition, then, else), and, or, not. A switch is 1 when on. Digits may be negative: ceil(x, -4) rounds up to the nearest 10,000.",
+              "minLength": 1,
+              "type": "string"
+            },
+            "id": {
+              "description": "Lowercase letters, digits and _, used in formulas",
+              "minLength": 1,
+              "type": "string"
+            },
+            "label": {
+              "description": "A few words the person reads",
+              "minLength": 1,
+              "type": "string"
+            },
+            "prefix": {
+              "description": "Written before the number, such as $",
+              "type": "string"
+            },
+            "unit": {
+              "description": "Written after the number, such as ₫, km or %",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "label",
+            "formula"
+          ],
+          "type": "object"
+        },
+        "maxItems": 4,
+        "type": "array"
+      },
+      "steps": {
+        "description": "steps: 2 to 8, in order, each a short label and a sentence or two",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "label": {
+              "description": "A word or two",
+              "minLength": 1,
+              "type": "string"
+            },
+            "text": {
+              "description": "What happens at this step",
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "text"
+          ],
+          "type": "object"
+        },
+        "maxItems": 8,
+        "type": "array"
+      },
+      "title": {
+        "description": "A few words above it, such as \"Zoo trip: cost per family\"",
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "kind",
+      "title"
+    ],
+    "type": "object"
+  },
+  "name": "show_widget"
+}
+===== bus: show_widget, once shown
+{
+  "next": "It shows under your answer. Now write your answer in words: the main result in a sentence, and what you showed called by what it is, without repeating all of it. Up to 4 show under one answer.",
+  "results": "Each family pays = 135,000 ₫",
+  "shown": "a calculator \"Zoo trip: cost per family\""
+}
 ===== stage 0
 You are Researcher, step 1 of 3 in the News desk team.
 The operator's request comes to you first.

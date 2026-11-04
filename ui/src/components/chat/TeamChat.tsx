@@ -10,6 +10,7 @@ import { nameWithHelpers } from '../../lib/chat/helpers'
 import { clockTime, dayKey, dayLabel, listNames } from '../../lib/chat/format'
 import { destination, withMention, type ChatAgent } from '../../lib/chat/route'
 import { answersDecision, replyOf } from '../../lib/chat/reply'
+import { changeWidget } from '../../lib/widgets/client'
 import { answerReply, askedPassages, partId, type AskedPassage } from '../../lib/files/passage'
 import { FileReaderContext } from '../../lib/files/reader'
 import { markSeen } from '../../lib/chat/seen'
@@ -493,6 +494,10 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
   useEffect(() => { if (chat.loaded) onNewestRun?.(newestWork) }, [chat.loaded, newestWork, onNewestRun])
   const members = agents.filter((agent) => !agent.operator)
   const soloAgent = team.solo ? members.find((agent) => agent.id === team.solo) ?? null : null
+  // ADR 0114: what each answer's choices sent, read from the message that replied to it.
+  const chosenFor = new Map(chat.items.flatMap((item) => (item.kind === 'work' && item.request?.replyTo?.runId ? [[item.request.replyTo.runId, item.request.text.trim()] as const] : [])))
+  // Only the newest answer's choices can be tapped, and only while nothing is at work.
+  const choose = (label: string, reply: ReplyTo) => send(label, soloAgent ? { kind: 'agent', agent: soloAgent.id } : null, false, undefined, replyOf(reply))
   const workingNow = new Set(live.flatMap((run) => run.working ?? []))
   const waitingFor = decision?.from
   const unreachable = chat.error && /reach the LoomWatch server/i.test(chat.error)
@@ -899,7 +904,8 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
                 {item.kind === 'work'
                   ? <WorkPiece item={item} newest={item.run.runId === newestRun} approveFilled={!decision || decision.runId === item.run.runId} fixFilled={fixFill === item.run.runId} fixFill={fixFill} reveal={shown?.runId === item.run.runId ? shown : null} followed={item.run.followsRunId ? runs.get(item.run.followsRunId) ?? null : null} earlier={earlierTries(item.run, runs)} continuedFrom={continuedFrom.has(item.run.runId)} team={team} draft={draft}
                       detailsOpen={detailsRunId === item.run.runId} answerOpen={answerRunId === item.run.runId} recordOpen={recordRunId === undefined ? undefined : recordRunId === item.run.runId} onHandOver={onHandOver} onDetails={onDetails} onOpenAnswer={onOpenAnswer} onRun={chat.applyRun} onBaton={onBaton} onLine={line.onLine} onTryAgain={tryAgain} onContinue={keepGoing}
-                      onDecided={() => setDraft('')} onAlwaysAllow={onAlwaysAllow} onOpenFinding={onOpenFinding} onReply={startReply} onShowReplied={showReplied} onReact={chat.react} onUndoLesson={undoLearned} onTellAllLesson={tellAllLearned} />
+                      onDecided={() => setDraft('')} onAlwaysAllow={onAlwaysAllow} onOpenFinding={onOpenFinding} onReply={startReply} onShowReplied={showReplied} onReact={chat.react} onUndoLesson={undoLearned} onTellAllLesson={tellAllLearned}
+                      onWidgetChange={(runId, n, state) => changeWidget(teamPath, runId, n, state)} onChoose={item.run.runId === newestRun && live.length === 0 && !blocked ? choose : undefined} chosen={chosenFor.get(item.run.runId) ?? null} />
                   : <TeamNote message={item.message} reactions={item.reactions} lessons={item.lessons} fixFill={fixFill} name={name} hue={(id) => team.hues.get(id) ?? 1} flash={noteFlash?.id === item.message.id ? noteFlash.at : null} onReply={startReply} onShowReplied={showReplied} onStart={() => void startNote(item.message)} onReact={chat.react} onUndoLesson={undoLearned} onTellAllLesson={tellAllLearned} />}
               </Fragment>
             )

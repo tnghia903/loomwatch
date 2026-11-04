@@ -1,0 +1,192 @@
+/* ===========================================================================
+   Widgets under an answer (ADR 0114): choices, a checklist, a calculator, steps.
+   components/chat/widgets/. Every rule is under a .wg- class; tokens only. No gold fill: the
+   chat's send is the screen's one. A choice, a step, a tick or a switch that is on is the
+   accent's tint with a ring, a line or a gold mark (DESIGN.md §Components; settings.css's
+   "An 'on' here is a line, not a fill").
+   =========================================================================== */
+
+/* As wide as the chat allows, up to a reading width, so each widget is laid out by its own room
+   rather than shrinking to its content. */
+.wg-list { display: flex; flex-direction: column; gap: var(--sp-2); margin-top: var(--sp-2); width: min(100%, 640px); }
+
+.wg {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--r-lg);
+  background: var(--color-panel-solid);
+  min-width: 0;
+}
+.wg-title { margin: 0; display: flex; align-items: baseline; gap: var(--sp-2); font: 600 14px/20px var(--font-sans); color: var(--color-ink); }
+.wg-count { margin-left: auto; font: 400 12px/16px var(--font-sans); color: var(--color-ink-2); font-variant-numeric: tabular-nums; }
+
+/* Choices */
+.wg-options { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 140px), 1fr)); gap: var(--sp-2); }
+.wg-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 40px;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid color-mix(in srgb, var(--color-ink) 18%, transparent);
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--color-ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.wg-option:hover:not(:disabled) { border-color: var(--color-ink-3); }
+.wg-option:disabled { cursor: default; color: var(--color-ink-2); }
+.wg-option.on { border-color: var(--color-accent); background: var(--color-accent-tint); box-shadow: 0 0 0 1px var(--color-accent); color: var(--color-ink); }
+.wg-option-label { font: 500 14px/20px var(--font-sans); }
+.wg-option-detail { font: 400 12px/16px var(--font-sans); color: var(--color-ink-2); }
+
+/* Checklist: the box sits on an item's first line; a tick is a gold line and mark, not a fill. */
+.wg-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.wg-tick { padding: 6px 0; }
+.wg-tick.check .txt b { font-weight: 400; }
+.wg-tick.check .txt span { color: var(--color-ink-2); }
+.wg-tick.check.on .box { background: var(--color-accent-tint); border-color: var(--color-accent); }
+.wg-tick.check.on .box svg { color: var(--color-accent); }
+.wg-tick.check.on .txt b { color: var(--color-ink-2); text-decoration: line-through; }
+
+/* Calculator: its results, then its inputs; side by side when the calculator itself has room. */
+.wg-calculator { container-type: inline-size; }
+.wg-calc { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); }
+.wg-results {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--color-ink) 5%, transparent);
+}
+.wg-result { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.wg-result-label { font: 400 12px/16px var(--font-sans); color: var(--color-ink-2); }
+.wg-result-value { font: 600 24px/30px var(--font-sans); letter-spacing: -.01em; color: var(--color-ink); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.wg-working { font: 400 12px/16px var(--font-sans); color: var(--color-ink-2); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.wg-working.wg-cant { color: var(--color-ink); }
+.wg-inputs { display: flex; flex-direction: column; }
+/* A row is its label and its field; the field goes under the label when they don't fit side by side. */
+.wg-input {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2px var(--sp-2);
+  min-height: 40px;
+  padding: 4px 0;
+  border-top: 1px solid var(--color-hairline);
+}
+.wg-input:first-child { border-top: 0; }
+.wg-input-label { flex: 1 1 8rem; min-width: 0; font: 400 14px/20px var(--font-sans); color: var(--color-ink); }
+.wg-field { flex: none; margin-left: auto; display: flex; align-items: center; gap: 4px; }
+.wg-field input {
+  width: 12ch;
+  min-height: 32px;
+  padding: 0 var(--sp-2);
+  border: 1px solid color-mix(in srgb, var(--color-ink) 18%, transparent);
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--color-ink);
+  font: 400 14px/20px var(--font-sans);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.wg-field input:focus { border-color: var(--color-accent); }
+.wg-field input[aria-invalid="true"] { border-color: var(--color-alert); }
+.wg-unit { font: 400 13px/18px var(--font-sans); color: var(--color-ink-2); }
+.wg-input-note { flex-basis: 100%; text-align: right; font: 400 12px/16px var(--font-sans); color: var(--color-alert); }
+/* A switch that is on is the accent's tint with a ring and a gold knob, never a gold fill. */
+.wg-switch { cursor: pointer; }
+.wg-switch-input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; }
+.wg-switch-track {
+  position: relative;
+  flex: none;
+  margin-left: auto;
+  width: 36px;
+  height: 22px;
+  border: 1px solid color-mix(in srgb, var(--color-ink) 25%, transparent);
+  border-radius: var(--r-full);
+  box-sizing: border-box;
+}
+.wg-switch-track i {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: var(--r-full);
+  background: var(--color-ink-3);
+  transition: translate var(--t-quick) var(--ease-out);
+}
+.wg-switch-input:checked + .wg-switch-track { border-color: var(--color-accent); background: var(--color-accent-tint); }
+.wg-switch-input:checked + .wg-switch-track i { translate: 14px 0; background: var(--color-accent); }
+.wg-switch-input:focus-visible + .wg-switch-track { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .wg-switch-track i { transition: none; } }
+@container (min-width: 560px) {
+  .wg-calc { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "results inputs"; align-items: start; }
+  .wg-results { grid-area: results; }
+  .wg-inputs { grid-area: inputs; }
+}
+
+/* Steps: numbered pills in order, a chevron between; the one picked is the accent's tint with a
+   ring, and its number a gold ring (DESIGN_LANGUAGE §5: step numbers are gold). */
+.wg-step-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); }
+.wg-step-list > li { display: flex; align-items: center; gap: var(--sp-2); }
+.wg-step-list > li:not(:last-child)::after,
+.wg-step-again::before { content: ''; width: 6px; height: 6px; border-top: 1.5px solid var(--color-ink-3); border-right: 1.5px solid var(--color-ink-3); transform: rotate(45deg); }
+.wg-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 2px var(--sp-2) 2px 2px;
+  border: 1px solid color-mix(in srgb, var(--color-ink) 18%, transparent);
+  border-radius: var(--r-full);
+  background: transparent;
+  color: var(--color-ink);
+  font: 500 13px/18px var(--font-sans);
+  cursor: pointer;
+}
+.wg-step.on { border-color: var(--color-accent); background: var(--color-accent-tint); box-shadow: 0 0 0 1px var(--color-accent); }
+.wg-step-n {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--color-ink) 7%, transparent);
+  font: 600 12px/1 var(--font-sans);
+  font-variant-numeric: tabular-nums;
+}
+.wg-step.on .wg-step-n { background: transparent; box-shadow: inset 0 0 0 1px var(--color-accent); }
+/* Steps that repeat end on a ghost of the first, after a chevron: not a step and not a button. */
+.wg-step-again { display: inline-flex; align-items: center; gap: var(--sp-2); }
+.wg-step-ghost {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 1px dashed var(--color-ink-3);
+  border-radius: var(--r-full);
+  font: 600 12px/1 var(--font-sans);
+  color: var(--color-ink-2);
+  font-variant-numeric: tabular-nums;
+  box-sizing: border-box;
+}
+.wg-step-text { padding: var(--sp-2) var(--sp-3); border-radius: var(--r-md); background: color-mix(in srgb, var(--color-ink) 5%, transparent); }
+.wg-step-head { margin: 0; font: 600 12px/16px var(--font-sans); color: var(--color-ink-2); font-variant-numeric: tabular-nums; }
+.wg-step-body { margin: 2px 0 0; font: 400 15px/22px var(--font-sans); color: var(--color-ink); }
+
+@media (pointer: coarse) {
+  .wg-option, .wg-input, .wg-step { min-height: 44px; }
+  .wg-tick { padding: 12px 0; }
+  .wg-field input { min-height: 44px; }
+  .wg-step-by { min-width: 44px; min-height: 44px; }
+}

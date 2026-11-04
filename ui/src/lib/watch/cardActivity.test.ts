@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { workCount } from '../story/reads'
-import { cardActivity, linkedIn, trayOf, webFinds } from './cardActivity'
+import { asUse, cardActivity, linkedIn, trayOf, webFinds } from './cardActivity'
 import { projectRun, type RunEvent } from './events'
 
 const start = Date.UTC(2026, 9, 21, 13, 20, 0)
@@ -114,5 +114,17 @@ describe('a notebook entry it read', () => {
     const evidence = projectRun(events).evidence
     expect(webFinds(evidence, new Set()).failedReads).toBe(0)
     expect(trayOf(evidence).some((mark) => mark.kind === 'page')).toBe(false)
+  })
+})
+
+// ADR 0114: what the agent put under its answer reads as what it is, not as the tool's name.
+describe('a widget under the answer', () => {
+  it('reads as what was shown', () => {
+    seq = 0
+    const evidence = projectRun([
+      event(0, 'message', { role: 'user', content: { type: 'text', text: 'Work out the trip.' } }),
+      ...call(1, 'w1', 'Team Bus: show_widget', 'other', { kind: 'calculator', title: 'Zoo trip' }, '{"shown":"a calculator"}'),
+    ]).evidence
+    expect(evidence.map(asUse).filter(Boolean).map((use) => use?.label)).toEqual(['Show a calculator under the answer'])
   })
 })

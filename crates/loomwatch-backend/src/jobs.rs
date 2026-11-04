@@ -217,6 +217,11 @@ pub(crate) struct JobSpec {
     /// (ADR 0092), filled into a team as `allowMyAgents`. Written only when it may not.
     #[serde(default = "brings_in_helpers", skip_serializing_if = "is_on")]
     pub(crate) brings_in: bool,
+    /// Whether it may put widgets under its answer (ADR 0114), filled into a team as `widgets`.
+    /// Absent means `LoomWatch`'s default (`widgets::DEFAULT_ON`), so the default can change without
+    /// a file changing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) widgets: Option<bool>,
     /// Which version this is. The daemon owns it: a save that changes anything a team copies makes
     /// the next one, and whatever a client sends here is ignored.
     #[serde(default = "first_version", skip_serializing_if = "is_first_version")]
@@ -245,6 +250,7 @@ impl JobSpec {
             || self.allow != other.allow
             || self.helpers != other.helpers
             || self.brings_in != other.brings_in
+            || self.widgets != other.widgets
     }
 }
 
@@ -287,6 +293,9 @@ pub(crate) struct JobList {
     pub(crate) folder: String,
     pub(crate) jobs: Vec<SavedJob>,
     pub(crate) problems: Vec<JobProblem>,
+    /// Whether an agent with no `widgets` setting may show widgets (ADR 0114), so the app shows
+    /// its switch as it is without a copy of the default.
+    pub(crate) widgets_default: bool,
 }
 
 /// Why a save or removal was refused.
@@ -451,6 +460,7 @@ pub(crate) fn normalize(spec: JobSpec) -> Result<JobSpec, String> {
         allow: spec.allow,
         helpers: spec.helpers,
         brings_in: spec.brings_in,
+        widgets: spec.widgets,
         version: spec.version.max(1),
         note,
         saved_at: spec.saved_at,
@@ -622,6 +632,7 @@ pub(crate) fn list_jobs(teams_root: &Path) -> Result<JobList, JobError> {
         folder: JOBS_DIR.to_owned(),
         jobs: Vec::new(),
         problems: Vec::new(),
+        widgets_default: crate::widgets::DEFAULT_ON,
     };
     let Some(folder) = jobs_folder(teams_root)? else {
         return Ok(list);
@@ -990,6 +1001,7 @@ mod tests {
             allow: JobAllow::default(),
             helpers: true,
             brings_in: true,
+            widgets: None,
             version: 1,
             note: String::new(),
             saved_at: None,
@@ -1327,6 +1339,25 @@ mod tests {
         assert!(!second.spec.helpers);
         let text = fs::read_to_string(root.path().join(".jobs/notes.yaml")).expect("file");
         assert!(text.contains("helpers: false"), "{text}");
+    }
+
+    /// ADR 0114: a team copies the widgets switch, so setting it makes a new version; an agent with
+    /// none writes nothing, and follows `LoomWatch`'s default.
+    #[test]
+    fn setting_widgets_is_a_new_version_and_absent_writes_nothing() {
+        let root = root();
+        save_job(root.path(), "notes", spec("Notes"), true, None).expect("first");
+        let text = fs::read_to_string(root.path().join(".jobs/notes.yaml")).expect("file");
+        assert!(!text.contains("widgets"), "{text}");
+        let mut on = spec("Notes");
+        on.widgets = Some(true);
+        let second = save_job(root.path(), "notes", on, false, Some(1)).expect("second");
+        assert_eq!(second.spec.version, 2);
+        assert_eq!(second.spec.widgets, Some(true));
+        let text = fs::read_to_string(root.path().join(".jobs/notes.yaml")).expect("file");
+        assert!(text.contains("widgets: true"), "{text}");
+        let listed = list_jobs(root.path()).expect("the list");
+        assert_eq!(listed.widgets_default, crate::widgets::DEFAULT_ON);
     }
 
     #[test]

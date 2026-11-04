@@ -185,6 +185,9 @@ export interface AgentConfig {
   /** `false`: as the starting agent, or working alone, it brings in none of the person's other
       agents from My agents (ADR 0092). The agent's own switch, filled in from My agents. */
   allowMyAgents?: boolean
+  /** Whether it may put widgets under its answer when its reply is the answer (ADR 0114). Absent:
+      LoomWatch's default. The agent's own switch, filled in from My agents. */
+  widgets?: boolean
   /** Capabilities the daemon delivers into this agent's workspace before the run. Executable, so
       it lives in the team file and saves explicitly — unlike the card positions in the sidecar. */
   capabilities?: CapabilityRef[]
