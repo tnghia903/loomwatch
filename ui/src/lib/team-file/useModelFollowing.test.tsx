@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CHECK_MODEL, DEFAULT_MODEL, FAST_MODEL } from '../ai/modelIds'
 import { CHECKER_ROLE } from '../library/checker'
 import { forgetReadings } from '../ai/reading'
-import { forgetKeyStatus } from '../ai/useKeyStatus'
+import { announceAiStatus, forgetKeyStatus } from '../ai/useKeyStatus'
 import { onTheFastTier } from '../library/onTheFastTier'
 import { ROLE_PRESETS } from '../library/roles'
 import type { AgentConfig } from './types'
@@ -177,6 +177,8 @@ describe('useModelFollowing', () => {
 
   it('with Let AI choose on, moves an unclear agent by AI’s reading, and stays put when AI can’t read it', async () => {
     readingOn = true
+    // Balance puts what gathers on the faster model.
+    ai = { openrouter: { connected: true }, priority: 'balance' }
     // "Do not judge the stories or write them": the free reading calls it a writer.
     const unclear = { ...helper, name: 'Gatherer', role: 'Find what happened in tech in the last 24 hours, from the trusted sources only. Do not judge the stories or write them: the Writer does.' }
     const { rerender, move } = follow([writer, { ...unclear, role: `${unclear.role} Keep it short.` }])
@@ -192,5 +194,32 @@ describe('useModelFollowing', () => {
     await settle()
     expect(readings).toBe(2)
     expect(move).toHaveBeenCalledWith('helper', FAST_MODEL)
+  })
+
+  it('moves a following agent when the person moves the priority while the team is open, with the note', async () => {
+    const { result, move } = follow([writer, { ...gathering }])
+    await settle()
+    // Highest quality: a researcher is on the strongest model already.
+    expect(move).not.toHaveBeenCalled()
+    act(() => announceAiStatus({ priority: 'balance' }))
+    await settle()
+    expect(move).toHaveBeenCalledTimes(1)
+    expect(move).toHaveBeenCalledWith('helper', FAST_MODEL)
+    // Its note says the slider moved it, not its configuration.
+    expect(result.current.moves.get('helper')).toEqual({ from: DEFAULT_MODEL, to: FAST_MODEL, priority: 'balance' })
+    // The writer chose its model: it never moves.
+    expect(move).not.toHaveBeenCalledWith('writer', expect.anything())
+  })
+
+  it('moves a following agent opened on its suggestion at another priority, and leaves one on what it suggests now', async () => {
+    ai = { openrouter: { connected: true }, priority: 'balance' }
+    // Both were made at Highest quality, on the strongest model; at Balance only the gatherer moves.
+    const { result, move } = follow([writer, { ...gathering }, { ...helper, id: 'drafter' }])
+    await settle()
+    await settle()
+    expect(move).toHaveBeenCalledTimes(1)
+    expect(move).toHaveBeenCalledWith('helper', FAST_MODEL)
+    expect(result.current.moves.get('helper')).toEqual({ from: DEFAULT_MODEL, to: FAST_MODEL, priority: 'balance' })
+    expect(move).not.toHaveBeenCalledWith('drafter', expect.anything())
   })
 })

@@ -63,12 +63,21 @@ describe('a following agent', () => {
   it('may move onto a plan just connected and onto its tier’s first choice, never onto OpenRouter by itself', () => {
     expect(mayMoveBetween('anthropic/claude-opus-5.5', 'anthropic:claude-opus-5-5')).toBe(true)
     expect(mayMoveBetween('anthropic/claude-opus-5.5', 'anthropic/claude-sonnet-5.5')).toBe(true)
-    expect(mayMoveBetween('chatgpt:gpt-6.1-sol', 'anthropic/claude-opus-5.5', 'strong')).toBe(false)
+    expect(mayMoveBetween('chatgpt:gpt-6.1-sol', 'anthropic/claude-opus-5.5', DEFAULT_MODEL)).toBe(false)
     expect(mayMoveBetween('anthropic:claude-opus-5-5', 'chatgpt:gpt-6.1-sol')).toBe(false)
     expect(mayMoveBetween('chatgpt:gpt-6.1-sol', 'chatgpt:gpt-6-luna')).toBe(true)
     // The plan's own model stood in for Claude Opus; the Claude credit, connected since, runs the first choice.
-    expect(mayMoveBetween('chatgpt:gpt-6.1-sol', 'anthropic:claude-opus-5-5', 'strong')).toBe(true)
-    expect(mayMoveBetween('chatgpt:gpt-6.1-sol', 'anthropic:claude-sonnet-5-5', 'strong')).toBe(false)
+    expect(mayMoveBetween('chatgpt:gpt-6.1-sol', 'anthropic:claude-opus-5-5', DEFAULT_MODEL)).toBe(true)
+    expect(mayMoveBetween('chatgpt:gpt-6.1-sol', 'anthropic:claude-sonnet-5-5', DEFAULT_MODEL)).toBe(false)
+  })
+})
+
+describe('a priority’s models on a plan', () => {
+  it('stand in with that priority’s own model where the plan can’t run the first choice, as the daemon does', () => {
+    expect(modelForTier('check', ['anthropic'], undefined, 'saving')).toBe('anthropic:claude-sonnet-5-5')
+    expect(modelForTier('check', ['anthropic'], undefined, 'quality')).toBe('anthropic:claude-opus-5-5')
+    expect(modelForTier('strong', ['chatgpt'], undefined, 'saving')).toBe('chatgpt:gpt-6-luna')
+    expect(tierOfModel('chatgpt:gpt-6-luna', 'saving')).toBe('strong')
   })
 })
 

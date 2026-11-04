@@ -15,6 +15,8 @@
 //!   models when one is kept, and the `ChatGPT` plan's when one is signed in.
 //! - `/api/models/reading` reads an agent's whole setup to suggest a model, when the operator turns
 //!   that on (`reading.rs`).
+//! - `PUT /api/ai/priority` sets what agents' models lean to: Saving, Balance or Highest quality
+//!   (`priority.rs`, ADR 0112); `GET /api/ai` says it.
 //!
 //! The router must only be mounted on a loopback listener. Changing requests need the
 //! `X-LoomWatch-Request: 1` header the app sends, so another site can't set a key.
@@ -23,6 +25,7 @@ pub mod anthropic;
 pub mod chatgpt;
 mod keys;
 mod models;
+mod priority;
 mod reading;
 
 use std::path::{Path, PathBuf};
@@ -47,8 +50,9 @@ pub(crate) use keys::PLANS_FILE;
 pub use keys::{ChatGptSecret, Keys, PlanSecrets};
 pub use models::{
     Catalog, DEFAULT_MODEL, FAST_MODEL, JobNeeds, MODEL_TIERS, Model, ModelRef, ModelTiers, Models,
-    Source, openrouter_id,
+    Priority, PriorityChanges, Source, openrouter_id,
 };
+use priority::PriorityFile;
 use reading::Reader;
 
 use crate::agent::{ApiKey, base_url, is_loopback_http};
@@ -75,6 +79,7 @@ struct Inner {
     key_url: String,
     client: Option<reqwest::Client>,
     reader: Reader,
+    priority: PriorityFile,
     claude_status: anthropic::StatusFile,
     /// Where the Claude key is checked and agents' Claude calls go.
     anthropic_base: String,
@@ -169,6 +174,7 @@ impl Ai {
                     state_dir,
                     &reading::decisions_url(key_url.strip_suffix("/key").unwrap_or(key_url)),
                 ),
+                priority: PriorityFile::new(state_dir),
                 claude_status: anthropic::StatusFile::new(state_dir),
                 anthropic_base: anthropic::base_url(),
                 chatgpt: Arc::new(chatgpt::ChatGpt::new(
@@ -261,6 +267,21 @@ impl Ai {
     #[must_use]
     pub fn anthropic_base(&self) -> &str {
         &self.inner.anthropic_base
+    }
+
+    /// What agents' models lean to (ADR 0112): the person's choice, else the table's default.
+    #[must_use]
+    pub fn priority(&self) -> Priority {
+        self.inner.priority.read()
+    }
+
+    /// Keeps what agents' models lean to.
+    ///
+    /// # Errors
+    ///
+    /// When the state folder can't be written.
+    pub fn set_priority(&self, priority: Priority) -> std::io::Result<()> {
+        self.inner.priority.write(priority)
     }
 
     /// The sources the person has connected, as their statuses say. Never reads a key.
@@ -413,6 +434,7 @@ pub fn router(ai: Ai) -> Router {
         .route("/api/ai/chatgpt/sign-in", post(sign_in_chatgpt))
         .route("/api/ai/chatgpt/check", post(check_chatgpt))
         .route(chatgpt::CALLBACK, get(chatgpt_callback))
+        .route("/api/ai/priority", put(change_priority))
         .route("/api/models", get(list_models))
         .layer(DefaultBodyLimit::max(4096))
         // A setup carries an agent's whole instructions.
@@ -448,7 +470,27 @@ async fn status(State(ai): State<Ai>) -> Json<Value> {
         "openrouter": ai.status(),
         "anthropic": ai.claude_status(),
         "chatgpt": ai.chatgpt_status(),
+        "priority": ai.priority(),
     }))
+}
+
+#[derive(Deserialize)]
+struct PriorityChange {
+    priority: Priority,
+}
+
+async fn change_priority(
+    State(ai): State<Ai>,
+    Json(change): Json<PriorityChange>,
+) -> Result<Json<Value>, ApiError> {
+    ai.set_priority(change.priority).map_err(|error| {
+        eprintln!("warning: could not keep what agents' models lean to: {error}");
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "LoomWatch couldn't save this choice. Restart LoomWatch and try again.".to_owned(),
+        )
+    })?;
+    Ok(Json(json!({"priority": ai.priority()})))
 }
 
 /// Gives the plan's calls an access token from the sign-in with `ChatGPT`.
@@ -1401,6 +1443,44 @@ mod tests {
             )
             .await;
         assert_eq!(declined, chatgpt::Outcome::Denied);
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    /// What agents' models lean to is said with the sources, kept across restarts, set only by the
+    /// app, and refused when it isn't one of the three.
+    #[tokio::test]
+    async fn the_priority_is_said_with_the_sources_and_kept() {
+        let folder = std::env::temp_dir().join(format!("loomwatch-ai-{}", uuid::Uuid::new_v4()));
+        let made = || {
+            Ai::with(
+                Keys::in_memory(),
+                Models::with_url("http://127.0.0.1:9/models", None),
+                &folder,
+                "http://127.0.0.1:9/key",
+            )
+        };
+        let app = router(made());
+        let (_, body) = send(&app, "GET", "/api/ai", None, false).await;
+        assert_eq!(body["priority"], "quality");
+        let change = || Some(json!({"priority": "balance"}));
+        let (status, _) = send(&app, "PUT", "/api/ai/priority", change(), false).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let (status, body) = send(&app, "PUT", "/api/ai/priority", change(), true).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["priority"], "balance");
+        let (status, _) = send(
+            &app,
+            "PUT",
+            "/api/ai/priority",
+            Some(json!({"priority": "cheapest"})),
+            true,
+        )
+        .await;
+        assert!(status.is_client_error(), "{status}");
+        let again = made();
+        assert_eq!(again.priority(), Priority::Balance);
+        let (_, body) = send(&router(again), "GET", "/api/ai", None, false).await;
+        assert_eq!(body["priority"], "balance");
         let _ = std::fs::remove_dir_all(&folder);
     }
 

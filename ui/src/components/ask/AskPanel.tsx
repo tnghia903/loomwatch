@@ -8,6 +8,7 @@ import { LoomMark, StatusGlyph } from '../ui/glyphs'
 import { Markdown } from '../ui/Markdown'
 import { Sources } from '../connections/Sources'
 import { AskCardView, type CardActions } from './AskCards'
+import { PrioritySlider } from '../models/PrioritySlider'
 import { AskModelPicker } from './AskModelPicker'
 import { SaidText } from '../chat/SaidText'
 import { SendButton } from '../box/BoxButtons'
@@ -230,6 +231,8 @@ export function AskPanel({ ask, view, cards, hidden = false, onHome = false, tit
           <span className="ask-switch-track" aria-hidden="true"><i /></span>
           <span>Ask me before starting a run</span>
         </label>
+        {/* What the agents Ask gives a team run on (ADR 0112); the same setting as on Usage. Not while Ask can't be used. */}
+        {!ask.unavailable && <PrioritySlider compact />}
       </form>
     </aside>
   )

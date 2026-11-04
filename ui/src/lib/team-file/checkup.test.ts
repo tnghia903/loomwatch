@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { parse } from 'yaml'
 import { describe, expect, it } from 'vitest'
 
-import { CHECK_MODEL, DEFAULT_MODEL, FAST_MODEL, type ModelTier } from '../ai/modelIds'
+import { CHECK_MODEL, DEFAULT_MODEL, DEFAULT_PRIORITY, FAST_MODEL, type ModelTier, modelForTier, setPriority } from '../ai/modelIds'
 import { CHECKER_ROLE } from '../library/checker'
 import { modelForPreset, ROLE_PRESETS } from '../library/roles'
 import { appendToRole, checkup, fixFields, jobFor, LONG_WORDS, type CheckupFinding, type CheckupInput } from './checkup'
@@ -87,6 +87,26 @@ describe('checkup', () => {
     expect(run({ agents: [{ ...researcher, model: 'anthropic/claude-haiku-5.5' }, writer], edges })).toEqual([])
     expect(run({ agents: [{ ...researcher, model: 'openai/gpt-6.1-sol' }, writer], edges })).toEqual([])
   }))
+
+  it('follows the person’s priority: below Highest quality a researcher still on the strongest model is offered the faster one', () => {
+    const team = [agent('researcher', preset('researcher'), { model: DEFAULT_MODEL }), agent('writer', preset('writer'), { model: DEFAULT_MODEL })]
+    const edges = [{ from: 'researcher', to: 'writer' }]
+    const gatherer = (agents: AgentConfig[]) => run({ agents, edges }).filter((finding) => finding.rule === 'strong-gatherer')
+    expect(gatherer(team)).toEqual([])
+    try {
+      setPriority('balance')
+      expect(gatherer(team)).toMatchObject([{ agentId: 'researcher', fix: { change: { model: FAST_MODEL } } }])
+      expect(gatherer([{ ...team[0], model: FAST_MODEL }, team[1]])).toEqual([])
+      // Saving's own faster model, for one made at Highest quality or at Balance; none for one on it already.
+      setPriority('saving')
+      const savingFast = modelForTier('fast')
+      expect(savingFast).not.toBe(FAST_MODEL)
+      expect(gatherer(team)).toMatchObject([{ fix: { change: { model: savingFast } } }])
+      expect(gatherer([{ ...team[0], model: savingFast }, team[1]])).toEqual([])
+    } finally {
+      setPriority(DEFAULT_PRIORITY)
+    }
+  })
 
   it('stays silent on every built-in job as the canvas places it', () => {
     const placed = ROLE_PRESETS.map((job) => agent(job.id, job.role, { ...modelForPreset(job) }))

@@ -5,6 +5,8 @@
 // No key or token ever comes back from the daemon: the app sends a key once, and afterwards only
 // sees what its source said about it.
 
+import { PRIORITIES, type Priority } from './modelIds'
+
 /** What the app knows about the OpenRouter connection. */
 export interface KeyStatus {
   connected: boolean
@@ -70,6 +72,8 @@ export interface AiStatus {
   openrouter: KeyStatus
   anthropic: ClaudeStatus
   chatgpt: ChatGptStatus
+  /** What agents' models lean to (ADR 0112). A daemon from before it says nothing: the table's default. */
+  priority?: Priority
 }
 
 /** One model an agent can run on. Prices are dollars per million tokens. */
@@ -122,7 +126,13 @@ export async function fetchAiStatus(): Promise<AiStatus> {
     // A daemon from before other sources says nothing of them: nothing is connected there.
     anthropic: answer.anthropic ?? { connected: false },
     chatgpt: answer.chatgpt ?? { available: false, connected: false, planUse: false },
+    ...(answer.priority && (PRIORITIES as readonly string[]).includes(answer.priority) ? { priority: answer.priority } : {}),
   }
+}
+
+/** Keeps what agents' models lean to (ADR 0112), and answers what the daemon now says. */
+export async function savePriority(priority: Priority): Promise<Priority> {
+  return (await call<{ priority: Priority }>('/api/ai/priority', 'PUT', { priority })).priority
 }
 
 export async function fetchKeyStatus(): Promise<KeyStatus> {

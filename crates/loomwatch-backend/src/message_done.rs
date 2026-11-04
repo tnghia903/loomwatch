@@ -170,7 +170,7 @@ impl MessageDone {
         if maker(&model) != maker(work_model) {
             return (model, Some(effort));
         }
-        let strong = crate::control::tier_model("strong");
+        let strong = crate::control::tier_model_at("strong", crate::control::priority());
         let model = if maker(&strong) == maker(work_model) {
             model
         } else {

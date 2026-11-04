@@ -30,18 +30,17 @@ impl BuiltInJob {
         self.role.join("\n")
     }
 
-    /// The model and thinking effort an agent doing this job starts on, as the app's templates and
-    /// palette place it.
-    pub(super) fn model(&self) -> (String, String) {
+    /// The model and thinking effort an agent doing this job starts on at `priority` (ADR 0112),
+    /// as the app's templates and palette place it.
+    pub(super) fn model_at(&self, priority: crate::ai::Priority) -> (String, String) {
         let tiers = &*crate::ai::MODEL_TIERS;
-        let needs = tiers.jobs.get(&self.id).unwrap_or(&tiers.new_agent);
-        let (_, effort) = tiers.choose(needs);
-        (super::tier_model(&needs.tier), effort.to_owned())
+        let (_, effort) = tiers.choose(&tiers.needs(&self.id, priority));
+        (super::job_model_at(&self.id, priority), effort.to_owned())
     }
 
-    /// The job as `list_jobs` lists it: enough to choose one.
+    /// The job as `list_jobs` lists it: enough to choose one, on the person's priority.
     pub(super) fn listed(&self) -> Value {
-        let (model, effort) = self.model();
+        let (model, effort) = self.model_at(super::priority());
         json!({
             "job": self.id,
             "name": self.label,

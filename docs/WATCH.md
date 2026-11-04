@@ -681,6 +681,8 @@ listener:
 | `POST /api/ai/chatgpt/sign-in` | `{ "url": … }`: the address of ChatGPT's sign-in page for a new sign-in, which comes back to `GET /api/ai/chatgpt/callback` on `127.0.0.1` within 10 minutes |
 | `POST /api/ai/chatgpt/check` | Lists the plan's models again, which also proves the sign-in still works |
 | `DELETE /api/ai/chatgpt` | `{ chatgpt, revoked }`: asks OpenAI to revoke the sign-in, then forgets it; `revoked` says whether OpenAI confirmed |
+| `GET /api/ai`, `priority` | `saving`, `balance` or `quality`: what new agents' models lean to (ADR 0112), the Your agents' models slider. Ask, its jobs and the app's model suggestions choose from that column of `schemas/model-tiers.json`. A new install says `quality` |
+| `PUT /api/ai/priority` | `{ "priority": "balance" }`: keeps it in `model-priority.json` in the state folder and answers `{ priority }`. Anything but the three is refused (422) |
 | `GET /api/models` | The models an agent can use: OpenRouter's public catalog, cut down to the models that can call tools, with a short recommended list and the default, plus `anthropic` (the Claude key's models, ids `anthropic:…`, priced as OpenRouter lists them) and `chatgpt` (the plan's models, ids `chatgpt:…`, no price). Fetched when first asked for and kept an hour; the last copy is saved in the state folder, so the list still shows offline. 502 when there is no list at all |
 
 Requests that change a key or a sign-in need the `X-LoomWatch-Request: 1` header the app sends, so

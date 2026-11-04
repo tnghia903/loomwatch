@@ -16,6 +16,7 @@ import { DailyBars, type DayValue } from './DailyBars'
 import { YouTabs } from '../you/YouTabs'
 import { LoomFace } from '../ui/glyphs'
 import { SectionHead } from '../ui/SectionHead'
+import { PrioritySlider } from '../models/PrioritySlider'
 
 /** "Oct 1", from a UTC date (`2026-10-01`). */
 function shortDate(day: string): string {
@@ -86,6 +87,10 @@ export function UsagePage() {
         <div className="lw-settings-head">
           <SectionHead page as="h1" className="t-display" title="Usage" explain={`What your agents and LoomWatch’s help used in the last ${DAYS} days, by how it was paid. Each card links to where you see the exact figure.`} />
         </div>
+        <section className="e1 lw-settings-section usage-priority">
+          <SectionHead as="h2" className="t-title" title="Your agents’ models" explain={PRIORITY_EXPLAINED} />
+          <PrioritySlider labelled />
+        </section>
         {error && <p role="alert" className="inline-error t-body">{error}</p>}
         {!report && !error && <p role="status" className="t-meta lw-settings-quiet">Loading usage…</p>}
         {report && shownSources.length === 0 && (
@@ -327,6 +332,9 @@ function WhereItWent({ report, openrouter }: { report: UsageReport; openrouter: 
     </section>
   )
 }
+
+/** What the agents' models setting picks for, behind its heading's "?" (ADR 0112). */
+const PRIORITY_EXPLAINED = 'Picks the models for new agents, the teams Ask makes, and each agent’s suggested model. Agents you already have keep theirs; change one from its model list. Ask itself uses the model shown at its top.'
 
 /** Why most of LoomWatch's help has no switch, behind its heading's "?". */
 const HELP_STAYS = 'Ask runs only when you use it, and learning only when you give feedback. Working out what a message needs stops a “hi” from starting the whole team, and checking holds answers to what you asked, so both stay on.'

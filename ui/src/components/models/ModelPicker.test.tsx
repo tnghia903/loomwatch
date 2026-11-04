@@ -28,6 +28,8 @@ const team = { agents: [gatherer, researcher, writer], responder: 'writer' }
 
 let served = catalog
 let reading = { enabled: false, readings: 0, spent: 0, today: 0, dailyLimit: 50 }
+/** What agents' models lean to, as the daemon says; absent is the table's default, Highest quality. */
+let priority: string | undefined
 let calls: { method: string; path: string; body?: { setup?: Record<string, unknown>; enabled?: boolean } }[] = []
 const readings = () => calls.filter((call) => call.path === '/api/models/reading' && call.method === 'POST')
 
@@ -35,6 +37,7 @@ beforeEach(() => {
   forgetModels(); forgetKeyStatus(); forgetReadings()
   served = catalog
   reading = { enabled: false, readings: 0, spent: 0, today: 0, dailyLimit: 50 }
+  priority = undefined
   calls = []
   try { window.localStorage.clear() } catch { /* none */ }
   vi.stubGlobal('fetch', vi.fn(async (path: string, init?: RequestInit) => {
@@ -43,7 +46,7 @@ beforeEach(() => {
     calls.push({ method, path, body })
     const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } })
     if (path === '/api/models') return json(served)
-    if (path === '/api/ai') return json({ openrouter: { connected: true } })
+    if (path === '/api/ai') return json({ openrouter: { connected: true }, ...(priority ? { priority } : {}) })
     if (path === '/api/models/reading' && method === 'PUT') { reading = { ...reading, enabled: Boolean(body?.enabled) }; return json(reading) }
     if (path === '/api/models/reading' && method === 'POST') {
       reading = { ...reading, readings: reading.readings + 1 }
@@ -215,6 +218,8 @@ describe('ModelPicker', () => {
   })
 
   it('shows how sure an unclear agent’s suggestion is, and lets AI choose once turned on', async () => {
+    // Balance, where a gatherer AI reads goes on the faster model.
+    priority = 'balance'
     render(<ModelPicker value={opus.id} onChange={() => {}} suggestFor={{ agent: gatherer, team }} />)
     fireEvent.click(await screen.findByRole('button', { name: /Claude Opus 5\.5/ }))
     // "write them" makes it a writer, so it is offered the strongest model, as a quick guess.
@@ -275,6 +280,8 @@ describe('ModelPicker', () => {
   })
 
   it('turned off, goes back to the quick guess and reads nothing more', async () => {
+    // Balance, where a gatherer AI reads goes on the faster model.
+    priority = 'balance'
     reading = { ...reading, enabled: true }
     render(<ModelPicker value={opus.id} onChange={() => {}} suggestFor={{ agent: gatherer, team }} />)
     fireEvent.click(await screen.findByRole('button', { name: /Claude Opus 5\.5/ }))
@@ -356,6 +363,8 @@ describe('ModelPicker', () => {
   })
 
   it('names on its closed button the suggestion AI read, without asking again', async () => {
+    // Balance, where a gatherer AI reads goes on the faster model.
+    priority = 'balance'
     reading = { ...reading, enabled: true }
     const onChange = vi.fn()
     const { rerender } = render(<ModelPicker value={opus.id} onChange={onChange} suggestFor={{ agent: gatherer, team }} />)
@@ -386,6 +395,11 @@ describe('ModelPicker', () => {
     expect(await said(sonnet.id, { from: opus.id, fromEffort: 'medium' })).toBe('Its configuration changed, so it moved from Claude Opus 5.5 at medium thinking effort. Undo')
     expect(await said(opus.id, { from: opus.id, fromEffort: 'medium' })).toBe('Its configuration changed, so it moved from medium thinking effort. Undo')
     expect(await said(opus.id, { from: opus.id, fromEffort: '' })).toBe('Its configuration changed, so it moved from the model’s default thinking effort. Undo')
+  })
+
+  it('says the slider moved it, not its configuration, when the person set their agents’ models', async () => {
+    render(<ModelPicker value={sonnet.id} onChange={() => {}} follows moved={{ from: opus.id, priority: 'balance', onUndo: () => {} }} />)
+    expect(await screen.findByRole('status')).toHaveTextContent('You set your agents’ models to Balanced, so it moved from Claude Opus 5.5. Undo')
   })
 
   it('says when a team names a model OpenRouter doesn’t list', async () => {

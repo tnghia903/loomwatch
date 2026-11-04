@@ -1235,6 +1235,121 @@ fn ask_chooses_models_from_the_shared_table() {
     assert!(!instructions.contains("the default for hard work"));
 }
 
+/// Ask chooses from the column of the person's priority (ADR 0112): at Balance a researcher
+/// gathers on the faster model and a job with its own pick gets it, while the writer keeps the
+/// strongest; the other priorities' jobs are there for a team the person asks to cost less or to
+/// be as good as it can be, and each kind of work a reading tells apart has its model.
+#[test]
+fn ask_chooses_at_the_persons_priority() {
+    use crate::ai::Priority;
+    let tiers = &*crate::ai::MODEL_TIERS;
+    let job = |choosing: &Value, id: &str| {
+        choosing["jobs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|job| job["job"] == id)
+            .cloned()
+            .unwrap_or_else(|| panic!("no job {id}: {choosing}"))
+    };
+    let balance = super::mcp::choosing_at(Priority::Balance);
+    assert_eq!(balance["priority"], "Balanced");
+    assert_eq!(job(&balance, "researcher")["model"], tiers.models["fast"]);
+    assert_eq!(job(&balance, "writer")["model"], tiers.models["strong"]);
+    assert_eq!(
+        job(&balance, "sheet")["model"],
+        tiers.priorities[&Priority::Balance].job_models["sheet"]
+    );
+    assert_eq!(job(&balance, "researcher")["thinkingEffort"], "medium");
+    let kinds = balance["kinds"].as_array().unwrap();
+    assert_eq!(kinds.len(), 3);
+    let gather = kinds.iter().find(|kind| kind["kind"] == "gather").unwrap();
+    assert_eq!(gather["model"], job(&balance, "researcher")["model"]);
+    assert!(
+        gather["for"]
+            .as_str()
+            .unwrap()
+            .starts_with("an agent that ")
+    );
+    let check = kinds.iter().find(|kind| kind["kind"] == "check").unwrap();
+    assert_eq!(check["model"], job(&balance, "checker")["model"]);
+    assert_eq!(check["thinkingEffort"], "high");
+    let others = balance["otherPriorities"].as_array().unwrap();
+    let names = others
+        .iter()
+        .map(|other| other["priority"].clone())
+        .collect::<Vec<_>>();
+    assert_eq!(names, [json!("Saving"), json!("Highest quality")]);
+    let quality = &others[1];
+    assert_eq!(job(quality, "researcher")["model"], tiers.models["strong"]);
+    let saving = super::mcp::choosing_at(Priority::Saving);
+    assert_ne!(job(&saving, "writer")["model"], tiers.models["strong"]);
+    // Nothing installed says otherwise: Ask is on the table's default.
+    assert_eq!(super::mcp::choosing()["priority"], "Highest quality");
+}
+
+/// What Ask is told of the setting is the setting it is given: each stop by its name, on every
+/// turn, the first with the instructions and the later ones without.
+#[tokio::test]
+async fn the_prompt_says_the_stop_it_is_given() {
+    use crate::ai::Priority;
+    let fixture = Fixture::start(None, None).await;
+    let turn = super::Turn {
+        text: "Make me a research team.".to_owned(),
+        context: super::AskContext::default(),
+    };
+    for (priority, said) in [
+        (Priority::Saving, "Saving"),
+        (Priority::Balance, "Balanced"),
+        (Priority::Quality, "Highest quality"),
+    ] {
+        for has in [Some("## What the person has"), None] {
+            let prompt = super::compose_prompt(&fixture.control, &turn, has, priority);
+            assert!(
+                prompt.contains(&format!(
+                    "\nYour agents' models: {said}.\n\n## The person's message\n"
+                )),
+                "{prompt}"
+            );
+        }
+    }
+}
+
+/// Every message tells Ask what agents' models lean to now, so a move of the slider between two
+/// messages reaches the next proposal.
+#[tokio::test]
+async fn every_message_says_what_agents_models_lean_to() {
+    let demo = assistant();
+    let fixture = Fixture::start(
+        Some(EventArchive::new(crate::db::Db::temp().await)),
+        Some(crate::engine::demo_model(demo.clone())),
+    )
+    .await;
+    let (status, started) = fixture.post("/api/ask/conversations", &json!({})).await;
+    assert_eq!(status, 201, "{started}");
+    let id = started["id"].as_str().expect("id").to_owned();
+    fixture.say(&id, "Make me a research team.").await;
+    let said = demo
+        .requests()
+        .iter()
+        .flat_map(|request| request.messages.clone())
+        .filter_map(|message| match message {
+            Message::User { content, .. } if content.contains("## The person's message") => {
+                Some(content)
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(!said.is_empty());
+    for content in &said {
+        assert!(
+            content.contains("\nYour agents' models: Highest quality.\n"),
+            "{content}"
+        );
+    }
+    fixture.end(&id).await;
+}
+
 /// Ask gives an agent a skill the way the canvas does, as a wired skill by its name, so it shows as
 /// a card and the run delivers it: `list_skills` lists what a run can deliver, and a proposal that
 /// wires a skill no run could find is refused before it reaches the canvas.

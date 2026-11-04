@@ -3,7 +3,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react'
 
 import { type Catalog, type Model, contextSize, price, shortName } from '../../lib/ai/client'
 import { makerOf, sourceMaker } from '../../lib/ai/makers'
-import { type ModelSource, type ModelTier, OFFLINE_MODEL, SOURCES, coveringPlan, modelForTier, modelNameFromId, openRouterEquivalent, parseModelRef, tierModel } from '../../lib/ai/modelIds'
+import { type ModelSource, OFFLINE_MODEL, PRIORITY_NAMES, type Priority, SOURCES, coveringPlan, modelForTier, modelNameFromId, openRouterEquivalent, parseModelRef } from '../../lib/ai/modelIds'
 import { useSetupReading } from '../../lib/ai/reading'
 import { SOURCE_INFO, connectedSources } from '../../lib/ai/sources'
 import { useAiStatus } from '../../lib/ai/useKeyStatus'
@@ -105,8 +105,7 @@ function ConnectRow({ source }: { source: ModelSource }) {
  * Said when the first choice runs through OpenRouter though its maker's plan could pay for it, or
  * when a plan's own model stands in for a first choice nothing connected can run.
  */
-function connectNudge(model: string, tier: ModelTier, source: ModelSource, connected: readonly ModelSource[], offered: (source: ModelSource) => boolean): string | undefined {
-  const first = tierModel(tier)
+function connectNudge(model: string, first: string, source: ModelSource, connected: readonly ModelSource[], offered: (source: ModelSource) => boolean): string | undefined {
   const plan = coveringPlan(first)
   const missing = plan && offered(plan) && !connected.includes(plan) ? plan : undefined
   const name = modelNameFromId(first)
@@ -178,7 +177,7 @@ export function ModelChoices({ value, suggestFor, follows, onPick }: { value: st
   const alsoGood = suggested && suggestion && connected
     ? connected.filter((source) => source !== suggestedSource).map((source) => all.find((model) => model.id === modelForTier(suggestion.tier, [source]))).filter((model): model is Model => Boolean(model))
     : []
-  const nudge = suggestion && suggestedSource && connected ? connectNudge(suggestion.model, suggestion.tier, suggestedSource, connected, offered) : undefined
+  const nudge = suggestion && suggestedSource && connected ? connectNudge(suggestion.model, suggestion.first, suggestedSource, connected, offered) : undefined
   const sections = catalog
     ? SOURCES.filter(offered).map((source) => {
         const live = !connected || connected.includes(source)
@@ -305,8 +304,8 @@ export function ModelPicker({ value, onChange, label = 'Model', disabled = false
   suggestFor?: ModelSuggestionInput
   /** Whether its model follows its suggestion; absent where following isn't offered. */
   follows?: boolean
-  /** Its model just moved with its configuration: from what, and how to put it back. */
-  moved?: { from: string; fromEffort?: string; onUndo: () => void }
+  /** Its model just moved with its configuration, or with the agents' models slider (`priority`): from what, and how to put it back. */
+  moved?: { from: string; fromEffort?: string; priority?: Priority; onUndo: () => void }
 }) {
   const { catalog } = useModels()
   const [open, setOpen] = useState(false)
@@ -352,7 +351,7 @@ export function ModelPicker({ value, onChange, label = 'Model', disabled = false
         <ChevronDown className="model-picker-arrow" size={16} aria-hidden="true" />
       </button>
       {moved && !open && <p className="t-meta model-moved" role="status">
-        Its configuration changed, so it moved from {movedFrom(moved, value)}.
+        {moved.priority ? `You set your agents’ models to ${PRIORITY_NAMES[moved.priority]}, so it moved from` : 'Its configuration changed, so it moved from'} {movedFrom(moved, value)}.
         {!disabled && <> <button type="button" className="link" onClick={moved.onUndo}>Undo</button></>}
       </p>}
       {open && <div className="e2 model-picker-pop" id={listId}>
