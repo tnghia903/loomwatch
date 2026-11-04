@@ -202,6 +202,65 @@ pub async fn send_to(
             json!({"error": "That agent isn't in My agents any more."}),
         ));
     };
+    let (path, revision) = match write_chat(daemon, &id, &job).await? {
+        Ok(written) => written,
+        Err(refused) => return Ok(refused),
+    };
+    let mut body = json!({
+        "teamPath": path,
+        "text": text,
+        "to": {"kind": "agent", "agent": chat_agent_id(&id)},
+        "expectedRevision": revision,
+        "startKey": message.start_key,
+    });
+    if let Some(reply) = message.reply_to {
+        body["replyTo"] = reply;
+    }
+    if !message.files.is_empty() {
+        body["files"] = json!(message.files);
+    }
+    let sent = daemon
+        .send_json(Method::POST, "/api/chat/messages", &[], &body)
+        .await?;
+    let status = StatusCode::from_u16(sent.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+    Ok((status, sent.json().await.unwrap_or(Value::Null)))
+}
+
+/// Before a file goes into one of My agents' own chats (`PUT /api/chat/files` at its `chatPath`):
+/// writes that chat when it isn't there yet, as its first message would, so a photo can go in the
+/// very first message too. Any other team is left as it is.
+///
+/// # Errors
+/// When `LoomWatch` can't be reached.
+pub async fn chat_for_files(daemon: &Daemon, team_path: &str) -> anyhow::Result<()> {
+    let Some(id) = team_path
+        .strip_prefix(CHATS)
+        .and_then(|rest| rest.strip_prefix('/'))
+        .and_then(|rest| rest.strip_suffix(".yaml"))
+    else {
+        return Ok(());
+    };
+    if daemon
+        .get_json(&query("/api/team", "path", team_path))
+        .await
+        .is_ok()
+    {
+        return Ok(());
+    }
+    if let Some((id, job)) = mine(daemon, id).await? {
+        // A refusal is the chat's to say, when the file reaches it.
+        let _ = write_chat(daemon, &id, &job).await?;
+    }
+    Ok(())
+}
+
+/// Writes one of My agents' own chat as a link to its saved self when it isn't already: its path
+/// and revision, or the daemon's refusal as its status and answer.
+async fn write_chat(
+    daemon: &Daemon,
+    id: &str,
+    job: &Value,
+) -> anyhow::Result<Result<(String, Option<String>), (StatusCode, Value)>> {
     let folder = daemon
         .send_json(Method::POST, "/api/bench", &[], &Value::Null)
         .await?
@@ -211,7 +270,7 @@ pub async fn send_to(
         .and_then(|reply| reply.get("folder")?.as_str().map(str::to_owned))
         .unwrap_or_else(|| CHATS.to_owned());
     let path = format!("{folder}/{id}.yaml");
-    let wanted = chat_yaml(&id, &name_of(&id, &job));
+    let wanted = chat_yaml(id, &name_of(id, job));
     let current = daemon
         .get_json(&query("/api/team", "path", &path))
         .await
@@ -240,31 +299,14 @@ pub async fn send_to(
             StatusCode::from_u16(saved.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
         let reply: Value = saved.json().await.unwrap_or(Value::Null);
         if !status.is_success() {
-            return Ok((status, reply));
+            return Ok(Err((status, reply)));
         }
         revision = reply
             .get("revision")
             .and_then(Value::as_str)
             .map(str::to_owned);
     }
-    let mut body = json!({
-        "teamPath": path,
-        "text": text,
-        "to": {"kind": "agent", "agent": chat_agent_id(&id)},
-        "expectedRevision": revision,
-        "startKey": message.start_key,
-    });
-    if let Some(reply) = message.reply_to {
-        body["replyTo"] = reply;
-    }
-    if !message.files.is_empty() {
-        body["files"] = json!(message.files);
-    }
-    let sent = daemon
-        .send_json(Method::POST, "/api/chat/messages", &[], &body)
-        .await?;
-    let status = StatusCode::from_u16(sent.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
-    Ok((status, sent.json().await.unwrap_or(Value::Null)))
+    Ok(Ok((path, revision)))
 }
 
 /// `POST /phone/v0/pinned {agent}`: pins one of My agents to the Mac's notch, as its menu in My

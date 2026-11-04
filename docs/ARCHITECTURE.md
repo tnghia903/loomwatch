@@ -463,7 +463,9 @@ iPhone or another computer connects to it and keeps nothing but a key of its own
   (`phone/`). A phone's request stops at 1 MB, except a file it sends into a team's chat or an
   agent's own chat, such as the picture of a part circled in the reader: that goes to
   `PUT /api/chat/files` as raw bytes (`application/octet-stream`, anything else refused at the
-  door), up to 25 MB, and its message names it in `files`, as the Mac's chat does (ADR 0082). A
+  door), up to 25 MB, and its message names it in `files`, as the Mac's chat does (ADR 0082). An
+  agent's own chat is written first when it has none yet, as its first message would write it, so
+  a photo can be the first thing sent to an agent (`pinned::chat_for_files`). A
   computer gets everything a person at this computer can do: its requests go on as
   a local program's would, without its key, cookies or the page it came from, and marked
   `x-loomwatch-via-device` so LoomWatch keeps a few things, such as connecting this computer to

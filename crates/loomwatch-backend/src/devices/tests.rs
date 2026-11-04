@@ -606,6 +606,90 @@ async fn every_other_call_still_stops_at_a_megabyte() {
     );
 }
 
+/// The phone's own routes read JSON, which axum would take up to 2 MB: they stop at the door's
+/// megabyte too.
+#[tokio::test]
+async fn the_phones_own_routes_stop_at_a_megabyte_too() {
+    let same = Box::leak(super::phone::pinned::chat_yaml("maya", "Maya").into_boxed_str());
+    let (daemon, calls) = pinned_stand_in(Some("maya"), Some(same)).await;
+    let door = phone_door(&daemon).await;
+    let limit = 1024 * 1024;
+    // Valid JSON, padded with spaces to `size` bytes.
+    let padded = |body: Value, size: usize| {
+        let mut bytes = body.to_string().into_bytes();
+        bytes.resize(size, b' ');
+        bytes
+    };
+    let send = |route: &str, bytes: Vec<u8>| {
+        client()
+            .post(format!("{door}{route}"))
+            .bearer_auth(KEY)
+            .header("content-type", "application/json")
+            .body(bytes)
+            .send()
+    };
+
+    let at_most = send(
+        "/phone/v0/pinned/messages",
+        padded(json!({"text": "Hi"}), limit),
+    )
+    .await
+    .unwrap();
+    assert_eq!(at_most.status(), 200);
+    assert_eq!(calls.lock().unwrap().len(), 1);
+
+    for (route, body) in [
+        ("/phone/v0/pinned/messages", json!({"text": "Hi"})),
+        ("/phone/v0/agents/maya/messages", json!({"text": "Hi"})),
+        ("/phone/v0/pinned", json!({"agent": "maya"})),
+        ("/phone/v0/agents/maya", json!({})),
+        (
+            "/phone/v0/team",
+            json!({"path": "trip.yaml", "revision": "x", "name": "x"}),
+        ),
+    ] {
+        for size in [limit + 1, 2 * limit] {
+            // Refused once the limit is passed, so the rest of a big body may meet a closed
+            // connection before the 413 is read.
+            match send(route, padded(body.clone(), size)).await {
+                Ok(over) => assert_eq!(over.status(), 413, "{route} took {size} bytes"),
+                Err(error) => assert!(size > limit + 1, "{route}, {size} bytes: {error}"),
+            }
+        }
+    }
+    assert_eq!(
+        calls.lock().unwrap().len(),
+        1,
+        "a call over the limit went on"
+    );
+}
+
+/// The Mac's chat sends no files without words ("Say what to do with it"), and neither does the
+/// phone: nothing reaches the chat.
+#[tokio::test]
+async fn files_with_no_words_go_nowhere_as_on_the_mac() {
+    let same = Box::leak(super::phone::pinned::chat_yaml("maya", "Maya").into_boxed_str());
+    let part = "/Users/me/LoomWatch/teams/.jobs/.bench/maya.files/chat/photo.jpg";
+    for route in [
+        "/phone/v0/pinned/messages",
+        "/phone/v0/agents/maya/messages",
+    ] {
+        let (daemon, calls) = pinned_stand_in(Some("maya"), Some(same)).await;
+        let door = phone_door(&daemon).await;
+        let reply = client()
+            .post(format!("{door}{route}"))
+            .bearer_auth(KEY)
+            .json(&json!({"text": "  ", "files": [{"path": part}]}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(reply.status(), 400, "{route}");
+        let body: Value = reply.json().await.unwrap();
+        assert_eq!(body["error"], "Say something first.", "{route}");
+        assert!(calls.lock().unwrap().is_empty(), "{route}");
+    }
+}
+
 /// ADR 0082: a message from the phone to an agent, pinned or in one of My agents' own chats,
 /// carries the files sent with it to the chat.
 #[tokio::test]
@@ -729,4 +813,158 @@ async fn the_chat_keeps_a_phones_file_with_the_agent_and_refuses_one_from_elsewh
             "{route}: {refused}"
         );
     }
+}
+
+/// The real chat behind the door, for a photo as big as a phone takes: it is kept in the team's
+/// chat folder, and a `teamPath` outside the teams folder is refused, as it is for the Mac.
+#[tokio::test]
+async fn a_phones_photo_is_kept_with_the_team_and_never_outside_the_teams_folder() {
+    let dir = crate::runs::tests::TeamsDir::new();
+    let elsewhere = crate::runs::tests::TeamsDir::new();
+    let team = "schemaVersion: 1\nid: trip\nname: Trip\nentrypoint: maya\nagents:\n  - id: maya\n    name: Maya\n    role: plan trips\n    model: fake/offline\nedges: []\n";
+    std::fs::write(dir.0.join("trip.yaml"), team).unwrap();
+    let outside = elsewhere.0.join("outside.yaml");
+    std::fs::write(&outside, team).unwrap();
+    let chat = crate::chat::router(None, dir.0.clone(), crate::runs::RunRegistry::default());
+    let door = phone_door(&serve(chat).await).await;
+    let upload = |team_path: String, bytes: Vec<u8>| {
+        let url = reqwest::Url::parse_with_params(
+            &format!("{door}/api/chat/files"),
+            [("teamPath", team_path.as_str()), ("name", "photo.jpg")],
+        )
+        .unwrap();
+        client()
+            .put(url)
+            .bearer_auth(KEY)
+            .header("content-type", "application/octet-stream")
+            .body(bytes)
+            .send()
+    };
+
+    // Five times what any other call from the phone may carry.
+    let photo: Vec<u8> = (0..=250u8).cycle().take(5 * 1024 * 1024).collect();
+    let reply = upload("trip.yaml".to_owned(), photo.clone()).await.unwrap();
+    assert_eq!(reply.status(), 200);
+    let kept: Value = reply.json().await.unwrap();
+    let kept_at = dir.0.join("trip.files").join("chat").join("photo.jpg");
+    assert_eq!(kept["path"], kept_at.to_string_lossy().as_ref(), "{kept}");
+    assert_eq!(kept["bytes"], photo.len());
+    assert!(
+        std::fs::read(&kept_at).unwrap() == photo,
+        "the photo changed on its way"
+    );
+
+    let name = elsewhere.0.file_name().unwrap().to_string_lossy();
+    for team_path in [
+        outside.to_string_lossy().into_owned(),
+        format!("../{name}/outside.yaml"),
+    ] {
+        let reply = upload(team_path.clone(), b"x".to_vec()).await.unwrap();
+        assert_eq!(reply.status(), 403, "{team_path}");
+    }
+    assert!(
+        !elsewhere.0.join("outside.files").exists(),
+        "a file was kept outside the teams folder"
+    );
+}
+
+/// One of My agents has no chat until its first message, so a photo sent before it would have no
+/// team to be kept with. The door writes the chat first, as that message would, and only then.
+#[tokio::test]
+async fn a_photo_can_go_in_the_first_message_to_an_agent() {
+    let dir = crate::runs::tests::TeamsDir::new();
+    let bench = dir.0.join(".jobs").join(".bench");
+    std::fs::create_dir_all(&bench).unwrap();
+    let writes: Calls = Arc::default();
+    // What the phone's routes read and save around the chat. A save writes the file, as
+    // `LoomWatch` does.
+    let root = dir.0.clone();
+    let read = move |axum::extract::Query(query): axum::extract::Query<
+        std::collections::HashMap<String, String>,
+    >| {
+        let file = root.join(&query["path"]);
+        async move {
+            match std::fs::read_to_string(file) {
+                Ok(yaml) => Ok(Json(json!({"yaml": yaml, "revision": "sha256:old"}))),
+                Err(_) => Err(axum::http::StatusCode::NOT_FOUND),
+            }
+        }
+    };
+    let root = dir.0.clone();
+    let save = move |State(calls): State<Calls>, request: Request| {
+        let root = root.clone();
+        async move {
+            record(&calls, request).await;
+            let body = calls.lock().unwrap().last().unwrap()["body"].clone();
+            let saved: Value = serde_json::from_str(body.as_str().unwrap()).unwrap();
+            std::fs::write(
+                root.join(saved["path"].as_str().unwrap()),
+                saved["yaml"].as_str().unwrap(),
+            )
+            .unwrap();
+            Json(json!({"revision": "sha256:new"}))
+        }
+    };
+    let around = Router::new()
+        .route(
+            "/api/jobs",
+            get(|| async { Json(json!({"jobs": [{"id": "maya", "name": "Maya"}]})) }),
+        )
+        .route(
+            "/api/bench",
+            post(|| async { Json(json!({"folder": ".jobs/.bench"})) }),
+        )
+        .route("/api/team", get(read).put(save))
+        .with_state(writes.clone());
+    let chat_routes = crate::chat::router(None, dir.0.clone(), crate::runs::RunRegistry::default());
+    let door = phone_door(&serve(chat_routes.merge(around)).await).await;
+    let upload = |team_path: &str, name: &str, bytes: Vec<u8>| {
+        client()
+            .put(format!(
+                "{door}/api/chat/files?teamPath={team_path}&name={name}"
+            ))
+            .bearer_auth(KEY)
+            .header("content-type", "application/octet-stream")
+            .body(bytes)
+    };
+
+    let photo = crate::test_support::png(6, 4, false);
+    // Nobody in My agents, or a team that isn't an agent's own chat, though named like one: nothing
+    // is written for them, and the chat says there is no such team.
+    for team_path in [".jobs%2F.bench%2Fnobody.yaml", "maya.yaml", "trip.yaml"] {
+        let reply = upload(team_path, "photo.png", photo.clone())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(reply.status(), 404, "{team_path}");
+    }
+    assert!(writes.lock().unwrap().is_empty());
+
+    let reply = upload(".jobs%2F.bench%2Fmaya.yaml", "photo.png", photo.clone())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(reply.status(), 200);
+    let kept_at = bench.join("maya.files").join("chat").join("photo.png");
+    assert_eq!(std::fs::read(&kept_at).unwrap(), photo);
+    {
+        let writes = writes.lock().unwrap();
+        assert_eq!(writes.len(), 1, "{writes:?}");
+        assert_eq!(writes[0]["if-none-match"], "*");
+        let saved: Value = serde_json::from_str(writes[0]["body"].as_str().unwrap()).unwrap();
+        assert_eq!(
+            saved,
+            json!({"path": ".jobs/.bench/maya.yaml", "yaml": super::phone::pinned::chat_yaml("maya", "Maya")})
+        );
+    }
+
+    // Its chat is there now, even as the Mac writes it: the next file changes nothing in it.
+    let mac = "schemaVersion: 1\nid: bench-maya\nname: Maya · chat\nentrypoint: maya\nagents:\n  - id: maya\n    name: Maya\n    role: plan trips\n    model: fake/offline\nedges: []\n";
+    std::fs::write(bench.join("maya.yaml"), mac).unwrap();
+    let reply = upload(".jobs%2F.bench%2Fmaya.yaml", "second.png", photo.clone())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(reply.status(), 200);
+    assert_eq!(writes.lock().unwrap().len(), 1);
 }
