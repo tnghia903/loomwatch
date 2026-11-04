@@ -4,7 +4,7 @@ import { Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState
 import { AppearContext, useAppear } from '../../lib/chat/appear'
 import { agentResolver, batonWords, passesOf, useBaton, type Baton } from '../../lib/chat/baton'
 import { useFollow } from '../../lib/chat/follow'
-import { handedBackText, type ChatItem, type ChatMessage, type HandedBack, type ReplyTo } from '../../lib/chat/client'
+import { handedBackText, teamFailure, type ChatItem, type ChatMessage, type HandedBack, type ReplyTo } from '../../lib/chat/client'
 import { describeDocument, documentSize, isDocument } from '../../lib/chat/document'
 import { judgedAgainst } from '../../lib/chat/doneWhen'
 import { LOOMWATCH_CHECK_ID, helperOf, helpersOf, nameWithHelpers, wearerOf, whoWorks } from '../../lib/chat/helpers'
@@ -13,7 +13,9 @@ import { clockTime, dayKey, dayLabel, listNames, took } from '../../lib/chat/for
 import { triesLine, tryingAgain } from '../../lib/chat/tries'
 import { checkReactions, talkReactions, targets, yoursOn, type AgentReaction, type Face, type ReactionAbout } from '../../lib/chat/reactions'
 import { answerRun, cancelRun, isTerminalRun, stopHelper, type RunAskedBy, type RunRecord } from '../../lib/runs/client'
-import { failedAgent, plainRunError, problemAction } from '../../lib/runs/errors'
+import { failedAgent, fixKey, problemAction, runStop } from '../../lib/runs/errors'
+import { stateAfterName } from '../../lib/state/words'
+import { teamHref } from '../../lib/team-file/teamHref'
 import { openStops, stopSentence } from '../../lib/runs/spend'
 import { useRunSession } from '../../lib/runs/useRunSession'
 import { useNow } from '../../lib/useNow'
@@ -94,6 +96,9 @@ interface WorkPieceProps {
   /** This piece's stop is the newest one LoomWatch knows how to fix, and nothing waits on you: its
    *  fix is the screen's one gold fill. Otherwise a gold ring (DESIGN_LANGUAGE §8). */
   fixFilled?: boolean
+  /** Which stop's fix is the screen's one gold fill, by `fixKey`, when it is a message's: a team's
+      failure handed back in this piece fills its fix only when it is that one. */
+  fixFill?: string | null
   /** A message the record beside the chat asked to show — the timeline's "Read the message". */
   reveal?: { id: string; at: number } | null
   team: TeamView
@@ -140,7 +145,7 @@ interface WorkPieceProps {
  * you for, the files handed to you, and the answer. The line opens and folds the replies under it,
  * in the chat; Details, beside it, opens the full record.
  */
-export function WorkPiece({ item, newest = false, approveFilled = true, fixFilled = false, reveal = null, followed, earlier = NO_TRIES, continuedFrom, team, draft, detailsOpen, answerOpen, recordOpen = detailsOpen && !answerOpen, onHandOver, onDetails, onOpenAnswer, onRun, onBaton, onLine, onTryAgain, onContinue, onDecided, onAlwaysAllow, onOpenFinding, onReply, onShowReplied, onReact, onUndoLesson, onTellAllLesson }: WorkPieceProps) {
+export function WorkPiece({ item, newest = false, approveFilled = true, fixFilled = false, fixFill = null, reveal = null, followed, earlier = NO_TRIES, continuedFrom, team, draft, detailsOpen, answerOpen, recordOpen = detailsOpen && !answerOpen, onHandOver, onDetails, onOpenAnswer, onRun, onBaton, onLine, onTryAgain, onContinue, onDecided, onAlwaysAllow, onOpenFinding, onReply, onShowReplied, onReact, onUndoLesson, onTellAllLesson }: WorkPieceProps) {
   const { run, request, notes } = item
   const live = !isTerminalRun(run.status)
   // What the agents said is shown where the work is happening — the newest piece, and any piece
@@ -200,6 +205,8 @@ export function WorkPiece({ item, newest = false, approveFilled = true, fixFille
   // Whether the schedule tries it again is said as the run ends. The session's copy sees the end
   // first; once the chat's copy has seen it too, that one is kept fresh, as when the try starts.
   const ended = isTerminalRun(run.status) ? run : record
+  // The way out this piece's own stop offers, which a team's failure in it then doesn't repeat.
+  const pieceFix = record.status === 'failed' && !tryingAgain(ended) ? problemAction(record.error)?.label ?? null : null
   const tries = triesLine(ended, earlier)
   // And the chat hears it, so the header's presence and the message box's label agree with this
   // piece rather than trailing it by a page read.
@@ -431,10 +438,10 @@ export function WorkPiece({ item, newest = false, approveFilled = true, fixFille
   return (
     <AppearContext.Provider value={news && painted}>
     <li ref={piece} className={`tc-piece${live ? ' live' : ''}${newest ? ' newest' : ''}${detailsOpen ? ' in-details' : ''}${appear ? ' tc-appear-soft' : ''}`} data-run={run.runId}>
-      <Request run={run} request={request} flash={saidFlash?.id === `request:${run.runId}`} continuedFrom={continued ? name(run.startAt ?? '') : null} name={name} solo={team.solo} onShowReplied={onShowReplied} reactions={request?.handedBack
+      <Request run={run} request={request} flash={saidFlash?.id === `request:${run.runId}`} fixFill={fixFill} pieceFix={pieceFix} continuedFrom={continued ? name(run.startAt ?? '') : null} name={name} solo={team.solo} onShowReplied={onShowReplied} reactions={request?.handedBack
         // A team's answer handed back: who took it up, not how long that took, which would read as
         // the team's time; and no face of yours, which the chat would read as on your own words.
-        ? reactOn(targets.request, `${request.handedBack.teamName}'s answer`, onRequest.map(({ face, by, at }) => ({ face, by, at })), { shown: true })
+        ? reactOn(targets.request, fromTeamSaid(request.handedBack), onRequest.map(({ face, by, at }) => ({ face, by, at })), { shown: true })
         // One of your agents asked for this work: its words, not yours.
         : run.askedBy ? reactOn(targets.request, `${run.askedBy.name}'s request`, onRequest)
         : run.messageAt
@@ -444,7 +451,7 @@ export function WorkPiece({ item, newest = false, approveFilled = true, fixFille
       {session.projection.doneWhen && !continued && (
         <MessageDoneWhen runId={run.runId} doneWhen={session.projection.doneWhen} judged={judgedAgainst(session.projection.doneWhen, session.projection.checks)} live={live} to={run.onlyAgent ? name(run.onlyAgent) : team.solo ? name(team.solo) : 'the team'} />
       )}
-      {notes.map((note) => <Note key={note.id} note={note} flash={saidFlash?.id === `note:${note.id}`} live={live} name={name} onShowReplied={onShowReplied} reactions={reactOn(targets.note(note.id), note.handedBack ? `${note.handedBack.teamName}'s answer` : `your note to ${name(note.agentId ?? '')}`, note.deliveredAt && note.agentId ? [{ face: 'seen', by: note.agentId, at: note.deliveredAt }] : [], note.handedBack ? { shown: true } : { mine: true })} />)}
+      {notes.map((note) => <Note key={note.id} note={note} fixFill={fixFill} pieceFix={pieceFix} flash={saidFlash?.id === `note:${note.id}`} live={live} name={name} onShowReplied={onShowReplied} reactions={reactOn(targets.note(note.id), note.handedBack ? fromTeamSaid(note.handedBack) : `your note to ${name(note.agentId ?? '')}`, note.deliveredAt && note.agentId ? [{ face: 'seen', by: note.agentId, at: note.deliveredAt }] : [], note.handedBack ? { shown: true } : { mine: true })} />)}
       {tries && !tryingAgain(ended) && <div className="chat-notice tc-tries"><span>{tries}</span></div>}
 
       {/* What the agents said to each other, as one line: while the work runs, who has it; at its
@@ -703,7 +710,7 @@ function Decisions({ messages, autoRan = [], operators, name }: { messages: read
 }
 
 /** What started this piece: your message, the schedule's, one of your agents', a reminder you asked for, or your Continue. */
-function Request({ run, request, flash = false, continuedFrom, name, solo, onShowReplied, reactions }: { run: RunRecord; request: ChatMessage | null; flash?: boolean; continuedFrom: string | null; name: (id: string) => string; solo?: string; onShowReplied?: (reply: ReplyTo) => (() => void) | undefined; reactions: (said: ReactNode) => ReactNode }) {
+function Request({ run, request, flash = false, fixFill = null, pieceFix = null, continuedFrom, name, solo, onShowReplied, reactions }: { run: RunRecord; request: ChatMessage | null; flash?: boolean; fixFill?: string | null; pieceFix?: string | null; continuedFrom: string | null; name: (id: string) => string; solo?: string; onShowReplied?: (reply: ReplyTo) => (() => void) | undefined; reactions: (said: ReactNode) => ReactNode }) {
   if (continuedFrom) {
     return <div className={`chat-notice${flash ? ' flash' : ''}`} data-said={`request:${run.runId}`}><span>You pressed Continue with the team · from {continuedFrom}</span><time>{clockTime(run.createdAt)}</time></div>
   }
@@ -736,7 +743,7 @@ function Request({ run, request, flash = false, continuedFrom, name, solo, onSho
       </div>
     )
   }
-  if (request?.handedBack) return <FromTeam message={request} handed={request.handedBack} said={`request:${run.runId}`} to={to} flash={flash} reactions={reactions} />
+  if (request?.handedBack) return <FromTeam message={request} handed={request.handedBack} said={`request:${run.runId}`} to={to} flash={flash} fixFill={fixFill} pieceFix={pieceFix} reactions={reactions} />
   return (
     <div className={`chat-msg mine${flash ? ' flash' : ''}`} data-said={`request:${run.runId}`}>
       <div className="chat-stack">
@@ -752,16 +759,49 @@ function Request({ run, request, flash = false, continuedFrom, name, solo, onSho
   )
 }
 
+/** What a face on a team's handed-back message is on: its answer, or, when it didn't finish or
+    start, its message. */
+function fromTeamSaid(handed: HandedBack): string {
+  return `${possessive(handed.teamName)} ${!handed.outcome || handed.outcome === 'answered' ? 'answer' : 'message'}`
+}
+
+/** "Video studio’s", and "Planners’" for a name that ends in s. */
+function possessive(name: string): string {
+  const trimmed = name.trim()
+  return `${trimmed}${/s$/i.test(trimmed) ? '’' : '’s'}`
+}
+
+/** A team and its step, named once: "Video studio’s Clip editor"; the team alone when no step is
+    named, or the step has the team's name. */
+function teamStep(team: string, step: string | null | undefined): string {
+  if (!step?.trim() || step.trim().toLowerCase() === team.trim().toLowerCase()) return team
+  return `${possessive(team)} ${step.trim()}`
+}
+
 /**
  * A team's work handed back to the agent that asked for it (ADR 0083, decision 10): the team's
  * own words, under its name and the figure of its agent that answered, never as yours, whether it
  * started the agent's turn or joined one as a note. Under it, who took it up.
  */
-function FromTeam({ message, handed, said, to, flash, reactions, children }: { message: ChatMessage; handed: HandedBack; said: string; to: string; flash: boolean; reactions: (said: ReactNode) => ReactNode; children?: ReactNode }) {
+function FromTeam({ message, handed, said, to, flash, fixFill = null, pieceFix = null, reactions, children }: { message: ChatMessage; handed: HandedBack; said: string; to: string; flash: boolean; fixFill?: string | null; pieceFix?: string | null; reactions: (said: ReactNode) => ReactNode; children?: ReactNode }) {
   const saved = useSavedJobs().jobs
   const figure = handed.agent
     ? agentFigure({ id: handed.agent, from: handed.fromAgent ? { agent: handed.fromAgent, version: 0 } : undefined }, saved)
     : figureFor(handed.teamPath)
+  // A team that failed or never started is marked as a stop, as a piece of work that stopped is,
+  // naming the team, and its step that didn't finish when the daemon says which, once: the agent's
+  // own work may stop under it too. "Didn't finish" is the one word for a failure; one someone
+  // stopped on purpose is not something wrong.
+  const stop = handed.outcome === 'failed' ? `${stateAfterName(teamStep(handed.teamName, handed.step), 'failed')}.` : handed.outcome === 'notStarted' ? 'It didn’t start.' : null
+  // The way out, as under a stopped piece of work: the fix LoomWatch's words name for a failure,
+  // unless this piece's own stop already offers it; and the team itself when the words say to
+  // open it.
+  const failure = teamFailure(message)
+  const fix = failure && problemAction(failure) && problemAction(failure)?.label !== pieceFix ? failure : null
+  const shown = handedBackText(message.text, handed)
+  // The daemon's words for a start that needs the team opened (`start` in team_requests.rs, whose
+  // tests pin them), as `problemAction` reads its words for a stop.
+  const open = handed.outcome === 'notStarted' && shown.includes(`Open ${handed.teamName}`)
   return (
     <div className={`chat-msg tc-from-team${flash ? ' flash' : ''}`} data-said={said}>
       <span className="chat-gutter">
@@ -773,8 +813,19 @@ function FromTeam({ message, handed, said, to, flash, reactions, children }: { m
         <div className="chat-meta" title={`What ${to} asked ${handed.teamName}: “${handed.request}”`}>
           <span className="chat-name hue-quiet">{handed.teamName}</span><span className="tc-to">to {to}</span><time>{clockTime(message.createdAt)}</time>
         </div>
-        {reactions(<div className="chat-bubble"><div className="chat-text"><Markdown>{handedBackText(message.text, handed)}</Markdown></div></div>)}
+        {reactions(
+          <div className={`chat-bubble${stop ? ' bad' : ''}`}>
+            {stop && <p className="tc-team-stop"><b><StatusGlyph status="failed" size={10} />{stop}</b></p>}
+            <div className="chat-text"><Markdown>{shown}</Markdown></div>
+          </div>,
+        )}
         {children}
+        {(fix || open) && (
+          <div className="tc-acts tc-team-acts">
+            {fix && <FixIt message={fix} filled={fixFill === fixKey(message.id, fix)} />}
+            {open && <a className="btn btn-ring" href={teamHref(handed.teamPath)}>Open {handed.teamName}</a>}
+          </div>
+        )}
       </div>
     </div>
   )
@@ -810,14 +861,14 @@ function FromAgent({ run, asked, text, to, flash, reactions }: { run: RunRecord;
 }
 
 /** A note you sent into this piece while an agent worked. */
-function Note({ note, flash = false, live, name, onShowReplied, reactions }: { note: ChatMessage; flash?: boolean; live: boolean; name: (id: string) => string; onShowReplied?: (reply: ReplyTo) => (() => void) | undefined; reactions: (said: ReactNode) => ReactNode }) {
+function Note({ note, flash = false, fixFill = null, pieceFix = null, live, name, onShowReplied, reactions }: { note: ChatMessage; flash?: boolean; fixFill?: string | null; pieceFix?: string | null; live: boolean; name: (id: string) => string; onShowReplied?: (reply: ReplyTo) => (() => void) | undefined; reactions: (said: ReactNode) => ReactNode }) {
   const appear = useAppear()
   const state = note.deliveredAt ? `${name(note.agentId ?? '')} took it in its next turn`
     : live ? note.now ? `Stopping ${name(note.agentId ?? '')}'s current step…` : `Waits for ${name(note.agentId ?? '')}'s current step to end`
       : 'The work ended before it was taken · kept for next time'
   if (note.handedBack) {
     return (
-      <FromTeam message={note} handed={note.handedBack} said={`note:${note.id}`} to={name(note.agentId ?? '')} flash={flash} reactions={reactions}>
+      <FromTeam message={note} handed={note.handedBack} said={`note:${note.id}`} to={name(note.agentId ?? '')} flash={flash} fixFill={fixFill} pieceFix={pieceFix} reactions={reactions}>
         <div className="chat-under"><Swap key={state}>{state}</Swap></div>
       </FromTeam>
     )
@@ -899,12 +950,17 @@ export function FixIt({ message, filled }: { message: string | null; filled: boo
     : <a className={className} href={action.href}>{action.label}</a>
 }
 
-/** The work stopped: in plain words, with the way to try again. */
+/**
+ * Work that didn't finish, or that you stopped, with the way to try again. A failure says who
+ * didn't finish in bold, then why, once: "Clip editor didn't finish. This agent runs on your Claude
+ * API credit…". "Stopped" is only ever work you stopped (`lib/state/words.ts`).
+ */
 function Stopped({ run, name, fixFilled, onTryAgain, onDetails }: { run: RunRecord; name: (id: string) => string; fixFilled: boolean; onTryAgain: () => void; onDetails?: () => void }) {
   if (run.status === 'failed') {
+    const { lead, reason } = failure(run, name)
     return (
       <Appearing className="tc-stopped bad" role="status">
-        <p><b><StatusGlyph status="failed" size={10} />The work stopped.</b> {run.error ? plainRunError(run.error.split('\n')[0], new Map(run.agentIds.map((id) => [id, { name: name(id) }]))) : run.errorCode === 'missing_canonical_response' ? `${name(run.responder)} finished without an answer.` : 'Its record says why.'}</p>
+        <p><b><StatusGlyph status="failed" size={10} />{lead}</b> {reason}</p>
         <div className="tc-acts">
           <FixIt message={run.error} filled={fixFilled} />
           <button type="button" className="btn" onClick={onTryAgain}><RotateCcw size={13} aria-hidden="true" />Try again</button>
@@ -919,6 +975,16 @@ function Stopped({ run, name, fixFilled, onTryAgain, onDetails }: { run: RunReco
       <div className="tc-acts"><button type="button" className="btn" onClick={onTryAgain}><RotateCcw size={13} aria-hidden="true" />Try again</button></div>
     </Appearing>
   )
+}
+
+/** Who a failed run's card says didn't finish, and why: the agent its error names, or the one it
+    ran; the work itself when that is nobody. */
+function failure(run: RunRecord, name: (id: string) => string): { lead: string; reason: string } {
+  const stop = run.error ? runStop(run.error.split('\n')[0], new Map(run.agentIds.map((id) => [id, { name: name(id) }]))) : null
+  const missing = !run.error && run.errorCode === 'missing_canonical_response'
+  const who = failedAgent(run) ?? (missing ? run.responder : null)
+  const lead = stop?.lead ?? `${stateAfterName(who ? name(who) : 'The work', 'failed')}.`
+  return { lead, reason: stop?.reason ?? (missing ? 'It gave no answer.' : 'It didn’t say why.') }
 }
 
 /**

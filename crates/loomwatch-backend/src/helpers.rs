@@ -93,7 +93,8 @@ pub fn name_on(team: &TeamConfig, id: &str) -> Option<String> {
     Some(name_of(shown(lead), number))
 }
 
-fn shown(agent: &AgentConfig) -> &str {
+/// What the person calls `agent`: its name, or its id when it has none.
+pub(crate) fn shown(agent: &AgentConfig) -> &str {
     if agent.name.trim().is_empty() {
         &agent.id
     } else {

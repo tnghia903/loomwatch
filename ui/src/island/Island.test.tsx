@@ -31,6 +31,8 @@ const pins: (string | null)[] = []
 let sendFails = false
 let requests: TeamRequest[] = []
 const answeredTeams: { id: string; decision: string }[] = []
+/** The team files that changed outside LoomWatch, by path: Start answers their check. */
+let unchecked = new Set<string>()
 const uploads: string[] = []
 /** Uploads held back, by file name, until their promise settles. */
 let holdUploads: Partial<Record<string, Promise<void>>> = {}
@@ -75,6 +77,7 @@ beforeEach(() => {
   sendFails = false
   requests = []
   answeredTeams.length = 0
+  unchecked = new Set()
   uploads.length = 0
   holdUploads = {}
   jobs = []
@@ -116,6 +119,10 @@ beforeEach(() => {
       const id = decodeURIComponent(url.split('/').at(-1)!)
       const { decision } = JSON.parse(String(init.body)) as { decision: 'start' | 'decline' }
       answeredTeams.push({ id, decision })
+      const asked = requests.find((request) => request.id === id)
+      if (decision === 'start' && asked && unchecked.has(asked.team.path)) {
+        return json({ error: `${asked.team.name} needs a check before it runs.`, code: 'team_needs_review', teamPath: asked.team.path, teamName: asked.team.name, teamRevision: 'sha256:changed', review: [{ text: 'Planner runs on LoomWatch with fake/offline.', warn: false }] }, 428)
+      }
       requests = requests.map((request) => (request.id === id ? { ...request, status: decision === 'start' ? 'started' : 'declined', runId: decision === 'start' ? 'crew1' : null } : request))
       return json(requests.find((request) => request.id === id))
     }
@@ -1937,6 +1944,32 @@ describe('the notch as the pinned agent’s slot, and its crew', () => {
     expect(stage.querySelector('.island-stage-figure.glow')?.closest('.island-stage-member')?.querySelector('b')?.textContent).toBe('Researcher')
     // Its work is on Maya's stage, not a row of its own.
     expect(container.querySelectorAll('.island-row:not(.island-pinned)')).toHaveLength(0)
+  }, 20_000)
+
+  it('opens LoomWatch at the check of a team that changed outside it when Start is pressed, and the request keeps waiting', async () => {
+    vi.stubGlobal('WebSocket', QuietSocket)
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    unchecked = new Set(['trip.yaml'])
+    requests = [{ id: 'tr1', askedBy: { runId: 'c1', agent: 'maya', chatPath: '.jobs/.bench/maya.yaml' }, team: { path: 'trip.yaml', name: 'Trip planner' }, request: 'Plan three gentle days in Đà Lạt', status: 'waiting', runId: null, problem: null, createdAt: iso(1), finishedAt: null }]
+    const { container } = render(<Island />)
+    place()
+    const island = container.querySelector('.island')!
+    await waitFor(() => expect(island.getAttribute('data-view')).toBe('ask'))
+    const card = within(container.querySelector<HTMLElement>('.island-card')!)
+    fireEvent.click(card.getByRole('button', { name: 'Start Trip planner' }))
+    // LoomWatch opens at the team's chat with the check of this request over it.
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'open', link: '/?path=trip.yaml&view=chat&teamRequest=tr1' }))
+    expect(answeredTeams).toEqual([{ id: 'tr1', decision: 'start' }])
+    expect(card.getByRole('status').textContent).toBe('Check Trip planner in LoomWatch to start it.')
+    expect(card.queryByRole('alert')).toBeNull()
+    // It still waits for Start in Maya's row, and nothing says it didn't start.
+    await waitFor(() => expect(island.getAttribute('data-view')).not.toBe('ask'), { timeout: 5000 })
+    fireEvent.pointerEnter(container.querySelector('.island-shape')!, { pointerType: 'mouse' })
+    await waitFor(() => expect(island.getAttribute('data-view')).toBe('list'))
+    const row = within(container.querySelector<HTMLElement>('.island-pinned')!)
+    expect(row.getByRole('button', { name: 'Start Trip planner' })).toBeTruthy()
+    expect(container.textContent).not.toContain('didn’t start')
   }, 20_000)
 
   it('shows a request for a team in Maya’s row as her words, with Start in the box’s place until you write something else', async () => {

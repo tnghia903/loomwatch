@@ -183,9 +183,10 @@ describe('The first run', () => {
     await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/ai')).toBe(true))
     await ask('Explain how compound interest works')
     await waitFor(() => expect(sent('/api/chat/messages')).toHaveLength(1))
-    settle('run-1', { status: 'failed', error: 'Your OpenRouter account is out of credits. Add credits at openrouter.ai, then try again.' })
+    settle('run-1', { status: 'failed', error: 'pipeline node helper failed: Your OpenRouter account is out of credits. Add credits at openrouter.ai, then try again.', agentNames: { helper: 'Guide' } })
     const stopped = await screen.findByRole('alert')
-    expect(stopped).toHaveTextContent('out of credits')
+    // Who didn't finish, by its name, then why.
+    expect(stopped).toHaveTextContent(/^Guide didn’t finish\. Your OpenRouter account is out of credits/)
     fireEvent.click(within(stopped).getByRole('button', { name: 'Try again' }))
     await waitFor(() => expect(sent('/api/chat/messages')).toHaveLength(2))
     expect(sent('/api/chat/messages')[1].text).toBe('Explain how compound interest works')
@@ -197,6 +198,21 @@ describe('The first run', () => {
     expect(onDone).toHaveBeenCalled()
     expect(sessionStorage.getItem('loomwatch:first-run')).toBe('done')
     expect(sent('/api/you', 'PUT')).toHaveLength(0)
+  })
+
+  // One word per state: an answer that never came didn't finish; "stopped" is only one you stopped.
+  it('says an agent that gave no reason didn’t finish, and keeps stopped for one you stopped', async () => {
+    render(<FirstRun onLookAround={vi.fn()} onDone={vi.fn()} />)
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/ai')).toBe(true))
+    await ask('Explain how compound interest works')
+    await waitFor(() => expect(sent('/api/chat/messages')).toHaveLength(1))
+    settle('run-1', { status: 'failed', error: null })
+    const failed = await screen.findByRole('alert')
+    expect(failed).toHaveTextContent(/^Your agent didn’t finish\.Try again$/)
+    fireEvent.click(within(failed).getByRole('button', { name: 'Try again' }))
+    await waitFor(() => expect(sent('/api/chat/messages')).toHaveLength(2))
+    settle('run-2', { status: 'cancelled', error: null })
+    expect(await screen.findByText('You stopped your agent before it answered.')).toBeInTheDocument()
   })
 
   it('doesn’t offer it to someone who told their agents about themselves already', async () => {

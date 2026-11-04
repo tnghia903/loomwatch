@@ -979,10 +979,30 @@ at a little desk, whose workbench opens while it is pointed at. For the agent in
 - the pinned agent may ask one of the person's teams to do part of a job (`my_teams`, `ask_team`
   on the Team Bus, `team_requests.rs`): the request waits at `GET /api/team-requests` until the
   person presses Start (`POST /api/team-requests/{id}`), the team runs as any run, and its answer
-  is sent back into the agent's chat, which starts the agent's next turn. That message is stored
+  is sent back into the agent's chat, which starts the agent's next turn. A team that changed
+  outside LoomWatch (ADR 0048) starts nothing on Start: the answer is 428 `team_needs_review` with
+  its check, as a run's start gives one (409 here means already answered), and the request keeps
+  waiting. The notch then opens the team's chat with that check over it (`?teamRequest=<id>`,
+  `TeamRequestCheck`), whose Trust and run approves the version shown and presses Start again, so
+  the agent's own request runs; the phone, which shows no check, shows the words. That message is stored
   with `handed_back` (the team, its answering agent, the request and the words before the answer),
   so the chat shows it as the team's, under its name and that agent's figure, not as the person's.
-  Only the daemon sets it: `POST /api/chat/messages` ignores one sent from a page.
+  Only the daemon sets it: `POST /api/chat/messages` ignores one sent from a page. It also says how
+  the team's work ended (`outcome`: `answered`, `failed`, `cancelled` or `notStarted`) and, for a
+  failure, its step that didn't finish (`step`, by the team's name for it), and the chat marks a
+  failure ("Trip planner's Route finder didn't finish.", the reason under it) or a refused start
+  ("It didn't start.") as a stop, with the way out a stopped piece of work offers (the fix
+  LoomWatch's words name, unless the piece's own stop already offers it; "Open Trip planner" when
+  the words say to open it). A step's failure is said with the step's name, not the run's words for
+  it, who first and the reason once ("Route finder didn't finish. Your OpenRouter account is out of
+  credits…"; `plain_stop` in `team_requests.rs`, and the app's `runStop` and `plainRunError` say the
+  same of any run's error, as a stopped piece of work's card does). The message is never the
+  person's words: its links
+  ask first (ADR 0104), it teaches nothing (ADR 0078), and when it joins a turn as a note
+  (`QueuedNote.from_team`) it never answers the agent's question to the person (ADR 0110), the agent
+  reads it under "## From a team you asked" rather than as direction, a failed turn names the team
+  and the agent by its name ("Coby couldn't finish after Trip planner's message"), and the archive
+  marks it `fromTeam`, so the run's record shows it as LoomWatch passing it on.
 
 `notch_panel.rs` is the one module in the workspace that calls `AppKit` directly.
 

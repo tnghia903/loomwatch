@@ -110,14 +110,14 @@ describe('answerVerdict', () => {
   })
 
   it('calls an answer from a run that did not finish partial, whatever else it holds', () => {
-    expect(answerVerdict({ ...finished, phase: 'partial', receipt: receipt([{ tone: 'bad', text: 'Researcher stopped (exit code 1)' }]) })).toMatchObject({ tone: 'bad', label: 'Partial answer', detail: 'Researcher stopped (exit code 1).' })
+    expect(answerVerdict({ ...finished, phase: 'partial', receipt: receipt([{ tone: 'bad', text: 'Researcher didn’t finish (exit code 1)' }]) })).toMatchObject({ tone: 'bad', label: 'Partial answer', detail: 'Researcher didn’t finish (exit code 1).' })
     expect(answerVerdict({ ...finished, phase: 'cancelled' })).toMatchObject({ label: 'Stopped early', detail: 'The team did not finish, so parts of this answer may be missing.' })
   })
 
   // A replay pages its record in: before the last page, stages that ran read "didn't run" and a
   // normal end of turn reads as a stop, so the count would start wrong and jump.
   it('waits for the whole record before counting anything', () => {
-    expect(answerVerdict({ ...finished, settled: false, receipt: receipt([{ tone: 'bad', text: 'Planner stopped (end turn)' }]) })).toMatchObject({ tone: 'live', label: 'Reading the record', findings: [], reviewable: false })
+    expect(answerVerdict({ ...finished, settled: false, receipt: receipt([{ tone: 'bad', text: 'Planner didn’t finish (end turn)' }]) })).toMatchObject({ tone: 'live', label: 'Reading the record', findings: [], reviewable: false })
   })
 
   it('lets your own review stand over the findings', () => {

@@ -8,7 +8,7 @@ import type { AutoRan, Evidence, RunPhase, RunProjection } from '../watch/events
 import { formatTokens, type TokenSummary, type TurnPurpose, costWords } from '../watch/usage'
 import { failuresOf, readPhrase, workCount } from './reads'
 import { describeEvidence } from './weft'
-import { stateLabel } from '../state/words'
+import { stateAfterName, stateLabel } from '../state/words'
 
 /**
  * The run receipt: a printed account of one run, in the order a person checks it.
@@ -193,13 +193,14 @@ function refusalLines(agent: ReceiptAgent, items: readonly Evidence[], carriedOn
   return lines
 }
 
-/** How an agent's line says where its part ended. */
+/** How an agent's line says where its part ended. A failure "didn't finish"; "stopped" is only
+    work you stopped (`lib/state/words.ts`). */
 interface EndWords {
   done: string
-  /** Before why: "Writer stopped (exit code 1)". */
-  stopped: string
-  /** Before LoomWatch's own sentence for a stop: "Writer stopped. Your OpenRouter account is…". */
-  stoppedBecause: string
+  /** Before why: "Writer didn’t finish (exit code 1)". */
+  failed: string
+  /** Before LoomWatch's own sentence for a stop: "Writer didn’t finish. Your OpenRouter account is…". */
+  failedBecause: string
   stoppedByYou: string
   unfinished: string
   working: string
@@ -207,19 +208,19 @@ interface EndWords {
 
 const agentWords = (name: string): EndWords => ({
   done: `${name} finished`,
-  stopped: `${name} stopped`,
-  stoppedBecause: `${name} stopped`,
+  failed: stateAfterName(name, 'failed'),
+  failedBecause: stateAfterName(name, 'failed'),
   stoppedByYou: `${name} was stopped before it finished`,
-  unfinished: `${name} didn’t finish`,
+  unfinished: stateAfterName(name, 'failed'),
   working: `${name} is still working`,
 })
 
 /** LoomWatch's own check of the answer (ADR 0098): what a reader needs is whether the answer was checked. */
 const CHECK_WORDS: EndWords = {
   done: `${LOOMWATCH_NAME} checked the answer`,
-  stopped: `${LOOMWATCH_NAME} couldn’t check the answer`,
+  failed: `${LOOMWATCH_NAME} couldn’t check the answer`,
   // The sentence after it names LoomWatch.
-  stoppedBecause: 'The answer wasn’t checked',
+  failedBecause: 'The answer wasn’t checked',
   stoppedByYou: 'You stopped the run before the answer was checked',
   unfinished: `${LOOMWATCH_NAME} didn’t finish checking the answer`,
   working: `${LOOMWATCH_NAME} is still checking the answer`,
@@ -310,14 +311,15 @@ export function buildReceipt(input: ReceiptInput): Receipt {
     else if ((status === 'failed' || status === 'stopped' || status === 'unavailable') && run.error && run.problem && (!check || ACCOUNT_STOPS.has(run.problem.kind))) {
       // A stop LoomWatch knows the way out of (a plan's limit, a sign-in that ended) is said in its
       // own words for it, which say what to do: on the line, and not again under "Worth a look".
-      lines.push({ tone: 'bad', text: `${words.stoppedBecause}. ${run.error}`, agentId: agent.id })
+      lines.push({ tone: 'bad', text: `${words.failedBecause}. ${run.error}`, agentId: agent.id })
       told.add(`${agent.id}\n${run.error}`)
     } else if (status === 'failed' || status === 'stopped' || status === 'unavailable') {
       // Any other error: name who reported it here, and what it said is under "Worth a look". A
       // turn its app reported as failed still ends `end_turn`, so the stop reason says nothing.
       const why = run.error ? ` (${input.harnessLabels.get(agent.id) || 'its model'} reported an error)`
         : run.stopReason ? ` (${run.stopReason.replace(/_/g, ' ')})` : run.exitCode !== null ? ` (exit code ${run.exitCode})` : ''
-      lines.push({ tone: 'bad', text: !why && stoppedByYou ? words.stoppedByYou : `${words.stopped}${why}`, agentId: agent.id })
+      // One you stopped with the run says so, whatever its process said as it ended.
+      lines.push({ tone: 'bad', text: stoppedByYou && (!why || status === 'stopped') ? words.stoppedByYou : `${words.failed}${why}`, agentId: agent.id })
     } else if (terminal) lines.push({ tone: 'bad', text: stoppedByYou ? words.stoppedByYou : words.unfinished, agentId: agent.id })
     else lines.push({ tone: 'wait', text: words.working, agentId: agent.id })
 

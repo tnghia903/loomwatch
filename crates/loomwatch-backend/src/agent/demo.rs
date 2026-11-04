@@ -176,6 +176,25 @@ impl Demo {
         (demo, hold)
     }
 
+    /// [`Demo::held`], and once the replies run out every request fails, as `OpenRouter` reporting
+    /// `message`: an agent still at work whose next turn breaks.
+    #[must_use]
+    pub fn held_then_failing(replies: Vec<Completion>, message: &str) -> (Self, Arc<Hold>) {
+        let hold = Arc::new(Hold {
+            waiting: AtomicUsize::new(0),
+            release: tokio::sync::Semaphore::new(0),
+        });
+        let demo = Self {
+            script: Some(Arc::new(Script {
+                replies: Mutex::new(replies.into()),
+                hold: Some(Arc::clone(&hold)),
+                fail: Some((String::new(), message.to_owned())),
+                ..Script::default()
+            })),
+        };
+        (demo, hold)
+    }
+
     /// [`Demo::responder`], with the requests `hold_when` picks streaming `partial` (when it is not
     /// empty) and then waiting at the returned [`Hold`] until the test lets them through or their
     /// turn is stopped: an agent part way through a turn.

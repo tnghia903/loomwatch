@@ -1,7 +1,7 @@
 import { ArrowDown, ChevronDown, ChevronRight, Play, Reply, RotateCcw, Search, X } from '../ui/icon'
 import { Fragment, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
-import { continueWithTeam, findInChat, sendChatMessage, startFromNote, stillAnswering, uploadChatFile, type ChatFile, type ChatItem, type ChatMessage, type ChatTarget, type Found, type FoundPassage, type FoundPiece, type NoteFailure, type ReplyTo } from '../../lib/chat/client'
+import { continueWithTeam, findInChat, sendChatMessage, startFromNote, stillAnswering, teamFailure, uploadChatFile, type ChatFile, type ChatItem, type ChatMessage, type ChatTarget, type Found, type FoundPassage, type FoundPiece, type NoteFailure, type ReplyTo } from '../../lib/chat/client'
 import type { HandOver } from '../../lib/chat/handed'
 import { carriesFiles, dropped, useChatAttachments } from '../../lib/chat/attachments'
 import { FindScopeContext, showFoundWords, type FindTerm } from '../../lib/chat/findWords'
@@ -19,7 +19,7 @@ import { FollowContext, type ChatFollow } from '../../lib/chat/follow'
 import { useTeamChat, type PendingMessage } from '../../lib/chat/useTeamChat'
 import { DaemonUnreachableError } from '../../lib/daemonFetch'
 import { inAboutYou, tellAllAgents, undoLesson, undoTellAllAgents, type Lesson } from '../../lib/lessons/client'
-import { failedAgent, plainRunError, problemAction } from '../../lib/runs/errors'
+import { failedAgent, fixKey, plainRunError, problemAction } from '../../lib/runs/errors'
 import { answerRun, newStartKey, RunApiError, STALE_TEAM_REVISION, TEAM_NEEDS_REVIEW, type RunRecord, type TeamReview } from '../../lib/runs/client'
 import type { ReceiptLine } from '../../lib/story/receipt'
 import type { AlwaysAllowed } from '../../lib/tools/allow'
@@ -897,7 +897,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
               <Fragment key={item.kind === 'work' ? item.run.runId : item.message.id}>
                 {newDay && <li className="tc-day" aria-hidden="true"><span>{dayLabel(at)}</span></li>}
                 {item.kind === 'work'
-                  ? <WorkPiece item={item} newest={item.run.runId === newestRun} approveFilled={!decision || decision.runId === item.run.runId} fixFilled={fixFill === item.run.runId} reveal={shown?.runId === item.run.runId ? shown : null} followed={item.run.followsRunId ? runs.get(item.run.followsRunId) ?? null : null} earlier={earlierTries(item.run, runs)} continuedFrom={continuedFrom.has(item.run.runId)} team={team} draft={draft}
+                  ? <WorkPiece item={item} newest={item.run.runId === newestRun} approveFilled={!decision || decision.runId === item.run.runId} fixFilled={fixFill === item.run.runId} fixFill={fixFill} reveal={shown?.runId === item.run.runId ? shown : null} followed={item.run.followsRunId ? runs.get(item.run.followsRunId) ?? null : null} earlier={earlierTries(item.run, runs)} continuedFrom={continuedFrom.has(item.run.runId)} team={team} draft={draft}
                       detailsOpen={detailsRunId === item.run.runId} answerOpen={answerRunId === item.run.runId} recordOpen={recordRunId === undefined ? undefined : recordRunId === item.run.runId} onHandOver={onHandOver} onDetails={onDetails} onOpenAnswer={onOpenAnswer} onRun={chat.applyRun} onBaton={onBaton} onLine={line.onLine} onTryAgain={tryAgain} onContinue={keepGoing}
                       onDecided={() => setDraft('')} onAlwaysAllow={onAlwaysAllow} onOpenFinding={onOpenFinding} onReply={startReply} onShowReplied={showReplied} onReact={chat.react} onUndoLesson={undoLearned} onTellAllLesson={tellAllLearned} />
                   : <TeamNote message={item.message} reactions={item.reactions} lessons={item.lessons} fixFill={fixFill} name={name} hue={(id) => team.hues.get(id) ?? 1} flash={noteFlash?.id === item.message.id ? noteFlash.at : null} onReply={startReply} onShowReplied={showReplied} onStart={() => void startNote(item.message)} onReact={chat.react} onUndoLesson={undoLearned} onTellAllLesson={tellAllLearned} />}
@@ -1199,23 +1199,23 @@ function TeamNote({ message, reactions, lessons, fixFill = null, name, hue, flas
 /**
  * The one stop whose way out is the screen's gold fill (DESIGN_LANGUAGE §8): the newest shown that
  * LoomWatch knows how to fix, and only while nothing waits on your answer. A piece of work is named
- * by its run, agents that could not answer by their note and cause (`fixKey`).
+ * by its run; agents that could not answer, and a team's failure handed back, by their message and
+ * cause (`fixKey`).
  */
 function filledFix(items: readonly ChatItem[], decision: OpenDecision | null): string | null {
   if (decision) return null
   for (const item of [...items].reverse()) {
     if (item.kind === 'work') {
       if (item.run.status === 'failed' && !tryingAgain(item.run) && problemAction(item.run.error)) return item.run.runId
+      // Within a piece, the newest first: its notes, then the message that started it.
+      const team = [...(item.notes ?? [])].reverse().concat(item.request ? [item.request] : []).find((message) => problemAction(teamFailure(message)))
+      if (team) return fixKey(team.id, teamFailure(team) ?? '')
       continue
     }
     const fixable = couldNotAnswer(item.message.answers?.failed ?? []).findLast((group) => problemAction(group.error))
     if (fixable) return fixKey(item.message.id, fixable.error)
   }
   return null
-}
-
-function fixKey(messageId: string, error: string): string {
-  return `${messageId}\n${error}`
 }
 
 /** The agents that could not answer a note, those stopped by the same thing together: one card,

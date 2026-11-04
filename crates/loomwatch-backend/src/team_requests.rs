@@ -5,7 +5,10 @@
 //! records a request here as waiting and returns at once. The island at the notch lists the
 //! requests (`GET /api/team-requests`) and answers one (`POST /api/team-requests/{id}`): Start
 //! launches a run of that team exactly as the person starting it in `LoomWatch` would, and Not now
-//! declines it. When a started run ends, its answer goes into the asking agent's own chat as a
+//! declines it. A team that changed outside `LoomWatch` starts nothing until the person has
+//! checked it (ADR 0048): Start answers with its check and the request keeps waiting, so the
+//! check's Trust and run approves the team and presses Start again, and the agent's own request
+//! runs. When a started run ends, its answer goes into the asking agent's own chat as a
 //! message to it, through the chat's own send path, so it is archived and shown in its Chat tab
 //! and the agent writes the person their answer.
 //!
@@ -19,14 +22,17 @@ use std::time::Duration;
 use axum::extract::{Path as AxumPath, Query, State};
 use axum::http::StatusCode;
 use axum::middleware;
+use axum::response::{IntoResponse as _, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use uuid::Uuid;
 
 use crate::api::ApiError;
 use crate::archive::EventArchive;
+use crate::chat::HandedOutcome;
 use crate::runs::{
     LaunchError, RunAskedBy, RunRegistry, RunStatus, StartRunOutcome, StartRunRequest,
 };
@@ -219,7 +225,7 @@ async fn answer_route(
     State(state): State<TeamRequestsState>,
     AxumPath(id): AxumPath<String>,
     Json(answer): Json<Answer>,
-) -> Result<Json<TeamRequest>, ApiError> {
+) -> Result<Response, ApiError> {
     // Taken under the lock, so a second press finds it no longer waiting.
     let mut taken = false;
     let request = update(&id, |request| {
@@ -248,18 +254,43 @@ async fn answer_route(
     }
     let request = match answer.decision {
         // Boxed: a run's start is a large future, and the route's would pass Clippy's limit.
-        Decision::Start => Box::pin(start(&state, request)).await,
+        Decision::Start => match Box::pin(start(&state, request.clone())).await {
+            Ok(started) => started,
+            Err(review) => return Ok(needs_check(&request, &review)),
+        },
         Decision::Decline => {
             decline(&state, &request).await;
             request
         }
     };
-    Ok(Json(request))
+    Ok(Json(request).into_response())
+}
+
+/// The answer to a Start whose team changed outside `LoomWatch` (ADR 0048): the request waits
+/// again, and the answer carries the team's check as a run's start does (`runs::start_response`),
+/// for the page that pressed Start to show. Its Trust and run approves the version shown and
+/// presses Start again. Not 409, which here means the request was already answered, as the phone
+/// reads it; the phone, which shows no check, shows the words.
+fn needs_check(request: &TeamRequest, review: &crate::runs::NeedsReview) -> Response {
+    update(&request.id, |waiting| waiting.status = Status::Waiting);
+    let mut body = serde_json::to_value(review).unwrap_or_else(|_| json!({}));
+    body["error"] = json!(format!(
+        "{} was added or changed outside LoomWatch. To check it before it runs, press Start at the \
+         notch on your Mac.",
+        request.team.name
+    ));
+    body["code"] = json!(crate::runs::TEAM_NEEDS_REVIEW);
+    (StatusCode::PRECONDITION_REQUIRED, Json(body)).into_response()
 }
 
 /// Start the team as the person would, and hand its answer back when it ends. The run keeps
 /// which agent asked, so the team's chat shows the request as that agent's, not the person's.
-async fn start(state: &TeamRequestsState, request: TeamRequest) -> TeamRequest {
+/// A team that needs the person's check first starts nothing and tells the agent nothing: it
+/// answers that check.
+async fn start(
+    state: &TeamRequestsState,
+    request: TeamRequest,
+) -> Result<TeamRequest, Box<crate::runs::NeedsReview>> {
     let launch = StartRunRequest::from_chat(
         &request.team.path,
         &request.request,
@@ -285,29 +316,25 @@ async fn start(state: &TeamRequestsState, request: TeamRequest) -> TeamRequest {
             let started = update(&request.id, |request| request.run_id = Some(run_id.clone()))
                 .unwrap_or(request);
             tokio::spawn(hand_back(state.clone(), started.id.clone(), run_id));
-            return started;
+            return Ok(started);
         }
-        Ok(StartRunOutcome::IdempotencyConflict { .. }) => {
-            (format!("{} is already starting.", request.team.name), None)
-        }
-        Err(LaunchError::NeedsReview(_)) => (
-            format!(
-                "{0}, or one of its agents, changed outside LoomWatch, so it didn't run. Open {0} \
-                 and press Run team to see what it will do, then ask again.",
-                request.team.name
-            ),
+        Err(LaunchError::NeedsReview(review)) => return Err(review),
+        // Read at the notch and in the asking agent's chat, each beside a way to open the team, so
+        // they say what to do there and who to ask again.
+        Ok(StartRunOutcome::IdempotencyConflict { .. }) => (
+            format!("{} was already starting this.", request.team.name),
             None,
         ),
         Err(LaunchError::StaleRevision { .. }) => (
             format!(
-                "{} changed while it was starting, so it didn't run. Ask again.",
-                request.team.name
+                "{} changed while it was starting, so it didn't run. Ask {} again.",
+                request.team.name, request.asked_by.name
             ),
             None,
         ),
         Err(LaunchError::Api(error)) => (
             format!(
-                "{} can't run as it is. Open it in LoomWatch to see what to fix.",
+                "{0} can't run as it is. Open {0} to see what to fix.",
                 request.team.name
             ),
             Some(error.message),
@@ -325,11 +352,18 @@ async fn start(state: &TeamRequestsState, request: TeamRequest) -> TeamRequest {
         state,
         &failed,
         &text,
-        Some(handed_back(state, &failed, None, Some(heading))),
+        Some(handed_back(
+            &failed,
+            team_of(state, &failed).as_ref(),
+            None,
+            Some(heading),
+            HandedOutcome::NotStarted,
+            None,
+        )),
         true,
     )
     .await;
-    failed
+    Ok(failed)
 }
 
 /// What the asking agent is told when `request`'s team could not start, and the words before
@@ -349,14 +383,26 @@ fn told_not_started(
     (format!("{heading} {problem}"), heading)
 }
 
-/// What the asking agent is told when `request`'s team stopped before it finished, and the words
-/// before the reason, which is what its chat shows.
-fn told_stopped(request: &TeamRequest, problem: &str) -> (String, String) {
-    let heading = format!(
-        "{} stopped before it finished “{}”:",
-        request.team.name, request.request
-    );
-    (format!("{heading} {problem}"), heading)
+/// What the asking agent is told when `request`'s team didn't finish, or someone stopped it
+/// (`stopped`), and the words before what its chat shows: the reason alone when `stop` names the
+/// step that didn't finish, which the chat names with the team ("Video studio's Clip editor didn't
+/// finish."), or the whole of `stop`.
+fn told_stopped(request: &TeamRequest, stop: &PlainStop, stopped: bool) -> (String, String) {
+    // One word per state, which the agent says on to the person: a failure "didn't finish";
+    // "stopped" is only work someone stopped.
+    let heading = if stopped {
+        format!(
+            "{} was stopped before it finished “{}”:",
+            request.team.name, request.request
+        )
+    } else {
+        format!("{} didn't finish “{}”:", request.team.name, request.request)
+    };
+    let (heading, shown) = match stop.step_that_did_not_finish().and(stop.lead()) {
+        Some(lead) => (format!("{heading} {lead}"), stop.reason.clone()),
+        None => (heading, stop.sentence()),
+    };
+    (format!("{heading} {shown}"), heading)
 }
 
 /// Not now: the asking agent hears it while its turn is still at work, and nothing otherwise.
@@ -385,8 +431,9 @@ async fn hand_back(state: TeamRequestsState, id: String, run_id: String) {
     let Some(request) = get_request(&id) else {
         return;
     };
+    let team = team_of(&state, &request);
     // The agent reads whose answer follows; the chat shows the answer as the team's.
-    let (status, problem, text, heading) = match &record {
+    let (status, problem, text, heading, outcome, step) = match &record {
         Some(record) if record.status == RunStatus::Succeeded => {
             let answer = record.reply.as_deref().unwrap_or_default().trim();
             let answer = crate::cap_middle_text(answer, ANSWER_KEPT_CHARS);
@@ -396,17 +443,40 @@ async fn hand_back(state: TeamRequestsState, id: String, run_id: String) {
                 None,
                 format!("{heading}\n\n{answer}"),
                 Some(heading),
+                HandedOutcome::Answered,
+                None,
             )
         }
         Some(record) => {
-            let problem = stopped_because(record.status, record.error.as_deref());
-            let (text, heading) = told_stopped(&request, &problem);
-            (Status::Failed, Some(problem), text, Some(heading))
+            let stop = stopped_because(record.status, record.error.as_deref(), team.as_ref());
+            let stopped = record.status == RunStatus::Cancelled;
+            let (text, heading) = told_stopped(&request, &stop, stopped);
+            let outcome = if stopped {
+                HandedOutcome::Cancelled
+            } else {
+                HandedOutcome::Failed
+            };
+            let unfinished = stop.step_that_did_not_finish().map(str::to_owned);
+            (
+                Status::Failed,
+                Some(stop.sentence()),
+                text,
+                Some(heading),
+                outcome,
+                unfinished,
+            )
         }
         None => {
-            let problem = "LoomWatch lost track of its run.".to_owned();
-            let (text, heading) = told_stopped(&request, &problem);
-            (Status::Failed, Some(problem), text, Some(heading))
+            let stop = PlainStop::said("LoomWatch lost track of its run.");
+            let (text, heading) = told_stopped(&request, &stop, false);
+            (
+                Status::Failed,
+                Some(stop.sentence()),
+                text,
+                Some(heading),
+                HandedOutcome::Failed,
+                None,
+            )
         }
     };
     let Some(request) = update(&id, |request| {
@@ -417,29 +487,35 @@ async fn hand_back(state: TeamRequestsState, id: String, run_id: String) {
         return;
     };
     let responder = record.as_ref().map(|record| record.responder.as_str());
-    let handed = handed_back(&state, &request, responder, heading);
+    let handed = handed_back(&request, team.as_ref(), responder, heading, outcome, step);
     tell(&state, &request, &text, Some(handed), false).await;
 }
 
-/// What the chat shows a message from `request`'s team as: the team, the agent of it that answers
-/// (`responder`, or the one its file names when no run says), and what it was asked, with `heading`
-/// the words before the team's own answer.
-fn handed_back(
-    state: &TeamRequestsState,
-    request: &TeamRequest,
-    responder: Option<&str>,
-    heading: Option<String>,
-) -> crate::chat::HandedBack {
-    let team = crate::config::TeamConfig::load_in(
+/// `request`'s team file as it is now, when it opens.
+fn team_of(state: &TeamRequestsState, request: &TeamRequest) -> Option<crate::config::TeamConfig> {
+    crate::config::TeamConfig::load_in(
         &state.teams_root.join(&request.team.path),
         &state.teams_root,
     )
-    .ok();
+    .ok()
+}
+
+/// What the chat shows a message from `request`'s team as: the team, the agent of it that answers
+/// (`responder`, or the one its file names when no run says), what it was asked and how its work
+/// ended, with `heading` the words before the team's own answer and `step` its step that didn't
+/// finish, by the team's name for it.
+fn handed_back(
+    request: &TeamRequest,
+    team: Option<&crate::config::TeamConfig>,
+    responder: Option<&str>,
+    heading: Option<String>,
+    outcome: HandedOutcome,
+    step: Option<String>,
+) -> crate::chat::HandedBack {
     let agent = responder
         .map(str::to_owned)
-        .or_else(|| team.as_ref().and_then(|team| team.responder_id().ok()));
+        .or_else(|| team.and_then(|team| team.responder_id().ok()));
     let from_agent = team
-        .as_ref()
         .zip(agent.as_deref())
         .and_then(|(team, id)| team.agents.iter().find(|each| each.id == id))
         .and_then(|each| each.from_agent.clone());
@@ -450,28 +526,129 @@ fn handed_back(
         from_agent,
         request: request.request.clone(),
         heading,
+        outcome: Some(outcome),
+        step,
     }
 }
 
-/// Why a team's run ended without an answer, in plain words, as a sentence of its own.
-fn stopped_because(status: RunStatus, error: Option<&str>) -> String {
+/// Why a team's run ended without an answer, in plain words: the agent it stopped at by its name
+/// in `team` rather than the run's own words for it, and why, cut to its first line.
+fn stopped_because(
+    status: RunStatus,
+    error: Option<&str>,
+    team: Option<&crate::config::TeamConfig>,
+) -> PlainStop {
     if status == RunStatus::Cancelled {
-        return "It was stopped.".to_owned();
+        return PlainStop::said("It was stopped.");
     }
     error
         .map(str::trim)
         .filter(|error| !error.is_empty())
         .map_or_else(
-            || "It failed without saying why.".to_owned(),
+            || PlainStop::said("It didn't say why."),
             |error| {
-                let line = first_line(error, 300);
-                let mut chars = line.chars();
-                chars
-                    .next()
-                    .map(|first| first.to_uppercase().chain(chars).collect())
-                    .unwrap_or_default()
+                let stop = plain_stop(error, team);
+                PlainStop {
+                    reason: sentence(&first_line(&stop.reason, 300)),
+                    ..stop
+                }
             },
         )
+}
+
+/// A run's error said as the person would: who didn't finish, or couldn't start, by its name in
+/// `team`, then why, once. Said in one line, "Writer didn't finish. Your `OpenRouter` account is
+/// out of credits…"; the chat names the step with the team instead, over the reason alone.
+#[derive(Debug)]
+struct PlainStop {
+    /// The agent the error names, as `team` names it.
+    who: Option<String>,
+    /// That agent's AI app never started, in runs recorded while `LoomWatch` drove AI apps.
+    unstarted: bool,
+    /// Why, the run's own words for it.
+    reason: String,
+}
+
+impl PlainStop {
+    /// A stop that names nobody: `reason` is all there is to say.
+    fn said(reason: &str) -> Self {
+        Self {
+            who: None,
+            unstarted: false,
+            reason: reason.to_owned(),
+        }
+    }
+
+    /// "Writer didn't finish.", the one word for a failure, or "Writer couldn't start.".
+    fn lead(&self) -> Option<String> {
+        let who = self.who.as_deref()?;
+        Some(if self.unstarted {
+            format!("{who} couldn't start.")
+        } else {
+            format!("{who} didn't finish.")
+        })
+    }
+
+    /// The agent that started and didn't finish, which the chat names with the team.
+    fn step_that_did_not_finish(&self) -> Option<&str> {
+        self.who.as_deref().filter(|_| !self.unstarted)
+    }
+
+    /// Who, then why, in one line.
+    fn sentence(&self) -> String {
+        match self.lead() {
+            Some(lead) => format!("{lead} {}", self.reason),
+            None => self.reason.clone(),
+        }
+    }
+}
+
+/// `error` with the run's words for the agent it stopped at ("pipeline node writer failed: …",
+/// "failed to spawn ACP harness for agent writer: …") taken apart into who, named as `team` names
+/// it, and why ("Writer didn't finish.", "Writer couldn't start.", then the cause, which
+/// `stopped_because` makes a sentence). Anything else is the reason as it is. The app says the same of a run's error (`runStop` and `plainRunError` in
+/// `ui/src/lib/runs/errors.ts`, with the same test cases).
+fn plain_stop(error: &str, team: Option<&crate::config::TeamConfig>) -> PlainStop {
+    // An agent the team doesn't name is said by its id, as the start of a sentence.
+    let named = |id: &str| {
+        team.and_then(|team| crate::helpers::name_on(team, id))
+            .unwrap_or_else(|| sentence(id))
+    };
+    let first = error.lines().next().unwrap_or_default();
+    // The lines after the first stay, so a cut still says something was left out.
+    let more = &error[first.len()..];
+    let spawn = first
+        .strip_prefix("failed to spawn ACP harness for pipeline node ")
+        .or_else(|| first.strip_prefix("failed to spawn ACP harness for agent "));
+    if let Some((id, cause)) = spawn.and_then(|rest| rest.split_once(": ")) {
+        return PlainStop {
+            who: Some(named(id)),
+            unstarted: true,
+            reason: format!("{cause}{more}"),
+        };
+    }
+    let stage = first
+        .strip_prefix("pipeline node ")
+        .and_then(|rest| rest.split_once(' '))
+        .filter(|(_, rest)| rest.starts_with("failed"))
+        .and_then(|(id, rest)| Some((id, rest.split_once(": ")?.1)));
+    match stage {
+        Some((id, cause)) => PlainStop {
+            who: Some(named(id)),
+            unstarted: false,
+            reason: format!("{cause}{more}"),
+        },
+        None => PlainStop::said(error),
+    }
+}
+
+/// `text` with a capital first letter, as a sentence of its own.
+fn sentence(text: &str) -> String {
+    let mut chars = text.chars();
+    chars
+        .next()
+        .map(|first| first.to_uppercase().chain(chars).collect())
+        .unwrap_or_default()
 }
 
 /// The first line of `text`, at most `limit` characters, with "…" when anything was left out.
@@ -573,6 +750,11 @@ mod tests {
             if request.prompt().contains("'s answer to “") {
                 return Some(Completion::text(WRITES_IT_UP));
             }
+            if request.prompt().contains("didn't finish “")
+                || request.prompt().contains("stopped before it finished “")
+            {
+                return Some(Completion::text("Trip planner couldn't finish your plan."));
+            }
             if let Some(Message::Tool { content, .. }) = request.messages.last() {
                 return Some(Completion::text(&format!("The tool said: {content}")));
             }
@@ -600,6 +782,14 @@ mod tests {
 
     /// A teams folder with Maya pinned and her chat written, and a Trip planner team.
     async fn rig(maya_model: &str) -> Rig {
+        let planner = crate::engine::demo_model(Demo::scripted(vec![Completion::text(
+            "Day 1: the lake. Day 2: the train. Day 3: the market.",
+        )]));
+        rig_with(maya_model, &planner).await
+    }
+
+    /// [`rig`], with the Trip planner's agent on `planner`.
+    async fn rig_with(maya_model: &str, planner: &str) -> Rig {
         let pool = crate::db::Db::temp().await;
         let archive = EventArchive::new(pool.clone());
         let registry = RunRegistry::durable(RunStore::new(pool));
@@ -618,9 +808,6 @@ mod tests {
             ),
         )
         .unwrap();
-        let planner = crate::engine::demo_model(Demo::scripted(vec![Completion::text(
-            "Day 1: the lake. Day 2: the train. Day 3: the market.",
-        )]));
         std::fs::write(
             dir.0.join("trips.yaml"),
             format!(
@@ -867,6 +1054,7 @@ mod tests {
                 "fromAgent": null,
                 "request": "Plan 3 gentle days in Đà Lạt",
                 "heading": "Trip planner's answer to “Plan 3 gentle days in Đà Lạt”:",
+                "outcome": "answered",
             }),
             "{from_team}"
         );
@@ -973,6 +1161,230 @@ mod tests {
         assert_eq!(missing, StatusCode::NOT_FOUND);
     }
 
+    /// ADR 0083, decision 10: a team that fails hands the agent that asked why, marked as a
+    /// failure, so its chat shows a stop and not the team's answer.
+    #[tokio::test]
+    async fn a_team_that_fails_hands_back_a_failure() {
+        let planner = crate::engine::demo_model(Demo::failing_after(
+            Vec::new(),
+            "the planner's model is down",
+        ));
+        let rig = rig_with(&maya("trips.yaml"), &planner).await;
+        let first = ask_maya(&rig, ".jobs/.bench/maya.yaml").await;
+        let request = asked_from(&first.run_id).remove(0);
+        let (status, started) = call(
+            &rig.requests,
+            "POST",
+            &format!("/api/team-requests/{}", request.id),
+            Some(json!({"decision": "start"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{started}");
+        let handed = handed_back_to_maya(&rig, &first.run_id).await;
+        assert_eq!(handed["outcome"], "failed", "{handed}");
+        // "Didn't finish", the one word for a failure, which the agent says on to the person. A
+        // team of one agent has no step to name besides itself.
+        assert_eq!(
+            handed["heading"],
+            "Trip planner didn't finish “Plan 3 gentle days in Đà Lạt”:"
+        );
+        assert_eq!(handed.get("step"), None, "{handed}");
+    }
+
+    /// A step of a team with several that fails is named as the team names it, with its reason,
+    /// at the notch and in the chat: not as the run's words for a step ("pipeline node …").
+    #[tokio::test]
+    async fn a_step_that_fails_is_named_as_the_team_names_it() {
+        let rig = rig(&maya("relay.yaml")).await;
+        let scout = crate::engine::demo_model(Demo::scripted(vec![Completion::text(
+            "Three lakes near Đà Lạt.",
+        )]));
+        let finder = crate::engine::demo_model(Demo::failing_after(
+            Vec::new(),
+            "the route finder's model is down",
+        ));
+        std::fs::write(
+            rig.dir.0.join("relay.yaml"),
+            format!(
+                "schemaVersion: 1\nid: relay\nname: Relay\nentrypoint: scout\nagents:\n  - id: scout\n    name: Scout\n    role: find places\n    model: {scout}\n  - id: planner\n    name: Route finder\n    role: plan the route\n    model: {finder}\nedges:\n  - from: scout\n    to: planner\n    layer: configured\n    kind: sequence\n    ts: 2026-11-03T00:00:00Z\n"
+            ),
+        )
+        .unwrap();
+        let first = ask_maya(&rig, ".jobs/.bench/maya.yaml").await;
+        let request = asked_from(&first.run_id).remove(0);
+        let (status, started) = call(
+            &rig.requests,
+            "POST",
+            &format!("/api/team-requests/{}", request.id),
+            Some(json!({"decision": "start"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{started}");
+        let message = handed_back_message_to_maya(&rig, &first.run_id).await;
+        let handed = &message["handedBack"];
+        assert_eq!(handed["outcome"], "failed", "{handed}");
+        // The chat names the step once, with the team, over the reason alone.
+        assert_eq!(handed["step"], "Route finder", "{handed}");
+        let text = message["text"].as_str().unwrap();
+        let heading = handed["heading"].as_str().unwrap();
+        assert_eq!(
+            text.strip_prefix(heading).map(str::trim),
+            Some("OpenRouter reported an error: the route finder's model is down"),
+            "{message}"
+        );
+        // The notch says who, then why, once.
+        let request = asked_from(&first.run_id).remove(0);
+        assert_eq!(
+            request.problem.as_deref(),
+            Some(
+                "Route finder didn't finish. OpenRouter reported an error: the route finder's model is down"
+            ),
+            "{request:?}"
+        );
+    }
+
+    /// Someone stopping the team is not the team failing: it is handed back as stopped, so the
+    /// chat marks no failure.
+    #[tokio::test]
+    async fn a_team_someone_stopped_hands_back_a_stop_not_a_failure() {
+        let (planner, _hold) = Demo::held(vec![Completion::text("never sent")]);
+        let planner = crate::engine::demo_model(planner);
+        let rig = rig_with(&maya("trips.yaml"), &planner).await;
+        let first = ask_maya(&rig, ".jobs/.bench/maya.yaml").await;
+        let request = asked_from(&first.run_id).remove(0);
+        let (status, started) = call(
+            &rig.requests,
+            "POST",
+            &format!("/api/team-requests/{}", request.id),
+            Some(json!({"decision": "start"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{started}");
+        rig.registry
+            .cancel(started["runId"].as_str().expect("a run"));
+        let handed = handed_back_to_maya(&rig, &first.run_id).await;
+        assert_eq!(handed["outcome"], "cancelled", "{handed}");
+        // Stopped, not "didn't finish": that word is only for a failure.
+        assert_eq!(
+            handed["heading"],
+            "Trip planner was stopped before it finished “Plan 3 gentle days in Đà Lạt”:"
+        );
+    }
+
+    /// A team that can't start while the agent that asked is still at work is handed back to that
+    /// turn as not started.
+    #[tokio::test]
+    async fn a_team_that_cannot_start_while_she_works_is_handed_back_as_not_started() {
+        let (maya, hold) = Demo::responder_holding(
+            |request| {
+                Some(if request.prompt().contains("didn't start “") {
+                    Completion::text("The Trip planner didn't start.")
+                } else if request.after_tool() {
+                    Completion::text("I asked the Trip planner.")
+                } else {
+                    Completion::calls(
+                        "",
+                        vec![ToolCall {
+                            id: "ask-1".to_owned(),
+                            name: "ask_team".to_owned(),
+                            arguments: json!({"team": "trips.yaml", "request": "Plan Friday"})
+                                .to_string(),
+                        }],
+                    )
+                })
+            },
+            // Still at work once the team is asked.
+            crate::agent::SeenRequest::after_tool,
+            "",
+        );
+        let rig = rig(&crate::engine::demo_model(maya)).await;
+        let (status, sent) = call(
+            &rig.chat,
+            "POST",
+            "/api/chat/messages",
+            Some(json!({"teamPath": ".jobs/.bench/maya.yaml", "text": "Plan Friday", "to": {"kind": "agent", "agent": "maya"}, "work": true})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED, "{sent}");
+        let run_id = sent["run"]["runId"].as_str().unwrap().to_owned();
+        tokio::time::timeout(Duration::from_secs(20), async {
+            while asked_from(&run_id).is_empty() || hold.waiting() == 0 {
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        })
+        .await
+        .expect("Maya asked the team and is still at work");
+        let request = asked_from(&run_id).remove(0);
+        std::fs::remove_file(rig.dir.0.join("trips.yaml")).unwrap();
+        let (status, failed) = call(
+            &rig.requests,
+            "POST",
+            &format!("/api/team-requests/{}", request.id),
+            Some(json!({"decision": "start"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{failed}");
+        let queued = rig.registry.get(&run_id).unwrap().queued_notes;
+        assert_eq!(
+            queued
+                .iter()
+                .map(|note| note.from_team.as_deref())
+                .collect::<Vec<_>>(),
+            [Some("Trip planner")],
+            "{queued:?}"
+        );
+        let (status, page) = call(
+            &rig.chat,
+            "GET",
+            "/api/chat?teamPath=.jobs%2F.bench%2Fmaya.yaml",
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{page}");
+        let handed = page["items"][0]["notes"][0]["handedBack"].clone();
+        assert_eq!(handed["outcome"], "notStarted", "{page}");
+        hold.release(8);
+        wait_for(&rig.registry, |runs| {
+            runs.iter()
+                .any(|run| run.run_id == run_id && run.status.is_terminal())
+        })
+        .await;
+    }
+
+    /// What the chat of Maya, who asked in `asked_in`, shows the team's handed-back work as.
+    async fn handed_back_to_maya(rig: &Rig, asked_in: &str) -> Value {
+        handed_back_message_to_maya(rig, asked_in).await["handedBack"].clone()
+    }
+
+    /// The message in Maya's chat that hands her a team's work, once her turn on it has ended.
+    async fn handed_back_message_to_maya(rig: &Rig, asked_in: &str) -> Value {
+        wait_for(&rig.registry, |runs| {
+            runs.iter().any(|run| {
+                run.team_path == ".jobs/.bench/maya.yaml"
+                    && run.run_id != asked_in
+                    && run.status.is_terminal()
+            })
+        })
+        .await;
+        let (status, page) = call(
+            &rig.chat,
+            "GET",
+            "/api/chat?teamPath=.jobs%2F.bench%2Fmaya.yaml",
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{page}");
+        page["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["request"].get("handedBack").is_some())
+            .map_or_else(
+                || panic!("Maya's chat shows the team's work: {page}"),
+                |item| item["request"].clone(),
+            )
+    }
+
     #[tokio::test]
     async fn a_team_that_cannot_start_fails_in_plain_words() {
         let rig = rig(&maya("trips.yaml")).await;
@@ -993,7 +1405,7 @@ mod tests {
         let problem = failed["problem"].as_str().unwrap();
         assert_eq!(
             problem,
-            "Trip planner can't run as it is. Open it in LoomWatch to see what to fix."
+            "Trip planner can't run as it is. Open Trip planner to see what to fix."
         );
         assert!(
             rig.registry
@@ -1001,6 +1413,182 @@ mod tests {
                 .iter()
                 .all(|run| run.team_path != "trips.yaml")
         );
+    }
+
+    /// ADR 0048 with ADR 0083, decision 10: a team changed outside `LoomWatch` after it was first
+    /// seen starts nothing on Start. The answer is its check, as a run's start gives one, and the
+    /// request keeps waiting, so the check's Trust and run approves the version shown and presses
+    /// Start again: the agent's own request then runs, once, and its answer comes back to her.
+    #[tokio::test]
+    async fn a_team_changed_outside_loomwatch_shows_its_check_and_then_runs_the_request() {
+        let rig = rig(&maya("trips.yaml")).await;
+        let home = TeamsDir::new();
+        let approvals = std::sync::Arc::new(
+            crate::approvals::TeamApprovals::open(&home.0, &rig.dir.0).unwrap(),
+        );
+        // Maya's chat is LoomWatch's own; the Trip planner was there when the folder was opened.
+        let chat = std::fs::read(rig.dir.0.join(".jobs/.bench/maya.yaml")).unwrap();
+        approvals
+            .approve(
+                ".jobs/.bench/maya.yaml",
+                &crate::approvals::revision(&chat),
+                crate::approvals::Approval::Saved,
+            )
+            .unwrap();
+        rig.registry.set_approvals(approvals);
+        // Then it changed outside LoomWatch.
+        let planner = rig.dir.0.join("trips.yaml");
+        let changed = std::fs::read_to_string(&planner).unwrap().replace(
+            "Plan trips at the pace asked.",
+            "Plan trips, and book them.",
+        );
+        std::fs::write(&planner, &changed).unwrap();
+        let revision = crate::approvals::revision(changed.as_bytes());
+        let first = ask_maya(&rig, ".jobs/.bench/maya.yaml").await;
+        let request = asked_from(&first.run_id).remove(0);
+        let start = format!("/api/team-requests/{}", request.id);
+
+        let (status, check) = call(
+            &rig.requests,
+            "POST",
+            &start,
+            Some(json!({"decision": "start"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::PRECONDITION_REQUIRED, "{check}");
+        assert_eq!(check["code"], "team_needs_review");
+        assert_eq!(check["teamPath"], "trips.yaml");
+        assert_eq!(check["teamName"], "Trip planner");
+        assert_eq!(check["teamRevision"], revision);
+        assert!(
+            !check["review"].as_array().unwrap().is_empty(),
+            "the check says what it will do: {check}"
+        );
+        // Words for a page that shows no check, the phone's.
+        assert_eq!(
+            check["error"],
+            "Trip planner was added or changed outside LoomWatch. To check it before it runs, press \
+             Start at the notch on your Mac."
+        );
+        // Nothing ran, and the request still waits for Start, with nothing to say yet.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let waiting = asked_from(&first.run_id).remove(0);
+        assert_eq!(waiting.status, Status::Waiting);
+        assert_eq!((waiting.run_id, waiting.problem), (None, None));
+        assert!(
+            rig.registry
+                .list()
+                .iter()
+                .all(|run| run.team_path != "trips.yaml")
+        );
+
+        // Trust and run: the version shown is approved, then Start is pressed again.
+        let runs = crate::runs::router(None, rig.dir.0.clone(), rig.registry.clone());
+        let (status, approved) = call(
+            &runs,
+            "POST",
+            "/api/team/approve",
+            Some(json!({"teamPath": "trips.yaml", "teamRevision": revision})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{approved}");
+        let (status, started) = call(
+            &rig.requests,
+            "POST",
+            &start,
+            Some(json!({"decision": "start"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{started}");
+        assert_eq!(started["status"], "started");
+        let run_id = started["runId"].as_str().unwrap().to_owned();
+        let run = rig.registry.get(&run_id).unwrap();
+        assert_eq!(run.team_path, "trips.yaml");
+        assert_eq!(run.prompt, "Plan 3 gentle days in Đà Lạt");
+        let handed = handed_back_to_maya(&rig, &first.run_id).await;
+        assert_eq!(handed["outcome"], "answered", "{handed}");
+        assert_eq!(
+            rig.registry
+                .list()
+                .iter()
+                .filter(|run| run.team_path == "trips.yaml")
+                .count(),
+            1,
+            "the request ran once"
+        );
+    }
+
+    /// A team's agent that stopped is named as the team names it, without the run's words for it.
+    #[test]
+    fn a_teams_stop_names_the_agent_that_stopped() {
+        let team = crate::config::TeamConfig::parse(
+            "schemaVersion: 1\nid: trips\nname: Trip planner\nentrypoint: planner\nagents:\n  - id: planner\n    name: Route finder\n    role: plan\n    model: fake/offline\n",
+        )
+        .unwrap();
+        let out_of_credits = "Your OpenRouter account is out of credits. Add credits at openrouter.ai, then try again.";
+        let said = |error: &str, team: Option<&crate::config::TeamConfig>| {
+            stopped_because(RunStatus::Failed, Some(error), team).sentence()
+        };
+        // Who, then why, once: the app's `plainRunError` says the same (errors.test.ts).
+        assert_eq!(
+            said(
+                &format!("pipeline node planner failed: {out_of_credits}"),
+                Some(&team)
+            ),
+            format!("Route finder didn't finish. {out_of_credits}")
+        );
+        assert_eq!(
+            said(
+                "pipeline node planner failed after your answer: timed out\nmore",
+                Some(&team)
+            ),
+            "Route finder didn't finish. Timed out…"
+        );
+        assert_eq!(
+            said(
+                "failed to spawn ACP harness for agent planner: Permission denied",
+                Some(&team)
+            ),
+            "Route finder couldn't start. Permission denied"
+        );
+        assert_eq!(
+            said(
+                "failed to spawn ACP harness for pipeline node planner: Permission denied",
+                Some(&team)
+            ),
+            "Route finder couldn't start. Permission denied"
+        );
+        assert_eq!(
+            said(
+                "pipeline node planner failed: Codex reported an error instead of an answer: Quota exceeded.",
+                Some(&team)
+            ),
+            "Route finder didn't finish. Codex reported an error instead of an answer: Quota exceeded."
+        );
+        // Without the team file, by its id, as the start of a sentence.
+        assert_eq!(
+            said(
+                "pipeline node planner failed: LoomWatch couldn't reach ChatGPT: the connection failed",
+                None
+            ),
+            "Planner didn't finish. LoomWatch couldn't reach ChatGPT: the connection failed"
+        );
+        // A step that didn't finish is the one the chat names with the team; one that never
+        // started, or a stop that names nobody, is not.
+        let step = |error: &str| {
+            stopped_because(RunStatus::Failed, Some(error), Some(&team))
+                .step_that_did_not_finish()
+                .map(str::to_owned)
+        };
+        assert_eq!(
+            step("pipeline node planner failed: it broke").as_deref(),
+            Some("Route finder")
+        );
+        assert_eq!(
+            step("failed to spawn ACP harness for agent planner: Permission denied"),
+            None
+        );
+        assert_eq!(step("timed out after 600s"), None);
     }
 
     /// ADR 0083, decision 10: when the team doesn't finish, the agent reads why, the details
@@ -1024,24 +1612,67 @@ mod tests {
         let shown = |text: &str, heading: &str| {
             text.strip_prefix(heading).map(str::trim).map(str::to_owned)
         };
-        let problem = "Trip planner can't run as it is. Open it in LoomWatch to see what to fix.";
+        let problem = "Trip planner can't run as it is. Open Trip planner to see what to fix.";
         let (text, heading) =
             told_not_started(&request, problem, Some("agents[0].model is missing"));
         assert_eq!(
             text,
             "Trip planner didn't start “Plan Friday” (agents[0].model is missing): Trip planner \
-             can't run as it is. Open it in LoomWatch to see what to fix."
+             can't run as it is. Open Trip planner to see what to fix."
         );
         assert_eq!(shown(&text, &heading).as_deref(), Some(problem));
-        let (text, heading) = told_stopped(&request, &stopped_because(RunStatus::Cancelled, None));
+        // A team someone stopped was stopped, never "didn't finish": the agent says it on.
+        let (text, heading) = told_stopped(
+            &request,
+            &stopped_because(RunStatus::Cancelled, None, None),
+            true,
+        );
+        assert_eq!(
+            heading,
+            "Trip planner was stopped before it finished “Plan Friday”:"
+        );
         assert_eq!(shown(&text, &heading).as_deref(), Some("It was stopped."));
         assert_eq!(
-            stopped_because(RunStatus::Failed, Some("timed out after 600s\nmore")),
+            stopped_because(RunStatus::Failed, Some("timed out after 600s\nmore"), None).sentence(),
             "Timed out after 600s…"
         );
         assert_eq!(
-            stopped_because(RunStatus::Failed, None),
-            "It failed without saying why."
+            stopped_because(RunStatus::Failed, None, None).sentence(),
+            "It didn't say why."
+        );
+        // A step that didn't finish: the agent reads who and why; the chat shows the reason alone,
+        // under the team and its step named once (`HandedBack::step`).
+        let (text, heading) = told_stopped(
+            &request,
+            &stopped_because(
+                RunStatus::Failed,
+                Some("pipeline node planner failed: Your OpenRouter account is out of credits."),
+                None,
+            ),
+            false,
+        );
+        assert_eq!(
+            text,
+            "Trip planner didn't finish “Plan Friday”: Planner didn't finish. Your OpenRouter \
+             account is out of credits."
+        );
+        assert_eq!(
+            shown(&text, &heading).as_deref(),
+            Some("Your OpenRouter account is out of credits.")
+        );
+        // One that never started is said whole, the team being all the chat names.
+        let (text, heading) = told_stopped(
+            &request,
+            &stopped_because(
+                RunStatus::Failed,
+                Some("failed to spawn ACP harness for agent planner: Permission denied"),
+                None,
+            ),
+            false,
+        );
+        assert_eq!(
+            shown(&text, &heading).as_deref(),
+            Some("Planner couldn't start. Permission denied")
         );
     }
 

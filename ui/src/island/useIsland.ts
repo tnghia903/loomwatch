@@ -8,9 +8,9 @@ import { agentFigure, figureFor, type FigureChoice } from '../lib/library/figure
 import { benchChatOwner, fetchJobs, type SavedJob } from '../lib/library/jobs'
 import { fetchPinnedAgent, pinAgent } from '../lib/library/pinned'
 import { crewOf, type CrewAgent } from '../lib/rail/teamCrews'
-import { answerPermission, fetchRecentRuns, fetchRun, type RunRecord } from '../lib/runs/client'
+import { answerPermission, fetchRecentRuns, fetchRun, RunApiError, TEAM_NEEDS_REVIEW, type RunRecord } from '../lib/runs/client'
 import { permissionSaid } from '../lib/runs/permissionRequests'
-import { answerTeamRequest, fetchTeamRequests, type TeamRequest } from '../lib/runs/teamRequests'
+import { answerTeamRequest, fetchTeamRequests, teamRequestCheckHref, type TeamRequest } from '../lib/runs/teamRequests'
 import type { Ticket } from '../lib/story/needsYou'
 import { fetchTeamFile } from '../lib/team-file/client'
 import { inApp, listen, openInLoomWatch, tellApp } from './bridge'
@@ -469,16 +469,27 @@ export function useIsland(): Island {
   const answerTeam = useCallback((request: TeamRequest, decision: 'start' | 'decline') => {
     setTeamBusy(request.id)
     setTeamFailed(null)
+    const saying = (text: string) => {
+      setTeamSaid({ id: request.id, text })
+      window.setTimeout(() => {
+        setTeamSaid(null)
+        dispatch({ type: 'answered', ticket: `team:${request.id}` })
+        read()
+      }, ISLAND_WAITS.sent)
+    }
     answerTeamRequest(request.id, decision)
       .then(() => {
         const who = pinned?.name ?? 'your agent'
-        setTeamSaid({ id: request.id, text: decision === 'start' ? `${request.team.name} is starting.` : `${request.team.name} won’t start. Message ${who} if you still want it done.` })
-        window.setTimeout(() => {
-          setTeamSaid(null)
-          dispatch({ type: 'answered', ticket: `team:${request.id}` })
-          read()
-        }, ISLAND_WAITS.sent)
-      }, () => setTeamFailed(request.id))
+        saying(decision === 'start' ? `${request.team.name} is starting.` : `${request.team.name} won’t start. Message ${who} if you still want it done.`)
+      }, (error: unknown) => {
+        // A team that changed outside LoomWatch is checked before it runs (ADR 0048), in LoomWatch,
+        // where the whole check can be read: its Trust and run starts this request. It waits here
+        // until then.
+        if (decision === 'start' && error instanceof RunApiError && error.code === TEAM_NEEDS_REVIEW) {
+          openInLoomWatch(teamRequestCheckHref(request))
+          saying(`Check ${request.team.name} in LoomWatch to start it.`)
+        } else setTeamFailed(request.id)
+      })
       .finally(() => setTeamBusy(null))
   }, [read, pinned])
   // "Sent" says so for a moment.

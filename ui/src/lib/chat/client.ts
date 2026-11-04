@@ -70,12 +70,28 @@ export interface HandedBack {
       which tell the agent whose words follow and hold what is for it alone. `null`: the chat shows
       the whole message. */
   heading: string | null
+  /** How the team's work ended: its answer, or that it failed, was stopped or never started.
+      Absent in messages from before it was kept. */
+  outcome?: HandedOutcome | null
+  /** The team's step that didn't finish, as the team names it, when its run says which: the chat
+      names it once, with the team, over the reason alone. Absent otherwise, and in messages from
+      before it was kept. */
+  step?: string | null
 }
+
+/** How a team's handed-back work ended (the daemon's `chat::HandedOutcome`). */
+export type HandedOutcome = 'answered' | 'failed' | 'cancelled' | 'notStarted'
 
 /** What the chat shows of a team's handed-back message: its answer or its reason, without the
     words before it that are for the agent. */
 export function handedBackText(text: string, handed: HandedBack): string {
   return handed.heading && text.startsWith(handed.heading) ? text.slice(handed.heading.length).trim() : text
+}
+
+/** Why a team's work handed back in `message` failed, as the chat shows it; `null` when it didn't
+    fail, or isn't a team's. */
+export function teamFailure(message: ChatMessage): string | null {
+  return message.handedBack?.outcome === 'failed' ? handedBackText(message.text, message.handedBack) : null
 }
 
 /** A file pasted or dropped into the chat, as the daemon keeps it beside the team (`chat_files::ChatFile`). */

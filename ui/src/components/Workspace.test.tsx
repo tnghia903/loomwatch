@@ -240,6 +240,24 @@ describe('Workspace', () => {
     expect(screen.getByRole('application', {name: 'Team canvas'})).toBeInTheDocument()
   })
 
+  // ADR 0048 with ADR 0083, decision 10: Start at the notch on a team that changed outside
+  // LoomWatch opens the team's chat with the request in the address; the check for that request
+  // shows over it.
+  it('shows the check of the pinned agent’s request when the notch opens the team’s chat for it', async () => {
+    window.history.replaceState({}, '', '/?path=demo.yaml&view=chat&teamRequest=tr1')
+    const base = vi.mocked(fetch).getMockImplementation()!
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const url = String(input)
+      if (url === '/api/team-requests/tr1' && init?.method === 'POST') return new Response(JSON.stringify({ error: 'Demo needs a check.', code: 'team_needs_review', teamPath: 'demo.yaml', teamName: 'Demo', teamRevision: 'sha256:x', review: [{ text: 'Researcher runs on LoomWatch.', warn: false }] }), { status: 428 })
+      if (url.startsWith('/api/team-requests?')) return new Response(JSON.stringify([]), { status: 200 })
+      return base(input, init)
+    })
+    renderWorkspace()
+    expect(screen.getByRole('region', { name: /chat$/ })).toBeInTheDocument()
+    expect(await screen.findByRole('alertdialog', { name: 'Check “Demo” before it runs' })).toBeInTheDocument()
+    expect(window.location.search).toBe('?path=demo.yaml&view=chat')
+  })
+
   // ADR 0051: Details opens by default beside the chat, on the newest piece of work, and stays
   // closed once you close it.
   // ADR 0051: the chat is the screen. The pane opens by itself only to hand over what work made.

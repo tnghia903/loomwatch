@@ -188,6 +188,10 @@ describe('what came of asking about a part', () => {
     expect(answerOf(work({ status: 'queued' }))).toEqual({ state: 'working', by: 'writer' })
     expect(answerOf(work({ status: 'succeeded', reply: 'Shorter now: **two** lines.', finishedAt: at }))).toEqual({ state: 'said', by: 'writer', text: 'Shorter now: **two** lines.', at })
     expect(answerOf(work({ status: 'failed', error: 'The AI could not be reached.\nretry later' }))).toEqual({ state: 'failed', by: 'writer', text: 'The AI could not be reached.' })
+    // A step that didn't finish, by its name in the run.
+    expect(answerOf(work({ status: 'failed', error: 'pipeline node writer failed: the AI could not be reached', agentNames: { writer: 'Clip editor' } })))
+      .toEqual({ state: 'failed', by: 'writer', text: 'Clip editor didn’t finish. The AI could not be reached' })
+    expect(answerOf(work({ status: 'failed' }))).toEqual({ state: 'failed', by: 'writer', text: 'It didn’t say why.' })
     expect(answerOf(work({ status: 'cancelled' }))).toEqual({ state: 'none', why: 'stopped' })
     expect(answerOf(work({ status: 'succeeded', reply: ' ' }))).toEqual({ state: 'none', why: 'lost' })
   })

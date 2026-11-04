@@ -62,7 +62,7 @@ const SPEND_LIMIT: &str = "spend_limit";
 /// Stable pre-acceptance codes from `RUN_PROVENANCE_CONTRACT` §11.
 const STALE_TEAM_REVISION: &str = "stale_team_revision";
 /// A run refused until the operator reviews what the team file starts (ADR 0048).
-const TEAM_NEEDS_REVIEW: &str = "team_needs_review";
+pub(crate) const TEAM_NEEDS_REVIEW: &str = "team_needs_review";
 const IDEMPOTENCY_CONFLICT: &str = "idempotency_conflict";
 /// Who an "Allow for the whole team" grant is kept under: never an agent id, which must be an
 /// identifier.
@@ -359,6 +359,11 @@ pub struct QueuedNote {
     /// with its words when its model sees pictures.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub files: Vec<crate::chat_files::ChatFile>,
+    /// The team whose work it is, when it is a team's answer handed back to the agent that asked
+    /// for it (ADR 0083, decision 10), not the person's words: it is not direction, its links ask
+    /// first, and it never answers the agent's question to the person.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_team: Option<String>,
 }
 
 /// "Send now" (ADR 0051): a request to stop an agent's current turn so a note can go in at once.

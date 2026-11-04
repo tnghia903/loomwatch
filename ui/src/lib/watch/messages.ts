@@ -521,6 +521,13 @@ export class Correspondence {
    */
   operatorAnswer(event: RunEvent, text: string) {
     const raw = object(event.raw) ? event.raw : {}
+    // A team's answer handed back to the agent that asked for it (`fromTeam`): LoomWatch passing it
+    // on, never yours and never the answer to anything waiting on you.
+    if (words(raw.fromTeam)) {
+      const to = words(raw.to)
+      this.add(event, { id: `note:${event.id}`, kind: 'note', from: LOOMWATCH_ID, to, text, state: to ? 'pending' : 'delivered' })
+      return
+    }
     const askedBy = words(raw.askedBy)
     const waiting = (message: TeamMessage) => message.state === 'pending' && !message.reply
     const answered = askedBy

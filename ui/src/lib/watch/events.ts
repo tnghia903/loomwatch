@@ -984,7 +984,10 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
           if (object(event.raw) && event.raw.phase === 'operator_answer') {
             agent.status = 'succeeded'; agent.task = 'Decision received'; agent.reply = text
             letters.operatorAnswer(event, text)
-            evidence.push({ id: event.id, kind: 'source', relation: 'directed', name: event.raw.noAnswer === true ? 'Nobody answered in time' : 'Your answer', detail: text, agentId: agent.id, seq: event.seq, order: 0, ts: event.ts, status: 'succeeded', capture: 'recorded', offsetMs: Date.parse(event.ts) - startMs, callId: null, toolKind: null, rawInput: null, rawOutput: text, content: text, locations: [], target: null, events: [event] })
+            // A team's work handed back to the agent that asked for it (its answer, or why it
+            // stopped) is that team's, not yours.
+            const team = typeof event.raw.fromTeam === 'string' && event.raw.fromTeam ? event.raw.fromTeam : null
+            evidence.push({ id: event.id, kind: 'source', relation: 'directed', name: event.raw.noAnswer === true ? 'Nobody answered in time' : team ? `From ${team}` : 'Your answer', detail: text, agentId: agent.id, seq: event.seq, order: 0, ts: event.ts, status: 'succeeded', capture: 'recorded', offsetMs: Date.parse(event.ts) - startMs, callId: null, toolKind: null, rawInput: null, rawOutput: text, content: text, locations: [], target: null, events: [event] })
             break
           }
           if (resuming.delete(agent.id)) break

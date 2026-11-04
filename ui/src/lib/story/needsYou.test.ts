@@ -26,6 +26,16 @@ describe('ticketsFrom', () => {
     expect(tickets[2].text).toBe('Coder could not open slides.pptx')
   })
 
+  it('says a failure with the name of the step that didn’t finish, as its run names it', () => {
+    const [ticket] = ticketsFrom([
+      run('f1', { status: 'failed', error: 'pipeline node coder failed: it broke', agentNames: { coder: 'Slide maker' }, finishedAt: '2026-10-01T03:30:00Z' }),
+    ], names, new Set(), NOW)
+    expect(ticket.text).toBe('Slide maker didn’t finish. It broke')
+    // The ticket's tag already says it didn't finish.
+    const [silent] = ticketsFrom([run('f2', { status: 'failed', finishedAt: '2026-10-01T03:30:00Z' })], names, new Set(), NOW)
+    expect(silent.text).toBe('It didn’t say why.')
+  })
+
   // ADR 0090: what happens by itself if nobody answers is said on the ticket, as a time of day so a
   // ticket the tray keeps never goes stale. A scheduled run's question and spend stop carry their
   // deadline; a run you started waits for those as long as it takes. A permission always has one.

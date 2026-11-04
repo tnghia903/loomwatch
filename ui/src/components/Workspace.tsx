@@ -53,6 +53,7 @@ import { EntrypointProblemBar } from './canvas/EntrypointProblemBar'
 import { DeleteTeamDialog } from './home/DeleteTeamDialog'
 import { setupDiffers, usePlaces } from '../lib/projects/places'
 import { takeTeamOut } from '../lib/projects/client'
+import { TeamRequestCheck } from './run/TeamRequestCheck'
 import { TeamReviewDialog } from './run/TeamReviewDialog'
 import { Home } from './home/Home'
 import { ALLOW_SWITCHES } from '../lib/team-file/allow'
@@ -3075,6 +3076,8 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
           />
         )}
         {chatReview && <TeamReviewDialog review={chatReview.review} onTrust={async () => { await approveTeam(chatReview.review.teamPath, chatReview.review.teamRevision); const { retry } = chatReview; setChatReview(null); retry() }} onClose={() => setChatReview(null)} />}
+        {/* What the agent pinned to the notch asked of this team, checked before it runs. */}
+        <TeamRequestCheck />
         {compareOpen && doc.externalChange && (
           <YamlSheet title="Disk ↔ in-memory YAML" yaml={unifiedYamlDiff(doc.externalChange.diskYaml, doc.yamlPreview)} onClose={() => setCompareOpen(false)} footer={<ConflictSheetFooter onKeepMine={doc.keepMine} onUseDisk={() => void doc.useDisk()} />} />
         )}

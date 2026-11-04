@@ -317,6 +317,14 @@ it('keeps the operator answer as exact evidence, without replacing the original 
   expect(result.agents.find((agent) => agent.id === 'review')?.status).toBe('succeeded')
 })
 
+// ADR 0083, decision 10: a team's answer handed back to the agent that asked for it is archived
+// where your notes are, and named as the team's.
+it('names a team’s work passed on to an agent as from the team, not yours', () => {
+  const passed = { ...event(2, 'message', { role: 'user', content: { type: 'text', text: 'Trip planner’s answer to “Plan Friday”:\n\nThe lake.' } }, 'operator'), raw: { phase: 'operator_answer', source: 'loomwatch', to: 'maya', noteId: 'n', fromTeam: 'Trip planner' } }
+  const result = projectRun([event(0, 'message', { role: 'user', content: { type: 'text', text: 'Plan my week' } }, 'maya'), passed])
+  expect(result.evidence.find((item) => item.id === passed.id)).toMatchObject({ name: 'From Trip planner' })
+})
+
 
 it('keeps handover and checkpoint text out of the answer while retaining their tokens and transcript', () => {
   const rows = [

@@ -187,6 +187,30 @@ pub struct HandedBack {
     /// chat shows the whole message.
     #[serde(default)]
     pub heading: Option<String>,
+    /// How the team's work ended, so the chat marks a stop as one. `None` in messages from before
+    /// it was kept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<HandedOutcome>,
+    /// The team's step that didn't finish, as the team names it, when its run says which: the
+    /// chat names it once, with the team ("Video studio's Clip editor didn't finish."), over the
+    /// reason alone. `None` otherwise, and in messages from before it was kept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step: Option<String>,
+}
+
+/// How a team's work handed back to the agent that asked for it ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum HandedOutcome {
+    /// It finished: the message is its answer.
+    Answered,
+    /// It started and failed before it finished, or `LoomWatch` lost track of it: the message says
+    /// why.
+    Failed,
+    /// Someone stopped it before it finished.
+    Cancelled,
+    /// It never started: the message says why.
+    NotStarted,
 }
 
 /// The agents answering a message that needed no workflow, each for itself, at the same time.
@@ -2518,7 +2542,8 @@ pub(crate) async fn tell_agent(
         handed_back,
         message_at: None,
     };
-    let response = send_message(State(state), Ok(Json(request)))
+    // Boxed where it is made: inline it takes every caller over Clippy's `large_futures` limit.
+    let response = Box::pin(send_message(State(state), Ok(Json(request))))
         .await
         .map_err(|error| error.message)?;
     if response.status().is_success() {
@@ -2584,7 +2609,8 @@ pub(crate) async fn send_message_at(
         handed_back: None,
         message_at: Some(message_at),
     };
-    let response = match send_message(State(state), Ok(Json(request))).await {
+    // Boxed, as in `tell_agent`.
+    let response = match Box::pin(send_message(State(state), Ok(Json(request)))).await {
         Ok(response) => response,
         Err(error) => return MessageAtSent::Refused(error.message),
     };
@@ -2686,6 +2712,7 @@ pub(crate) async fn send_changes(
             now: false,
             reply: None,
             files: message.files.clone(),
+            from_team: None,
         };
         // The agent finished between the look and the note: its turn starts instead, below.
         if let Ok(record) = registry.queue_note(&run_id, note) {
@@ -2768,8 +2795,9 @@ async fn send_message(
         changes: Vec::new(),
     };
     let mut decided = decide(request.to.as_ref(), &live);
-    // A message the person asked for at a time is LoomWatch's words, not feedback from them.
-    if request.message_at.is_none() {
+    // A message the person asked for at a time is LoomWatch's words, and a team's answer handed
+    // back is that team's: neither is feedback from the person.
+    if request.message_at.is_none() && request.handed_back.is_none() {
         learn_from_words(
             &state, &store, &team, &relative, &request, &message, &decided,
         )
@@ -2786,6 +2814,10 @@ async fn send_message(
             now: request.now,
             reply: replied.as_ref().map(crate::Replied::quoted),
             files: message.files.clone(),
+            from_team: request
+                .handed_back
+                .as_ref()
+                .map(|handed| handed.team_name.clone()),
         };
         let answer = note.text.clone();
         match state.registry.queue_note(run_id, note) {
@@ -2793,16 +2825,22 @@ async fn send_message(
                 // Boxed, as is the answer below: held over the awaits inline, they take every
                 // caller of `send_message` over Clippy's 16 KB `large_futures` limit.
                 let mut record = Box::new(record);
-                // An agent waiting on its question to you takes this as the answer (ADR 0110).
-                if let Some(answered) = Box::pin(answer_its_question(
-                    &state,
-                    run_id,
-                    agent,
-                    &message.id,
-                    answer,
-                ))
-                .await
-                {
+                // An agent waiting on its question to you takes this as the answer (ADR 0110). A
+                // team's answer handed back is not yours, so the question stays yours to answer.
+                let answered = match &request.handed_back {
+                    Some(_) => None,
+                    None => {
+                        Box::pin(answer_its_question(
+                            &state,
+                            run_id,
+                            agent,
+                            &message.id,
+                            answer,
+                        ))
+                        .await
+                    }
+                };
+                if let Some(answered) = answered {
                     *record = answered;
                 }
                 message.route = Route::Note;
@@ -2851,9 +2889,11 @@ async fn send_message(
             .replying(replied)
             .giving(message.files.clone());
             // ADR 0104 is about the person's own words: a message set for a time holds the
-            // agent's, so a link in it asks first.
+            // agent's, and a team's answer handed back holds that team's, so a link in either asks
+            // first.
             start = match &request.message_at {
                 Some(message_at) => start.for_message_at(message_at.clone()),
+                None if request.handed_back.is_some() => start,
                 None => start.written_by_the_operator(text),
             };
             if let Decided::Agent(agent) = &decided {
@@ -5105,6 +5145,7 @@ mod tests {
                     now: false,
                     reply: None,
                     files: Vec::new(),
+                    from_team: None,
                 },
             )
             .unwrap();
@@ -5145,6 +5186,135 @@ mod tests {
         let store = rig.registry.chat_store().unwrap();
         let message = store.get(id).await.unwrap().unwrap();
         assert!(message.delivered_at.is_some(), "{message:?}");
+    }
+
+    /// ADR 0083, decision 10, beside ADR 0110: a team's answer handed back while the agent that
+    /// asked for it waits on its question to the person is not the person's answer. The question
+    /// stays open; when the person answers it, the team's answer goes in the same turn under its
+    /// own heading, not as direction from them, and the run's record says whose it was.
+    #[tokio::test]
+    #[allow(clippy::too_many_lines)]
+    async fn a_teams_answer_never_answers_the_question_an_agent_asked_the_person() {
+        use crate::test_support::{stand_in, turn};
+        const TEAMS: &str = "Trip planner's answer to “Plan Friday”:";
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        let (researcher, _) = stand_in(vec![
+            turn(&["today's digest"], "asked and stopped").calling(
+                "ask_user",
+                json!({"question": "Which region?"}),
+                "\"parked\":true",
+            ),
+            turn(
+                &["Record where this work stands"],
+                "## Done\nwork\n\n## Next\nnothing",
+            ),
+            turn(&[], "researcher covered Asia, with Friday's plan")
+                .in_order(&[
+                    "## Direction from you",
+                    "Asia only",
+                    "## From a team you asked",
+                    TEAMS,
+                    "The lake at nine.",
+                ])
+                .never(&["## Also from you while you waited"]),
+        ]);
+        let (writer, _) = agent("writer", FirstTurn::Answered);
+        std::fs::write(
+            dir.0.join("news.yaml"),
+            format!(
+                "schemaVersion: 1\nid: news-desk\nname: News desk\nentrypoint: researcher\nagents:\n  - id: researcher\n    name: Researcher\n    role: find the news\n    model: {researcher}\n  - id: writer\n    name: Writer\n    role: write the digest\n    model: {writer}\nedges:\n  - from: researcher\n    to: writer\n    layer: configured\n    kind: sequence\n    ts: 2026-09-13T00:00:00Z\n"
+            ),
+        )
+        .unwrap();
+        let rig = rig(pool, &dir);
+        let (_, started) = send(
+            &rig.app,
+            json!({"teamPath": "news.yaml", "text": "today's digest", "to": {"kind": "team"}}),
+        )
+        .await;
+        let run_id = started["run"]["runId"].as_str().unwrap().to_owned();
+        wait_for(&rig.registry, &run_id, |run| run.waiting_on.is_some()).await;
+
+        // The team it asked finishes while it waits on the person.
+        let teams_root = crate::platform::canonicalize(&dir.0).unwrap();
+        tell_agent(
+            &rig.registry,
+            Some(rig.archive.clone()),
+            &teams_root,
+            "news.yaml",
+            "researcher",
+            &format!("{TEAMS}\n\nThe lake at nine."),
+            Some(HandedBack {
+                team_path: "trips.yaml".to_owned(),
+                team_name: "Trip planner".to_owned(),
+                agent: Some("planner".to_owned()),
+                from_agent: None,
+                request: "Plan Friday".to_owned(),
+                heading: Some(TEAMS.to_owned()),
+                outcome: Some(HandedOutcome::Answered),
+                step: None,
+            }),
+            false,
+            None,
+        )
+        .await
+        .unwrap();
+        let waiting = rig.registry.get(&run_id).unwrap();
+        assert_eq!(
+            waiting.waiting_on.as_ref().map(|asked| &asked["question"]),
+            Some(&json!("Which region?")),
+            "the question is still the person's to answer: {waiting:?}"
+        );
+        assert_eq!(
+            waiting
+                .queued_notes
+                .iter()
+                .map(|note| note.from_team.as_deref())
+                .collect::<Vec<_>>(),
+            [Some("Trip planner")],
+            "{waiting:?}"
+        );
+
+        // The person answers it.
+        let (status, sent) = send(
+            &rig.app,
+            json!({"teamPath": "news.yaml", "text": "Asia only", "to": {"kind": "agent", "agent": "researcher"}}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{sent}");
+        let done = wait_for(&rig.registry, &run_id, |run| run.status.is_terminal()).await;
+        assert_eq!(done.status, RunStatus::Succeeded, "{done:?}");
+
+        let events = rig.archive.load_session(&run_id).await.unwrap();
+        let passed_on = events
+            .iter()
+            .filter(|event| {
+                event
+                    .raw
+                    .as_ref()
+                    .is_some_and(|raw| raw["phase"] == "operator_answer")
+            })
+            .map(|event| {
+                (
+                    event.payload["content"]["text"]
+                        .as_str()
+                        .unwrap_or_default(),
+                    event.raw.as_ref().unwrap().get("fromTeam").cloned(),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            passed_on.contains(&(
+                format!("{TEAMS}\n\nThe lake at nine.").as_str(),
+                Some(json!("Trip planner"))
+            )),
+            "{passed_on:?}"
+        );
+        assert!(
+            passed_on.contains(&("Asia only", None)),
+            "the person's answer is still theirs: {passed_on:?}"
+        );
     }
 
     /// ADR 0083, decision 10: only `LoomWatch` marks a message as a team's handed-back work. A page
@@ -5574,6 +5744,260 @@ mod tests {
                 "Read from {paper}\nTitle: STAIR\n\n# STAIR\n\nLeaf sections are picked from a \
                  table of contents."
             )]
+        );
+    }
+
+    /// ADR 0104 is about the person's own words. A team's answer handed back to the agent that
+    /// asked for it (ADR 0083, decision 10) holds that team's, so a link in it asks the person
+    /// first when the agent's web switch is off.
+    #[tokio::test]
+    async fn a_link_in_a_teams_answer_asks_first() {
+        let paper = "http://127.0.0.1:9/html/2609.03874v1".to_owned();
+        let asked = paper.clone();
+        let lead = crate::engine::demo_model(crate::agent::Demo::responder(move |request| {
+            let offered = request.tools.iter().any(|tool| tool == "read_page");
+            Some(if offered && !request.after_tool() {
+                crate::agent::Completion::calls(
+                    "",
+                    vec![crate::agent::ToolCall {
+                        id: "read-1".to_owned(),
+                        name: "read_page".to_owned(),
+                        arguments: json!({"url": asked}).to_string(),
+                    }],
+                )
+            } else {
+                crate::agent::Completion::text("done")
+            })
+        }));
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        let yaml = format!(
+            "schemaVersion: 1\nid: lab\nname: Lab\nentrypoint: lead\nagents:\n  - id: lead\n    name: Research lead\n    role: plan the research\n    model: {lead}\n    allow:\n      commands: true\nedges: []\n"
+        );
+        std::fs::write(dir.0.join("lab.yaml"), yaml).unwrap();
+        let rig = rig(pool, &dir);
+        let heading = "Readers' answer to “Find the paper”:";
+        let teams_root = crate::platform::canonicalize(&dir.0).unwrap();
+        tell_agent(
+            &rig.registry,
+            Some(rig.archive.clone()),
+            &teams_root,
+            "lab.yaml",
+            "lead",
+            &format!("{heading}\n\nIt is at {paper}"),
+            Some(HandedBack {
+                team_path: "readers.yaml".to_owned(),
+                team_name: "Readers".to_owned(),
+                agent: None,
+                from_agent: None,
+                request: "Find the paper".to_owned(),
+                heading: Some(heading.to_owned()),
+                outcome: Some(HandedOutcome::Answered),
+                step: None,
+            }),
+            false,
+            None,
+        )
+        .await
+        .unwrap();
+        let run_id = rig.registry.list()[0].run_id.clone();
+        let asking = wait_for(&rig.registry, &run_id, |run| {
+            !run.permission_requests.is_empty() || run.status.is_terminal()
+        })
+        .await;
+        let ask = asking
+            .permission_requests
+            .first()
+            .unwrap_or_else(|| panic!("it read the page without asking: {asking:?}"));
+        assert_eq!(ask.switch.as_deref(), Some("web"), "{ask:?}");
+        assert_eq!(ask.title, format!("Read {paper}"), "{ask:?}");
+        rig.registry.cancel(&run_id);
+        wait_for(&rig.registry, &run_id, |run| run.status.is_terminal()).await;
+    }
+
+    /// The same for a team's answer that joins the agent's turn as a note: a note's links are read
+    /// at once because the person wrote them, and this one's were not.
+    #[tokio::test]
+    async fn a_link_in_a_teams_answer_joining_a_turn_asks_first() {
+        const TEAMS: &str = "## From a team you asked";
+        let paper = "http://127.0.0.1:9/html/2609.03874v1".to_owned();
+        let asked = paper.clone();
+        let (lead, hold) = crate::agent::Demo::responder_holding(
+            move |request| {
+                Some(if request.after_tool() {
+                    crate::agent::Completion::text("done")
+                } else if request.prompt().contains(TEAMS) {
+                    crate::agent::Completion::calls(
+                        "",
+                        vec![crate::agent::ToolCall {
+                            id: "read-1".to_owned(),
+                            name: "read_page".to_owned(),
+                            arguments: json!({"url": asked}).to_string(),
+                        }],
+                    )
+                } else {
+                    crate::agent::Completion::text("planned")
+                })
+            },
+            // Still at work on the person's message when the team's answer comes.
+            |request| !request.after_tool() && !request.prompt().contains(TEAMS),
+            "",
+        );
+        let lead = crate::engine::demo_model(lead);
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        let yaml = format!(
+            "schemaVersion: 1\nid: lab\nname: Lab\nentrypoint: lead\nagents:\n  - id: lead\n    name: Research lead\n    role: plan the research\n    model: {lead}\n    allow:\n      commands: true\nedges: []\n"
+        );
+        std::fs::write(dir.0.join("lab.yaml"), yaml).unwrap();
+        let rig = rig(pool, &dir);
+        let (status, started) = send(
+            &rig.app,
+            json!({"teamPath": "lab.yaml", "text": "plan the research", "to": {"kind": "agent", "agent": "lead"}}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED, "{started}");
+        let run_id = started["run"]["runId"].as_str().unwrap().to_owned();
+        tokio::time::timeout(Duration::from_secs(20), async {
+            while hold.waiting() == 0 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the lead is at work");
+        let heading = "Readers' answer to “Find the paper”:";
+        let teams_root = crate::platform::canonicalize(&dir.0).unwrap();
+        tell_agent(
+            &rig.registry,
+            Some(rig.archive.clone()),
+            &teams_root,
+            "lab.yaml",
+            "lead",
+            &format!("{heading}\n\nIt is at {paper}"),
+            Some(HandedBack {
+                team_path: "readers.yaml".to_owned(),
+                team_name: "Readers".to_owned(),
+                agent: None,
+                from_agent: None,
+                request: "Find the paper".to_owned(),
+                heading: Some(heading.to_owned()),
+                outcome: Some(HandedOutcome::Answered),
+                step: None,
+            }),
+            false,
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(rig.registry.get(&run_id).unwrap().queued_notes.len(), 1);
+        hold.release(1);
+        let asking = wait_for(&rig.registry, &run_id, |run| {
+            !run.permission_requests.is_empty() || run.status.is_terminal()
+        })
+        .await;
+        let ask = asking
+            .permission_requests
+            .first()
+            .unwrap_or_else(|| panic!("it read the page without asking: {asking:?}"));
+        assert_eq!(ask.title, format!("Read {paper}"), "{ask:?}");
+        rig.registry.cancel(&run_id);
+        wait_for(&rig.registry, &run_id, |run| run.status.is_terminal()).await;
+    }
+
+    /// A turn that breaks on a note says so with the agent's name, as the person calls it, never
+    /// its id, and as when it broke, not as what broke it.
+    #[tokio::test]
+    async fn a_turn_that_breaks_after_a_note_names_the_agent() {
+        let (lead, hold) = crate::agent::Demo::held_then_failing(
+            vec![crate::agent::Completion::text("planned")],
+            "the model is down",
+        );
+        let lead = crate::engine::demo_model(lead);
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        let yaml = format!(
+            "schemaVersion: 1\nid: lab\nname: Lab\nentrypoint: lead\nagents:\n  - id: lead\n    name: Research lead\n    role: plan the research\n    model: {lead}\nedges: []\n"
+        );
+        std::fs::write(dir.0.join("lab.yaml"), yaml).unwrap();
+        let rig = rig(pool, &dir);
+        let (status, started) = send(
+            &rig.app,
+            json!({"teamPath": "lab.yaml", "text": "plan the research", "to": {"kind": "agent", "agent": "lead"}}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED, "{started}");
+        let run_id = started["run"]["runId"].as_str().unwrap().to_owned();
+        tokio::time::timeout(Duration::from_secs(20), async {
+            while hold.waiting() == 0 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the lead is at work");
+        let (status, noted) = send(
+            &rig.app,
+            json!({"teamPath": "lab.yaml", "text": "only papers from this year", "to": {"kind": "agent", "agent": "lead"}}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{noted}");
+        assert_eq!(noted["route"], "note", "{noted}");
+        hold.release(2);
+        let failed = wait_for(&rig.registry, &run_id, |run| run.status.is_terminal()).await;
+        assert_eq!(failed.status, RunStatus::Failed, "{failed:?}");
+        let error = failed.error.unwrap_or_default();
+        assert!(
+            error.starts_with("Research lead couldn't finish after your note: "),
+            "{error}"
+        );
+    }
+
+    /// The same for a step of a team with several: the step that breaks on a note is named as the
+    /// team names it.
+    #[tokio::test]
+    async fn a_step_that_breaks_after_a_note_is_named() {
+        let (researcher, hold) = crate::agent::Demo::held_then_failing(
+            vec![crate::agent::Completion::text("three stories")],
+            "the model is down",
+        );
+        let researcher = crate::engine::demo_model(researcher);
+        let (writer, _) = agent("writer", FirstTurn::Answered);
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        std::fs::write(
+            dir.0.join("news.yaml"),
+            format!(
+                "schemaVersion: 1\nid: news-desk\nname: News desk\nentrypoint: researcher\nagents:\n  - id: researcher\n    name: Story finder\n    role: find the news\n    model: {researcher}\n  - id: writer\n    name: Writer\n    role: write the digest\n    model: {writer}\nedges:\n  - from: researcher\n    to: writer\n    layer: configured\n    kind: sequence\n    ts: 2026-09-13T00:00:00Z\n"
+            ),
+        )
+        .unwrap();
+        let rig = rig(pool, &dir);
+        let (_, started) = send(
+            &rig.app,
+            json!({"teamPath": "news.yaml", "text": "today's digest", "to": {"kind": "team"}}),
+        )
+        .await;
+        let run_id = started["run"]["runId"].as_str().unwrap().to_owned();
+        tokio::time::timeout(Duration::from_secs(20), async {
+            while hold.waiting() == 0 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the first step is at work");
+        let (status, noted) = send(
+            &rig.app,
+            json!({"teamPath": "news.yaml", "text": "Asia only", "to": {"kind": "agent", "agent": "researcher"}}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{noted}");
+        assert_eq!(noted["route"], "note", "{noted}");
+        hold.release(2);
+        let failed = wait_for(&rig.registry, &run_id, |run| run.status.is_terminal()).await;
+        assert_eq!(failed.status, RunStatus::Failed, "{failed:?}");
+        let error = failed.error.unwrap_or_default();
+        assert!(
+            error.starts_with("Story finder couldn't finish after your note: "),
+            "{error}"
         );
     }
 
@@ -7069,6 +7493,65 @@ mod tests {
             asked.lock().unwrap().len(),
             1,
             "a message that long is a new job"
+        );
+    }
+
+    /// ADR 0083, decision 10: a team's answer handed back to the agent that asked for it is that
+    /// team's words, so it teaches nothing, however much it reads like feedback. The person's own
+    /// words after it still teach.
+    #[tokio::test]
+    async fn a_teams_answer_teaches_nothing() {
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        write_news_desk(&dir, FirstTurn::Answered);
+        let rig = rig(pool, &dir);
+        let asked = learner(&rig);
+        let work = finished_work(&rig, "today's digest").await;
+        let teams_root = crate::platform::canonicalize(&dir.0).unwrap();
+        tell_agent(
+            &rig.registry,
+            Some(rig.archive.clone()),
+            &teams_root,
+            "news.yaml",
+            "writer",
+            "Too long for our readers. Cut it to bullets.",
+            Some(HandedBack {
+                team_path: "editors.yaml".to_owned(),
+                team_name: "Editors".to_owned(),
+                agent: None,
+                from_agent: None,
+                request: "Read the digest".to_owned(),
+                heading: None,
+                outcome: Some(HandedOutcome::Answered),
+                step: None,
+            }),
+            false,
+            None,
+        )
+        .await
+        .unwrap();
+        let handed = rig
+            .registry
+            .list()
+            .into_iter()
+            .find(|run| run.run_id != work.run_id)
+            .expect("the team's answer started the writer's turn")
+            .run_id;
+        wait_for(&rig.registry, &handed, |run| run.status.is_terminal()).await;
+        let (status, _) = send(
+            &rig.app,
+            json!({"teamPath": "news.yaml", "text": "Too long. Three bullets, please.", "to": null}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let kept = learned(&rig, "team:news-desk#writer", 1).await;
+        assert_eq!(kept[0].feedback, "Too long. Three bullets, please.");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let asked = asked.lock().unwrap().clone();
+        assert_eq!(
+            asked.len(),
+            1,
+            "only the person's words reached the learner: {asked:?}"
         );
     }
 
