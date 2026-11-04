@@ -62,7 +62,7 @@ const SPEND_LIMIT: &str = "spend_limit";
 /// Stable pre-acceptance codes from `RUN_PROVENANCE_CONTRACT` §11.
 const STALE_TEAM_REVISION: &str = "stale_team_revision";
 /// A run refused until the operator reviews what the team file starts (ADR 0048).
-const TEAM_NEEDS_REVIEW: &str = "team_needs_review";
+pub(crate) const TEAM_NEEDS_REVIEW: &str = "team_needs_review";
 const IDEMPOTENCY_CONFLICT: &str = "idempotency_conflict";
 /// Who an "Allow for the whole team" grant is kept under: never an agent id, which must be an
 /// identifier.

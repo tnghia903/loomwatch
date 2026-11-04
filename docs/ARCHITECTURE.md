@@ -977,7 +977,12 @@ at a little desk, whose workbench opens while it is pointed at. For the agent in
 - the pinned agent may ask one of the person's teams to do part of a job (`my_teams`, `ask_team`
   on the Team Bus, `team_requests.rs`): the request waits at `GET /api/team-requests` until the
   person presses Start (`POST /api/team-requests/{id}`), the team runs as any run, and its answer
-  is sent back into the agent's chat, which starts the agent's next turn. That message is stored
+  is sent back into the agent's chat, which starts the agent's next turn. A team that changed
+  outside LoomWatch (ADR 0048) starts nothing on Start: the answer is 428 `team_needs_review` with
+  its check, as a run's start gives one (409 here means already answered), and the request keeps
+  waiting. The notch then opens the team's chat with that check over it (`?teamRequest=<id>`,
+  `TeamRequestCheck`), whose Trust and run approves the version shown and presses Start again, so
+  the agent's own request runs; the phone, which shows no check, shows the words. That message is stored
   with `handed_back` (the team, its answering agent, the request and the words before the answer),
   so the chat shows it as the team's, under its name and that agent's figure, not as the person's.
   Only the daemon sets it: `POST /api/chat/messages` ignores one sent from a page. It also says how

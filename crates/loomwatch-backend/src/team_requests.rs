@@ -5,7 +5,10 @@
 //! records a request here as waiting and returns at once. The island at the notch lists the
 //! requests (`GET /api/team-requests`) and answers one (`POST /api/team-requests/{id}`): Start
 //! launches a run of that team exactly as the person starting it in `LoomWatch` would, and Not now
-//! declines it. When a started run ends, its answer goes into the asking agent's own chat as a
+//! declines it. A team that changed outside `LoomWatch` starts nothing until the person has
+//! checked it (ADR 0048): Start answers with its check and the request keeps waiting, so the
+//! check's Trust and run approves the team and presses Start again, and the agent's own request
+//! runs. When a started run ends, its answer goes into the asking agent's own chat as a
 //! message to it, through the chat's own send path, so it is archived and shown in its Chat tab
 //! and the agent writes the person their answer.
 //!
@@ -19,10 +22,12 @@ use std::time::Duration;
 use axum::extract::{Path as AxumPath, Query, State};
 use axum::http::StatusCode;
 use axum::middleware;
+use axum::response::{IntoResponse as _, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use uuid::Uuid;
 
 use crate::api::ApiError;
@@ -220,7 +225,7 @@ async fn answer_route(
     State(state): State<TeamRequestsState>,
     AxumPath(id): AxumPath<String>,
     Json(answer): Json<Answer>,
-) -> Result<Json<TeamRequest>, ApiError> {
+) -> Result<Response, ApiError> {
     // Taken under the lock, so a second press finds it no longer waiting.
     let mut taken = false;
     let request = update(&id, |request| {
@@ -249,18 +254,43 @@ async fn answer_route(
     }
     let request = match answer.decision {
         // Boxed: a run's start is a large future, and the route's would pass Clippy's limit.
-        Decision::Start => Box::pin(start(&state, request)).await,
+        Decision::Start => match Box::pin(start(&state, request.clone())).await {
+            Ok(started) => started,
+            Err(review) => return Ok(needs_check(&request, &review)),
+        },
         Decision::Decline => {
             decline(&state, &request).await;
             request
         }
     };
-    Ok(Json(request))
+    Ok(Json(request).into_response())
+}
+
+/// The answer to a Start whose team changed outside `LoomWatch` (ADR 0048): the request waits
+/// again, and the answer carries the team's check as a run's start does (`runs::start_response`),
+/// for the page that pressed Start to show. Its Trust and run approves the version shown and
+/// presses Start again. Not 409, which here means the request was already answered, as the phone
+/// reads it; the phone, which shows no check, shows the words.
+fn needs_check(request: &TeamRequest, review: &crate::runs::NeedsReview) -> Response {
+    update(&request.id, |waiting| waiting.status = Status::Waiting);
+    let mut body = serde_json::to_value(review).unwrap_or_else(|_| json!({}));
+    body["error"] = json!(format!(
+        "{} was added or changed outside LoomWatch. To check it before it runs, press Start at the \
+         notch on your Mac.",
+        request.team.name
+    ));
+    body["code"] = json!(crate::runs::TEAM_NEEDS_REVIEW);
+    (StatusCode::PRECONDITION_REQUIRED, Json(body)).into_response()
 }
 
 /// Start the team as the person would, and hand its answer back when it ends. The run keeps
 /// which agent asked, so the team's chat shows the request as that agent's, not the person's.
-async fn start(state: &TeamRequestsState, request: TeamRequest) -> TeamRequest {
+/// A team that needs the person's check first starts nothing and tells the agent nothing: it
+/// answers that check.
+async fn start(
+    state: &TeamRequestsState,
+    request: TeamRequest,
+) -> Result<TeamRequest, Box<crate::runs::NeedsReview>> {
     let launch = StartRunRequest::from_chat(
         &request.team.path,
         &request.request,
@@ -286,20 +316,13 @@ async fn start(state: &TeamRequestsState, request: TeamRequest) -> TeamRequest {
             let started = update(&request.id, |request| request.run_id = Some(run_id.clone()))
                 .unwrap_or(request);
             tokio::spawn(hand_back(state.clone(), started.id.clone(), run_id));
-            return started;
+            return Ok(started);
         }
+        Err(LaunchError::NeedsReview(review)) => return Err(review),
         // Read at the notch and in the asking agent's chat, each beside a way to open the team, so
         // they say what to do there and who to ask again.
         Ok(StartRunOutcome::IdempotencyConflict { .. }) => (
             format!("{} was already starting this.", request.team.name),
-            None,
-        ),
-        Err(LaunchError::NeedsReview(_)) => (
-            format!(
-                "{0}, or one of its agents, changed outside LoomWatch, so it didn't run. Open {0} \
-                 and press Run team to see what it will do, then ask {1} again.",
-                request.team.name, request.asked_by.name
-            ),
             None,
         ),
         Err(LaunchError::StaleRevision { .. }) => (
@@ -339,7 +362,7 @@ async fn start(state: &TeamRequestsState, request: TeamRequest) -> TeamRequest {
         true,
     )
     .await;
-    failed
+    Ok(failed)
 }
 
 /// What the asking agent is told when `request`'s team could not start, and the words before
@@ -1269,6 +1292,109 @@ mod tests {
                 .list()
                 .iter()
                 .all(|run| run.team_path != "trips.yaml")
+        );
+    }
+
+    /// ADR 0048 with ADR 0083, decision 10: a team changed outside `LoomWatch` after it was first
+    /// seen starts nothing on Start. The answer is its check, as a run's start gives one, and the
+    /// request keeps waiting, so the check's Trust and run approves the version shown and presses
+    /// Start again: the agent's own request then runs, once, and its answer comes back to her.
+    #[tokio::test]
+    async fn a_team_changed_outside_loomwatch_shows_its_check_and_then_runs_the_request() {
+        let rig = rig(&maya("trips.yaml")).await;
+        let home = TeamsDir::new();
+        let approvals = std::sync::Arc::new(
+            crate::approvals::TeamApprovals::open(&home.0, &rig.dir.0).unwrap(),
+        );
+        // Maya's chat is LoomWatch's own; the Trip planner was there when the folder was opened.
+        let chat = std::fs::read(rig.dir.0.join(".jobs/.bench/maya.yaml")).unwrap();
+        approvals
+            .approve(
+                ".jobs/.bench/maya.yaml",
+                &crate::approvals::revision(&chat),
+                crate::approvals::Approval::Saved,
+            )
+            .unwrap();
+        rig.registry.set_approvals(approvals);
+        // Then it changed outside LoomWatch.
+        let planner = rig.dir.0.join("trips.yaml");
+        let changed = std::fs::read_to_string(&planner).unwrap().replace(
+            "Plan trips at the pace asked.",
+            "Plan trips, and book them.",
+        );
+        std::fs::write(&planner, &changed).unwrap();
+        let revision = crate::approvals::revision(changed.as_bytes());
+        let first = ask_maya(&rig, ".jobs/.bench/maya.yaml").await;
+        let request = asked_from(&first.run_id).remove(0);
+        let start = format!("/api/team-requests/{}", request.id);
+
+        let (status, check) = call(
+            &rig.requests,
+            "POST",
+            &start,
+            Some(json!({"decision": "start"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::PRECONDITION_REQUIRED, "{check}");
+        assert_eq!(check["code"], "team_needs_review");
+        assert_eq!(check["teamPath"], "trips.yaml");
+        assert_eq!(check["teamName"], "Trip planner");
+        assert_eq!(check["teamRevision"], revision);
+        assert!(
+            !check["review"].as_array().unwrap().is_empty(),
+            "the check says what it will do: {check}"
+        );
+        // Words for a page that shows no check, the phone's.
+        assert_eq!(
+            check["error"],
+            "Trip planner was added or changed outside LoomWatch. To check it before it runs, press \
+             Start at the notch on your Mac."
+        );
+        // Nothing ran, and the request still waits for Start, with nothing to say yet.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let waiting = asked_from(&first.run_id).remove(0);
+        assert_eq!(waiting.status, Status::Waiting);
+        assert_eq!((waiting.run_id, waiting.problem), (None, None));
+        assert!(
+            rig.registry
+                .list()
+                .iter()
+                .all(|run| run.team_path != "trips.yaml")
+        );
+
+        // Trust and run: the version shown is approved, then Start is pressed again.
+        let runs = crate::runs::router(None, rig.dir.0.clone(), rig.registry.clone());
+        let (status, approved) = call(
+            &runs,
+            "POST",
+            "/api/team/approve",
+            Some(json!({"teamPath": "trips.yaml", "teamRevision": revision})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{approved}");
+        let (status, started) = call(
+            &rig.requests,
+            "POST",
+            &start,
+            Some(json!({"decision": "start"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{started}");
+        assert_eq!(started["status"], "started");
+        let run_id = started["runId"].as_str().unwrap().to_owned();
+        let run = rig.registry.get(&run_id).unwrap();
+        assert_eq!(run.team_path, "trips.yaml");
+        assert_eq!(run.prompt, "Plan 3 gentle days in Đà Lạt");
+        let handed = handed_back_to_maya(&rig, &first.run_id).await;
+        assert_eq!(handed["outcome"], "answered", "{handed}");
+        assert_eq!(
+            rig.registry
+                .list()
+                .iter()
+                .filter(|run| run.team_path == "trips.yaml")
+                .count(),
+            1,
+            "the request ran once"
         );
     }
 

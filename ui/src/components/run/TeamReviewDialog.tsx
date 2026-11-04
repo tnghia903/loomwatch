@@ -7,6 +7,12 @@ export interface TeamReviewDialogProps {
   /** Approve the revision shown and start the run the operator asked for. */
   onTrust: () => Promise<void>
   onClose: () => void
+  /** What it will run, when someone else asked for it: "Coby asked: “…”". */
+  asked?: string
+  /** It changed again while the check was open: this is the newer version's. */
+  changedAgain?: boolean
+  /** What happened instead, once nothing is left to trust: said with Close alone. */
+  ended?: string | null
 }
 
 /** The daemon quotes commands in backticks; they read as code. */
@@ -20,7 +26,7 @@ function withCode(text: string) {
  * Lines worth a second look — a program LoomWatch doesn't know, commands without asking, reading
  * outside the team's own folder — are marked.
  */
-export function TeamReviewDialog({ review, onTrust, onClose }: TeamReviewDialogProps) {
+export function TeamReviewDialog({ review, onTrust, onClose, asked, changedAgain = false, ended = null }: TeamReviewDialogProps) {
   const titleId = useId()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -32,6 +38,8 @@ export function TeamReviewDialog({ review, onTrust, onClose }: TeamReviewDialogP
     setError(null)
     try {
       await onTrust()
+      // Still open: the one who opened it left it up, for a newer check or to say what happened.
+      setBusy(false)
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught))
       setBusy(false)
@@ -42,24 +50,36 @@ export function TeamReviewDialog({ review, onTrust, onClose }: TeamReviewDialogP
     <div className="lw-scrim dim" onMouseDown={() => { if (!busy) onClose() }}>
       <div role="alertdialog" aria-modal="true" aria-labelledby={titleId} className="pop e2 lw-deleteteam lw-teamreview" onMouseDown={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === 'Escape' && !busy) { event.stopPropagation(); onClose() } }}>
         <h2 id={titleId}>Check “{review.teamName}” before it runs</h2>
-        <p>This team, or one of its agents, was added or changed outside LoomWatch, so LoomWatch hasn’t run this version of it. Here is what it will do on this computer:</p>
-        <ul className="tr-lines">
-          {review.review.map((line, index) => (
-            <li key={index} className={line.warn ? 'tr-warn' : undefined}>
-              {line.warn && <span className="tr-flag" aria-hidden="true">!</span>}
-              <span className="tr-text">
-                {line.warn && <span className="visually-hidden">Look twice: </span>}
-                {withCode(line.text)}
-              </span>
-            </li>
-          ))}
-        </ul>
-        <p>{marked ? 'Run it only if you trust where it came from and understand the lines marked !.' : 'Run it only if you trust where it came from.'}</p>
-        {error && <p role="alert" className="dt-alert">{error}</p>}
-        <div className="dt-acts">
-          <button type="button" className="btn" autoFocus onClick={onClose} disabled={busy}>Cancel</button>
-          <button type="button" className="btn btn-primary" onClick={() => void trust()} disabled={busy}>{busy ? 'Starting…' : 'Trust and run'}</button>
-        </div>
+        {ended ? (
+          <>
+            <p role="alert">{ended}</p>
+            <div className="dt-acts">
+              <button type="button" className="btn" autoFocus onClick={onClose}>Close</button>
+            </div>
+          </>
+        ) : (
+          <>
+            {asked && <p>{asked}</p>}
+            <p>{changedAgain ? `${review.teamName} changed again while this was open. Here is what it will do now:` : 'This team, or one of its agents, was added or changed outside LoomWatch, so LoomWatch hasn’t run this version of it. Here is what it will do on this computer:'}</p>
+            <ul className="tr-lines">
+              {review.review.map((line, index) => (
+                <li key={index} className={line.warn ? 'tr-warn' : undefined}>
+                  {line.warn && <span className="tr-flag" aria-hidden="true">!</span>}
+                  <span className="tr-text">
+                    {line.warn && <span className="visually-hidden">Look twice: </span>}
+                    {withCode(line.text)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <p>{marked ? 'Run it only if you trust where it came from and understand the lines marked !.' : 'Run it only if you trust where it came from.'}</p>
+            {error && <p role="alert" className="dt-alert">{error}</p>}
+            <div className="dt-acts">
+              <button type="button" className="btn" autoFocus onClick={onClose} disabled={busy}>Cancel</button>
+              <button type="button" className="btn btn-primary" onClick={() => void trust()} disabled={busy}>{busy ? 'Starting…' : 'Trust and run'}</button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   )

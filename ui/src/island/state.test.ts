@@ -435,9 +435,9 @@ describe('the pinned agent’s slot, crew and requests for your teams', () => {
   })
 
   it('says why a team you pressed Start on could not start, as a stop, until you look', () => {
-    const refused = request({ status: 'failed', problem: 'Open Trip planner in LoomWatch and press Run once: it changed outside LoomWatch.', finishedAt: iso(2) })
+    const refused = request({ status: 'failed', problem: 'Trip planner can’t run as it is. Open Trip planner to see what to fix.', finishedAt: iso(2) })
     let s = play([[at(0), placed], [at(0), pinned], [at(0), runs()], [at(2), { type: 'runs', records: [], requests: [refused] }]])
-    expect(s.teams?.map((team) => [team.teamName, team.moment, team.result, team.link])).toEqual([['Trip planner', 'fail', 'Open Trip planner in LoomWatch and press Run once: it changed outside LoomWatch.', '/?path=trip.yaml']])
+    expect(s.teams?.map((team) => [team.teamName, team.moment, team.result, team.link])).toEqual([['Trip planner', 'fail', 'Trip planner can’t run as it is. Open Trip planner to see what to fix.', '/?path=trip.yaml']])
     expect([viewOf(s), s.pop.out?.pop.kind]).toEqual(['fail', 'fail'])
     s = islandReducer(s, { type: 'opened', runId: 'team-request:tr1', now: at(3) })
     expect(s.teams).toEqual([])
