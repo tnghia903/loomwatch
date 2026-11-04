@@ -401,6 +401,15 @@ describe('a web page in the reader', () => {
     const settle = (ms = 10) => new Promise((resolve) => setTimeout(resolve, ms))
     const tell = (data: Record<string, unknown>) => inner.dispatchEvent(new inner.MessageEvent('message', { data: { lw: 'reader', ...data }, source: inner.parent }))
     const picked = () => sent.filter((message) => message.type === 'thing').map((message) => [message.what, message.path, message.text])
+    // A part with a picture is said once its picture is made, several turns of the page's clock
+    // later; a busy machine can take longer than `settle`'s 10 ms (CI, 2026-11-04). So these wait
+    // for the part to be said, not for a time.
+    const marks = () => sent.filter((message) => message.type === 'thing').length
+    const said = async (act: () => void) => {
+      const before = marks()
+      act()
+      await vi.waitFor(() => expect(marks()).toBeGreaterThan(before))
+    }
     try {
       doc.body.innerHTML = '<h2 data-box="10 10 400 30">Plan</h2>'
         + '<section id="plan" data-box="10 50 600 400"><div data-box="20 60 300 100"><p data-box="30 70 280 20">Costs <b data-box="70 70 30 20">rise</b> in <a href="https://x.example/may" data-box="120 70 40 20">May</a></p> '
@@ -524,8 +533,7 @@ describe('a web page in the reader', () => {
       // A chart whole, with its picture.
       sent.length = 0
       drawn.length = 0
-      press(inner, doc.querySelector('canvas')!, 100, 250)
-      await settle()
+      await said(() => press(inner, doc.querySelector('canvas')!, 100, 250))
       expect(picked()).toEqual([['chart', 'canvas#chart', 'The chart under “Plan”']])
       expect(Object.prototype.toString.call(sent.find((message) => message.type === 'thing')!.picture)).toBe('[object ArrayBuffer]')
       expect(drawn.map((args) => args[0])).toEqual([doc.querySelector('canvas')])
@@ -536,27 +544,21 @@ describe('a web page in the reader', () => {
       drawn.length = 0
       sizes.length = 0
       const [, api, , reranker, label] = [...doc.querySelectorAll('text')]
-      press(inner, api, 100, 600)
-      await settle()
+      await said(() => press(inner, api, 100, 600))
       expect(picked()).toEqual([['part', 'svg#arch > g', 'The part “API · Container App”']])
       expect(sizes.at(-1)).toEqual([232, 132])
       expect(drawn.at(-1)!.slice(1)).toEqual([-24, -34, 600, 400])
       // Clicked again, the region drawn around it, by its own words; then the drawing.
       sent.length = 0
-      press(inner, api, 100, 600)
-      await settle()
-      press(inner, api, 100, 600)
-      await settle()
+      await said(() => press(inner, api, 100, 600))
+      await said(() => press(inner, api, 100, 600))
       expect(picked()).toEqual([['part', 'svg#arch > rect:nth-of-type(2)', 'The part “Serving path”'], ['chart', 'svg#arch', 'The chart under “Plan”']])
       // A box with its words beside it rather than in a group: the words drawn on it.
       sent.length = 0
-      press(inner, reranker, 360, 570)
-      await settle()
+      await said(() => press(inner, reranker, 360, 570))
       // A label on no box is a part of its own; the drawing's background is the drawing.
-      press(inner, label, 289, 606)
-      await settle()
-      press(inner, doc.querySelector('svg')!, 580, 880)
-      await settle()
+      await said(() => press(inner, label, 289, 606))
+      await said(() => press(inner, doc.querySelector('svg')!, 580, 880))
       expect(picked()).toEqual([
         ['part', 'svg#arch > rect:nth-of-type(3)', 'The part “Reranker app”'],
         ['part', 'svg#arch > text:nth-of-type(3)', 'The part “top 20”'],
@@ -584,8 +586,7 @@ describe('a web page in the reader', () => {
         'The part “Export”', 'The part “Costs rise in May”', 'The part “Export”', 'The part “Costs rise in May Export”', 'The chart under “Plan”',
         'The part “Costs rise in May Export”', 'The chart under “Plan”', 'The part “Serving path”',
       ])
-      keys('Enter', 'a')
-      await settle()
+      await said(() => keys('Enter', 'a'))
       expect(picked()).toEqual([['part', 'svg#arch > rect:nth-of-type(2)', 'The part “Serving path”']])
       expect(page).toEqual(['a'])
 
