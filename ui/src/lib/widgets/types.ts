@@ -48,6 +48,15 @@ export interface WidgetCell { label: string; mark: 'yes' | 'no' | 'neither'; not
 /** One box in a flow. */
 export interface WidgetBox { label: string; note?: string }
 
+/** What a comparison's sides are parts of. */
+export interface WidgetWhole { label: string; note?: string }
+
+/** One side of a comparison: its name, its figure when the sides share a measure, a few words. */
+export interface WidgetSide { label: string; value?: number; note?: string }
+
+/** One fact of a comparison, read across: a value for each side, in their order. */
+export interface WidgetRow { label: string; values: string[] }
+
 /** One series of a graph: a value for each of its labels. */
 export interface WidgetSeries { label: string; values: number[] }
 
@@ -56,7 +65,8 @@ export type WidgetSpec =
   | { kind: 'checklist'; title: string; items: WidgetItem[] }
   | { kind: 'calculator'; title: string; inputs: WidgetInput[]; results: WidgetFigure[]; presets?: WidgetPreset[] }
   | { kind: 'steps'; title: string; steps: WidgetStep[]; repeats?: boolean }
-  | { kind: 'chart'; title: string; bars: WidgetBar[]; unit?: string; prefix?: string; decimals?: number }
+  | { kind: 'chart'; title: string; bars: WidgetBar[]; unit?: string; prefix?: string; decimals?: number; counted?: boolean }
+  | { kind: 'compare'; title: string; whole?: WidgetWhole; sides: WidgetSide[]; rows?: WidgetRow[]; unit?: string; prefix?: string; decimals?: number; counted?: boolean }
   | { kind: 'marks'; title: string; cells: WidgetCell[]; facts?: string[] }
   | { kind: 'flow'; title: string; boxes: WidgetBox[]; repeats?: boolean }
   | { kind: 'graph'; title: string; style: 'bar' | 'line'; labels: string[]; series: WidgetSeries[]; unit?: string; prefix?: string; decimals?: number }

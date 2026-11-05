@@ -730,3 +730,193 @@ fn a_place_line_never_shows_when_no_widget_was_kept() {
         "words with none are kept exactly"
     );
 }
+
+fn plans() -> Value {
+    json!({
+        "kind": "compare", "title": "Two phone plans",
+        "whole": {"label": "Your family's lines", "note": "Four phones"},
+        "sides": [
+            {"label": "Basic", "value": 4.0, "note": "Shared data"},
+            {"label": "Unlimited", "value": 12.0, "note": "Each line its own"}
+        ],
+        "rows": [
+            {"label": "Data", "values": ["20 GB shared", "Unlimited"]},
+            {"label": "Calls abroad", "values": ["Paid by the minute", "Included"]}
+        ],
+        "unit": "lines", "counted": true
+    })
+}
+
+#[test]
+fn a_comparison_is_read_checked_and_told_back() {
+    let widget = read(&plans()).expect("a good comparison");
+    assert_eq!(widget.kind(), "compare");
+    assert_eq!(
+        serde_json::to_value(&widget).unwrap(),
+        plans(),
+        "kept as the agent gave it"
+    );
+    let told = shown(&widget, 2);
+    assert_eq!(told["shown"], "a comparison \"Two phone plans\"");
+    assert_eq!(told["figures"], "Basic 4 lines; Unlimited 12 lines");
+    assert_eq!(told["place"], "{{widget 2}}");
+    assert_eq!(
+        showed(&[kept(1, widget.clone(), None, None)]).unwrap(),
+        "[Under this answer: a comparison \"Two phone plans\" (Your family's lines: Basic 4 \
+         lines, Unlimited 12 lines; Data: 20 GB shared | Unlimited; Calls abroad: Paid by the \
+         minute | Included).]"
+    );
+    assert!(
+        read_state(&widget, &json!({"checked": []})).is_err(),
+        "a comparison keeps nothing"
+    );
+
+    // Without figures, the sides are named and the rows carry it.
+    let words = read(&json!({
+        "kind": "compare", "title": "TCP or UDP",
+        "sides": [{"label": "TCP"}, {"label": "UDP"}],
+        "rows": [{"label": "Order", "values": ["Kept", "Not kept"]}]
+    }))
+    .expect("a comparison of words");
+    assert!(shown(&words, 1).get("figures").is_none());
+    assert_eq!(
+        showed(&[kept(1, words, None, None)]).unwrap(),
+        "[Under this answer: a comparison \"TCP or UDP\" (TCP, UDP; Order: Kept | Not kept).]"
+    );
+}
+
+#[test]
+fn a_bad_comparison_says_what_to_change() {
+    let with = |change: &dyn Fn(&mut Value)| {
+        let mut arguments = plans();
+        change(&mut arguments);
+        read(&arguments).expect_err(&format!("{arguments} should be refused"))
+    };
+    let cases: [(Change, &str); 9] = [
+        (
+            &|w| w["sides"] = json!([{"label": "Only", "value": 1}]),
+            "sides has 1; give 2 to 3",
+        ),
+        (
+            &|w| {
+                w["sides"] = json!([{"label": "a", "value": 1}, {"label": "b", "value": 2}, {"label": "c", "value": 3}, {"label": "d", "value": 4}]);
+                w.as_object_mut().unwrap().remove("rows");
+            },
+            "sides has 4; give 2 to 3",
+        ),
+        (
+            &|w| {
+                w["sides"][1].as_object_mut().unwrap().remove("value");
+            },
+            "1 of 2 sides have a value: give every side a value in the same unit, or none",
+        ),
+        (
+            &|w| w["rows"][0]["values"] = json!(["only one"]),
+            "rows 1: values has 1; give 2, one per side in their order",
+        ),
+        (
+            &|w| w["rows"][0]["values"] = json!(["a", "b", "c"]),
+            "rows 1: values has 3; give 2, one per side in their order",
+        ),
+        (
+            &|w| w["sides"][0]["value"] = json!(2.5),
+            "counted figures are whole numbers of things",
+        ),
+        (
+            &|w| w["sides"][0]["value"] = json!(-1),
+            "counted figures are whole numbers of things",
+        ),
+        (
+            &|w| {
+                w["sides"] = json!([{"label": "a"}, {"label": "b"}]);
+            },
+            "counted draws the sides' values: give each side a value",
+        ),
+        (&|w| w["whole"] = json!("Congress"), "whole is"),
+    ];
+    for (change, says) in cases {
+        let error = with(change);
+        assert!(error.contains(says), "{error:?} should say {says:?}");
+    }
+    let nothing = read(&json!({
+        "kind": "compare", "title": "x", "sides": [{"label": "a"}, {"label": "b"}]
+    }))
+    .expect_err("nothing to compare");
+    assert!(
+        nothing.contains("a comparison needs something to compare"),
+        "{nothing}"
+    );
+}
+
+#[test]
+fn a_chart_of_whole_things_may_be_counted() {
+    let mut arguments = senate();
+    arguments["counted"] = json!(true);
+    let counted = read(&arguments).expect("whole seats can be counted");
+    assert!(matches!(counted, Widget::Chart { counted: true, .. }));
+    assert_eq!(serde_json::to_value(&counted).unwrap()["counted"], true);
+    let plain = read(&senate()).unwrap();
+    assert!(
+        serde_json::to_value(&plain)
+            .unwrap()
+            .get("counted")
+            .is_none(),
+        "a chart that isn't counted keeps no field for it"
+    );
+    arguments["bars"][0]["value"] = json!(-2);
+    assert!(
+        read(&arguments)
+            .unwrap_err()
+            .contains("counted figures are whole numbers of things"),
+        "a count is never below zero"
+    );
+    arguments["bars"][0]["value"] = json!(50.5);
+    let error = read(&arguments).expect_err("half a seat isn't counted");
+    assert!(
+        error.contains("counted figures are whole numbers of things"),
+        "{error}"
+    );
+    arguments["counted"] = json!("yes");
+    assert!(
+        read(&arguments)
+            .unwrap_err()
+            .contains("counted is true or false")
+    );
+}
+
+/// The agent picks a kind by the shape of what it tells: every kind the tool offers has its line
+/// in the tool's guide and in the answering agent's habit, and is read, not refused.
+#[test]
+fn every_kind_the_tool_offers_has_its_place_in_the_guide() {
+    let tool = tool_definition();
+    let kinds: Vec<&str> = tool["inputSchema"]["properties"]["kind"]["enum"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|kind| kind.as_str().unwrap())
+        .collect();
+    assert_eq!(kinds.len(), 9);
+    let guide = SHOW_WIDGET.default_text();
+    let habit = crate::agent::prompt::WIDGETS.default_text();
+    let kind_line = SHOW_WIDGET_KIND.default_text();
+    for kind in &kinds {
+        assert!(
+            guide
+                .lines()
+                .any(|line| line.starts_with("- ") && line.ends_with(&format!(": {kind}"))),
+            "the guide has a line ending in \": {kind}\""
+        );
+        assert!(
+            habit.contains(&format!("{kind} for ")),
+            "the habit says what {kind} is for"
+        );
+        assert!(kind_line.contains(kind), "kind's description names {kind}");
+        let error = read(&json!({"kind": kind, "title": "x"})).unwrap_err();
+        assert!(!error.contains("isn't a widget"), "{kind} is read: {error}");
+    }
+    assert!(
+        guide.contains("parts that sit side by side")
+            && guide.contains("are shown with compare, not flow"),
+        "the guide says a flow is not for parts side by side"
+    );
+}

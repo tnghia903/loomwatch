@@ -573,8 +573,9 @@ that were set when the turn failed. `GET /api/messages-at` lists what is waiting
 
 The agent whose reply is the answer a person reads can put up to four widgets in it with the Team
 Bus's `show_widget` (ADR 0114): choices to tap, a checklist to tick, a calculator, steps to tap
-through, a chart whose bars LoomWatch draws to scale from the agent's figures, a graph of bars or a
-line over labels, a row of marks, or a flow. The bus offers it only to that agent
+through, a comparison of two or three things side by side, a chart whose bars LoomWatch draws to
+scale from the agent's figures, a graph of bars or a line over labels, a row of marks, or a flow.
+The bus offers it only to that agent
 (`BusSeat.answers`): the run's responder, told to the bus once per run (`TeamBus::answered_by`), not
 a helper or an agent started by another, with a person there, and with its `widgets` switch on.
 Absent, the switch is `widgets::DEFAULT_ON`, which is on: an agent asked for a chart or something
@@ -582,7 +583,11 @@ to use had no way to give one, and drew bars in text or wrote a page instead. `w
 an agent without it. A call from any other seat is refused. An agent offered it is told, in its
 instructions' "How you work" (`agent::prompt::WIDGETS`), to show its answer with one whenever one
 fits, ahead of a table, a list or bars written in text, and to put each where it belongs with the
-place line the call answers with.
+place line the call answers with. Both that habit and the tool's description (`widgets::SHOW_WIDGET`,
+a line per kind) pick the kind by the shape of what the agent tells: things side by side or the
+parts of one thing a comparison, figures a chart, figures over time a graph, one thing leading to
+the next a flow, a process to follow steps, and so on; a flow's arrows mean order, so parts side
+by side are a comparison. A quick answer's last ask (`intent::SHOW_IN_REPLY`) names the same.
 
 `widgets::read` checks a widget against limits kept in one place (`widgets::limits`) and says what
 to change when it is refused. A calculator's results are formulas in a small language that the
@@ -596,7 +601,13 @@ part of the reply). A chart (2 to 12 bars, one `unit`, `prefix` and `decimals` f
 agent's figures as they are; the call answers with them written as the person reads them (`bars`),
 and the app draws every bar from one zero (`ui/src/lib/widgets/chart.ts`), a figure below zero to
 its left. A graph (2 to 24 labels, 1 to 3 series) is drawn to round ticks (`ui/src/lib/widgets/
-graph.ts`), its series in `--color-series-1..3`.
+graph.ts`), its series in `--color-series-1..3`. A comparison has 2 or 3 `sides` (three at most, so
+each keeps a readable column on a phone), an optional `whole` they are parts of, a figure on every
+side or on none (in one `unit`), and up to 6 `rows` of facts with one value per side; the call
+answers with its figures (`figures`), and the app draws each from one zero. A chart or comparison
+whose figures count whole things sets `counted` (each a whole number, 0 or more): the app draws a
+dot for each thing, in tens, or for a round number of them (1, 2, 5, 10, …) when they don't fit,
+with a key saying which (`ui/src/lib/widgets/dots.ts`).
 
 The call also answers with a place line, `{{widget N}}`, `N` counting the widgets the session has
 shown. The agent writes it on a line of its own where the widget belongs. When the run succeeds,
@@ -830,7 +841,7 @@ drawn on the canvas.
 | `ask_user(question, context?)` | A question for the person running the team. Returns at once; the answer arrives as the agent's next turn | none — the run waits on the operator |
 | `memory_search`, `memory_read`, `memory_write`, `checkpoint` | The team's Notebook, when the team turns it on (see [TEAM_MEMORY.md](TEAM_MEMORY.md)) | none |
 | `earlier_work(work)` | Read one earlier piece of the team's work in full. Offered in runs started from the app, which have a team chat to read | none |
-| `show_widget(kind, title, …)` | Put a widget in the answer: choices, a checklist, a calculator, steps, a chart, a graph, marks or a flow, placed by the line it answers with (ADR 0114). Offered only to the agent whose reply is the answer, with its switch on (on unless `widgets: false`) | none — kept with the answer when the run succeeds |
+| `show_widget(kind, title, …)` | Put a widget in the answer: a comparison, a chart, a graph, a flow, steps, a calculator, a checklist, marks or choices, picked by the shape of what it tells, placed by the line it answers with (ADR 0114). Offered only to the agent whose reply is the answer, with its switch on (on unless `widgets: false`) | none — kept with the answer when the run succeeds |
 
 The bus grants the *ability* to delegate. The *judgment* of when to comes with it:
 

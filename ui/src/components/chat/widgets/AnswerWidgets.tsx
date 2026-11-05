@@ -1,9 +1,12 @@
+import { useAppear } from '../../../lib/chat/appear'
 import type { KeptWidget, WidgetState } from '../../../lib/widgets/types'
+import { useFirstSight } from '../../../lib/widgets/useFirstSight'
 import { useHeldState } from '../../../lib/widgets/useHeldState'
 import { WidgetCalculator } from './WidgetCalculator'
 import { WidgetChart } from './WidgetChart'
 import { WidgetChecklist } from './WidgetChecklist'
 import { WidgetChoices } from './WidgetChoices'
+import { WidgetCompare } from './WidgetCompare'
 import { WidgetFlow } from './WidgetFlow'
 import { WidgetGraph } from './WidgetGraph'
 import { WidgetMarks } from './WidgetMarks'
@@ -37,10 +40,19 @@ export function AnswerWidgets(props: AnswerWidgetsProps) {
 
 /**
  * One widget in an answer (ADR 0114): choices to tap, a checklist to tick, a calculator LoomWatch
- * works out, steps to tap through, or a chart, a graph, a row of marks or a flow to look at. What you tick or
- * change is kept, and the next work's conversation says so.
+ * works out, steps to tap through, or a comparison, a chart, a graph, a row of marks or a flow to
+ * look at. What you tick or change is kept, and the next work's conversation says so. When it
+ * arrives as news (ADR 0051) and this window hasn't drawn it before, its marks grow in once
+ * (`wg-fresh`); history and a widget drawn again are simply there.
  */
-export function AnswerWidget({ kept, onChange, onChoose, chosen = null, live = false }: Omit<AnswerWidgetsProps, 'widgets'> & { kept: KeptWidget }) {
+export function AnswerWidget(props: Omit<AnswerWidgetsProps, 'widgets'> & { kept: KeptWidget }) {
+  const news = useAppear()
+  const first = useFirstSight(JSON.stringify(props.kept.spec))
+  const fresh = news && first
+  return <div className={`wg-shell${fresh ? ' wg-fresh' : ''}`}>{drawn(props)}</div>
+}
+
+function drawn({ kept, onChange, onChoose, chosen = null, live = false }: Omit<AnswerWidgetsProps, 'widgets'> & { kept: KeptWidget }) {
   switch (kept.spec.kind) {
     case 'choices': return <WidgetChoices spec={kept.spec} onChoose={live ? undefined : onChoose} chosen={chosen} live={live} />
     case 'checklist': return <HeldChecklist kept={kept} onChange={onChange} live={live} />
@@ -48,6 +60,7 @@ export function AnswerWidget({ kept, onChange, onChoose, chosen = null, live = f
     case 'steps': return <WidgetSteps spec={kept.spec} />
     case 'marks': return <WidgetMarks spec={kept.spec} />
     case 'flow': return <WidgetFlow spec={kept.spec} />
+    case 'compare': return <WidgetCompare spec={kept.spec} />
     case 'chart': return <WidgetChart spec={kept.spec} />
     case 'graph': return <WidgetGraph spec={kept.spec} />
   }

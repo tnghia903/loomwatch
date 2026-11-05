@@ -127,6 +127,9 @@ export function WidgetGraph({ spec }: { spec: Graph }) {
               })
             : spec.series.map((series, which) => (
                 <g key={which}>
+                  {spec.series.length === 1 && (
+                    <path className="wg-garea s1" d={`${series.values.map((value, index) => `${index === 0 ? 'M' : 'L'}${x(index)},${y(value)}`).join(' ')} L${x(series.values.length - 1)},${y(0)} L${x(0)},${y(0)} Z`} />
+                  )}
                   <path className={`wg-gline s${which + 1}`} strokeDasharray={DASH[which]} d={series.values.map((value, index) => `${index === 0 ? 'M' : 'L'}${x(index)},${y(value)}`).join(' ')} />
                   <circle className={`wg-gdot s${which + 1}`} cx={x(selected)} cy={y(series.values[selected] ?? 0)} r={4} />
                 </g>

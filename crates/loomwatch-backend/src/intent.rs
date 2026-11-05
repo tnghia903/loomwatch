@@ -60,11 +60,13 @@ const PASS: &str = "PASS";
 /// What an agent answering in the chat with `show_widget` (ADR 0114) is asked beside keeping its
 /// reply short. The ask for a few plain sentences comes last, so without this a model takes it
 /// as words only, though its instructions say to show a widget whenever one fits.
-const SHOW_IN_REPLY: &str = "Keep your words that short, and when a widget fits what you answer, \
-     as your instructions describe, show it with show_widget as well: steps for how something \
-     works or how to do it, a chart for figures to compare, a calculator for a sum or a split they \
-     may change, a checklist for things to do. Put its place line where it belongs, and let your \
-     sentences say what to notice.";
+const SHOW_IN_REPLY: &str = "Keep your words that short, and when one of the views your \
+     instructions describe fits what you answer, show it with show_widget as well, picked by the \
+     shape of what you tell: compare for two or three things side by side or two or three parts \
+     of one thing, a flow for how one thing leads to the next, steps for how to do something, a \
+     chart for figures to compare, a calculator for a sum or a split they may change, a checklist \
+     for things to do. Put its place line where it belongs, and let your sentences say what to \
+     notice.";
 
 /// Who a message was for.
 pub(crate) struct Addressed<'a> {
@@ -536,6 +538,35 @@ fn opening_lines(role: &str, chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A quick answer's last ask (#369) picks the widget by the shape of what it tells, as the
+    /// tool's guide does, and in the tool's own kinds: things side by side are a comparison, and
+    /// how one thing leads to the next is a flow, not steps.
+    #[test]
+    fn a_quick_answer_is_asked_for_the_widget_that_fits_its_shape() {
+        let offered =
+            crate::widgets::tool_definition()["inputSchema"]["properties"]["kind"]["enum"].clone();
+        let picks = [
+            (
+                "compare for two or three things side by side or two or three parts of one thing",
+                "compare",
+            ),
+            ("a flow for how one thing leads to the next", "flow"),
+            ("steps for how to do something", "steps"),
+            ("a chart for figures to compare", "chart"),
+        ];
+        for (words, kind) in picks {
+            assert!(SHOW_IN_REPLY.contains(words), "the ask says {words:?}");
+            assert!(
+                offered.as_array().unwrap().iter().any(|one| one == kind),
+                "{kind} is a kind the tool offers"
+            );
+        }
+        assert!(
+            !SHOW_IN_REPLY.contains("how something works"),
+            "how something works is a flow, not steps"
+        );
+    }
 
     fn team() -> TeamConfig {
         TeamConfig::parse(
