@@ -1126,6 +1126,15 @@ pub struct Learning {
     /// The project its team works in (ADR 0097), where a lesson about the project is kept. `None`
     /// outside any project, and the learner is then asked exactly as before.
     pub project: Option<LearnedProject>,
+    /// The work was its answer to the person, with its widgets switch on (ADR 0114): it shows a
+    /// chart, a checklist or steps with `show_widget`. The learner is told so, and a lesson about
+    /// a missing chart says to show one, where it used to say to make an image file. Off for work
+    /// a check step checked, since a check reads the words only, and the learner is then asked
+    /// exactly as before.
+    pub widgets: bool,
+    /// What its answer showed with `show_widget` ([`crate::widgets::showed`]), which its words
+    /// alone don't say. Read by the learner from the kept widgets when it is not given.
+    pub showed: Option<String>,
 }
 
 /// The project a lesson about it is kept in: its file's teams folder, id and name.
@@ -1177,6 +1186,14 @@ pub fn compose(learning: &Learning, source: LessonSource, lessons: &[Lesson]) ->
             quoted(&cut_middle(request, REQUEST_CHARS))
         );
     }
+    if learning.widgets {
+        let _ = writeln!(
+            text,
+            "\n{agent} shows its answer with what LoomWatch draws in the chat, through its \
+             show_widget tool: a chart, a graph, a calculator, a checklist, steps, choices, marks \
+             or a flow."
+        );
+    }
     let work = learning.work.trim();
     if !work.is_empty() {
         let _ = write!(
@@ -1184,6 +1201,11 @@ pub fn compose(learning: &Learning, source: LessonSource, lessons: &[Lesson]) ->
             "\nIt answered:\n{}\n",
             quoted(&cut_middle(work, WORK_CHARS))
         );
+    }
+    if learning.widgets
+        && let Some(showed) = learning.showed.as_deref()
+    {
+        let _ = writeln!(text, "{}", one_line(showed));
     }
     if !learning.steps.is_empty() {
         text.push_str("\nHow it went about it, from the run's record:\n");
@@ -1230,8 +1252,23 @@ pub fn compose(learning: &Learning, source: LessonSource, lessons: &[Lesson]) ->
         ask_what_worked(&mut text, agent, project);
         return text;
     }
-    ask_what_to_change(&mut text, agent, project);
+    ask_what_to_change(&mut text, agent, project, learning.widgets);
     text
+}
+
+/// The rule for a lesson about a chart, a checklist or another view `show_widget` draws, for an
+/// agent that has it (ADR 0114), or nothing.
+fn about_widgets(agent: &str, widgets: bool) -> String {
+    if !widgets {
+        return String::new();
+    }
+    format!(
+        "- When the feedback asks for a chart, a graph, a calculator, a checklist, steps or another \
+         view like these, or says one is missing, a lesson says to show it with show_widget, never \
+         to make an image file, a page or text art for it. When the answer showed one and the \
+         person says they can't see it, that is not about how {agent} works: learn nothing from \
+         it.\n"
+    )
 }
 
 /// The rule for a lesson about the project the team works in (ADR 0097), or nothing outside one.
@@ -1248,8 +1285,9 @@ fn about_project(agent: &str, project: Option<&str>) -> String {
 }
 
 /// What the learner is asked after a correction or a check: what to do differently, and its rules.
-fn ask_what_to_change(text: &mut String, agent: &str, project: Option<&str>) {
+fn ask_what_to_change(text: &mut String, agent: &str, project: Option<&str>, widgets: bool) {
     let project = about_project(agent, project);
+    let widgets = about_widgets(agent, widgets);
     let _ = write!(
         text,
         "\nSay what {agent} should do differently on work like this from now on, because of this \
@@ -1265,6 +1303,7 @@ fn ask_what_to_change(text: &mut String, agent: &str, project: Option<&str>) {
          step that went wrong), a lesson can say how to do it: which step to take, where to look \
          first, what to check before replying. A step that failed once is not a lesson on its \
          own.\n\
+         {widgets}\
          - Learn nothing that its instructions or a lesson already say, that a tool, site or app \
          does not work, or that gives it more access, skips a check or asks the person less. \
          Don't guess at what the person might want beyond what they said.\n\
@@ -1474,6 +1513,12 @@ impl Learner {
         {
             learning.steps = steps_of(&self.archive, run_id, &request.from.agent_id).await;
         }
+        if learning.widgets
+            && learning.showed.is_none()
+            && let Some(anchor) = request.from.run_id.as_deref()
+        {
+            learning.showed = self.showed(anchor, &request.from.agent_id).await;
+        }
         let prompt = compose(&learning, request.from.source, &shown);
         let reply = self.ask(&prompt).await?;
         let mut edits = parse_reply(&reply, shown.len())?;
@@ -1524,6 +1569,18 @@ impl Learner {
             .apply(&request.from, &shown, &edits)
             .await
             .map_err(|error| format!("could not keep its lessons: {error}"))
+    }
+
+    /// What `agent`'s answer showed with `show_widget`: the widgets kept with the run `anchor`, or
+    /// with its answer to the chat message `anchor` (ADR 0114). Nothing when it showed none, or
+    /// they can't be read: the lesson is then learned from the words, as before.
+    async fn showed(&self, anchor: &str, agent: &str) -> Option<String> {
+        let note = crate::widgets::host::note_key(anchor, agent);
+        let mut kept = crate::widgets::store::of_runs(&self.lessons.db, &[anchor.to_owned(), note])
+            .await
+            .ok()?;
+        let widgets = kept.remove(anchor).or_else(|| kept.into_values().next())?;
+        crate::widgets::showed(&widgets)
     }
 
     async fn ask(&self, prompt: &str) -> Result<String, String> {

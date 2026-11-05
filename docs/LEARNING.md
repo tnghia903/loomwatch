@@ -84,6 +84,13 @@ is the usual answer. It is also told not to learn:
 - anything that gives the agent more access, skips a check or asks you less;
 - a guess at what you might want beyond what you said.
 
+When the feedback is on an answer the agent gave you and its widgets switch is on (ADR 0114), the
+learner is told the agent shows charts, graphs, calculators, checklists, steps, choices, marks and
+flows in the chat with `show_widget`, and what this answer showed. Feedback that asks for a chart
+or says one is missing then teaches it to show one, never to make an image file, a page or text
+art. When the answer showed one and you say you can't see it, it learns nothing: that isn't about
+how the agent works. A check step reads the answer's words only, so what it teaches is unchanged.
+
 ## 4. How a lesson is made
 
 1. The feedback arrives. The work you asked for starts at once, with your words already in its
@@ -91,7 +98,7 @@ is the usual answer. It is also told not to learn:
 2. In the background, LoomWatch's own model (the fast tier) takes one turn with no tools. It is
    shown:
    - the agent's name, its instructions and Done when;
-   - the request and the work;
+   - the request and the work, and what the answer showed with `show_widget` when it could;
    - how the agent went about it: at most 30 steps from the run's record, the first and the last
      kept;
    - the feedback;

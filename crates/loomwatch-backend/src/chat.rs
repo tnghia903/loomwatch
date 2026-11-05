@@ -3276,6 +3276,8 @@ async fn learn_from_love(
             request: task_text(&answered.request, team).to_owned(),
             work,
             project: crate::lessons::project_of(team, &resolved),
+            // The answer it gave, so it had `show_widget` when its switch was on (ADR 0114).
+            widgets: agent.widgets.unwrap_or(crate::widgets::DEFAULT_ON),
             ..crate::lessons::Learning::default()
         },
     });
@@ -3337,6 +3339,11 @@ async fn learn_from_words(
         return;
     }
     // Replying to something else the agent said makes that the work the words are about.
+    let about_other = reply_to.is_some_and(|reply| reply.kind != ReplyKind::Answer);
+    // ADR 0114: words about an answer it gave, which had `show_widget` when its switch was on.
+    let widgets = !about_other
+        && answered.said.iter().any(|(id, _)| *id == agent.id)
+        && agent.widgets.unwrap_or(crate::widgets::DEFAULT_ON);
     let work = match reply_to {
         Some(reply) if reply.kind != ReplyKind::Answer => reply.text.clone(),
         _ => answered
@@ -3366,6 +3373,8 @@ async fn learn_from_words(
             missed_items: Vec::new(),
             steps: Vec::new(),
             project: crate::lessons::project_of(team, &resolved),
+            widgets,
+            showed: None,
         },
     });
 }
@@ -8197,6 +8206,13 @@ mod tests {
             assert!(asked[0].contains(
                 "Then the person wrote this about the work:\n> Too long. Three bullets, please."
             ));
+            // ADR 0114: the answer was Writer's, with its widgets switch on (the default), so a
+            // lesson about a missing chart says to show one with a widget.
+            assert!(
+                asked[0].contains("a lesson says to show it with show_widget"),
+                "{}",
+                asked[0]
+            );
         }
         // The chat shows it on the work it came from.
         let chat = page(&rig.app).await;
@@ -8282,6 +8298,10 @@ mod tests {
         let kept = learned(&rig, "team:news-desk#researcher", 1).await;
         assert_eq!(kept[0].agent_id, "researcher");
         assert!(asked.lock().unwrap()[0].contains("It answered:\n> researcher handover"));
+        assert!(
+            !asked.lock().unwrap()[0].contains("show_widget"),
+            "a handover is not an answer the person reads, so it had no widgets"
+        );
         let (status, _) = send(
             &rig.app,
             json!({"teamPath": "news.yaml", "text": "x".repeat(crate::lessons::MAX_FEEDBACK_CHARS + 1), "to": null}),
@@ -8404,6 +8424,10 @@ mod tests {
             "{asked}"
         );
         assert!(asked.contains("It answered:\n> A very long list of everything that happened."));
+        assert!(
+            asked.contains("a lesson says to show it with show_widget"),
+            "an answer in the chat can show widgets too: {asked}"
+        );
         let chat = page(&rig.app).await;
         let note = chat["items"]
             .as_array()
@@ -8459,6 +8483,11 @@ mod tests {
                 asked[0]
             );
             assert!(asked[0].contains("Then the person marked the answer Love it"));
+            assert!(
+                asked[0].contains("through its show_widget tool"),
+                "its answer could show widgets, which may be what was loved: {}",
+                asked[0]
+            );
         }
         // Off and on again: no second learning.
         post(
