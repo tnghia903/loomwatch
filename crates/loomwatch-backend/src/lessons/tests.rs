@@ -111,6 +111,8 @@ fn the_learner_reads_the_work_the_feedback_and_the_numbered_lessons() {
         missed_items: Vec::new(),
         steps: Vec::new(),
         project: None,
+        widgets: false,
+        showed: None,
     };
     let shown = vec![lesson("When writing a digest, open with the date.")];
     let prompt = compose(&learning, LessonSource::You, &shown);
@@ -526,6 +528,56 @@ async fn the_learner_takes_one_turn_with_no_tools_and_its_edits_are_kept() {
     assert!(asked[0].contains(
         "Then the person wrote this about the work:\n> Too long. Three bullets, please."
     ));
+}
+
+/// ADR 0114: an agent with `show_widget` draws its charts in the chat. Feedback about a missing
+/// chart on its answer teaches it to show one there, not to make an image file, and the learner
+/// reads what the answer showed, which its words don't say: a chart the person says they can't
+/// see was there. An answer in the chat is read under its message's key. An agent without it is
+/// asked exactly as before.
+#[tokio::test]
+async fn a_lesson_about_a_missing_chart_says_to_show_one_with_a_widget() {
+    let lessons = store().await;
+    let chart = crate::widgets::read(&serde_json::json!({
+        "kind": "chart", "title": "US Senate seats", "unit": "seats",
+        "bars": [{"label": "Democrats", "value": 54}, {"label": "Republicans", "value": 44}]
+    }))
+    .unwrap();
+    crate::widgets::store::keep(&lessons.db, "run-1", &[(chart.clone(), None)])
+        .await
+        .unwrap();
+    let note = crate::widgets::host::note_key("message-1", "writer");
+    crate::widgets::store::keep(&lessons.db, &note, &[(chart, Some(1))])
+        .await
+        .unwrap();
+    let ask = async |widgets: bool, anchor: &str, source: LessonSource| {
+        let (learner, asked) = learner_answering(lessons.clone(), "{\"edits\": []}");
+        let mut request = request("agent:writer");
+        request.from.run_id = Some(anchor.to_owned());
+        request.from.source = source;
+        request.learning.said = "I cannot see any charts in the chat.".to_owned();
+        request.learning.widgets = widgets;
+        learner.learn(&request).await.unwrap();
+        asked.lock().unwrap()[0].clone()
+    };
+    let rule = "a lesson says to show it with show_widget, never to make an image file";
+    let drawn = "[Under this answer: a chart \"US Senate seats\" (Democrats 54 seats; Republicans \
+                 44 seats).]";
+
+    let with = ask(true, "run-1", LessonSource::You).await;
+    assert!(with.contains(rule), "{with}");
+    assert!(with.contains("through its show_widget tool: a chart, a graph"));
+    assert!(
+        with.contains(&format!("> A very long digest.\n{drawn}\n")),
+        "what it showed follows its words: {with}"
+    );
+    assert!(with.contains("person says they can't see it, that is not about how Writer works"));
+    let in_the_chat = ask(true, "message-1", LessonSource::You).await;
+    assert!(in_the_chat.contains(drawn), "{in_the_chat}");
+
+    let without = ask(false, "run-1", LessonSource::You).await;
+    assert!(!without.contains("show_widget"), "{without}");
+    assert!(!without.contains("[Under this answer"), "{without}");
 }
 
 #[tokio::test]

@@ -4447,6 +4447,9 @@ fn learn_from_checks(
             missed_items: fixed,
             steps: Vec::new(),
             project: lessons::project_of(team, team_path),
+            // A check reads the words only, so a widget would not meet an item it checks.
+            widgets: false,
+            showed: None,
         },
     });
 }
