@@ -12,6 +12,7 @@ export function WidgetChecklist({ spec, state, onToggle, error, disabled = false
   return (
     <section className="wg wg-checklist" aria-label={spec.title} title={disabled ? LIVE : undefined}>
       <p className="wg-title">{spec.title}<span className="wg-count">{done} of {spec.items.length} done</span></p>
+      <span className="wg-progress" aria-hidden="true"><i data-testid="wg-progress" style={{ width: `${spec.items.length ? (done / spec.items.length) * 100 : 0}%` }} /></span>
       <ul className="wg-items">
         {spec.items.map((item, at) => (
           <li key={at}>

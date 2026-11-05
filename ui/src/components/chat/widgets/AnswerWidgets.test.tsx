@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { AppearContext } from '../../../lib/chat/appear'
 import type { KeptWidget, WidgetState } from '../../../lib/widgets/types'
 import { AnswerWidgets } from './AnswerWidgets'
 
@@ -278,5 +279,131 @@ describe('AnswerWidgets, new parts', () => {
     for (const box of screen.getAllByRole('checkbox')) expect(box).toBeDisabled()
     for (const button of within(screen.getByRole('region', { name: 'Which theme?' })).getAllByRole('button')) expect(button).toBeDisabled()
     expect(onChange).not.toHaveBeenCalled()
+  })
+})
+
+describe('AnswerWidgets, compare and counted', () => {
+  const plans: KeptWidget = {
+    n: 9,
+    spec: {
+      kind: 'compare',
+      title: 'Two phone plans',
+      whole: { label: 'Your family’s lines', note: 'Four phones' },
+      sides: [{ label: 'Basic', value: 100, note: 'Shared data' }, { label: 'Unlimited', value: 435 }],
+      rows: [{ label: 'Data', values: ['20 GB shared', 'Unlimited'] }, { label: 'Calls abroad', values: ['By the minute', 'Included'] }],
+      unit: 'minutes',
+    },
+  }
+
+  it('draws the parts of one thing side by side, each figure to scale, with facts read across', () => {
+    render(<AnswerWidgets widgets={[plans]} onChange={keeper().onChange} />)
+    const compare = screen.getByRole('region', { name: 'Two phone plans' })
+    // A screen reader reads it as a table: the sides across the top, a fact on each row.
+    const table = within(compare).getByRole('table')
+    expect(table).toHaveTextContent('Two phone plans: Your family’s lines, Four phones')
+    expect(within(table).getAllByRole('columnheader').map((cell) => cell.textContent)).toEqual(['Basic', 'Unlimited'])
+    const rows = within(table).getAllByRole('row').map((row) => [...row.children].map((cell) => cell.textContent))
+    expect(rows).toEqual([
+      ['', 'Basic', 'Unlimited'],
+      ['minutes', '100 minutes', '435 minutes'],
+      ['Note', 'Shared data', ''],
+      ['Data', '20 GB shared', 'Unlimited'],
+      ['Calls abroad', 'By the minute', 'Included'],
+    ])
+    // Drawn: the whole joined to each side, and each figure a rule from one zero.
+    const drawn = within(compare).getByTestId('wg-compare')
+    expect(drawn).toHaveTextContent('Your family’s lines')
+    expect(drawn.querySelector('.wg-tree')).not.toBeNull()
+    const [basic, unlimited] = within(compare).getAllByTestId('wg-side-scale')
+    expect(parseFloat(basic.style.width)).toBeCloseTo((100 / 435) * 100, 5)
+    expect(unlimited.style.width).toBe('100%')
+    // A fact's values sit under their sides, in the sides' order.
+    const facts = [...drawn.querySelectorAll('.wg-row')].map((row) => [...row.children].map((cell) => cell.textContent))
+    expect(facts).toEqual([['Data', '20 GB shared', 'Unlimited'], ['Calls abroad', 'By the minute', 'Included']])
+    expect(within(compare).queryAllByTestId('wg-dots')).toHaveLength(0)
+  })
+
+  it('draws figures that count whole things as a dot each, or a round number each when too many', () => {
+    const seats: KeptWidget = { n: 10, spec: { kind: 'compare', title: 'Two houses', unit: 'seats', counted: true, sides: [{ label: 'Upper', value: 100 }, { label: 'Lower', value: 435 }] } }
+    const crowd: KeptWidget = { n: 11, spec: { kind: 'compare', title: 'Two halls', unit: 'people', counted: true, sides: [{ label: 'Small', value: 300 }, { label: 'Big', value: 1203 }] } }
+    render(<AnswerWidgets widgets={[seats, crowd]} onChange={keeper().onChange} />)
+    const houses = screen.getByRole('region', { name: 'Two houses' })
+    const [upper, lower] = within(houses).getAllByTestId('wg-dots')
+    expect(upper.querySelectorAll('i')).toHaveLength(100)
+    expect(lower.querySelectorAll('i')).toHaveLength(435)
+    // A dot for each seat needs no key: the figure is written above the dots.
+    expect(houses).not.toHaveTextContent('= 1')
+    expect(within(houses).queryAllByTestId('wg-side-scale')).toHaveLength(0)
+    // 1,203 won't fit a dot each: a dot is 5 people, and the 3 left over are part of one more.
+    const halls = screen.getByRole('region', { name: 'Two halls' })
+    const [small, big] = within(halls).getAllByTestId('wg-dots')
+    expect(small.querySelectorAll('i')).toHaveLength(60)
+    expect(big.querySelectorAll('i')).toHaveLength(241)
+    expect(big.querySelector('i.part')).toHaveStyle({ '--part': '0.6' })
+    expect(halls).toHaveTextContent('= 5 people')
+  })
+
+  it('draws a counted chart as lines of dots, each figure still written beside its line', () => {
+    const states: KeptWidget = { n: 12, spec: { kind: 'chart', title: 'Seats by state', unit: 'seats', counted: true, bars: [{ label: 'California', value: 52 }, { label: 'Texas', value: 38 }, { label: 'Wyoming', value: 1 }] } }
+    render(<AnswerWidgets widgets={[states]} onChange={keeper().onChange} />)
+    const chart = screen.getByRole('region', { name: 'Seats by state' })
+    expect(within(chart).getAllByRole('listitem').map((row) => row.textContent)).toEqual(['California52 seats', 'Texas38 seats', 'Wyoming1 seats'])
+    expect(within(chart).getAllByTestId('wg-dots').map((line) => line.querySelectorAll('i').length)).toEqual([52, 38, 1])
+    // Tens are set apart, so a line can be counted.
+    expect(within(chart).getAllByTestId('wg-dots')[0].querySelectorAll('b')).toHaveLength(5)
+    expect(within(chart).queryAllByTestId('wg-bar-fill')).toHaveLength(0)
+    expect(chart).not.toHaveTextContent('= 1')
+  })
+
+  it('runs a flow across while each stop has room, and down when it hasn’t', () => {
+    const flow: KeptWidget = { n: 13, spec: { kind: 'flow', title: 'From bill to law', boxes: [{ label: 'One house votes' }, { label: 'The other votes' }, { label: 'Signed' }, { label: 'Law' }] } }
+    const { unmount } = render(<AnswerWidgets widgets={[flow]} onChange={keeper().onChange} />)
+    const route = () => screen.getByRole('region', { name: 'From bill to law' }).querySelector('.wg-route')
+    expect(route()).toHaveClass('across')
+    // The stops read as their words: the numbers are drawn, not written.
+    expect(within(screen.getByRole('region', { name: 'From bill to law' })).getAllByRole('listitem').map((stop) => stop.textContent)).toEqual(['One house votes', 'The other votes', 'Signed', 'Law'])
+    unmount()
+    const measure = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ width: 300 } as DOMRect)
+    render(<AnswerWidgets widgets={[flow]} onChange={keeper().onChange} />)
+    expect(route()).toHaveClass('down')
+    measure.mockRestore()
+  })
+
+  it('grows in when it arrives as news, once; history and a widget drawn again are simply there', () => {
+    const once: KeptWidget = { n: 14, spec: { kind: 'chart', title: 'Drawn once', bars: [{ label: 'a', value: 1 }, { label: 'b', value: 2 }] } }
+    const history: KeptWidget = { n: 17, spec: { kind: 'chart', title: 'Read back', bars: [{ label: 'a', value: 3 }, { label: 'b', value: 4 }] } }
+    const shell = (title: string) => screen.getByRole('region', { name: title }).parentElement
+    // An older page read back: not news, so nothing moves, then or later.
+    const old = render(<AppearContext.Provider value={false}><AnswerWidgets widgets={[history]} onChange={keeper().onChange} /></AppearContext.Provider>)
+    expect(shell('Read back')).not.toHaveClass('wg-fresh')
+    old.unmount()
+    const first = render(<AppearContext.Provider value={true}><AnswerWidgets widgets={[once, { ...history, n: 18 }]} onChange={keeper().onChange} /></AppearContext.Provider>)
+    expect(shell('Drawn once')).toHaveClass('wg-fresh')
+    expect(shell('Read back')).not.toHaveClass('wg-fresh')
+    first.unmount()
+    render(<AppearContext.Provider value={true}><AnswerWidgets widgets={[{ ...once, n: 15 }]} onChange={keeper().onChange} /></AppearContext.Provider>)
+    expect(shell('Drawn once')).not.toHaveClass('wg-fresh')
+  })
+
+  it('runs a route down when a word of its labels wouldn’t fit across, rather than break it', () => {
+    const words: KeptWidget = { n: 19, spec: { kind: 'flow', title: 'Signing in', boxes: [{ label: 'Username' }, { label: 'Internationalisation' }, { label: 'Session' }, { label: 'Done' }] } }
+    render(<AnswerWidgets widgets={[words]} onChange={keeper().onChange} />)
+    // 480 px across four stops is 120 each; "Internationalisation" needs about 162 with its room.
+    expect(screen.getByRole('region', { name: 'Signing in' }).querySelector('.wg-route')).toHaveClass('down')
+  })
+
+  it('shows how much of a checklist is done as a line under its title', () => {
+    const three: KeptWidget = { n: 16, spec: { kind: 'checklist', title: 'Three things', items: [{ text: 'One' }, { text: 'Two' }, { text: 'Three' }] }, state: { checked: [true, false, false] } }
+    render(<AnswerWidgets widgets={[three]} onChange={keeper().onChange} />)
+    // What is done, not what is left.
+    expect(parseFloat(screen.getByTestId('wg-progress').style.width)).toBeCloseTo(100 / 3, 5)
+  })
+
+  it('reads figures without a unit as a "Number" row, and ends steps that repeat on the first one’s name', () => {
+    const plain: KeptWidget = { n: 20, spec: { kind: 'compare', title: 'Two lines', sides: [{ label: 'Basic', value: 4 }, { label: 'Unlimited', value: 12 }] } }
+    render(<AnswerWidgets widgets={[plain, { ...water, n: 21 }]} onChange={keeper().onChange} />)
+    const table = within(screen.getByRole('region', { name: 'Two lines' })).getByRole('table')
+    expect([...within(table).getAllByRole('row')[1].children].map((cell) => cell.textContent)).toEqual(['Number', '4', '12'])
+    expect(screen.getByRole('img', { name: 'Then back to step 1' })).toHaveTextContent('Evaporation')
   })
 })

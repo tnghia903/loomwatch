@@ -566,7 +566,11 @@ async fn a_lesson_about_a_missing_chart_says_to_show_one_with_a_widget() {
 
     let with = ask(true, "run-1", LessonSource::You).await;
     assert!(with.contains(rule), "{with}");
-    assert!(with.contains("through its show_widget tool: a chart, a graph"));
+    assert!(with.contains("through its show_widget tool: a comparison, a chart, a graph"));
+    assert!(
+        with.contains("asks for a chart, a graph, a comparison"),
+        "{with}"
+    );
     assert!(
         with.contains(&format!("> A very long digest.\n{drawn}\n")),
         "what it showed follows its words: {with}"

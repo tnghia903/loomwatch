@@ -85,11 +85,18 @@ At a check's stop, **Send back** works with no note: the checks still open say w
 
 An answer can have things to use and to look at in it (ADR 0114), when the agent that wrote it has
 **Adds charts, checklists and calculators to its answers** on, as it is unless turned off: choices
-to tap, a checklist to tick, a calculator, steps to tap through, a chart whose bars LoomWatch draws
-to scale from the agent's figures, a graph of bars or a line, a row of things marked yes or no, or a
-diagram of boxes and arrows. The agent that answers shows one whenever its answer has figures to
-compare, a sum to change, things to do, a process or a choice of what next; words alone are for
-answers with none of these. A quick question the agents answer in the chat, without starting
+to tap, a checklist to tick, a calculator, steps to tap through, a comparison of two or three things
+side by side (or the parts of one thing, joined to the whole above them) with facts read across, a
+chart whose bars LoomWatch draws to scale from the agent's figures, a graph of bars or a line, a row
+of things marked yes or no, or a flow of numbered stops along a line. Figures that count whole
+things, such as seats or people, can be drawn as dots, one for each or for a round number of them,
+with a key saying which. The agent that answers shows one whenever its answer has things to set
+side by side, figures to compare, a sum to change, things to do, a process or a choice of what
+next, and its instructions match each kind to the shape of what it tells (a flow's arrows say one
+thing leads to the next, so parts side by side are a comparison); words alone are for answers with
+none of these. When a widget arrives while you watch, its bars grow, its dots come in and a flow's
+line draws across, once; opening the chat or reading back older answers draws them still, as does
+reduced motion. A quick question the agents answer in the chat, without starting
 work, can have them too. Each stands where the agent put it in its words; one it didn't place
 comes after them. They appear as the answer is written and work once it is done.
 

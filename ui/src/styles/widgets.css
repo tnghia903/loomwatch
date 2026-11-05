@@ -1,76 +1,328 @@
 /* ===========================================================================
-   Widgets in an answer (ADR 0114): choices, a checklist, a calculator, steps, a chart, a graph,
-   marks, a flow; each where the answer's words place it, the rest after them.
-   components/chat/widgets/. Every rule is under a .wg- class; tokens only. No gold fill: the
-   chat's send is the screen's one. A choice, a step, a tick or a switch that is on is the
-   accent's tint with a ring, a line or a gold mark (DESIGN.md §Components; settings.css's
-   "An 'on' here is a line, not a fill").
+   Widgets in an answer (ADR 0114): a comparison, a chart, a graph, a flow, steps, a calculator, a
+   checklist, marks, choices; each where the answer's words place it, the rest after them.
+   components/chat/widgets/. Every rule is under a .wg- class; tokens only.
+
+   The look ("Counted"): a card set into the bubble with a rim of light; its title in the serif;
+   figures large in the serif, each drawn to scale from one zero, and things that can be counted
+   drawn one dot each, in tens; steps and flows as numbered stops along one line. No gold fill: the
+   chat's send is the screen's one. Gold is a line: step numbers, a ring on what is picked, the one
+   short line that runs a flow's route when it first appears. Series wear --color-series-n; words stay ink.
    =========================================================================== */
 
 /* As wide as the chat allows, up to a reading width, so each widget is laid out by its own room
    rather than shrinking to its content. */
-.wg-list { display: flex; flex-direction: column; gap: var(--sp-2); margin-top: var(--sp-2); width: min(100%, 640px); }
+.wg-list { display: flex; flex-direction: column; gap: var(--sp-3); margin-top: var(--sp-2); width: min(100%, 640px); }
+.wg-shell { min-width: 0; }
 
-/* --wg-surface: the card's own colour, which a graph's selected point is ringed in. */
+/* --wg-surface: the card's own colour, which a graph's selected point and a stop's number sit on. */
 .wg {
   --wg-surface: var(--color-panel-solid);
+  --wg-mark: var(--color-series-1);
   display: flex;
   flex-direction: column;
-  gap: var(--sp-2);
-  padding: var(--sp-3);
+  gap: var(--sp-3);
+  padding: var(--sp-4);
   border: 1px solid var(--color-hairline);
   border-radius: var(--r-lg);
   background: var(--wg-surface);
+  box-shadow: var(--rim-light);
   min-width: 0;
 }
-.wg-title { margin: 0; display: flex; align-items: baseline; gap: var(--sp-2); font: 600 14px/20px var(--font-sans); color: var(--color-ink); }
-.wg-count { margin-left: auto; font: 400 12px/16px var(--font-sans); color: var(--color-ink-2); font-variant-numeric: tabular-nums; }
+/* Fraunces ships at 400 only: a heavier weight is a bold the browser fakes. */
+.wg-title { margin: 0; display: flex; align-items: baseline; gap: var(--sp-2); font: 400 18px/24px var(--font-serif); letter-spacing: -.005em; color: var(--color-ink); text-wrap: balance; }
+.wg-count { margin-left: auto; flex: none; font: 400 12px/16px var(--font-sans); color: var(--color-ink-2); font-variant-numeric: tabular-nums; }
 
-/* Choices */
-.wg-options { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 140px), 1fr)); gap: var(--sp-2); }
+/* What one dot stands for, under a chart or a comparison of things counted. */
+.wg-key { margin: 0; display: flex; align-items: center; gap: 6px; font: 400 12px/16px var(--font-sans); color: var(--color-ink-2); font-variant-numeric: tabular-nums; }
+.wg-key i { width: 5px; height: 5px; border-radius: var(--r-full); background: var(--wg-mark); }
+.wg-chart .wg-key i { width: 7px; height: 7px; }
+
+/* ---------------------------------------------------------------------------
+   Dots: one for each thing (or a round number of them), in tens. A block of rows on a
+   comparison's side, one line on a chart's row. What is left over is part of a dot, cut upright.
+   --------------------------------------------------------------------------- */
+.wg-dots { --dot: 5px; display: flex; flex-wrap: wrap; align-items: center; gap: 2px; min-height: var(--dot); }
+.wg-dots i { width: var(--dot); height: var(--dot); border-radius: var(--r-full); background: var(--wg-mark); }
+/* A chart's line of dots is larger than a comparison's block (dots.ts LINE_DOT), so a row reads as
+   a mark of its own and not a dotted rule. */
+.wg-chart .wg-dots { --dot: 7px; }
+.wg-dots i.part { clip-path: inset(0 calc((1 - var(--part)) * 100%) 0 0); }
+.wg-dots b { width: 3px; }
+.wg-dots.block { display: grid; grid-template-columns: repeat(10, 5px); justify-content: center; }
+.wg-dots.block.by20 { grid-template-columns: repeat(10, 5px) 3px repeat(10, 5px); }
+.wg-dots.block.by30 { grid-template-columns: repeat(10, 5px) 3px repeat(10, 5px) 3px repeat(10, 5px); }
+
+/* ---------------------------------------------------------------------------
+   Compare: the whole above, joined to each side; each side its name, its figure large, its few
+   words and its mark to scale; then facts read across, labelled once. Sides share one grid with
+   the facts, so a value sits under its side.
+   --------------------------------------------------------------------------- */
+.wg-cmp { display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); }
+.wg-whole { grid-column: 1 / -1; justify-self: center; display: flex; flex-direction: column; align-items: center; max-width: 100%; text-align: center; }
+.wg-whole b { font: 600 14px/20px var(--font-sans); color: var(--color-ink); overflow-wrap: anywhere; }
+.wg-whole span { font: 400 12px/16px var(--font-sans); color: var(--color-ink-2); overflow-wrap: anywhere; }
+/* The joint: a stem down from the whole, then a bar to each side's middle, with a drop to each. */
+.wg-tree { grid-column: 1 / -1; position: relative; height: 24px; }
+.wg-tree::before { content: ''; position: absolute; left: 50%; top: 2px; height: 11px; border-left: 1px solid var(--color-warp); }
+.wg-tree::after {
+  content: '';
+  position: absolute;
+  top: 12px;
+  height: 12px;
+  left: calc(50% / var(--n));
+  right: calc(50% / var(--n));
+  border: 1px solid var(--color-warp);
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+}
+/* Three sides: the middle one's drop is the stem carried on down. */
+.wg-cmp.n3 .wg-tree::before { height: 22px; }
+.wg-side { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 0; padding: 4px 10px 12px; text-align: center; }
+.wg-side + .wg-side { box-shadow: inset 1px 0 0 var(--color-hairline); }
+.wg-side.s2 { --wg-mark: var(--color-series-2); }
+.wg-side.s3 { --wg-mark: var(--color-series-3); }
+.wg-side-name { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; font: 500 13px/18px var(--font-sans); color: var(--color-ink-2); overflow-wrap: anywhere; }
+/* Each side's own mark beside its name, when its figure is drawn. */
+.wg-side.drawn .wg-side-name::before { content: ''; flex: none; width: 8px; height: 8px; border-radius: var(--r-full); background: var(--wg-mark); }
+.wg-side.named .wg-side-name { font: 400 22px/28px var(--font-serif); letter-spacing: -.01em; color: var(--color-ink); }
+.wg-side-figure { font: 400 40px/1.1 var(--font-serif); letter-spacing: -.02em; color: var(--color-ink); font-variant-numeric: lining-nums tabular-nums; overflow-wrap: anywhere; }
+.wg-side-figure small { font: 400 13px/1 var(--font-sans); letter-spacing: 0; color: var(--color-ink-2); }
+.wg-side-note { font: 400 12px/16px var(--font-sans); color: var(--color-ink-2); overflow-wrap: anywhere; }
+.wg-side .wg-dots { margin-top: var(--sp-2); }
+.wg-side-scale { display: block; width: 100%; max-width: 180px; height: 4px; margin-top: var(--sp-2); border-radius: var(--r-full); background: color-mix(in srgb, var(--color-ink) 8%, transparent); }
+.wg-side-scale i { display: block; height: 100%; min-width: 2px; border-radius: inherit; background: var(--wg-mark); transform-origin: left; }
+.wg-cmp > .wg-key { grid-column: 1 / -1; justify-self: center; padding-bottom: var(--sp-1); }
+/* Each side wears its own colour, so the key's dot is neutral. */
+.wg-cmp > .wg-key i { background: var(--color-ink-3); }
+/* A fact: its name across the top, centred, then each side's value under that side. */
+.wg-row { display: contents; }
+.wg-row-label {
+  grid-column: 1 / -1;
+  padding: 9px 0 2px;
+  border-top: 1px solid var(--color-hairline);
+  text-align: center;
+  font: 600 11px/14px var(--font-sans);
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: var(--color-ink-2);
+}
+.wg-row-value { min-width: 0; padding: 2px 10px 9px; text-align: center; font: 500 14px/19px var(--font-sans); color: var(--color-ink); overflow-wrap: anywhere; }
+.wg-row-value + .wg-row-value { box-shadow: inset 1px 0 0 var(--color-hairline); }
+/* A fact under the pointer is tinted across, where there is a pointer to hover with. */
+@media (hover: hover) { .wg-row:hover > * { background: color-mix(in srgb, var(--color-ink) 4%, transparent); } }
+
+/* ---------------------------------------------------------------------------
+   Chart: each thing's name and figure on a line, its bar (or its dots) under them, every bar from
+   one zero. A figure below zero runs left of the zero line, lighter.
+   --------------------------------------------------------------------------- */
+.wg-bars { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-3); }
+.wg-bar { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "label figure" "mark mark"; align-items: baseline; gap: 6px var(--sp-2); }
+.wg-bar-label { grid-area: label; min-width: 0; font: 400 14px/20px var(--font-sans); color: var(--color-ink); overflow-wrap: anywhere; }
+.wg-bar-figure { grid-area: figure; font: 600 14px/20px var(--font-sans); color: var(--color-ink); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.wg-bar-note { font-weight: 400; color: var(--color-ink-2); }
+.wg-bar-track, .wg-bar > .wg-dots { grid-area: mark; }
+.wg-bar-track { position: relative; height: 8px; border-radius: var(--r-full); background: color-mix(in srgb, var(--color-ink) 7%, transparent); }
+.wg-bar-fill { position: absolute; top: 0; bottom: 0; min-width: 2px; border-radius: var(--r-full); background: var(--wg-mark); transform-origin: left; }
+.wg-bar-fill.below { background: color-mix(in srgb, var(--wg-mark) 25%, transparent); box-shadow: inset 0 0 0 1.5px var(--wg-mark); transform-origin: right; }
+.wg-bar-zero { position: absolute; top: -3px; bottom: -3px; width: 1px; background: var(--color-ink-3); }
+.wg-chart.counted .wg-bars { gap: var(--sp-2); }
+
+/* ---------------------------------------------------------------------------
+   A route, for a flow and for steps: numbered stops along one line, across while each stop has
+   room, down when it hasn't. Numbers are a gold ring (DESIGN_LANGUAGE §5: step numbers are gold).
+   --------------------------------------------------------------------------- */
+.wg-route { position: relative; }
+.wg-stops { list-style: none; margin: 0; padding: 0; counter-reset: wg-stop; }
+.wg-stop { position: relative; min-width: 0; }
+/* --n counts the stops and, where the route repeats, the ghost of the first; --stops the stops. */
+.wg-route.across .wg-stops { display: grid; grid-template-columns: repeat(var(--stops, var(--n)), minmax(0, 1fr)); }
+.wg-route.across .wg-stop { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 0 4px; text-align: center; }
+.wg-route.down .wg-stops { display: flex; flex-direction: column; gap: var(--sp-3); }
+/* The line: across, from the first stop's middle to the last's, under the numbers, with a chevron
+   halfway between two stops; down, a piece from each number to the next. */
+.wg-rail { position: absolute; top: 13px; left: calc(50% / var(--n)); right: calc(50% / var(--n)); height: 2px; border-radius: 1px; background: var(--color-warp); }
+.wg-route.down .wg-rail { display: none; }
+/* Steps' numbers sit inside their buttons: the line and the chevrons meet them at their middle. */
+.wg-steps .wg-rail { top: 20px; }
+.wg-steps .wg-route.across .wg-stop:not(:last-child)::after,
+.wg-steps .wg-route.across.again .wg-stop:last-child::after { top: 17px; }
+.wg-steps .wg-route.down .wg-stop:not(:last-child)::after,
+.wg-steps .wg-route.down.again .wg-stop:last-child::after { left: 20px; top: 35px; bottom: calc(-1 * (var(--sp-3) + 7px)); }
+
+/* The ghost of the first stop, where a route repeats: outside the list (it is not a stop), in the
+   column after the last stop across, or the row under it down. A dashed ring and the first stop's
+   name, quiet. */
+.wg-route.across.again .wg-stops { width: calc(100% * var(--stops) / var(--n)); }
+.wg-again { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 0; padding: 0 4px; text-align: center; }
+.wg-route.across .wg-again { position: absolute; top: 0; right: 0; width: calc(100% / var(--n)); }
+.wg-steps .wg-route.across .wg-again { padding-top: 7px; }
+.wg-route.down .wg-again { flex-direction: row; margin-top: var(--sp-3); padding: 0; text-align: left; }
+.wg-steps .wg-route.down .wg-again { padding-left: 7px; }
+.wg-again-n {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1.5px dashed var(--color-ink-3);
+  border-radius: var(--r-full);
+  background: var(--wg-surface);
+  font: 600 13px/1 var(--font-sans);
+  color: var(--color-ink-2);
+  font-variant-numeric: tabular-nums;
+  box-sizing: border-box;
+}
+.wg-again-label { font: 500 12px/16px var(--font-sans); color: var(--color-ink-2); overflow-wrap: break-word; }
+.wg-route.across .wg-stop:not(:last-child)::after,
+.wg-route.across.again .wg-stop:last-child::after {
+  content: '';
+  position: absolute;
+  top: 10px;
+  right: -4px;
+  width: 6px;
+  height: 6px;
+  border-top: 2px solid var(--color-ink-3);
+  border-right: 2px solid var(--color-ink-3);
+  transform: rotate(45deg);
+}
+.wg-route.down .wg-stop:not(:last-child)::after,
+.wg-route.down.again .wg-stop:last-child::after { content: ''; position: absolute; left: 13px; top: 30px; bottom: calc(2px - var(--sp-3)); width: 2px; border-radius: 1px; background: var(--color-warp); }
+
+/* Flow: each stop's number is drawn here, so the stop reads as its words. The last is filled,
+   where the flow arrives; one that repeats ends on a dashed ghost of the first instead. */
+.wg-flow .wg-stop::before {
+  counter-increment: wg-stop;
+  content: counter(wg-stop);
+  position: relative;
+  z-index: 1;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-full);
+  box-shadow: inset 0 0 0 1.5px var(--color-accent);
+  background: var(--wg-surface);
+  color: var(--color-accent);
+  font: 600 13px/1 var(--font-sans);
+  font-variant-numeric: tabular-nums;
+}
+.wg-flow:not(.repeats) .wg-stop:last-child::before { box-shadow: inset 0 0 0 2px var(--color-ink); color: var(--color-ink); }
+.wg-route.across .wg-stop .wg-flow-label { margin-top: 6px; }
+.wg-flow-label { font: 600 13px/18px var(--font-sans); color: var(--color-ink); text-wrap: balance; overflow-wrap: break-word; }
+.wg-flow-note { font: 400 12px/16px var(--font-sans); color: var(--color-ink-2); text-wrap: balance; overflow-wrap: anywhere; }
+.wg-flow .wg-route.down .wg-stop { display: grid; grid-template-columns: 28px minmax(0, 1fr); column-gap: 10px; align-items: start; }
+.wg-flow .wg-route.down .wg-stop::before { grid-row: 1 / span 2; }
+.wg-flow .wg-route.down .wg-flow-label { grid-column: 2; margin-top: 5px; }
+.wg-flow .wg-route.down .wg-flow-note { grid-column: 2; }
+
+/* Steps: the stops are the buttons. The one picked is the accent's tint with a ring; its words
+   show under the route. */
+/* Each step has a button's edge, which a flow's stops don't: something to tap. */
+.wg-step {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 6px 8px 8px;
+  border: 1px solid color-mix(in srgb, var(--color-ink) 16%, transparent);
+  border-radius: var(--r-md);
+  background: var(--wg-surface);
+  color: var(--color-ink-2);
+  font: 500 13px/18px var(--font-sans);
+  text-align: center;
+  cursor: pointer;
+}
+.wg-step:hover { color: var(--color-ink); border-color: var(--color-ink-3); }
+.wg-step-n {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-full);
+  box-shadow: inset 0 0 0 1.5px var(--color-accent);
+  background: var(--wg-surface);
+  color: var(--color-accent);
+  font: 600 13px/1 var(--font-sans);
+  font-variant-numeric: tabular-nums;
+}
+.wg-step-label { overflow-wrap: break-word; text-wrap: balance; }
+/* The step picked: its button ringed in gold on the accent's tint; its number ink, so it is never
+   gold on gold (DESIGN_LANGUAGE §4). */
+.wg-stop.on .wg-step { color: var(--color-ink); font-weight: 600; border-color: var(--color-accent); background: var(--color-accent-tint); box-shadow: 0 0 0 1px var(--color-accent); }
+.wg-stop.on .wg-step-n { color: var(--color-ink); background: var(--wg-surface); }
+/* Down, each step is a row with its button's edge, its number at the top left. */
+.wg-route.down .wg-step { flex-direction: row; align-items: flex-start; width: 100%; padding: 6px 10px 6px 6px; text-align: left; }
+.wg-route.down .wg-step-label { padding-top: 5px; }
+
+.wg-step-text { padding: var(--sp-3); border-radius: var(--r-md); background: color-mix(in srgb, var(--color-ink) 5%, transparent); }
+.wg-step-head { margin: 0; font: 600 12px/16px var(--font-sans); color: var(--color-ink-2); font-variant-numeric: tabular-nums; }
+.wg-step-body { margin: 4px 0 0; font: 400 15px/22px var(--font-sans); color: var(--color-ink); }
+
+/* ---------------------------------------------------------------------------
+   Choices
+   --------------------------------------------------------------------------- */
+.wg-options { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 150px), 1fr)); gap: var(--sp-2); }
 .wg-option {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  min-height: 40px;
+  min-height: 44px;
   padding: var(--sp-2) var(--sp-3);
-  border: 1px solid color-mix(in srgb, var(--color-ink) 18%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-ink) 16%, transparent);
   border-radius: var(--r-md);
-  background: transparent;
+  background: color-mix(in srgb, var(--color-ink) 3%, transparent);
   color: var(--color-ink);
   font: inherit;
   text-align: left;
   cursor: pointer;
+  transition: border-color var(--t-instant) var(--ease-out), background-color var(--t-instant) var(--ease-out);
 }
-.wg-option:hover:not(:disabled) { border-color: var(--color-ink-3); }
+.wg-option:hover:not(:disabled) { border-color: var(--color-ink-3); background: color-mix(in srgb, var(--color-ink) 6%, transparent); }
 .wg-option:disabled { cursor: default; color: var(--color-ink-2); }
 .wg-option.on { border-color: var(--color-accent); background: var(--color-accent-tint); box-shadow: 0 0 0 1px var(--color-accent); color: var(--color-ink); }
 .wg-option-label { font: 500 14px/20px var(--font-sans); }
 .wg-option-detail { font: 400 12px/16px var(--font-sans); color: var(--color-ink-2); }
 
-/* Checklist: the box sits on an item's first line; a tick is a gold line and mark, not a fill. */
+/* ---------------------------------------------------------------------------
+   Checklist: how much is done as a line under the title; the box sits on an item's first line;
+   a tick is a gold line and mark, not a fill.
+   --------------------------------------------------------------------------- */
+.wg-progress { display: block; height: 4px; margin-top: calc(-1 * var(--sp-1)); border-radius: var(--r-full); background: color-mix(in srgb, var(--color-ink) 8%, transparent); overflow: hidden; }
+.wg-progress i { display: block; height: 100%; border-radius: inherit; background: var(--color-ok); transition: width var(--t-move) var(--ease-out); }
 .wg-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
-.wg-tick { padding: 6px 0; }
+.wg-items > li + li { border-top: 1px solid var(--color-hairline); }
+.wg-tick { padding: 8px 0; }
 .wg-tick.check .txt b { font-weight: 400; }
 .wg-tick.check .txt span { color: var(--color-ink-2); }
 .wg-tick.check.on .box { background: var(--color-accent-tint); border-color: var(--color-accent); }
 .wg-tick.check.on .box svg { color: var(--color-accent); }
 .wg-tick.check.on .txt b { color: var(--color-ink-2); text-decoration: line-through; }
 
-/* Calculator: its results, then its inputs; side by side when the calculator itself has room. */
+/* ---------------------------------------------------------------------------
+   Calculator: its results large, then its inputs; side by side when it has room.
+   --------------------------------------------------------------------------- */
 .wg-calculator { container-type: inline-size; }
 .wg-calc { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); }
 .wg-results {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-2);
-  padding: var(--sp-3);
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
   border-radius: var(--r-md);
   background: color-mix(in srgb, var(--color-ink) 5%, transparent);
 }
 .wg-result { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.wg-result-label { font: 400 12px/16px var(--font-sans); color: var(--color-ink-2); }
-.wg-result-value { font: 600 24px/30px var(--font-sans); letter-spacing: -.01em; color: var(--color-ink); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.wg-result-label { font: 500 12px/16px var(--font-sans); color: var(--color-ink-2); }
+.wg-result-value { font: 400 32px/38px var(--font-serif); letter-spacing: -.015em; color: var(--color-ink); font-variant-numeric: lining-nums tabular-nums; overflow-wrap: anywhere; }
 .wg-working { font: 400 12px/16px var(--font-sans); color: var(--color-ink-2); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .wg-working.wg-cant { color: var(--color-ink); }
 .wg-inputs { display: flex; flex-direction: column; }
@@ -131,74 +383,10 @@
 .wg-switch-input:checked + .wg-switch-track { border-color: var(--color-accent); background: var(--color-accent-tint); }
 .wg-switch-input:checked + .wg-switch-track i { translate: 14px 0; background: var(--color-accent); }
 .wg-switch-input:focus-visible + .wg-switch-track { outline: 2px solid var(--color-accent); outline-offset: 2px; }
-@media (prefers-reduced-motion: reduce) { .wg-switch-track i { transition: none; } }
 @container (min-width: 560px) {
   .wg-calc { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "results inputs"; align-items: start; }
   .wg-results { grid-area: results; }
   .wg-inputs { grid-area: inputs; }
-}
-
-/* Steps: numbered pills in order, a chevron between; the one picked is the accent's tint with a
-   ring, and its number a gold ring (DESIGN_LANGUAGE §5: step numbers are gold). */
-.wg-step-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); }
-.wg-step-list > li { display: flex; align-items: center; gap: var(--sp-2); }
-.wg-step-list > li:not(:last-child)::after,
-.wg-step-again::before { content: ''; width: 6px; height: 6px; border-top: 1.5px solid var(--color-ink-3); border-right: 1.5px solid var(--color-ink-3); transform: rotate(45deg); }
-.wg-step {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 32px;
-  padding: 2px var(--sp-2) 2px 2px;
-  border: 1px solid color-mix(in srgb, var(--color-ink) 18%, transparent);
-  border-radius: var(--r-full);
-  background: transparent;
-  color: var(--color-ink);
-  font: 500 13px/18px var(--font-sans);
-  cursor: pointer;
-}
-.wg-step.on { border-color: var(--color-accent); background: var(--color-accent-tint); box-shadow: 0 0 0 1px var(--color-accent); }
-.wg-step-n {
-  display: grid;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-  border-radius: var(--r-full);
-  background: color-mix(in srgb, var(--color-ink) 7%, transparent);
-  font: 600 12px/1 var(--font-sans);
-  font-variant-numeric: tabular-nums;
-}
-.wg-step.on .wg-step-n { background: transparent; box-shadow: inset 0 0 0 1px var(--color-accent); }
-/* Steps that repeat end on a ghost of the first, after a chevron: not a step and not a button. */
-.wg-step-again { display: inline-flex; align-items: center; gap: var(--sp-2); }
-.wg-step-ghost {
-  display: grid;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-  border: 1px dashed var(--color-ink-3);
-  border-radius: var(--r-full);
-  font: 600 12px/1 var(--font-sans);
-  color: var(--color-ink-2);
-  font-variant-numeric: tabular-nums;
-  box-sizing: border-box;
-}
-.wg-step-text { padding: var(--sp-2) var(--sp-3); border-radius: var(--r-md); background: color-mix(in srgb, var(--color-ink) 5%, transparent); }
-.wg-step-head { margin: 0; font: 600 12px/16px var(--font-sans); color: var(--color-ink-2); font-variant-numeric: tabular-nums; }
-.wg-step-body { margin: 2px 0 0; font: 400 15px/22px var(--font-sans); color: var(--color-ink); }
-
-/* A widget the words place stands between its paragraphs, in a bubble as wide as the chat
-   allows, so a calculator lays itself out by its own room. */
-.chat-bubble.wg-in,
-.tc-reactable:has(> .chat-bubble.wg-in) { width: 100%; }
-.wg-here { margin: var(--sp-2) 0; }
-.wg-here:first-child { margin-top: 2px; }
-.wg-here:last-child { margin-bottom: 2px; }
-.wg-here .wg { --wg-surface: color-mix(in srgb, var(--color-ink) 3%, var(--color-panel-solid)); }
-/* On a narrow phone the card gives its row of boxes a little more room, so five still fit. */
-@media (max-width: 400px) {
-  .wg-here .wg { padding-inline: var(--sp-2); }
-  .wg-boxes { gap: 2px; }
 }
 
 /* A group's switches: one row of boxes to tap, each its label under a check or a dash. On is the
@@ -251,62 +439,34 @@
 .wg-preset.on { border-color: var(--color-accent); background: var(--color-accent-tint); box-shadow: 0 0 0 1px var(--color-accent); }
 .wg-preset.on svg { color: var(--color-accent); }
 
-/* Marks: a row of things, each a glyph and its words. Yes is green's glyph on a faint green edge;
-   no is quiet, since it marks a fact, not something wrong. */
+/* ---------------------------------------------------------------------------
+   Marks: a row of things, each a glyph and its words. Yes is green's glyph on a faint green edge;
+   no is quiet, since it marks a fact, not something wrong.
+   --------------------------------------------------------------------------- */
 .wg-cells { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: var(--sp-1); }
 .wg-cell {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 2px;
-  padding: 6px 4px;
+  padding: 8px 4px;
   border: 1px solid color-mix(in srgb, var(--color-ink) 12%, transparent);
   border-radius: var(--r-md);
   text-align: center;
 }
 .wg-cell-label { font: 500 12px/16px var(--font-sans); color: var(--color-ink-2); font-variant-numeric: tabular-nums; }
-.wg-cell-mark { display: grid; place-items: center; height: 20px; color: var(--color-ink-3); }
+.wg-cell-mark { display: grid; place-items: center; height: 22px; color: var(--color-ink-3); }
 .wg-cell-note { font: 400 12px/16px var(--font-sans); color: var(--color-ink-2); overflow-wrap: anywhere; }
-.wg-cell.no, .wg-cell.neither { border-color: transparent; }
+.wg-cell.no, .wg-cell.neither { border-color: transparent; background: color-mix(in srgb, var(--color-ink) 3%, transparent); }
 .wg-cell.yes { border-color: color-mix(in srgb, var(--color-ok) 45%, transparent); background: color-mix(in srgb, var(--color-ok) 8%, transparent); }
 .wg-cell.yes .wg-cell-mark { color: var(--color-ok); }
 .wg-cell.yes .wg-cell-note { color: var(--color-ink); }
 .wg-facts { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px var(--sp-3); font: 400 12px/16px var(--font-sans); color: var(--color-ink-2); }
 
-/* A flow: boxes down the middle, a chevron between; one that repeats ends on a ghost of the first. */
-.wg-flow-boxes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; align-items: center; gap: 22px; }
-.wg-flow-box {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  width: min(100%, 360px);
-  padding: var(--sp-2) var(--sp-3);
-  border: 1px solid color-mix(in srgb, var(--color-ink) 18%, transparent);
-  border-radius: var(--r-md);
-  text-align: center;
-}
-.wg-flow-box:not(:last-child)::before { content: ''; position: absolute; left: 50%; top: 100%; width: 1px; height: 21px; background: var(--color-warp); }
-.wg-flow-box:not(:last-child)::after,
-.wg-flow-again::before {
-  content: '';
-  position: absolute;
-  left: 50%;
-  bottom: -15px;
-  width: 7px;
-  height: 7px;
-  border-right: 1.5px solid var(--color-warp);
-  border-bottom: 1.5px solid var(--color-warp);
-  transform: translateX(-50%) rotate(45deg);
-}
-.wg-flow-label { font: 600 14px/20px var(--font-sans); color: var(--color-ink); }
-.wg-flow-note { font: 400 12px/16px var(--font-sans); color: var(--color-ink-2); }
-.wg-flow-again { position: relative; display: flex; justify-content: center; margin: 22px 0 0; }
-.wg-flow-again::before { top: -15px; bottom: auto; }
-.wg-flow-ghost { padding: 4px var(--sp-3); border: 1px dashed var(--color-ink-3); border-radius: var(--r-md); font: 500 12px/16px var(--font-sans); color: var(--color-ink-2); }
-
-/* A graph: ink words, recessive grid, thin marks in the series' colours, one plot. */
+/* ---------------------------------------------------------------------------
+   Graph: ink words, recessive grid, the series' colours on the marks, one plot. A lone line has a
+   faint fill under it.
+   --------------------------------------------------------------------------- */
 .wg-legend { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 2px var(--sp-3); font: 400 12px/16px var(--font-sans); color: var(--color-ink); }
 .wg-legend li { display: inline-flex; align-items: center; gap: 6px; }
 .wg-graph.many .wg-reading { min-height: 36px; }
@@ -321,6 +481,7 @@
 .wg-at { stroke: color-mix(in srgb, var(--color-ink) 22%, transparent); stroke-width: 1; }
 .wg-hit { fill: transparent; cursor: pointer; }
 .wg-gline { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.wg-garea.s1 { fill: color-mix(in srgb, var(--color-series-1) 10%, transparent); stroke: none; }
 .wg-gdot { stroke: var(--wg-surface); stroke-width: 2; }
 .wg-swatch line { stroke-width: 2; stroke-linecap: round; }
 .wg-gbar.s1, .wg-gdot.s1, .wg-swatch.s1 rect { fill: var(--color-series-1); }
@@ -333,31 +494,45 @@
 .wg-gline.s1, .wg-swatch.s1 line { stroke: var(--color-series-1); }
 .wg-gline.s2, .wg-swatch.s2 line { stroke: var(--color-series-2); }
 .wg-gline.s3, .wg-swatch.s3 line { stroke: var(--color-series-3); }
-/* Chart: label, bar, figure on one line; bars share one zero, so their lengths compare. The fill
-   is ink, not gold (no gold fill, as above); a figure below zero runs left of the zero line, in a
-   lighter ink. Narrow, the label sits above its bar. */
-.wg-chart { container-type: inline-size; }
-.wg-bars { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
-.wg-bar {
-  display: grid;
-  grid-template-columns: minmax(0, 32%) minmax(0, 1fr) auto;
-  align-items: center;
-  gap: var(--sp-2);
+
+/* ---------------------------------------------------------------------------
+   Where a widget stands: between its paragraphs, in a bubble as wide as the chat allows, so a
+   calculator lays itself out by its own room.
+   --------------------------------------------------------------------------- */
+.chat-bubble.wg-in,
+.tc-reactable:has(> .chat-bubble.wg-in) { width: 100%; }
+.wg-here { margin: var(--sp-3) 0; }
+.wg-here:first-child { margin-top: 2px; }
+.wg-here:last-child { margin-bottom: 2px; }
+.wg-here .wg { --wg-surface: color-mix(in srgb, var(--color-ink) 3%, var(--color-panel-solid)); }
+/* On a narrow phone the card gives its contents a little more room, so five boxes still fit. */
+@media (max-width: 400px) {
+  .wg { padding: var(--sp-3); }
+  .wg-boxes { gap: 2px; }
+  .wg-side { padding-inline: 6px; }
+  .wg-side-figure { font-size: 32px; }
 }
-.wg-bar-label { font: 400 14px/20px var(--font-sans); color: var(--color-ink); overflow-wrap: anywhere; }
-.wg-bar-track { position: relative; height: 12px; border-radius: var(--r-full); background: color-mix(in srgb, var(--color-ink) 6%, transparent); }
-.wg-bar-fill { position: absolute; top: 0; bottom: 0; border-radius: var(--r-full); background: var(--color-ink-2); min-width: 2px; }
-.wg-bar-fill.below { background: var(--color-ink-3); }
-.wg-bar-zero { position: absolute; top: -3px; bottom: -3px; width: 1px; background: var(--color-ink-3); }
-.wg-bar-figure { font: 600 13px/18px var(--font-sans); color: var(--color-ink); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
-.wg-bar-note { font-weight: 400; color: var(--color-ink-2); }
-@container (max-width: 360px) {
-  .wg-bar { grid-template-columns: minmax(0, 1fr) auto; row-gap: 2px; }
-  .wg-bar-label { grid-column: 1 / -1; }
+
+/* ---------------------------------------------------------------------------
+   Motion: when a widget arrives as news (useAppear, ADR 0051) and this window hasn't drawn it
+   before, its marks come in once the answer around it has risen: bars grow from zero, dots come in
+   one after another, a route's line draws itself across. The card itself doesn't rise again
+   inside the rising answer. Once each; nothing loops; with reduced motion it is simply there.
+   Arrivals fill backwards only, so nothing keeps a transform once it has played.
+   --------------------------------------------------------------------------- */
+@keyframes wg-grow { from { transform: scaleX(0); } }
+@keyframes wg-dot { from { transform: scale(0); } }
+.wg-fresh .wg-bar-fill, .wg-fresh .wg-side-scale i { animation: wg-grow var(--t-settle) var(--ease-out) backwards; animation-delay: calc(var(--t-entrance) + var(--k, 0) * 60ms); }
+.wg-fresh .wg-dots i { animation: wg-dot var(--t-move) var(--ease-out) backwards; animation-delay: calc(var(--t-entrance) + var(--k, 0) * 60ms + min(var(--i) * 1.5ms, 700ms)); }
+.wg-fresh .wg-route.across .wg-rail { transform-origin: left; animation: wg-grow var(--t-settle) var(--ease-out) var(--t-entrance) backwards; }
+@media (prefers-reduced-motion: reduce) {
+  .wg-fresh .wg-bar-fill, .wg-fresh .wg-side-scale i, .wg-fresh .wg-dots i, .wg-fresh .wg-rail { animation: none; }
+  .wg-switch-track i, .wg-progress i, .wg-option { transition: none; }
 }
 
 @media (pointer: coarse) {
-  .wg-option, .wg-input, .wg-step, .wg-preset, .wg-box { min-height: 44px; }
+  .wg-option, .wg-input, .wg-preset, .wg-box { min-height: 44px; }
+  .wg-step { min-height: 44px; min-width: 44px; }
   .wg-tick { padding: 12px 0; }
   .wg-field input { min-height: 44px; }
   .wg-step-by { min-width: 44px; min-height: 44px; }

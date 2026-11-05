@@ -6,11 +6,14 @@
 //! reply became the answer are kept with it ([`of_answer`], [`store`]); what the person ticks or
 //! changes is kept beside them, and the next run's conversation says so ([`showed`], [`changes`]).
 //!
-//! Eight kinds, drawn by the app (`ui/src/components/chat/widgets/`): choices the person taps to
+//! Nine kinds, drawn by the app (`ui/src/components/chat/widgets/`): choices the person taps to
 //! reply, a checklist they tick, a calculator whose results `LoomWatch` works out as they change its
-//! inputs ([`formula`]), steps they tap through, and four to look at: a chart whose bars `LoomWatch`
-//! draws to scale from the figures the agent gives, a graph of bars or a line over labels, a row of
-//! things marked yes or no, and a flow of boxes and arrows. The agent never draws or writes markup.
+//! inputs ([`formula`]), steps they tap through, and five to look at: a comparison of two or three
+//! things side by side (or the parts of one thing) with facts read across, a chart whose bars
+//! `LoomWatch` draws to scale from the figures the agent gives, a graph of bars or a line over
+//! labels, a row of things marked yes or no, and a flow of boxes and arrows. Figures that count
+//! whole things (`counted`) are drawn as dots. The agent never draws or writes markup; the tool's
+//! description tells it which kind fits which shape of answer ([`SHOW_WIDGET`]).
 //!
 //! Each widget is told a place line, `{{widget N}}`, that the agent writes on its own line where the
 //! widget belongs in its answer. When the run ends the line is taken out of the answer's words and
@@ -74,6 +77,13 @@ pub(crate) mod limits {
     pub(crate) const POINTS: (usize, usize) = (2, 24);
     pub(crate) const POINT_CHARS: usize = 16;
     pub(crate) const SERIES: (usize, usize) = (1, 3);
+    /// A comparison's sides: three at most, so each keeps a readable column on a phone.
+    pub(crate) const SIDES: (usize, usize) = (2, 3);
+    pub(crate) const SIDE_LABEL_CHARS: usize = 40;
+    pub(crate) const SIDE_NOTE_CHARS: usize = 60;
+    pub(crate) const ROWS: (usize, usize) = (0, 6);
+    pub(crate) const ROW_LABEL_CHARS: usize = 40;
+    pub(crate) const ROW_VALUE_CHARS: usize = 60;
     /// What the next run's conversation says of the person's changes under one answer.
     pub(crate) const CHANGES_CHARS: usize = 400;
 }
@@ -114,6 +124,28 @@ pub(crate) enum Widget {
         prefix: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         decimals: Option<u8>,
+        /// The figures count whole things (seats, people): drawn as dots.
+        #[serde(default, skip_serializing_if = "is_false")]
+        counted: bool,
+    },
+    /// Two or three things side by side, or the parts of one thing (`whole`): each its name, a
+    /// figure in one unit when they share a measure, and rows of facts read across. To look at.
+    Compare {
+        title: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        whole: Option<Whole>,
+        sides: Vec<Side>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        rows: Vec<Row>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        unit: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        prefix: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        decimals: Option<u8>,
+        /// The figures count whole things (seats, people): drawn as dots.
+        #[serde(default, skip_serializing_if = "is_false")]
+        counted: bool,
     },
     /// A row of things, each marked yes, no or neither, with facts under it. To look at.
     Marks {
@@ -237,6 +269,31 @@ pub(crate) struct Bar {
     pub(crate) note: Option<String>,
 }
 
+/// What a comparison's sides are parts of.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct Whole {
+    pub(crate) label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) note: Option<String>,
+}
+
+/// One side of a comparison: its name, its figure when the sides share a measure, a few words.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct Side {
+    pub(crate) label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) value: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) note: Option<String>,
+}
+
+/// One fact of a comparison, read across: its name, and a value for each side in their order.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct Row {
+    pub(crate) label: String,
+    pub(crate) values: Vec<String>,
+}
+
 /// One thing in a row of marks.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Cell {
@@ -284,6 +341,7 @@ impl Widget {
             | Self::Calculator { title, .. }
             | Self::Steps { title, .. }
             | Self::Chart { title, .. }
+            | Self::Compare { title, .. }
             | Self::Marks { title, .. }
             | Self::Flow { title, .. }
             | Self::Graph { title, .. } => title,
@@ -297,6 +355,7 @@ impl Widget {
             Self::Calculator { .. } => "calculator",
             Self::Steps { .. } => "steps",
             Self::Chart { .. } => "chart",
+            Self::Compare { .. } => "compare",
             Self::Marks { .. } => "marks",
             Self::Flow { .. } => "flow",
             Self::Graph { .. } => "graph",
@@ -311,6 +370,7 @@ impl Widget {
             Self::Calculator { .. } => "a calculator",
             Self::Steps { .. } => "steps",
             Self::Chart { .. } => "a chart",
+            Self::Compare { .. } => "a comparison",
             Self::Marks { .. } => "a row of marks",
             Self::Flow { .. } => "a flow",
             Self::Graph {
@@ -381,23 +441,32 @@ pub(crate) fn read(arguments: &Value) -> Result<Widget, String> {
             repeats: repeats(arguments)?,
             title,
         },
-        "chart" => Widget::Chart {
-            bars: list(arguments, "bars", limits::BARS, |bar| {
+        "chart" => {
+            let bars = list(arguments, "bars", limits::BARS, |bar| {
                 Ok(Bar {
                     label: text(bar, "label", 1, limits::LABEL_CHARS)?,
                     value: number(bar, "value")?.ok_or("value is missing: give it as a number")?,
                     note: optional_text(bar, "note", limits::NOTE_CHARS)?,
                 })
-            })?,
-            unit: optional_text(arguments, "unit", limits::UNIT_CHARS)?,
-            prefix: optional_text(arguments, "prefix", limits::UNIT_CHARS)?,
-            decimals: decimals(arguments)?,
-            title,
-        },
+            })?;
+            let counted = flag(arguments, "counted")?;
+            if counted {
+                check_counted(bars.iter().map(|bar| bar.value))?;
+            }
+            Widget::Chart {
+                bars,
+                unit: optional_text(arguments, "unit", limits::UNIT_CHARS)?,
+                prefix: optional_text(arguments, "prefix", limits::UNIT_CHARS)?,
+                decimals: decimals(arguments)?,
+                counted,
+                title,
+            }
+        }
+        "compare" => read_compare(arguments, title)?,
         other => {
             return Err(format!(
-                "kind \"{other}\" isn't a widget: use choices, checklist, calculator, steps, \
-                 chart, graph, marks or flow"
+                "kind \"{other}\" isn't a widget: use compare, chart, graph, flow, steps, \
+                 calculator, checklist, marks or choices"
             ));
         }
     };
@@ -479,11 +548,121 @@ fn read_marks(arguments: &Value, title: String) -> Result<Widget, String> {
 }
 
 fn repeats(arguments: &Value) -> Result<bool, String> {
-    match arguments.get("repeats") {
+    flag(arguments, "repeats")
+}
+
+/// A true-or-false field, false when absent.
+fn flag(arguments: &Value, field: &str) -> Result<bool, String> {
+    match arguments.get(field) {
         None | Some(Value::Null) => Ok(false),
-        Some(Value::Bool(repeats)) => Ok(*repeats),
-        Some(_) => Err("repeats is true or false".to_owned()),
+        Some(Value::Bool(on)) => Ok(*on),
+        Some(_) => Err(format!("{field} is true or false")),
     }
+}
+
+/// Figures drawn as dots count whole things: each a whole number, 0 or more.
+fn check_counted(values: impl IntoIterator<Item = f64>) -> Result<(), String> {
+    if values
+        .into_iter()
+        .all(|value| value >= 0.0 && value.fract() == 0.0)
+    {
+        Ok(())
+    } else {
+        Err(
+            "counted figures are whole numbers of things, 0 or more: leave counted out for \
+             figures such as prices, shares or averages"
+                .to_owned(),
+        )
+    }
+}
+
+/// A comparison, read and checked: every side has a figure or none does, and every row has a value
+/// for each side.
+fn read_compare(arguments: &Value, title: String) -> Result<Widget, String> {
+    let whole = match arguments.get("whole") {
+        None | Some(Value::Null) => None,
+        Some(whole @ Value::Object(_)) => Some(Whole {
+            label: text(whole, "label", 1, limits::SIDE_LABEL_CHARS)
+                .map_err(|error| format!("whole: {error}"))?,
+            note: optional_text(whole, "note", limits::SIDE_NOTE_CHARS)
+                .map_err(|error| format!("whole: {error}"))?,
+        }),
+        Some(_) => return Err("whole is {\"label\", \"note\"}".to_owned()),
+    };
+    let sides = list(arguments, "sides", limits::SIDES, |side| {
+        Ok(Side {
+            label: text(side, "label", 1, limits::SIDE_LABEL_CHARS)?,
+            value: number(side, "value")?,
+            note: optional_text(side, "note", limits::SIDE_NOTE_CHARS)?,
+        })
+    })?;
+    let with_figures = sides.iter().filter(|side| side.value.is_some()).count();
+    if with_figures != 0 && with_figures != sides.len() {
+        return Err(format!(
+            "{with_figures} of {} sides have a value: give every side a value in the same unit, \
+             or none",
+            sides.len()
+        ));
+    }
+    let counted = flag(arguments, "counted")?;
+    if counted {
+        if with_figures == 0 {
+            return Err("counted draws the sides' values: give each side a value".to_owned());
+        }
+        check_counted(sides.iter().filter_map(|side| side.value))?;
+    }
+    let count = sides.len();
+    let rows = match arguments.get("rows") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(_) => list(arguments, "rows", limits::ROWS, |row| {
+            let values = row
+                .get("values")
+                .and_then(Value::as_array)
+                .ok_or_else(|| format!("values is missing: give {count}, one per side"))?;
+            if values.len() != count {
+                return Err(format!(
+                    "values has {}; give {count}, one per side in their order",
+                    values.len()
+                ));
+            }
+            Ok(Row {
+                label: text(row, "label", 1, limits::ROW_LABEL_CHARS)?,
+                values: values
+                    .iter()
+                    .map(|value| {
+                        let written = value
+                            .as_str()
+                            .map(str::trim)
+                            .filter(|written| !written.is_empty())
+                            .ok_or("each value is a few words")?;
+                        let length = written.chars().count();
+                        if length > limits::ROW_VALUE_CHARS {
+                            return Err(format!(
+                                "a value is {length} characters; keep it to {}",
+                                limits::ROW_VALUE_CHARS
+                            ));
+                        }
+                        Ok(written.to_owned())
+                    })
+                    .collect::<Result<_, String>>()?,
+            })
+        })?,
+    };
+    if with_figures == 0 && rows.is_empty() {
+        return Err(
+            "a comparison needs something to compare: a value for each side, or rows".to_owned(),
+        );
+    }
+    Ok(Widget::Compare {
+        title,
+        whole,
+        sides,
+        rows,
+        unit: optional_text(arguments, "unit", limits::UNIT_CHARS)?,
+        prefix: optional_text(arguments, "prefix", limits::UNIT_CHARS)?,
+        decimals: decimals(arguments)?,
+        counted,
+    })
 }
 
 fn read_graph(arguments: &Value, title: String) -> Result<Widget, String> {
@@ -914,6 +1093,63 @@ fn preset_lines(widget: &Widget) -> Vec<String> {
         .collect()
 }
 
+/// "Senate 100 seats; House 435 seats": a comparison's figures as the person reads them, when its
+/// sides have them.
+fn sides_line(widget: &Widget) -> Option<String> {
+    let Widget::Compare {
+        sides,
+        unit,
+        prefix,
+        decimals,
+        ..
+    } = widget
+    else {
+        return None;
+    };
+    let figures = sides
+        .iter()
+        .map(|side| {
+            side.value.map(|value| {
+                format!(
+                    "{} {}",
+                    side.label,
+                    written(value, prefix.as_deref(), unit.as_deref(), *decimals)
+                )
+            })
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some(figures.join("; "))
+}
+
+/// "Congress: Senate 100 seats, House 435 seats; Term: 6 years | 2 years": a comparison in a
+/// line, for the next run.
+fn compare_line(widget: &Widget) -> String {
+    let Widget::Compare {
+        whole, sides, rows, ..
+    } = widget
+    else {
+        return String::new();
+    };
+    let mut line = whole
+        .as_ref()
+        .map(|whole| format!("{}: ", whole.label))
+        .unwrap_or_default();
+    line.push_str(&sides_line(widget).map_or_else(
+        || {
+            sides
+                .iter()
+                .map(|side| side.label.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        },
+        |figures| figures.replace("; ", ", "),
+    ));
+    for row in rows {
+        let _ = write!(line, "; {}: {}", row.label, row.values.join(" | "));
+    }
+    line
+}
+
 /// "Democrats 51 seats; Republicans 49 seats": a chart's figures as the person reads them.
 fn bars_line(widget: &Widget) -> Option<String> {
     let Widget::Chart {
@@ -948,27 +1184,58 @@ fn bars_line(widget: &Widget) -> Option<String> {
 /// message as a tool call are left out of its answer.
 pub(crate) const SHOW_WIDGET: Block = Block::new(
     "bus.show_widget",
-    "Show your answer with what LoomWatch draws, so the person sees it at a glance and can use \
-     it: a chart whose bars LoomWatch draws to scale from figures you give, a graph of bars or a \
-     line over labels such as months, a calculator whose results LoomWatch works out as they \
-     change its inputs, a checklist they tick, steps they tap through one at a time, choices they \
-     tap to reply, a row of things marked yes or no, or a flow of boxes and arrows. Use one \
-     whenever the answer has figures to compare (chart), figures that change over time or several \
-     series (graph), a sum, a split or a cost they may change (calculator), things to do \
-     (checklist), a process or a how-to (steps), a choice of what to do next (choices), which of \
-     several things pass a test (marks), or how parts connect (flow), and prefer it to a table, a \
-     list or bars written in text, or a page written for it. Show up to 4 when the answer has more \
-     than one of these. Words alone are for an answer with none of them, such as a short fact. \
-     Call it before you write your answer, once for each, then put each where it belongs with the \
-     place line it gives you, after the words that lead to it, and say in words what to notice or \
-     try. Give the main result in words too, since a copy of the answer shows only your words.",
+    "Show your answer with what LoomWatch draws, so the person takes it in at a glance and can \
+     use it. Pick the kind by the shape of what you are telling:\n\
+     - two or three things side by side, or two or three parts of one thing, with facts to read \
+     across: compare\n\
+     - figures to compare, one for each thing: chart\n\
+     - figures that change over time, or several series: graph\n\
+     - one thing leading to the next, in order: flow\n\
+     - a process the person follows, one step at a time: steps\n\
+     - a sum, a split or a cost they may change: calculator\n\
+     - things to do: checklist\n\
+     - which of several things pass a test: marks\n\
+     - what they may want next: choices\n\
+     A flow's line says that one thing leads to the next, so two or three parts that sit side by \
+     side, such as a shop's sales and support teams, are shown with compare, not flow. When \
+     figures count whole things, such as seats or people, set counted. Prefer one of these to a \
+     table, a list or bars written in text, or a page written for it. Show up to 4 when the answer has more than one of these. Words alone \
+     are for an answer with none of them, such as a short fact. Call it before you write your \
+     answer, once for each, then put each where it belongs with the place line it gives you, \
+     after the words that lead to it, and say in words what to notice or try. Give the main \
+     result in words too, since a copy of the answer shows only your words.",
 );
 
 /// `show_widget`'s `kind`.
 pub(crate) const SHOW_WIDGET_KIND: Block = Block::new(
     "bus.show_widget.kind",
-    "choices, checklist, calculator, steps, chart, graph, marks or flow. Fill in only that kind's \
-     fields.",
+    "compare, chart, graph, flow, steps, calculator, checklist, marks or choices, picked by the \
+     shape of what you are telling. Fill in only that kind's fields.",
+);
+
+/// A comparison's `sides`.
+pub(crate) const SHOW_WIDGET_SIDES: Block = Block::new(
+    "bus.show_widget.sides",
+    "compare: 2 or 3 things side by side, in the order to read them, each a name and a few words \
+     under it. When they share a measure, such as seats, members or a price, give each side its \
+     figure as value, in the comparison's one unit, rather than in a row: LoomWatch draws values \
+     to scale, which words in a row can't be. Every side or none.",
+);
+
+/// A comparison's `rows`.
+pub(crate) const SHOW_WIDGET_ROWS: Block = Block::new(
+    "bus.show_widget.rows",
+    "compare: up to 6 facts read across the sides, each a few words and one value per side in \
+     their order, such as {\"label\": \"Term\", \"values\": [\"6 years\", \"2 years\"]}.",
+);
+
+/// `counted`, on a chart or a comparison.
+pub(crate) const SHOW_WIDGET_COUNTED: Block = Block::new(
+    "bus.show_widget.counted",
+    "chart or compare: true when the figures count whole things, such as seats, people or votes. \
+     LoomWatch draws them as dots, one for each thing or for a round number of them, so a \
+     difference is seen before it is read. Leave it out for prices, shares, averages or \
+     measures.",
 );
 
 /// A calculator result's `note`.
@@ -1039,7 +1306,7 @@ pub(crate) fn tool_definition() -> Value {
                 "kind": {
                     "type": "string",
                     "description": SHOW_WIDGET_KIND.text(),
-                    "enum": ["choices", "checklist", "calculator", "steps", "chart", "graph", "marks", "flow"]
+                    "enum": ["compare", "chart", "graph", "flow", "steps", "calculator", "checklist", "marks", "choices"]
                 },
                 "title": {
                     "type": "string",
@@ -1203,7 +1470,7 @@ pub(crate) fn tool_definition() -> Value {
                 },
                 "boxes": {
                     "type": "array",
-                    "description": "flow: 2 to 8 boxes in order, joined by arrows, such as the parts a request passes through",
+                    "description": "flow: 2 to 8 stops in order, each leading to the next, such as what happens from an order to its delivery",
                     "maxItems": limits::BOXES.1,
                     "items": {
                         "type": "object",
@@ -1215,9 +1482,49 @@ pub(crate) fn tool_definition() -> Value {
                         "additionalProperties": false
                     }
                 },
-                "unit": {"type": "string", "description": "chart or graph: written after every figure, such as seats, % or km"},
-                "prefix": {"type": "string", "description": "chart or graph: written before every figure, such as $"},
-                "decimals": {"type": "integer", "description": "chart or graph: decimal places shown; without it, up to 2", "minimum": 0, "maximum": formula::MAX_DECIMALS}
+                "whole": {
+                    "type": "object",
+                    "description": "compare: what the sides are parts of, when they are, drawn above them and joined to each",
+                    "properties": {
+                        "label": label,
+                        "note": {"type": "string", "description": "A few words under it"}
+                    },
+                    "required": ["label"],
+                    "additionalProperties": false
+                },
+                "sides": {
+                    "type": "array",
+                    "description": SHOW_WIDGET_SIDES.text(),
+                    "maxItems": limits::SIDES.1,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "label": {"type": "string", "description": "A word or two", "minLength": 1},
+                            "value": {"type": "number", "description": "Its figure"},
+                            "note": {"type": "string", "description": "A few words under it"}
+                        },
+                        "required": ["label"],
+                        "additionalProperties": false
+                    }
+                },
+                "rows": {
+                    "type": "array",
+                    "description": SHOW_WIDGET_ROWS.text(),
+                    "maxItems": limits::ROWS.1,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "label": label,
+                            "values": {"type": "array", "items": {"type": "string"}}
+                        },
+                        "required": ["label", "values"],
+                        "additionalProperties": false
+                    }
+                },
+                "counted": {"type": "boolean", "description": SHOW_WIDGET_COUNTED.text()},
+                "unit": {"type": "string", "description": "chart, compare or graph: written after every figure, such as seats, % or km"},
+                "prefix": {"type": "string", "description": "chart, compare or graph: written before every figure, such as $"},
+                "decimals": {"type": "integer", "description": "chart, compare or graph: decimal places shown; without it, up to 2", "minimum": 0, "maximum": formula::MAX_DECIMALS}
             },
             "required": ["kind", "title"],
             "additionalProperties": false
@@ -1239,6 +1546,9 @@ pub(crate) fn shown(widget: &Widget, place: u32) -> Value {
     }
     if let Some(bars) = bars_line(widget) {
         out["bars"] = json!(bars);
+    }
+    if let Some(figures) = sides_line(widget) {
+        out["figures"] = json!(figures);
     }
     out["next"] = json!(SHOW_WIDGET_SHOWN.text());
     out
@@ -1525,6 +1835,7 @@ pub(crate) fn read_state(widget: &Widget, state: &Value) -> Result<Value, String
         Widget::Choices { .. }
         | Widget::Steps { .. }
         | Widget::Chart { .. }
+        | Widget::Compare { .. }
         | Widget::Marks { .. }
         | Widget::Flow { .. }
         | Widget::Graph { .. } => Err(format!("{} keep nothing", widget.kind())),
@@ -1611,6 +1922,9 @@ pub(crate) fn showed(widgets: &[Kept]) -> Option<String> {
                 }
             ),
             Widget::Graph { .. } => format!("{} ({})", kept.spec.named(), graph_line(&kept.spec)),
+            Widget::Compare { .. } => {
+                format!("{} ({})", kept.spec.named(), compare_line(&kept.spec))
+            }
         })
         .collect();
     Some(format!("[Under this answer: {}.]", each.join("; ")))
@@ -1688,6 +2002,7 @@ fn change(widget: &Widget, state: &Value) -> Option<String> {
         Widget::Choices { .. }
         | Widget::Steps { .. }
         | Widget::Chart { .. }
+        | Widget::Compare { .. }
         | Widget::Marks { .. }
         | Widget::Flow { .. }
         | Widget::Graph { .. } => None,
