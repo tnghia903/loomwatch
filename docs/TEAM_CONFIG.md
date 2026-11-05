@@ -113,7 +113,7 @@ agents:
   from the agent's file each time the daemon or the app reads the team: its `name`, `role` (the
   file's `instructions`), `model` and `thinkingEffort` when the agent names a model, its skills,
   its tools with their `alwaysAllow` calls, what it reads (as `knowledge`, labelled apart from the
-  team's), `doneWhen`, `allow` and `allowRecruiting`. A skill or tool the entry turns off is left
+  team's), `doneWhen`, `allow`, `allowRecruiting` and `widgets`. A skill or tool the entry turns off is left
   out. A change saved to the agent reaches every team that uses it from that team's next run; a
   run's record keeps the agent as it ran.
 - **The team's own.** `part`, `spawn`, knowledge, skills and tools the team connects beyond the
@@ -242,6 +242,11 @@ depend on the document as a whole:
   With `false` it learns nothing new and is given none of its lessons. One of My agents keeps one
   list of lessons in every team that uses it (`from: {agent}`); when a team's own agent becomes one
   of My agents, its lessons go with it.
+- Optional `Agent.widgets` says whether the agent may put widgets under its answer when its reply
+  is the answer the person reads (ADR 0114): choices to tap, a checklist to tick, a calculator
+  LoomWatch works out, or steps to tap through. Absent means LoomWatch's default, which is off for
+  now; `true` turns it on for that agent, `false` keeps it off. One of My agents keeps it
+  as its own (`widgets` in its file), and every team that uses it follows. Not for an operator node.
 - **Notes set aside from the answer.** Some sections an agent ends its reply with are for the
   operator, not the answer's reader:
   - `## Not met`: the `doneWhen` items it could not meet.
@@ -734,7 +739,8 @@ Every agent in a run works with LoomWatch's own tools:
   never holds it. Each action asks you first unless always allowed.
 - **The Team Bus**: `roster`, `ask`, `report` and `ask_user`. In team mode it also gets `dispatch`
   and `handoff`. With a notebook it also gets `memory_search`, `memory_read`, `memory_write` and
-  `checkpoint`, and in a run started from the app it gets `earlier_work`. These are calls straight
+  `checkpoint`, and in a run started from the app it gets `earlier_work`. The agent whose reply is
+  the answer you read, with `widgets` on, gets `show_widget` (ADR 0114). These are calls straight
   into the daemon, made as that agent; the agent connects to no server for them.
 
 No built-in tool publishes, posts or sends anything outside the run; a tool you connected can, in

@@ -137,7 +137,16 @@ export function asUse(item: Evidence): Use | null {
   if (item.kind === 'plan') return make('plan', 'Update the plan')
   if (item.kind === 'delegation') return make('ask', item.target ? `${item.relation[0].toUpperCase()}${item.relation.slice(1)} ${item.target}` : firstLine(item.name))
   if (item.kind === 'search') return make('file', `Find ${firstLine(item.name)}`)
+  // ADR 0114: what it put under its answer, in words, not the tool's name.
+  if (firstLine(item.name) === 'Team Bus: show_widget') return make('tool', shownUnder(item.rawInput))
   return make('tool', firstLine(item.name))
+}
+
+/** "Show a calculator under the answer", from a `show_widget` call's input. */
+function shownUnder(input: unknown): string {
+  const kind = typeof input === 'object' && input !== null ? (input as { kind?: unknown }).kind : null
+  const what = kind === 'calculator' ? 'a calculator' : kind === 'checklist' ? 'a checklist' : kind === 'choices' ? 'choices' : kind === 'steps' ? 'steps' : 'something'
+  return `Show ${what} under the answer`
 }
 
 /** An address as two answers' links compare: no scheme, no www, no trailing slash or #part. */

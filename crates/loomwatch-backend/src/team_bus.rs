@@ -54,6 +54,8 @@ struct TeamBusState {
     /// The one agent of a one-agent turn asked about a part of a file (ADR 0077). The answer may
     /// be a teammate's job, so it may `ask` any teammate, from any seat.
     asks_teammates: std::sync::OnceLock<String>,
+    /// The agent whose reply is this run's answer, which may put widgets under it (ADR 0114).
+    answers: std::sync::OnceLock<String>,
     /// The team's Brief, read once at run acceptance. Delegated helpers are supplied it here:
     /// before this, `run_agent_inner` handed a helper its role and the one string its caller
     /// typed, which is the single largest context loss in the system (`docs/TEAM_MEMORY.md`).
@@ -393,6 +395,7 @@ impl TeamBus {
             team,
             team_path: team_path.to_path_buf(),
             asks_teammates: std::sync::OnceLock::new(),
+            answers: std::sync::OnceLock::new(),
             memory,
             archive,
             exit_timeout,
@@ -495,6 +498,33 @@ impl TeamBus {
     /// That agent in its own turn, not answering a question it was brought in for.
     fn asks_any_teammate(&self, session: &AgentSession) -> bool {
         !session.answering && self.asks_teammates(&session.agent_id)
+    }
+
+    /// ADR 0114: `agent_id`'s reply is this run's answer, the one the person reads. Set once, before
+    /// the agent starts, so the tools it is offered never change within its session.
+    pub(crate) fn answered_by(&self, agent_id: &str) {
+        let _ = self.state.answers.set(agent_id.to_owned());
+    }
+
+    /// Whether `agent_id` writes the answer and may put widgets under it: it is the run's
+    /// responder, a person is there to use them, and its switch is on (or absent, with the
+    /// default on).
+    fn shows_widgets(&self, agent_id: &str) -> bool {
+        self.state.operator.is_some()
+            && self
+                .state
+                .answers
+                .get()
+                .is_some_and(|answers| answers == agent_id)
+            && self
+                .state
+                .team
+                .agents
+                .iter()
+                .find(|agent| agent.id == agent_id)
+                .is_some_and(|agent| {
+                    !agent.is_operator() && agent.widgets.unwrap_or(crate::widgets::DEFAULT_ON)
+                })
     }
 
     pub(crate) async fn connection(&self, agent_id: &str) -> Result<TeamBusConnection> {
@@ -1625,6 +1655,7 @@ impl TeamBus {
             "message_me_at" => self.message_me_at(session, event_log, arguments).await,
             "pending_messages" => self.pending_messages(session).await,
             "cancel_message" => self.cancel_message(session, arguments).await,
+            crate::widgets::TOOL => self.show_widget(session, arguments),
             "my_agents" => self.my_agents(session).await,
             "dispatch" => {
                 let reference = required_string(arguments, "agent")?;
@@ -3381,6 +3412,9 @@ pub(crate) struct BusSeat {
     pub(crate) my_agents: bool,
     /// In its own chat, with a person: it may message them at a time they ask (ADR 0108).
     pub(crate) own_chat: bool,
+    /// Its reply is the answer the person reads, and its switch is on: it may put widgets under it
+    /// (ADR 0114).
+    pub(crate) answers: bool,
 }
 
 impl TeamBus {
@@ -3441,6 +3475,10 @@ impl TeamBus {
                 && !holder.answering
                 && self.state.operator.is_some()
                 && self.own_chat(&holder.agent_id).is_some(),
+            answers: !copy
+                && !holder.helper
+                && !holder.answering
+                && self.shows_widgets(&holder.agent_id),
         }
     }
 
@@ -3473,6 +3511,28 @@ impl TeamBus {
             "only an agent in its own chat, with the person there, may set a message for them"
                 .to_owned(),
         ))
+    }
+
+    /// `show_widget` (ADR 0114): check the widget and, for a calculator, work out its results with
+    /// the starting values, for the agent to write its answer from. Kept with the answer when the
+    /// run ends ([`crate::widgets::of_answer`]), from this call's archived input. Refused for any
+    /// agent but the one whose reply is the answer, in its own turn, so a harness that cached an
+    /// older list of tools can't show one either.
+    fn show_widget(&self, session: &AgentSession, arguments: &Value) -> Result<Value> {
+        if crate::helpers::lead_of(&session.agent_id).is_some()
+            || session.answering
+            || session.delegation_path.len() != 1
+            || !self.shows_widgets(&session.agent_id)
+        {
+            return Err(refused(
+                "not_the_answer",
+                "only the agent whose reply is the answer the person reads may show a widget"
+                    .to_owned(),
+            ));
+        }
+        let widget = crate::widgets::read(arguments)
+            .map_err(|error| refused("widget_refused", format!("It isn't shown: {error}.")))?;
+        Ok(crate::widgets::shown(&widget))
     }
 
     /// `message_me_at`: keep the message for its time, and return at once.
@@ -3736,6 +3796,10 @@ pub(crate) fn offered_tools(seat: &BusSeat) -> Vec<Value> {
     // ADR 0108: an agent in its own chat may message the person at a time they ask.
     if seat.own_chat {
         tools.extend(message_tools());
+    }
+    // ADR 0114: the agent whose reply is the answer may put widgets under it.
+    if seat.answers {
+        tools.push(crate::widgets::tool_definition());
     }
     if seat.notebook {
         tools.extend(memory_tool_definitions());
@@ -4300,6 +4364,7 @@ mod tests {
             spend: crate::spend::SpendConfig::default(),
             from_agent: None,
             learns: true,
+            widgets: None,
         }
     }
 
@@ -4348,12 +4413,162 @@ mod tests {
                 front_desk: true,
                 my_agents: true,
                 own_chat: true,
+                answers: true,
             };
             for tool in offered_tools(&seat) {
                 let text = tool.to_string();
                 assert!(!text.contains("  "), "{text}");
             }
         }
+    }
+
+    /// ADR 0114: only the agent whose reply is the answer, with its switch on, is offered
+    /// `show_widget`, and the bus refuses the call from anyone else, whatever list of tools a
+    /// harness cached. A widget it can't show is refused with what to change.
+    #[tokio::test]
+    #[allow(clippy::too_many_lines)]
+    async fn only_the_agent_whose_reply_is_the_answer_shows_a_widget() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
+        let archive = EventArchive::new(pool);
+        let bus_with = |widgets: Option<bool>, answers: Option<&str>| {
+            let mut lead = test_agent("lead", OFFLINE);
+            lead.widgets = widgets;
+            let mut helper = test_agent("helper", OFFLINE);
+            helper.widgets = Some(true);
+            let team = Arc::new(TeamConfig {
+                project: None,
+                shares: None,
+                project_file: None,
+                schema_version: 1,
+                id: "trips".into(),
+                name: "Trips".into(),
+                entrypoint: "lead".into(),
+                responder: None,
+                schedule: None,
+                deliver: None,
+                conversation: ConversationConfig::default(),
+                permissions: crate::config::TeamPermissions::default(),
+                spend: crate::spend::SpendConfig::default(),
+                memory: None,
+                guards: GuardsConfig::default(),
+                agents: vec![lead, helper],
+                edges: Vec::new(),
+            });
+            let bus = TeamBus::start(
+                team,
+                &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("trips.yaml"),
+                archive.clone(),
+                Duration::from_secs(2),
+                TeamBusMode::Team,
+                Arc::new(crate::memory::TeamMemory::default()),
+                Some(crate::runs::RunRegistry::default().operator_desk(Some(&archive))),
+            )?;
+            if let Some(agent) = answers {
+                bus.answered_by(agent);
+            }
+            anyhow::Ok(bus)
+        };
+        let list = json!({
+            "kind": "checklist",
+            "title": "Before Wednesday",
+            "items": [{"text": "Print 32 copies"}]
+        });
+        let offered = |connection: &TeamBusConnection| {
+            connection
+                .tool_definitions(false)
+                .iter()
+                .any(|tool| tool["name"] == crate::widgets::TOOL)
+        };
+
+        let bus = bus_with(Some(true), Some("lead"))?;
+        let lead = bus.connection("lead").await?;
+        lead.register(EventLog::new(archive.clone(), "answering".into()))
+            .await;
+        assert!(offered(&lead), "the agent whose reply is the answer");
+        let shown = lead.call(crate::widgets::TOOL, list.clone()).await;
+        assert_eq!(shown["isError"], false, "{shown}");
+        assert_eq!(
+            shown["structuredContent"]["shown"],
+            "a checklist \"Before Wednesday\""
+        );
+        let bad = lead
+            .call(
+                crate::widgets::TOOL,
+                json!({"kind": "checklist", "title": "Empty", "items": []}),
+            )
+            .await;
+        assert_eq!(bad["isError"], true, "{bad}");
+        assert!(
+            bad.to_string()
+                .contains("It isn't shown: items has 0; give 1 to 20"),
+            "{bad}"
+        );
+
+        // The answering agent's other sessions write to a teammate, not to the person: answering a
+        // teammate's question, or started by one with work of its own.
+        for context in [
+            DelegationContext {
+                path: vec!["helper".into(), "lead".into()],
+                depth: 1,
+                answering: true,
+            },
+            DelegationContext {
+                path: vec!["helper".into(), "lead".into()],
+                depth: 1,
+                answering: false,
+            },
+        ] {
+            let answering = context.answering;
+            let other = bus.connection_with_context("lead", context).await?;
+            other
+                .register(EventLog::new(archive.clone(), "teammate's".into()))
+                .await;
+            assert!(!offered(&other), "answering: {answering}");
+            let refused = other.call(crate::widgets::TOOL, list.clone()).await;
+            assert_eq!(
+                refused["isError"], true,
+                "answering: {answering}: {refused}"
+            );
+        }
+        // A session the bus reopened plainly after a question, but still answering: refused by
+        // what the session holds, not only by its seat.
+        let reopened = bus.connection("lead").await?;
+        reopened
+            .register(EventLog::new(archive.clone(), "reopened".into()))
+            .await;
+        if let Some(session) = bus.state.tokens.write().await.get_mut(&reopened.token) {
+            session.answering = true;
+        }
+        let refused = reopened.call(crate::widgets::TOOL, list.clone()).await;
+        assert_eq!(refused["isError"], true, "{refused}");
+
+        // A teammate on the same bus, its switch on too, doesn't write the answer.
+        let helper = bus.connection("helper").await?;
+        helper
+            .register(EventLog::new(archive.clone(), "teammate".into()))
+            .await;
+        assert!(!offered(&helper));
+        let refused = helper.call(crate::widgets::TOOL, list.clone()).await;
+        assert_eq!(refused["isError"], true, "{refused}");
+        assert!(
+            refused
+                .to_string()
+                .contains("only the agent whose reply is the answer"),
+            "{refused}"
+        );
+
+        // The answering agent with its switch absent has LoomWatch's default, off for now; and a
+        // run that never said who answers offers it to nobody.
+        const { assert!(!crate::widgets::DEFAULT_ON) };
+        for bus in [bus_with(None, Some("lead"))?, bus_with(Some(true), None)?] {
+            let lead = bus.connection("lead").await?;
+            lead.register(EventLog::new(archive.clone(), "off".into()))
+                .await;
+            assert!(!offered(&lead));
+            let refused = lead.call(crate::widgets::TOOL, list.clone()).await;
+            assert_eq!(refused["isError"], true, "{refused}");
+        }
+        Ok(())
     }
 
     /// ADR 0108: an agent in its own chat sets, lists and cancels a message on the bus itself;
@@ -8100,8 +8315,9 @@ mod tests {
             front_desk: false,
             my_agents: false,
             own_chat: false,
+            answers: false,
         };
-        let cases: [(&str, BusSeat, &[&str]); 18] = [
+        let cases: [(&str, BusSeat, &[&str]); 20] = [
             (
                 "one agent, team mode",
                 seat(TeamBusMode::Team, 0, false),
@@ -8255,6 +8471,37 @@ mod tests {
                     ..seat(TeamBusMode::Team, 0, false)
                 },
                 &["ask_user"],
+            ),
+            // ADR 0114: the agent whose reply is the answer may put widgets under it.
+            (
+                "a lead whose reply is the answer",
+                BusSeat {
+                    answers: true,
+                    ..seat(TeamBusMode::Team, 2, false)
+                },
+                &[
+                    "roster",
+                    "dispatch",
+                    "ask",
+                    "handoff",
+                    "ask_user",
+                    "show_widget",
+                ],
+            ),
+            (
+                "an agent in its own chat whose reply is the answer",
+                BusSeat {
+                    own_chat: true,
+                    answers: true,
+                    ..seat(TeamBusMode::Pipeline, 0, false)
+                },
+                &[
+                    "ask_user",
+                    "message_me_at",
+                    "pending_messages",
+                    "cancel_message",
+                    "show_widget",
+                ],
             ),
         ];
         for (what, seat, expected) in cases {

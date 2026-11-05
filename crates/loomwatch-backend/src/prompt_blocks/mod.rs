@@ -119,7 +119,7 @@ fn placeholders(text: &str) -> Vec<&str> {
 #[cfg(any(test, feature = "prompt-overrides"))]
 const ALL: &[Block] = {
     use crate::agent::{prompt, tools};
-    use crate::{helpers, orientation, team_bus};
+    use crate::{helpers, orientation, team_bus, widgets};
     &[
         prompt::INTRO,
         prompt::PLAN,
@@ -196,6 +196,11 @@ const ALL: &[Block] = {
         team_bus::MESSAGE_ME_AT_SET,
         team_bus::PENDING_MESSAGES,
         team_bus::CANCEL_MESSAGE,
+        widgets::SHOW_WIDGET,
+        widgets::SHOW_WIDGET_KIND,
+        widgets::SHOW_WIDGET_OPTIONS,
+        widgets::SHOW_WIDGET_FORMULA,
+        widgets::SHOW_WIDGET_SHOWN,
         crate::messages_at::DUE,
         crate::messages_at::DUE_LATE,
         team_bus::MEMORY_SEARCH,

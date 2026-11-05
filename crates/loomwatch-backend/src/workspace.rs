@@ -666,6 +666,7 @@ mod tests {
             spend: crate::spend::SpendConfig::default(),
             from_agent: None,
             learns: true,
+            widgets: None,
         }
     }
 

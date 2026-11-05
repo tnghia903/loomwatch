@@ -65,6 +65,7 @@ export function teamAgentSource(agent: AgentConfig): LibrarySource {
     ...(agent.allow ? { allow: { ...agent.allow } } : {}),
     ...(agent.allowRecruiting === false ? { helpers: false as const } : {}),
     ...(agent.allowMyAgents === false ? { bringsIn: false as const } : {}),
+    ...(agent.widgets !== undefined ? { widgets: agent.widgets } : {}),
   }
 }
 

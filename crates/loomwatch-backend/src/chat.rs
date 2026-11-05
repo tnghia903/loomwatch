@@ -1363,6 +1363,8 @@ struct History {
     files: BTreeMap<String, Vec<ChatFile>>,
     /// The operator's reactions on those runs and notes, by run or note.
     reactions: Vec<(String, Reaction)>,
+    /// The widgets under those runs' answers, and what the operator made of them (ADR 0114).
+    widgets: BTreeMap<String, Vec<crate::widgets::Kept>>,
 }
 
 async fn gather(
@@ -1426,6 +1428,10 @@ async fn gather(
                 .map(move |reaction| (anchor.clone(), reaction))
         })
         .collect();
+    let widgets = match registry.db() {
+        Some(db) => crate::widgets::store::of_runs(&db, &ids).await?,
+        None => BTreeMap::new(),
+    };
     Ok(History {
         runs,
         notes,
@@ -1433,6 +1439,7 @@ async fn gather(
         replies,
         files,
         reactions,
+        widgets,
     })
 }
 
@@ -1478,6 +1485,8 @@ enum EntryKind {
     Answer {
         by: String,
         text: String,
+        /// The widgets under it, in a line (ADR 0114).
+        widgets: Option<String>,
     },
     Stopped {
         why: String,
@@ -1493,6 +1502,30 @@ enum EntryKind {
     Decision {
         line: String,
     },
+}
+
+/// ADR 0114: what the operator made of an answer's widgets, as they last left them before the run
+/// reading it was created (`before`), stamped with that last change.
+fn widgets_changed(
+    person: &Person,
+    run: &RunRecord,
+    kept: &[crate::widgets::Kept],
+    before: &str,
+    finished: &str,
+) -> Option<Entry> {
+    let line = crate::widgets::changes(&person.subject, short_id(&run.run_id), kept, before)?;
+    let at = kept
+        .iter()
+        .filter_map(|kept| kept.changed_at.as_deref())
+        .filter(|at| *at <= before)
+        .max()
+        .unwrap_or(finished)
+        .to_owned();
+    Some(Entry {
+        at,
+        run_id: Some(run.run_id.clone()),
+        kind: EntryKind::Decision { line },
+    })
 }
 
 /// Every entry the section could hold, newest first.
@@ -1549,14 +1582,21 @@ fn entries(team: &TeamConfig, history: &History, before: &str, person: &Person) 
             .clone()
             .unwrap_or_else(|| run.created_at.clone());
         match run.status {
-            RunStatus::Succeeded => entries.push(Entry {
-                at: finished,
-                run_id: Some(run.run_id.clone()),
-                kind: EntryKind::Answer {
-                    by: name(&run.responder),
-                    text: run.reply.clone().unwrap_or_default(),
-                },
-            }),
+            RunStatus::Succeeded => {
+                let widgets = history.widgets.get(&run.run_id);
+                entries.extend(
+                    widgets.and_then(|kept| widgets_changed(person, run, kept, before, &finished)),
+                );
+                entries.push(Entry {
+                    at: finished,
+                    run_id: Some(run.run_id.clone()),
+                    kind: EntryKind::Answer {
+                        by: name(&run.responder),
+                        text: run.reply.clone().unwrap_or_default(),
+                        widgets: widgets.and_then(|kept| crate::widgets::showed(kept)),
+                    },
+                });
+            }
             RunStatus::Failed | RunStatus::Cancelled => entries.push(Entry {
                 at: finished,
                 run_id: Some(run.run_id.clone()),
@@ -1760,20 +1800,27 @@ fn detail(entries: &[Entry], followed: Option<&str>, person: &Person) -> (Vec<St
     let mut cutoff = entries.len();
     for (index, entry) in entries.iter().enumerate() {
         let text = match &entry.kind {
-            EntryKind::Answer { by, text } => {
+            EntryKind::Answer { by, text, widgets } => {
                 let short = short_id(entry.run_id.as_deref().unwrap_or_default());
+                // ADR 0114: before the answer's words, so the cut of an older answer keeps it.
+                let under = widgets
+                    .as_deref()
+                    .map(|line| format!("\n{line}"))
+                    .unwrap_or_default();
                 if entry.run_id.as_deref() == followed {
                     newest_answer_done = true;
-                    format!("{by} answered (work {short}); the answer is under Previous output.")
+                    format!(
+                        "{by} answered (work {short}); the answer is under Previous output.{under}"
+                    )
                 } else if newest_answer_done {
                     format!(
-                        "{by} answered (work {short}):\n{}",
+                        "{by} answered (work {short}):{under}\n{}",
                         opening(text, OLDER_ANSWER_CHARS, short)
                     )
                 } else {
                     newest_answer_done = true;
                     format!(
-                        "{by} answered (work {short}):\n{}",
+                        "{by} answered (work {short}):{under}\n{}",
                         crate::cap_middle_text(text, NEWEST_ANSWER_CHARS)
                     )
                 }
@@ -1971,14 +2018,39 @@ pub(crate) async fn earlier_work(
     }
     match found.as_slice() {
         [] => anyhow::bail!("no work {work} in this team's chat"),
-        [run] => Ok(json!({
-            "work": short_id(&run.run_id),
-            "asked": run.prompt,
-            "askedAt": run.created_at,
-            "status": run.status,
-            "answer": run.reply.as_deref().map(|reply| crate::cap_middle_text(reply, 24_000)),
-            "error": run.error,
-        })),
+        [run] => {
+            let mut found = json!({
+                "work": short_id(&run.run_id),
+                "asked": run.prompt,
+                "askedAt": run.created_at,
+                "status": run.status,
+                "answer": run.reply.as_deref().map(|reply| crate::cap_middle_text(reply, 24_000)),
+                "error": run.error,
+            });
+            // ADR 0114: the widgets under the answer, and what the operator had made of them
+            // when the asking run was created.
+            if let Some(db) = registry.db() {
+                let kept = crate::widgets::store::of_runs(&db, std::slice::from_ref(&run.run_id))
+                    .await?
+                    .remove(&run.run_id)
+                    .unwrap_or_default();
+                if let Some(line) = crate::widgets::showed(&kept) {
+                    found["widgets"] = json!(line);
+                }
+                let person = crate::you::told_in(Path::new(&asking.team_path))
+                    .and_then(|you| you.name)
+                    .unwrap_or_else(|| "You".to_owned());
+                if let Some(line) = crate::widgets::changes(
+                    &person,
+                    short_id(&run.run_id),
+                    &kept,
+                    &asking.created_at,
+                ) {
+                    found["changed"] = json!(line);
+                }
+            }
+            Ok(found)
+        }
         _ => anyhow::bail!("more than one piece of work starts with {work}: give more of its id"),
     }
 }
@@ -2011,6 +2083,7 @@ pub fn router(archive: Option<EventArchive>, teams_root: PathBuf, registry: RunR
         .route("/api/chat/messages/{id}/start", post(start_from_note))
         .route("/api/chat/continue", post(continue_team))
         .route("/api/chat/reactions", post(react))
+        .route("/api/chat/widgets", post(change_widget))
         .route("/api/chat/answering", get(answering))
         .route_layer(middleware::from_fn(local_evidence))
         .with_state(ChatState {
@@ -2133,6 +2206,9 @@ enum Item {
         /// What the agents learned from feedback on it and still keep (ADR 0078).
         #[serde(skip_serializing_if = "Vec::is_empty")]
         lessons: Vec<crate::lessons::Lesson>,
+        /// The widgets under its answer, and what the operator made of them (ADR 0114).
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        widgets: Vec<crate::widgets::Kept>,
     },
     /// A team note, and how the operator reacted to it and to the agents' answers to it.
     Note {
@@ -2205,6 +2281,7 @@ async fn chat_page(
                 notes,
                 reactions: Vec::new(),
                 lessons: Vec::new(),
+                widgets: Vec::new(),
             }
         })
         .chain(notes.into_iter().map(|message| Item::Note {
@@ -2244,6 +2321,7 @@ async fn chat_page(
         }
     }
     with_lessons(&state, &shown, &mut items).await?;
+    with_widgets(&state, &shown, &mut items).await?;
     Ok(Json(json!({
         "teamKey": team_ref.key,
         "teamPath": relative,
@@ -2284,6 +2362,28 @@ async fn find(
         .await
         .map_err(|error| database(&error))?;
     Ok(Json(found).into_response())
+}
+
+/// Each piece of work with the widgets under its answer (ADR 0114).
+async fn with_widgets(
+    state: &ChatState,
+    shown: &[String],
+    items: &mut [Item],
+) -> Result<(), ApiError> {
+    let Some(db) = state.registry.db() else {
+        return Ok(());
+    };
+    let mut kept = crate::widgets::store::of_runs(&db, shown)
+        .await
+        .map_err(|error| database(&error))?;
+    for item in items {
+        if let Item::Work { run, widgets, .. } = item
+            && let Some(found) = kept.remove(&run.run_id)
+        {
+            *widgets = found;
+        }
+    }
+    Ok(())
 }
 
 /// Each piece of work, and each team note the agents answered, with what they learned from
@@ -3660,6 +3760,76 @@ struct ReactRequest {
     about: Option<About>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WidgetRequest {
+    team_path: String,
+    run_id: String,
+    /// The widget's place under the answer, from 1.
+    n: u32,
+    /// A checklist's ticks or a calculator's values (`crate::widgets::read_state`).
+    state: Value,
+}
+
+/// `POST /api/chat/widgets`: keep what the operator made of a widget under an answer (ADR 0114): a
+/// checklist's ticks, a calculator's values. Answers with the widget as kept. The next work's
+/// conversation says what changed; a run already working is not told.
+async fn change_widget(
+    State(state): State<ChatState>,
+    body: Result<Json<WidgetRequest>, JsonRejection>,
+) -> Result<Response, ApiError> {
+    let couldnt = || {
+        ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "LoomWatch couldn’t keep that. Try again.".to_owned(),
+        )
+    };
+    let Json(request) = body.map_err(|rejection| {
+        eprintln!(
+            "warning: a widget change was refused: {}",
+            rejection.body_text()
+        );
+        couldnt()
+    })?;
+    let (relative, team) = open_team(&state.teams_root, &request.team_path)?;
+    let team_ref = TeamRef {
+        key: team.chat_key(&relative),
+        path: relative,
+    };
+    let store = state.registry.chat_store().ok_or_else(no_store)?;
+    let db = state.registry.db().ok_or_else(no_store)?;
+    let not_here = || {
+        ApiError::new(
+            StatusCode::NOT_FOUND,
+            "That answer isn’t in this chat any more, so this wasn’t kept.".to_owned(),
+        )
+    };
+    store
+        .run(&team_ref, &request.run_id)
+        .await
+        .map_err(|error| database(&error))?
+        .ok_or_else(not_here)?;
+    let kept = crate::widgets::store::one(&db, &request.run_id, request.n)
+        .await
+        .map_err(|error| database(&error))?
+        .ok_or_else(not_here)?;
+    let checked = crate::widgets::read_state(&kept.spec, &request.state).map_err(|error| {
+        eprintln!(
+            "warning: a change to a widget under run {} was refused: {error}",
+            request.run_id
+        );
+        couldnt()
+    })?;
+    crate::widgets::store::set_state(&db, &request.run_id, request.n, &checked, &now())
+        .await
+        .map_err(|error| database(&error))?;
+    let kept = crate::widgets::store::one(&db, &request.run_id, request.n)
+        .await
+        .map_err(|error| database(&error))?
+        .ok_or_else(not_here)?;
+    Ok(Json(kept).into_response())
+}
+
 /// `POST /api/chat/reactions`: put one of [`FACES`] on something said in the chat, or take it
 /// off. Anything said can have one: what the agents said in a piece of work, your own words in
 /// it, a team note, and the agents' answers to that note. Answers with every reaction in that
@@ -4069,6 +4239,7 @@ mod tests {
             decisions: Vec::new(),
             reactions: Vec::new(),
             files: BTreeMap::new(),
+            widgets: BTreeMap::new(),
         };
         let section = render(&team(), &history, &now, &Person::named(None)).unwrap();
         // Same input, same bytes.
@@ -4116,6 +4287,7 @@ mod tests {
             decisions: Vec::new(),
             reactions: Vec::new(),
             files: BTreeMap::new(),
+            widgets: BTreeMap::new(),
         };
         let section = render(&team(), &history, &now, &Person::named(None)).unwrap();
         assert!(
@@ -4150,6 +4322,7 @@ mod tests {
             decisions: Vec::new(),
             reactions: Vec::new(),
             files: BTreeMap::new(),
+            widgets: BTreeMap::new(),
         };
         let section = render(&team(), &history, &now, &Person::named(None)).unwrap();
         assert!(!section.contains("THE ANSWER"), "{section}");
@@ -4182,6 +4355,7 @@ mod tests {
             }],
             reactions: Vec::new(),
             files: BTreeMap::new(),
+            widgets: BTreeMap::new(),
         };
         let section = render(&team(), &history, &now, &Person::named(None)).unwrap();
         assert!(
@@ -4212,6 +4386,7 @@ mod tests {
             notes: vec![noted],
             decisions: Vec::new(),
             files: BTreeMap::new(),
+            widgets: BTreeMap::new(),
         };
         let section = render(&team(), &history, &now, &Person::named(None)).unwrap();
         assert!(
@@ -4254,6 +4429,7 @@ mod tests {
                 },
             ],
             files: BTreeMap::new(),
+            widgets: BTreeMap::new(),
         };
         let section = render(&team(), &history, &now, &Person::named(Some(" Mai "))).unwrap();
         assert!(section.contains("Mai to the team: digest"), "{section}");
@@ -4307,6 +4483,7 @@ mod tests {
             ],
             decisions: Vec::new(),
             files: BTreeMap::new(),
+            widgets: BTreeMap::new(),
         };
         let section = render(&team(), &history, &now, &Person::named(None)).unwrap();
         assert!(
@@ -5086,6 +5263,245 @@ mod tests {
             "{}",
             writer[0]
         );
+    }
+
+    /// A one-agent team whose agent may show widgets (ADR 0114), on `model`.
+    fn write_planner(dir: &TeamsDir, model: &str, widgets: Option<bool>) {
+        let switch = widgets.map_or_else(String::new, |on| format!("    widgets: {on}\n"));
+        std::fs::write(
+            dir.0.join("news.yaml"),
+            format!(
+                "schemaVersion: 1\nid: trips\nname: Trips\nentrypoint: planner\nagents:\n  - id: planner\n    name: Planner\n    role: plan school trips\n    model: {model}\n{switch}"
+            ),
+        )
+        .unwrap();
+    }
+
+    fn zoo_trip() -> Value {
+        json!({
+            "kind": "calculator",
+            "title": "Zoo trip",
+            "inputs": [
+                {"id": "pupils", "label": "Pupils", "start": 32, "min": 1},
+                {"id": "bus", "label": "Bus", "start": 2_400_000, "unit": "₫"},
+                {"id": "ticket", "label": "Ticket", "start": 60000, "unit": "₫"}
+            ],
+            "results": [{"id": "each", "label": "Each family pays", "formula": "ceil((bus + pupils * ticket) / pupils, -4)", "unit": "₫"}]
+        })
+    }
+
+    /// ADR 0114: the agent whose reply is the answer shows a calculator before it writes the
+    /// answer, and is told the figures the daemon worked out. The chat shows the widget under the
+    /// answer, the
+    /// person changes an input, and the next work's conversation says what they changed, with the
+    /// figure worked out again.
+    #[tokio::test]
+    async fn a_widget_under_an_answer_is_kept_changed_and_read_by_the_next_work() {
+        use crate::test_support::{stand_in, turn};
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        let (planner, demo) = stand_in(vec![
+            turn(&["plan the zoo trip"], "It comes to 140,000 ₫ a family.").calling(
+                crate::widgets::TOOL,
+                zoo_trip(),
+                "Each family pays = 140,000 ₫",
+            ),
+            turn(
+                &[
+                    "Planner answered (work",
+                    "[Under this answer: a calculator \"Zoo trip\" (Each family pays = 140,000 ₫).]",
+                    "You changed what is under the answer of work",
+                    "\"Zoo trip\": Pupils 25, Bus 2,400,000 ₫, Ticket 60,000 ₫ → Each family pays = \
+                     160,000 ₫.",
+                ],
+                "With 25 pupils it is 160,000 ₫.",
+            ),
+        ]);
+        write_planner(&dir, &planner, Some(true));
+        let rig = rig(pool, &dir);
+        let (_, started) = send(
+            &rig.app,
+            json!({"teamPath": "news.yaml", "text": "plan the zoo trip", "to": {"kind": "team"}}),
+        )
+        .await;
+        let run_id = started["run"]["runId"].as_str().unwrap().to_owned();
+        let done = wait_for(&rig.registry, &run_id, |run| run.status.is_terminal()).await;
+        assert_eq!(done.status, RunStatus::Succeeded, "{done:?}");
+        assert_eq!(
+            done.reply.as_deref(),
+            Some("It comes to 140,000 ₫ a family.")
+        );
+        assert!(
+            demo.requests()[0]
+                .tools
+                .contains(&crate::widgets::TOOL.to_owned()),
+            "the agent whose reply is the answer is offered the tool"
+        );
+
+        // The chat: the widget under the answer, as LoomWatch checked it, with nothing changed.
+        let chat = page(&rig.app).await;
+        let widgets = &chat["items"][0]["widgets"];
+        assert_eq!(widgets[0]["n"], 1, "{chat}");
+        assert_eq!(widgets[0]["spec"]["kind"], "calculator");
+        assert_eq!(
+            widgets[0]["spec"]["results"][0]["label"],
+            "Each family pays"
+        );
+        assert!(widgets[0]["state"].is_null() && widgets[0]["changedAt"].is_null());
+
+        // The person changes an input; what isn't the widget's, or breaks its limits, is refused.
+        let change = |n: u32, state: Value| json!({"teamPath": "news.yaml", "runId": run_id, "n": n, "state": state});
+        let (status, kept) = post(
+            &rig.app,
+            "/api/chat/widgets",
+            change(1, json!({"values": {"pupils": 25}})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{kept}");
+        assert_eq!(kept["state"], json!({"values": {"pupils": 25}}));
+        assert!(kept["changedAt"].is_string());
+        let (status, refused) = post(
+            &rig.app,
+            "/api/chat/widgets",
+            change(1, json!({"values": {"pupils": 0}})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{refused}");
+        let (status, _) = post(
+            &rig.app,
+            "/api/chat/widgets",
+            change(2, json!({"values": {"pupils": 30}})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(
+            page(&rig.app).await["items"][0]["widgets"][0]["state"],
+            json!({"values": {"pupils": 25}}),
+            "the refused changes changed nothing"
+        );
+
+        // The next work reads what the answer showed, and what the person changed.
+        let (_, next) = send(
+            &rig.app,
+            json!({"teamPath": "news.yaml", "text": "and with fewer pupils", "to": {"kind": "team"}}),
+        )
+        .await;
+        let next_id = next["run"]["runId"].as_str().unwrap().to_owned();
+        let done = wait_for(&rig.registry, &next_id, |run| run.status.is_terminal()).await;
+        assert_eq!(done.status, RunStatus::Succeeded, "{done:?}");
+
+        // Reading that earlier work in full gives its widgets and what was changed in them.
+        let earlier = earlier_work(&rig.registry, &next_id, &run_id[..8])
+            .await
+            .unwrap();
+        assert_eq!(
+            earlier["widgets"],
+            "[Under this answer: a calculator \"Zoo trip\" (Each family pays = 140,000 ₫).]"
+        );
+        assert!(
+            earlier["changed"]
+                .as_str()
+                .is_some_and(|line| line.contains("Pupils 25") && line.contains("160,000 ₫")),
+            "{earlier}"
+        );
+    }
+
+    /// ADR 0114: an agent with no `widgets` setting has `LoomWatch`'s default, off for now, and isn't
+    /// offered the tool.
+    #[tokio::test]
+    async fn an_agent_with_widgets_off_is_not_offered_the_tool() {
+        use crate::test_support::{stand_in, turn};
+        // This test is for the default being off: once it is on, `None` belongs with the agents
+        // that are offered the tool.
+        const { assert!(!crate::widgets::DEFAULT_ON) };
+        for widgets in [None, Some(false)] {
+            let pool = crate::db::Db::temp().await;
+            let dir = TeamsDir::new();
+            let (planner, demo) = stand_in(vec![turn(&["plan the zoo trip"], "In words.")]);
+            write_planner(&dir, &planner, widgets);
+            let rig = rig(pool, &dir);
+            let (_, started) = send(
+                &rig.app,
+                json!({"teamPath": "news.yaml", "text": "plan the zoo trip", "to": {"kind": "team"}}),
+            )
+            .await;
+            let run_id = started["run"]["runId"].as_str().unwrap().to_owned();
+            let done = wait_for(&rig.registry, &run_id, |run| run.status.is_terminal()).await;
+            assert_eq!(done.status, RunStatus::Succeeded, "{done:?}");
+            assert!(
+                !demo.requests()[0]
+                    .tools
+                    .contains(&crate::widgets::TOOL.to_owned()),
+                "{widgets:?}"
+            );
+            assert!(page(&rig.app).await["items"][0]["widgets"].is_null());
+        }
+    }
+
+    /// ADR 0114: in a pipeline, the last stage writes the answer and is offered `show_widget`; the
+    /// stage before it writes for that stage, not for a person, and isn't, whatever its switch.
+    #[tokio::test]
+    async fn in_a_pipeline_only_the_stage_whose_reply_is_the_answer_is_offered_widgets() {
+        use crate::test_support::{stand_in, turn};
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        let (researcher, researching) = stand_in(vec![turn(&["today's digest"], "three facts")]);
+        let (writer, writing) = stand_in(vec![turn(&["three facts"], "the digest")]);
+        std::fs::write(
+            dir.0.join("news.yaml"),
+            format!(
+                "schemaVersion: 1\nid: news-desk\nname: News desk\nentrypoint: researcher\nagents:\n  - id: researcher\n    name: Researcher\n    role: find the news\n    model: {researcher}\n    widgets: true\n  - id: writer\n    name: Writer\n    role: write the digest\n    model: {writer}\n    widgets: true\nedges:\n  - from: researcher\n    to: writer\n    layer: configured\n    kind: sequence\n    ts: 2026-09-13T00:00:00Z\n"
+            ),
+        )
+        .unwrap();
+        let rig = rig(pool, &dir);
+        let (_, started) = send(
+            &rig.app,
+            json!({"teamPath": "news.yaml", "text": "today's digest", "to": {"kind": "team"}}),
+        )
+        .await;
+        let run_id = started["run"]["runId"].as_str().unwrap().to_owned();
+        let done = wait_for(&rig.registry, &run_id, |run| run.status.is_terminal()).await;
+        assert_eq!(done.status, RunStatus::Succeeded, "{done:?}");
+        let offered = |requests: Vec<crate::agent::SeenRequest>| {
+            requests[0].tools.contains(&crate::widgets::TOOL.to_owned())
+        };
+        assert!(
+            offered(writing.requests()),
+            "the last stage writes the answer"
+        );
+        assert!(
+            !offered(researching.requests()),
+            "the stage before writes for the writer"
+        );
+    }
+
+    /// ADR 0114: a model that calls `show_widget` anyway, when its agent isn't offered it, is told
+    /// there is no such tool, and nothing is kept under its answer. (The bus refuses it too:
+    /// `team_bus::tests::only_the_agent_whose_reply_is_the_answer_shows_a_widget`.)
+    #[tokio::test]
+    async fn a_widget_from_an_agent_not_offered_the_tool_is_refused() {
+        use crate::test_support::{stand_in, turn};
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        let (planner, _) = stand_in(vec![
+            turn(&["plan the zoo trip"], "In words, then.").calling(
+                crate::widgets::TOOL,
+                zoo_trip(),
+                "There's no tool called show_widget",
+            ),
+        ]);
+        write_planner(&dir, &planner, Some(false));
+        let rig = rig(pool, &dir);
+        let (_, started) = send(
+            &rig.app,
+            json!({"teamPath": "news.yaml", "text": "plan the zoo trip", "to": {"kind": "team"}}),
+        )
+        .await;
+        let run_id = started["run"]["runId"].as_str().unwrap().to_owned();
+        let done = wait_for(&rig.registry, &run_id, |run| run.status.is_terminal()).await;
+        assert_eq!(done.status, RunStatus::Succeeded, "{done:?}");
+        assert!(page(&rig.app).await["items"][0]["widgets"].is_null());
     }
 
     /// ADR 0110: a message to an agent waiting on its question to you is the answer. The question
@@ -6869,6 +7285,7 @@ mod tests {
             decisions: Vec::new(),
             reactions: Vec::new(),
             files: BTreeMap::new(),
+            widgets: BTreeMap::new(),
         };
         assert_eq!(render(&team(), &history, &now, &Person::named(None)), None);
     }
@@ -7059,6 +7476,7 @@ mod tests {
                 reaction("2026-10-06T02:30:00.000Z"),
             )],
             files: BTreeMap::new(),
+            widgets: BTreeMap::new(),
         };
         let section = render(&team(), &history, &now, &Person::named(None)).unwrap();
         assert!(
@@ -7307,6 +7725,7 @@ mod tests {
                 ),
             ],
             files: BTreeMap::new(),
+            widgets: BTreeMap::new(),
         };
         let section = render(&team(), &history, &now, &Person::named(None)).unwrap();
         for line in [

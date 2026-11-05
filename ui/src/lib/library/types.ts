@@ -30,6 +30,8 @@ export interface LibrarySource {
   helpers?: false
   /** `false`: the agent it places brings in none of My agents (ADR 0092), `allowMyAgents: false`. */
   bringsIn?: false
+  /** Whether the agent it places may put widgets under its answer (ADR 0114); absent, the default. */
+  widgets?: boolean
   /** One of Your agents: the placed agent links back to this version of it. */
   from?: AgentLink
 }

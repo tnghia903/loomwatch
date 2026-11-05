@@ -703,6 +703,7 @@ $defs:
             - required: [turnedOff]
             - required: [spend]
             - required: [from]
+            - required: [widgets]
     properties:
       id:
         $ref: "#/$defs/Identifier"
@@ -935,6 +936,13 @@ $defs:
           standing instructions, each shown with where it came from and undone with one click.
           `false` turns that off: it learns nothing new and is given none of its lessons. On when
           absent. Not for an operator node.
+        type: boolean
+      widgets:
+        description: >-
+          Whether the agent may put widgets under its answer when its reply is the answer the
+          person reads (ADR 0114): choices to tap, a checklist to tick, a calculator LoomWatch
+          works out, or steps to tap through. Absent means LoomWatch's default, which is off for now.
+          Not for an operator node.
         type: boolean
       status:
         description: Runtime-only status; team-file writers omit it and readers ignore it.

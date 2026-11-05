@@ -204,5 +204,32 @@
     "entry": { "id": "review", "kind": "operator", "role": "Approve it?" },
     "job": { "name": "Researcher", "instructions": "The saved one." },
     "filled": { "id": "review", "kind": "operator", "role": "Approve it?" }
+  },
+  {
+    "name": "an agent's widgets switch goes into the team as it is set (ADR 0114)",
+    "agent": "planner",
+    "entry": { "id": "planner", "from": { "agent": "planner" }, "model": "fake/offline" },
+    "job": { "name": "Planner", "instructions": "Plan school trips.", "widgets": true },
+    "filled": {
+      "id": "planner",
+      "from": { "agent": "planner" },
+      "model": "fake/offline",
+      "name": "Planner",
+      "role": "Plan school trips.",
+      "widgets": true
+    }
+  },
+  {
+    "name": "an agent with no widgets setting leaves the team on LoomWatch's default (ADR 0114)",
+    "agent": "planner",
+    "entry": { "id": "planner", "from": { "agent": "planner" }, "model": "fake/offline", "widgets": false },
+    "job": { "name": "Planner", "instructions": "Plan school trips." },
+    "filled": {
+      "id": "planner",
+      "from": { "agent": "planner" },
+      "model": "fake/offline",
+      "name": "Planner",
+      "role": "Plan school trips."
+    }
   }
 ]

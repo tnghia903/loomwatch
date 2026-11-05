@@ -61,6 +61,7 @@ pub mod team_requests;
 pub mod updates;
 pub mod wardrobe;
 pub mod watch_api;
+pub(crate) mod widgets;
 pub mod workspace;
 pub mod you;
 
@@ -666,6 +667,8 @@ async fn run_team_mode(
         bus.offer_helpers(home);
     }
     let_the_part_asked_ask_teammates(&bus, lineage);
+    // ADR 0114: in team mode the agent the run starts with writes the answer.
+    bus.answered_by(&agent.id);
     bus.allow_links(&lineage.links);
     let connection = bus.connection(&agent.id).await?;
     let model_selector = agent.model_selector();
@@ -815,6 +818,9 @@ async fn run_pipeline_nodes(
         Some(only) => only.clone(),
         None => team.responder_id()?,
     };
+    // ADR 0114: the stage that writes the answer may put widgets under it. Told before any stage
+    // connects, so each one's tools are fixed from its first call.
+    bus.answered_by(&responder);
     let mut shared_log = shared_log;
     let mut replies: BTreeMap<String, String> = BTreeMap::new();
     // What each stage wrote for its successor, which is what the successor actually reads. Named
@@ -10995,6 +11001,7 @@ mod tests {
             spend: crate::spend::SpendConfig::default(),
             from_agent: None,
             learns: true,
+            widgets: None,
         }
     }
 
@@ -11027,6 +11034,7 @@ mod tests {
             spend: crate::spend::SpendConfig::default(),
             from_agent: None,
             learns: true,
+            widgets: None,
         }
     }
 

@@ -59,6 +59,7 @@ export function buildAgentFromSource(
     ...(source.from ? {} : { followsSuggestion: true }),
     allowRecruiting: source.helpers !== false,
     ...(source.bringsIn === false ? { allowMyAgents: false } : {}),
+    ...(source.widgets !== undefined ? { widgets: source.widgets } : {}),
     ...(source.capabilities?.length ? { capabilities: source.capabilities.map((capability) => ({ ...capability })) } : {}),
     ...(source.doneWhen?.length ? { doneWhen: [...source.doneWhen] } : {}),
     ...(source.allow ? { allow: { ...source.allow } } : {}),

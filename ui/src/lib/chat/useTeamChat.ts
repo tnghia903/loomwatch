@@ -210,7 +210,9 @@ export function useTeamChat(teamPath: string | null) {
       const key = `run:${run.runId}`
       const existing = previous.byKey.get(key)
       const byKey = new Map(previous.byKey)
-      byKey.set(key, { kind: 'work', run, request: existing?.kind === 'work' ? existing.request : null, notes: existing?.kind === 'work' ? existing.notes : [], reactions: existing?.kind === 'work' ? existing.reactions : undefined, lessons: existing?.kind === 'work' ? existing.lessons : undefined })
+      // What only a page read brings stays: the request, notes, reactions, lessons and the widgets
+      // under the answer (ADR 0114), which a run's own record doesn't carry.
+      byKey.set(key, { kind: 'work', run, request: existing?.kind === 'work' ? existing.request : null, notes: existing?.kind === 'work' ? existing.notes : [], reactions: existing?.kind === 'work' ? existing.reactions : undefined, lessons: existing?.kind === 'work' ? existing.lessons : undefined, widgets: existing?.kind === 'work' ? existing.widgets : undefined })
       return { ...previous, byKey }
     })
   }, [teamPath])

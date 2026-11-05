@@ -663,6 +663,9 @@ pub struct AgentConfig {
     pub from_agent: Option<String>,
     /// It learns from the person's feedback on its work (ADR 0078). On unless `learns: false`.
     pub learns: bool,
+    /// It may put widgets under its answer (ADR 0114): `None` for `LoomWatch`'s default
+    /// (`widgets::DEFAULT_ON`), so the default can change without a file changing.
+    pub widgets: Option<bool>,
 }
 
 /// At most this many `doneWhen` items, each at most [`DONE_WHEN_CHARS`] characters: the schema's
@@ -807,6 +810,8 @@ struct RawAgent {
     from: Option<RawFrom>,
     #[serde(default)]
     learns: Option<bool>,
+    #[serde(default)]
+    widgets: Option<bool>,
     /// Runtime annotation. Accepted and discarded: writers must not persist it and readers must
     /// ignore it (`docs/TEAM_CONFIG.md`).
     #[serde(default, rename = "status")]
@@ -848,36 +853,45 @@ fn filled_in(id: &str, role: Option<&String>, from: Option<&RawFrom>) -> Result<
     }
 }
 
+/// An operator node with a harness attached is a contradiction, not a shorthand: ignoring the
+/// field would make the file say something the daemon does not do.
+fn no_harness_fields(raw: &RawAgent) -> Result<(), String> {
+    let id = &raw.id;
+    for (field, present) in [
+        ("spawn", raw.spawn.is_some()),
+        ("model", raw.model.is_some()),
+        ("allow", raw.allow.is_some()),
+        ("turnedOff", !raw.turned_off.is_empty()),
+        ("doneWhen", !raw.done_when.is_empty()),
+        ("part", raw.part.is_some()),
+        ("checks", raw.checks.is_some()),
+        ("sendBackOnce", raw.send_back_once),
+        ("sendBack", raw.send_back.is_some()),
+        ("spend", raw.spend.is_some()),
+        ("learns", raw.learns.is_some()),
+        ("widgets", raw.widgets.is_some()),
+    ] {
+        if present {
+            return Err(format!(
+                "agent {id:?} is `kind: operator`, so it has no {field}: the stop is answered by \
+                 the person at the keyboard and spawns nothing. Remove {field}, or drop `kind: \
+                 operator` to make it a harness agent."
+            ));
+        }
+    }
+    Ok(())
+}
+
 impl TryFrom<RawAgent> for AgentConfig {
     type Error = String;
 
     fn try_from(raw: RawAgent) -> Result<Self, Self::Error> {
+        if matches!(raw.kind, AgentKind::Operator) {
+            no_harness_fields(&raw)?;
+        }
         let id = raw.id;
         match raw.kind {
             AgentKind::Operator => {
-                // An operator node with a harness attached is a contradiction, not a shorthand:
-                // ignoring the field would make the file say something the daemon does not do.
-                for (field, present) in [
-                    ("spawn", raw.spawn.is_some()),
-                    ("model", raw.model.is_some()),
-                    ("allow", raw.allow.is_some()),
-                    ("turnedOff", !raw.turned_off.is_empty()),
-                    ("doneWhen", !raw.done_when.is_empty()),
-                    ("part", raw.part.is_some()),
-                    ("checks", raw.checks.is_some()),
-                    ("sendBackOnce", raw.send_back_once),
-                    ("sendBack", raw.send_back.is_some()),
-                    ("spend", raw.spend.is_some()),
-                    ("learns", raw.learns.is_some()),
-                ] {
-                    if present {
-                        return Err(format!(
-                            "agent {id:?} is `kind: operator`, so it has no {field}: the stop is \
-                             answered by the person at the keyboard and spawns nothing. Remove \
-                             {field}, or drop `kind: operator` to make it a harness agent."
-                        ));
-                    }
-                }
                 let role = raw.role.unwrap_or_default();
                 if role.trim().is_empty() {
                     return Err(format!(
@@ -911,6 +925,7 @@ impl TryFrom<RawAgent> for AgentConfig {
                     spend: crate::spend::SpendConfig::default(),
                     from_agent: None,
                     learns: false,
+                    widgets: None,
                 })
             }
             AgentKind::Harness => {
@@ -951,6 +966,7 @@ impl TryFrom<RawAgent> for AgentConfig {
                         .map(|from| from.agent.trim().to_owned())
                         .filter(|agent| !agent.is_empty()),
                     learns: raw.learns.unwrap_or(true),
+                    widgets: raw.widgets,
                 })
             }
         }
@@ -1216,6 +1232,7 @@ impl AgentConfig {
             spend: crate::spend::SpendConfig::default(),
             from_agent: None,
             learns: false,
+            widgets: None,
         }
     }
 

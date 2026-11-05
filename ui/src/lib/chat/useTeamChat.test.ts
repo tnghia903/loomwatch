@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { RunRecord } from '../runs/client'
 import type { ChatItem, ChatMessage } from './client'
+import type { KeptWidget } from '../widgets/types'
 import type { Reaction } from './reactions'
 import { useTeamChat } from './useTeamChat'
 
@@ -23,6 +24,8 @@ let refuse = false
 let posts = 0
 /** The chat holds a team note rather than a piece of work. */
 let noted = false
+/** The widgets under the piece's answer (ADR 0114). */
+let widgets: KeptWidget[] | undefined
 
 beforeEach(() => {
   vi.useFakeTimers()
@@ -30,10 +33,11 @@ beforeEach(() => {
   refuse = false
   posts = 0
   noted = false
+  widgets = undefined
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     if (url.startsWith('/api/chat?')) {
-      const items: ChatItem[] = [noted ? { kind: 'note', message: hello, reactions: stored } : { kind: 'work', run, request: null, notes: [], reactions: stored }]
+      const items: ChatItem[] = [noted ? { kind: 'note', message: hello, reactions: stored } : { kind: 'work', run, request: null, notes: [], reactions: stored, ...(widgets ? { widgets } : {}) }]
       return new Response(JSON.stringify({ teamKey: 'news', teamPath: 'news.yaml', items, more: false }), { status: 200 })
     }
     if (url === '/api/chat/reactions' && init?.method === 'POST') {
@@ -119,5 +123,15 @@ describe('your reactions in the chat', () => {
     await settle()
     act(() => result.current.applyRun({ ...run, status: 'cancelled' } as RunRecord))
     expect(faces(result.current.items)).toEqual(['talk:h1:said=seen'])
+  })
+
+  // ADR 0114: a run's own record has no widgets; the piece keeps the ones its page read brought.
+  it('keep the widgets under a piece’s answer when its run changes outside a page read', async () => {
+    widgets = [{ n: 1, spec: { kind: 'checklist', title: 'Before Wednesday', items: [{ text: 'Print 32 copies' }] } }]
+    const { result } = renderHook(() => useTeamChat('news.yaml'))
+    await settle()
+    act(() => result.current.applyRun({ ...run, eventCount: 11 } as RunRecord))
+    const piece = result.current.items[0]
+    expect(piece.kind === 'work' ? piece.widgets : null).toEqual(widgets)
   })
 })

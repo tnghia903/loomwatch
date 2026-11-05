@@ -3049,3 +3049,77 @@ describe('replies in the chat', () => {
     await waitFor(() => expect(onHandOver).toHaveBeenCalledWith('run-1', { files: [`${folder}/writer/digest.md`, `${folder}/researcher/sources.md`], written: [`${folder}/researcher/sources.md`, `${folder}/writer/digest.md`], document: false }))
   })
 })
+
+// ADR 0114: widgets the agent whose reply is the answer put under it.
+describe('widgets under an answer', () => {
+  const widgets = [
+    { n: 1, spec: { kind: 'choices' as const, title: 'Which theme?', options: [{ label: 'Animals' }, { label: 'Food' }] } },
+    { n: 2, spec: { kind: 'checklist' as const, title: 'Before Wednesday', items: [{ text: 'Print 32 copies' }, { text: 'Read the words aloud' }] } },
+  ]
+
+  it('draws them under the answer’s words, sends a choice as your reply to it, and keeps a tick', async () => {
+    said.read = true
+    page = [{ kind: 'work', run: run({ reply: 'Ten words for Wednesday.' }), request: message({}), notes: [], widgets }]
+    answer = (url) => (url === '/api/chat/widgets'
+      ? new Response(JSON.stringify({ ...widgets[1], state: { checked: [true, false] }, changedAt: '2026-11-05T10:00:00.000Z' }), { status: 200 })
+      : new Response(JSON.stringify({ route: 'team', message: message({ id: 'm-2', text: 'Food' }), run: run({ runId: 'run-2', status: 'running', reply: null, finishedAt: null }) }), { status: 202 }))
+    renderChat()
+    const choices = await screen.findByRole('region', { name: 'Which theme?' })
+    // After the answer's words, inside the answer.
+    const answerText = screen.getByText('Ten words for Wednesday.')
+    expect(answerText.compareDocumentPosition(choices) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(choices.closest('.tc-answer')).not.toBeNull()
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /Print 32 copies/ }))
+    await waitFor(() => expect(posted.find((post) => post.url === '/api/chat/widgets')).toMatchObject({ body: { teamPath: 'news.yaml', runId: 'run-1', n: 2, state: { checked: [true, false] } } }))
+
+    fireEvent.click(within(choices).getByRole('button', { name: 'Food' }))
+    await waitFor(() => expect(posted.find((post) => post.url === '/api/chat/messages')).toMatchObject({ body: { teamPath: 'news.yaml', text: 'Food', replyTo: { runId: 'run-1', kind: 'answer', from: 'writer' } } }))
+  })
+
+  it('lets only the newest answer’s choices be tapped, and shows the one sent', async () => {
+    said.read = true
+    page = [
+      { kind: 'work', run: run({ reply: 'Which theme this time?' }), request: message({}), notes: [], widgets: [widgets[0]] },
+      { kind: 'work', run: run({ runId: 'run-2', reply: 'Ten animal words.', createdAt: '2026-10-06T03:00:00.000Z', finishedAt: '2026-10-06T03:02:00.000Z' }), request: message({ id: 'm-2', runId: 'run-2', text: 'Animals', replyTo: { runId: 'run-1', messageId: 'answer:run-1', from: 'writer', to: null, kind: 'answer', text: 'Which theme this time?' } }), notes: [] },
+    ]
+    renderChat()
+    const choices = await screen.findByRole('region', { name: 'Which theme?' })
+    expect(within(choices).getByRole('button', { name: 'Animals' })).toHaveAttribute('aria-pressed', 'true')
+    for (const button of within(choices).getAllByRole('button')) expect(button).toBeDisabled()
+  })
+
+  it('closes an older answer’s choices once newer work is below it, though none was sent', async () => {
+    said.read = true
+    page = [
+      { kind: 'work', run: run({ reply: 'Which theme this time?' }), request: message({}), notes: [], widgets: [widgets[0]] },
+      { kind: 'work', run: run({ runId: 'run-2', status: 'running', reply: null, finishedAt: null, createdAt: '2026-10-06T03:00:00.000Z' }), request: message({ id: 'm-2', runId: 'run-2', text: 'something else' }), notes: [] },
+    ]
+    renderChat()
+    const choices = await screen.findByRole('region', { name: 'Which theme?' })
+    for (const button of within(choices).getAllByRole('button')) {
+      expect(button).toHaveAttribute('aria-pressed', 'false')
+      expect(button).toBeDisabled()
+    }
+  })
+
+  it('closes the newest answer’s choices while the chat can’t send', async () => {
+    said.read = true
+    page = [{ kind: 'work', run: run({ reply: 'Which theme this time?' }), request: message({}), notes: [], widgets: [widgets[0]] }]
+    renderChat({ blocked: 'Choose a model for it in Build first.' })
+    const choices = await screen.findByRole('region', { name: 'Which theme?' })
+    for (const button of within(choices).getAllByRole('button')) expect(button).toBeDisabled()
+  })
+
+  it('has no gold fill: a choice you picked is a tint with a ring', async () => {
+    said.read = true
+    page = [{ kind: 'work', run: run({ reply: 'Which theme this time?' }), request: message({}), notes: [], widgets: [widgets[0]] }]
+    renderChat()
+    const choices = await screen.findByRole('region', { name: 'Which theme?' })
+    const before = goldFilled().length
+    fireEvent.click(within(choices).getByRole('button', { name: 'Animals' }))
+    await waitFor(() => expect(within(choices).getByRole('button', { name: 'Animals' })).toHaveAttribute('aria-pressed', 'true'))
+    expect(isGoldFill(within(choices).getByRole('button', { name: 'Animals' }))).toBe(false)
+    expect(goldFilled().length).toBe(before)
+  })
+})

@@ -114,6 +114,9 @@ export interface ByHandProps {
   cover?: ReactNode
   /** A new agent, not saved yet: its name and instructions start open, where it starts. */
   fresh?: boolean
+  /** Whether an agent with no `widgets` setting may show widgets (ADR 0114): the daemon's default,
+      from `useSavedJobs`. Absent: off. */
+  widgetsDefault?: boolean
 }
 
 /**
@@ -133,7 +136,7 @@ const BLOCKS: readonly { part: FigurePart; title: string }[] = [
 ]
 
 
-export function ByHand({ draft, set: write, skills, skillsLoading, roleField, figure, record, hideDoes = false, readOnly = false, reads: teamReads, teamOwn, onShowWorkflow, learned, suggestFor, following, chat, onBuild, cover, fresh = false }: ByHandProps) {
+export function ByHand({ draft, set: write, skills, skillsLoading, roleField, figure, record, hideDoes = false, readOnly = false, reads: teamReads, teamOwn, onShowWorkflow, learned, suggestFor, following, chat, onBuild, cover, fresh = false, widgetsDefault = false }: ByHandProps) {
   const chatting = chat !== undefined
   const set: ByHandProps['set'] = (key, value) => { if (!readOnly) write(key, value) }
   // The block you are working in: its thing on the bench is lit.
@@ -446,7 +449,14 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
             })}
           </ul>)}
 
-          {block('reply', <ReplyField role={draft.instructions} readOnly={readOnly} onChange={(role) => set('instructions', role)} />)}
+          {block('reply', <>
+            <ReplyField role={draft.instructions} readOnly={readOnly} onChange={(role) => set('instructions', role)} />
+            {/* ADR 0114: the agent's own switch; absent, LoomWatch's default, off until it is measured. */}
+            <button type="button" className={`check byhand-helpers${(draft.widgets ?? widgetsDefault) ? ' on' : ''}`} disabled={readOnly} aria-pressed={draft.widgets ?? widgetsDefault} onClick={() => set('widgets', !(draft.widgets ?? widgetsDefault))}>
+              <span className="box"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg></span>
+              <span className="txt"><b className="t-body">Adds choices, checklists and calculators to its answers</b><span className="t-meta">And steps to tap through. Only under the answers you read from it, when they help more than words.</span></span>
+            </button>
+          </>)}
           {learned && <LearnedBlock of={learned} name={draft.name.trim() || 'this agent'} readOnly={readOnly} />}
         </div>
       </div>

@@ -51,6 +51,9 @@ export interface JobSpec {
   /** `false`: it does not bring in other agents from My agents for a part no one on its team does
       (ADR 0092), filled into a team as `allowMyAgents: false`. Absent, it may. */
   bringsIn?: false
+  /** Whether it may put widgets under its answer (ADR 0114), filled into a team as `widgets`.
+      Absent, it follows LoomWatch's default, which `GET /api/jobs` says (`widgetsDefault`). */
+  widgets?: boolean
   /** Set by the daemon: which version this is. Absent means 1. */
   version?: number
   /** What changed in this version, in the operator's words. */
@@ -77,6 +80,9 @@ export interface JobList {
   folder: string
   jobs: SavedJob[]
   problems: JobProblem[]
+  /** Whether an agent with no `widgets` setting may show widgets (ADR 0114). Absent from a daemon
+      that predates them: off. */
+  widgetsDefault?: boolean
 }
 
 /** Dispatched on `window` after a save or removal, so every list of jobs reloads. */
@@ -241,6 +247,8 @@ export interface SavedJobsState {
   loaded: boolean
   error: string | null
   reload: () => void
+  /** Whether an agent with no `widgets` setting may show widgets (ADR 0114): the daemon's. */
+  widgetsDefault: boolean
 }
 
 // Stable empties, so a component that lists jobs in a dependency array does not re-run every render.
@@ -277,5 +285,5 @@ export function useSavedJobs(): SavedJobsState {
     window.addEventListener(JOBS_CHANGED_EVENT, reload)
     return () => window.removeEventListener(JOBS_CHANGED_EVENT, reload)
   }, [reload])
-  return { jobs: list?.jobs ?? NO_JOBS, problems: list?.problems ?? NO_PROBLEMS, available, loaded: list !== null || !available || error !== null, error, reload }
+  return { jobs: list?.jobs ?? NO_JOBS, problems: list?.problems ?? NO_PROBLEMS, available, loaded: list !== null || !available || error !== null, error, reload, widgetsDefault: list?.widgetsDefault === true }
 }

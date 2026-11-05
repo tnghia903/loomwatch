@@ -563,6 +563,32 @@ watcher sends it as a message that rings, and the phone shows the agent's reply,
 that were set when the turn failed. `GET /api/messages-at` lists what is waiting, and
 `DELETE /api/messages-at/{id}` cancels one.
 
+### Widgets under an answer
+
+The agent whose reply is the answer a person reads can put up to four widgets under it with the
+Team Bus's `show_widget` (ADR 0114): choices to tap, a checklist to tick, a calculator, or steps to
+tap through. The bus offers it only to that agent (`BusSeat.answers`): the run's responder, told to
+the bus once per run (`TeamBus::answered_by`), not a helper or an agent started by another, with a
+person there, and with its `widgets` switch on. Absent, the switch is `widgets::DEFAULT_ON`, off
+until the bench passes. A call from any other seat is refused.
+
+`widgets::read` checks a widget against limits kept in one place (`widgets::limits`) and says what
+to change when it is refused. A calculator's results are formulas in a small language that the
+daemon (`widgets/formula.rs`) and the app (`ui/src/lib/widgets/formula.ts`) both work out, tested
+with one case file (`schemas/formula.cases.json`), down to how a number is written: shortest
+decimal form at 15 significant digits, halves away from zero, `1,234,567.5` in every locale. The
+call answers with the results at the starting values, so the agent's words use LoomWatch's numbers,
+and tells it to write the answer now (words written beside a tool call are not part of the reply).
+
+Nothing is added to the reply. When the run succeeds, `runs::keep_widgets` reads the archive for
+the `show_widget` calls of the turn whose reply became the answer (or, when that turn showed none,
+the latest earlier turn of work in the same session that did) and keeps them in the `widgets` table
+before the run reads as done. The chat page's `work` items carry `widgets`. What the person ticks or
+changes is kept by `POST /api/chat/widgets` (`state`, `changedAt`), and the next run's
+`## Conversation so far` names what each answer showed and what changed, with the results worked
+out again; `earlier_work` includes them. A choice is sent as the person's message, replying to the
+answer, and keeps no state.
+
 ### Permissions
 
 Any tool call that reaches past reading the agent's own folder is a permission request. One
@@ -769,6 +795,7 @@ drawn on the canvas.
 | `ask_user(question, context?)` | A question for the person running the team. Returns at once; the answer arrives as the agent's next turn | none — the run waits on the operator |
 | `memory_search`, `memory_read`, `memory_write`, `checkpoint` | The team's Notebook, when the team turns it on (see [TEAM_MEMORY.md](TEAM_MEMORY.md)) | none |
 | `earlier_work(work)` | Read one earlier piece of the team's work in full. Offered in runs started from the app, which have a team chat to read | none |
+| `show_widget(kind, title, …)` | Put a widget under the answer: choices, a checklist, a calculator or steps (ADR 0114). Offered only to the agent whose reply is the answer, with its switch on | none — kept with the answer when the run succeeds |
 
 The bus grants the *ability* to delegate. The *judgment* of when to comes with it:
 
@@ -1042,7 +1069,8 @@ at a little desk, whose workbench opens while it is pointed at. For the agent in
 
 ```
 Agent    { id, name, role, kind: harness|operator, spawn{cwd}, model,
-           allow{web,commands,edits}, from{agent}, part{text,doneWhen}, status }
+           allow{web,commands,edits}, from{agent}, part{text,doneWhen}, widgets, status }
+           # widgets: whether it may put widgets under its answer (ADR 0114); absent, the default.
            # part: what this team needs from the agent (ADR 0097), always the team's.
            # from: one of My agents (.jobs/<agent>.yaml, ADR 0094). The team file then holds only
            # the team's fields; name, role, model, skills, tools, reads, doneWhen and allow are

@@ -85,7 +85,7 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
   // Inside a team the address is the team's, so the page keeps which tab is open.
   const [teamView, setTeamView] = useState<AgentView>('build')
   const view: AgentView = inTeam ? teamView : asked
-  const { jobs, available, loaded } = useSavedJobs()
+  const { jobs, available, loaded, widgetsDefault } = useSavedJobs()
   const pinned = usePinnedAgent()
   const ai = useAiStatus()
   const saved = useMemo(() => (id ? jobs.find((job) => job.id === id) ?? null : null), [jobs, id])
@@ -246,6 +246,7 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
   const bench = (
     <ByHand
       fresh={!id}
+      widgetsDefault={widgetsDefault}
       draft={draft} set={set} skills={skills} skillsLoading={skillsLoading} roleField={roleField} figure={figure} record={benchRecord} reads={inTeam?.reads} onShowWorkflow={inTeam?.onShowWorkflow}
       learned={saved ? { savedAgent: saved.id } : null}
       chat={view === 'chat' ? <AgentChat draft={draft} model={draft.model} chatId={chatId} figure={figure} onAllow={(what) => (typeof what === 'string' ? set('allow', { ...draft.allow, [what]: true }) : set('toolAllow', withAllowed(draft.toolAllow, what.tool, what.call)))} onRecord={setBenchRecord} answerRunId={answerRun} onOpenAnswer={(runId) => { setAnswerRun(runId); if (runId) details.close() }} knowledge={inTeam?.knowledge} file={benchFile.chat}

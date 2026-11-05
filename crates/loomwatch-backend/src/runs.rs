@@ -2247,6 +2247,11 @@ impl RunRegistry {
 
     /// Where a chat message's rows live: the `runs` table's database, when this registry is durable.
     #[must_use]
+    /// The database runs are kept in, when they are durable.
+    pub(crate) fn db(&self) -> Option<crate::db::Db> {
+        self.store.as_ref().map(|store| store.db.clone())
+    }
+
     pub(crate) fn chat_store(&self) -> Option<crate::chat::ChatStore> {
         self.store
             .as_ref()
@@ -3864,10 +3869,7 @@ async fn execute(
                 Some(outcome.event_count),
             )
         }
-        Ok(outcome) => {
-            let (_, _, stop_reason) = archived_exit(&archive, &run_id, responder.as_deref()).await;
-            registry.mark_succeeded(&run_id, &outcome, stop_reason)
-        }
+        Ok(outcome) => succeed(&registry, &archive, &run_id, responder.as_deref(), &outcome).await,
         Err(error) if crate::spend::SpendStopped::of(&error).is_some() => {
             let stopped = crate::spend::SpendStopped::of(&error).expect("checked by the guard");
             settle_at_spool(
@@ -3901,6 +3903,43 @@ async fn execute(
     // Boxed: `execute` is already near clippy's future-size limit on Windows.
     Box::pin(note_files_made(&registry, &archive, &run_id)).await;
     persist_or_log(&registry, &run_id).await;
+}
+
+/// A run that answered. Its widgets are kept before it reads as done, so the chat shows the answer
+/// and its widgets together. Boxed: `execute`, which awaits this, is near clippy's future-size limit
+/// on Windows.
+async fn succeed(
+    registry: &RunRegistry,
+    archive: &EventArchive,
+    run_id: &str,
+    responder: Option<&str>,
+    outcome: &SessionOutcome,
+) -> bool {
+    let (_, _, stop_reason) = archived_exit(archive, run_id, responder).await;
+    Box::pin(keep_widgets(registry, archive, run_id, responder)).await;
+    registry.mark_succeeded(run_id, outcome, stop_reason)
+}
+
+/// Keep the widgets under a succeeded run's answer, from its archive (ADR 0114). Logged, never
+/// propagated: how a run ended must not change because they could not be read.
+async fn keep_widgets(
+    registry: &RunRegistry,
+    archive: &EventArchive,
+    run_id: &str,
+    responder: Option<&str>,
+) {
+    let Some(db) = registry.db() else {
+        return;
+    };
+    let kept = async {
+        let events = archive.load_session(run_id).await?;
+        let widgets = crate::widgets::of_answer(&events, responder);
+        crate::widgets::store::keep(&db, run_id, &widgets).await?;
+        anyhow::Ok(())
+    };
+    if let Err(error) = kept.await {
+        eprintln!("warning: could not keep the widgets under run {run_id}'s answer: {error:#}");
+    }
 }
 
 /// Work out and keep the files a finished run made, from its archive. Logged, never propagated:
@@ -3939,6 +3978,7 @@ async fn settle_at_spool(
         crate::spend::Stopped::NobodyToAsk => None,
     };
     if let Some(reply) = words {
+        Box::pin(keep_widgets(registry, archive, run_id, responder)).await;
         let outcome = SessionOutcome {
             session_id: run_id.to_owned(),
             event_count: event_count.unwrap_or_default(),
@@ -8369,6 +8409,82 @@ pub(crate) mod tests {
             .await
             .unwrap();
         assert_eq!(checkpoints.len(), 1, "{checkpoints:?}");
+    }
+
+    /// ADR 0114: an answer finished at the spool with what it has keeps the widgets its agent
+    /// showed on the way, as an answer that finished by itself does.
+    #[tokio::test]
+    async fn finishing_at_the_spool_keeps_the_widgets_it_showed() {
+        use crate::agent::{ToolCall, Usage};
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let model = demo_model(Demo::responder(move |_| {
+            let call = calls.fetch_add(1, Ordering::SeqCst);
+            let (tool, arguments) = if call == 0 {
+                (
+                    crate::widgets::TOOL,
+                    r#"{"kind":"checklist","title":"Before Wednesday","items":[{"text":"Print 32 copies"}]}"#,
+                )
+            } else {
+                (
+                    "update_plan",
+                    r#"{"steps":[{"step":"look","status":"in_progress"}]}"#,
+                )
+            };
+            Some(Completion {
+                usage: Usage {
+                    input_tokens: 1000,
+                    output_tokens: 50,
+                    cost_usd: 0.04,
+                    ..Usage::default()
+                },
+                ..Completion::calls(
+                    "Planning.",
+                    vec![ToolCall {
+                        id: format!("call-{call}"),
+                        name: tool.into(),
+                        arguments: arguments.into(),
+                    }],
+                )
+            })
+        }));
+        fs::write(
+            dir.0.join("spool.yaml"),
+            format!(
+                "schemaVersion: 1\nid: spool\nname: Spool\nentrypoint: solo\nspend:\n  perRun: 0.05\nagents:\n  - id: solo\n    name: Solo\n    role: answer\n    model: {model}\n    widgets: true\n"
+            ),
+        )
+        .expect("write team file");
+        let archive = EventArchive::new(pool);
+        let registry = RunRegistry::durable(archive.run_store());
+        let app = router(Some(archive.clone()), dir.0.clone(), registry.clone());
+        let run = start(&app, "spool.yaml").await;
+
+        let waiting = wait_for(&registry, &run.run_id, |r| !r.spend_stops.is_empty()).await;
+        let answered = app
+            .clone()
+            .oneshot(post_json(
+                &format!("/api/runs/{}/spend", run.run_id),
+                &json!({"stopId": waiting.spend_stops[0].id, "decision": "finish"}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(answered.status(), StatusCode::OK);
+        let done = wait_for(&registry, &run.run_id, |r| r.status.is_terminal()).await;
+        assert_eq!(done.status, RunStatus::Succeeded, "{done:?}");
+        assert_eq!(done.stop_reason.as_deref(), Some(SPEND_LIMIT));
+        let kept = crate::widgets::store::of_runs(archive.db(), std::slice::from_ref(&run.run_id))
+            .await
+            .unwrap();
+        assert_eq!(
+            kept.get(&run.run_id).map(|widgets| widgets
+                .iter()
+                .map(|kept| kept.spec.title())
+                .collect::<Vec<_>>()),
+            Some(vec!["Before Wednesday"]),
+            "{kept:?}"
+        );
     }
 
     /// "Finish with what it has" when no agent has written a word yet: there is nothing to finish
