@@ -230,7 +230,14 @@ impl Anthropic {
             let context = call.context_tokens();
             so_far.extend(call.blocks);
             unparsed.extend(call.unparsed);
-            if call.stop != "pause_turn" || continued == MAX_CONTINUATIONS {
+            // A paused search is carried on only while the run has money left for it: the run's
+            // limit is asked before each call, and one call carried on five times once spent
+            // $2.48 of a $1.00 run (ADR 0115). Taken as it stands, the session asks the spool
+            // before its next call, and the model carries on from it if money is added.
+            let spent_room = request
+                .room_usd
+                .is_some_and(|room| self.spent_so_far(&model, &usage) >= room);
+            if call.stop != "pause_turn" || continued == MAX_CONTINUATIONS || spent_room {
                 let mut completion = self.finish(&model, so_far, &unparsed, &call.stop, usage);
                 // Each request read the conversation again, so the totals count it once a request:
                 // how full it is comes from the last one.
@@ -457,6 +464,16 @@ impl Anthropic {
                 items: blocks,
             }),
             context_tokens: None,
+        }
+    }
+
+    /// What the requests of one call have cost so far: `OpenRouter` says, and Anthropic's tokens
+    /// are priced here.
+    fn spent_so_far(&self, model: &str, usage: &Usage) -> f64 {
+        if self.route == Route::Anthropic {
+            self.cost(model, usage)
+        } else {
+            usage.cost_usd
         }
     }
 
@@ -1288,6 +1305,7 @@ mod tests {
             tools_off: false,
             session_key: "s-1",
             agent_id: "writer",
+            room_usd: None,
         }
     }
 

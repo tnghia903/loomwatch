@@ -3,7 +3,7 @@ import { useState } from 'react'
 
 import { useRevealOnArrival } from '../../lib/chat/follow'
 import { answerSpend, type RunRecord, type SpendDecision, type SpendStop } from '../../lib/runs/client'
-import { dollars, stopActions, stopSentence } from '../../lib/runs/spend'
+import { dollars, stopActions, stopSentence, usualSentence } from '../../lib/runs/spend'
 import { ifNobodyAnswers } from '../../lib/story/needsYou'
 
 interface SpendStopCardProps {
@@ -66,6 +66,8 @@ function Stop({ runId, stop, onDecide, onRun, onAnswered }: {
   // A scheduled run's stop says what happens by itself, and by when (ADR 0090).
   const until = stop.expiresAt ? ifNobodyAnswers(stop.expiresAt, stop.agent ? `${stop.name || stop.agent} stops here` : 'the team finishes with what it has') : undefined
   const over = stop.spentUsd > stop.limitUsd ? ` (calls already under way took it ${dollars(stop.spentUsd - stop.limitUsd)} over)` : ''
+  // What this team's runs usually cost, so this run can be told from the usual (ADR 0115).
+  const usual = usualSentence(stop)
   return (
     <article ref={element} className="permission-ask" aria-live="polite">
       <header>
@@ -73,7 +75,7 @@ function Stop({ runId, stop, onDecide, onRun, onAnswered }: {
         <strong>{stopSentence(stop)}</strong>
       </header>
       <p className="permission-note">
-        Spent {dollars(stop.spentUsd)}{over}. {stop.agent ? `${stop.name || stop.agent} waits` : 'The agents wait'}, and nothing more is spent until you answer.
+        Spent {dollars(stop.spentUsd)}{over}.{usual && ` ${usual}`} {stop.agent ? `${stop.name || stop.agent} waits` : 'The agents wait'}, and nothing more is spent until you answer.
       </p>
       {until && <p className="permission-note permission-until">{until}</p>}
       <div className="permission-acts">

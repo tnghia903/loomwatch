@@ -3347,6 +3347,238 @@ fn paused_search(id: &str) -> Reply {
     )
 }
 
+/// A run's spool of `limit` with `left` dollars left, each call's cost taken off.
+struct Metered {
+    left: Mutex<f64>,
+    limit: f64,
+}
+
+impl Spend for Metered {
+    fn before_call(&self) -> BoxFuture<'_, Go> {
+        Box::pin(async { Go::Ahead })
+    }
+
+    fn spent(&self, usage: &Usage) {
+        *self.left.lock().unwrap() -= usage.cost_usd;
+    }
+
+    fn room(&self) -> Option<Room> {
+        Some(Room {
+            left: *self.left.lock().unwrap(),
+            limit: self.limit,
+            own: false,
+        })
+    }
+}
+
+/// A turn that lists the files, then answers: its first step cost $0.40.
+fn listing_then_answer() -> Demo {
+    let mut listing = Completion::calls(
+        "Looking.",
+        vec![call("c1", "list_files", &json!({"path": "."}))],
+    );
+    listing.usage.cost_usd = 0.4;
+    Demo::scripted(vec![listing, Completion::text("Done.")])
+}
+
+fn last_words(request: &SeenRequest) -> String {
+    match request.messages.last() {
+        Some(Message::User { content, .. } | Message::Tool { content, .. }) => content.clone(),
+        other => panic!("ends with {other:?}"),
+    }
+}
+
+/// ADR 0115: with the switch on, an agent of a run with a limit is told under its task that the
+/// run has one, how to plan for it and what is left; after each step's results, what is left, what
+/// the step cost and, once little is, to finish with what it has.
+#[tokio::test]
+async fn with_the_switch_on_an_agent_sees_what_its_run_has_left() {
+    let _on = crate::spend_aware::scoped(true);
+    let folder = Folder::new();
+    let demo = listing_then_answer();
+    let mut session = session_on(
+        &folder,
+        Provider::Demo(demo.clone()),
+        Arc::new(Recorded::default()),
+        Arc::new(AllowAll),
+        "fake/offline",
+    )
+    .with_spend(Arc::new(Metered {
+        left: Mutex::new(1.3),
+        limit: 5.0,
+    }));
+    session.prompt("Tidy the folder.").await.unwrap();
+    let requests = demo.requests();
+    let task = last_words(&requests[0]);
+    assert!(task.starts_with("Tidy the folder."), "{task}");
+    assert!(
+        task.ends_with(&format!(
+            "## Money for this run\n{}\n[Money for this run: $1.30 left of $5.00.]",
+            crate::spend_aware::SECTION.default_text()
+        )),
+        "{task}"
+    );
+    let after = last_words(&requests[1]);
+    assert!(
+        after.ends_with(
+            "\n\n[Money for this run: $0.90 left of $5.00. Your last step cost $0.40. Little is \
+             left: finish with what you have.]"
+        ),
+        "{after}"
+    );
+}
+
+/// An agent on the `ChatGPT` plan spends no dollars, so with the switch on it is told none.
+#[tokio::test]
+async fn an_agent_on_the_chatgpt_plan_is_told_no_money() {
+    let _on = crate::spend_aware::scoped(true);
+    let folder = Folder::new();
+    let demo = listing_then_answer();
+    let mut session = session_on(
+        &folder,
+        Provider::Demo(demo.clone()),
+        Arc::new(Recorded::default()),
+        Arc::new(AllowAll),
+        "chatgpt:gpt-6.1-terra",
+    )
+    .with_spend(Arc::new(Metered {
+        left: Mutex::new(1.3),
+        limit: 5.0,
+    }));
+    session.prompt("Tidy the folder.").await.unwrap();
+    for request in demo.requests() {
+        let words = last_words(&request);
+        assert!(!words.contains("Money for this run"), "{words}");
+    }
+}
+
+/// With the switch off, or on with nothing limiting the run, an agent's task and results are as
+/// they were.
+#[tokio::test]
+async fn with_the_switch_off_or_no_limit_an_agent_sees_no_money() {
+    for (on, metered) in [(false, true), (true, false)] {
+        let _switch = crate::spend_aware::scoped(on);
+        let folder = Folder::new();
+        let demo = listing_then_answer();
+        let session = session_on(
+            &folder,
+            Provider::Demo(demo.clone()),
+            Arc::new(Recorded::default()),
+            Arc::new(AllowAll),
+            "fake/offline",
+        );
+        let mut session = if metered {
+            session.with_spend(Arc::new(Metered {
+                left: Mutex::new(1.3),
+                limit: 5.0,
+            }))
+        } else {
+            session
+        };
+        session.prompt("Tidy the folder.").await.unwrap();
+        for request in demo.requests() {
+            let words = last_words(&request);
+            assert!(
+                !words.contains("Money for this run"),
+                "{on} {metered}: {words}"
+            );
+        }
+    }
+}
+
+/// A run's spool with `left` dollars left, which says no to the call after the first.
+struct NearlySpent {
+    left: f64,
+    calls: Mutex<u32>,
+}
+
+impl Spend for NearlySpent {
+    fn before_call(&self) -> BoxFuture<'_, Go> {
+        Box::pin(async move {
+            let mut calls = self.calls.lock().unwrap();
+            *calls += 1;
+            if *calls == 1 { Go::Ahead } else { Go::Stop }
+        })
+    }
+
+    fn spent(&self, _usage: &Usage) {}
+
+    fn room(&self) -> Option<Room> {
+        Some(Room {
+            left: self.left,
+            limit: 1.0,
+            own: false,
+        })
+    }
+}
+
+/// ADR 0115: the news brief of 2026-11-05 asked its $1.00 spool once, then one call that Anthropic
+/// paused and `LoomWatch` carried on five times ran 66 searches and cost $2.48. A paused reply is now
+/// carried on only while the run has money left for it: with almost none left, the first request
+/// is taken as it stands and the spool is asked before the next, where it was carried on to six.
+#[tokio::test]
+async fn a_paused_claude_search_is_not_carried_on_past_the_money_left() {
+    let folder = Folder::new();
+    let mut replies: Vec<Reply> = (1..=5)
+        .map(|n| paused_search(&format!("srvtoolu_{n}")))
+        .collect();
+    replies.push(events(
+        &[
+            vec![message_start(10, 1_000)],
+            text_block(0, "Found it.").to_vec(),
+            ended("end_turn", 3).to_vec(),
+        ]
+        .concat(),
+    ));
+    let (stand, base) = stand(replies).await;
+    let mut session = session_on(
+        &folder,
+        claude(&base),
+        Arc::new(Recorded::default()),
+        Arc::new(AllowAll),
+        "anthropic:claude-opus-5-5",
+    )
+    .with_spend(Arc::new(NearlySpent {
+        left: 0.000_1,
+        calls: Mutex::new(0),
+    }));
+    session.prompt("Look it up.").await.unwrap();
+    let requests = stand.bodies.lock().unwrap().len();
+    assert_eq!(requests, 1, "carried on past the money left");
+}
+
+/// With money to spare, a paused search is carried on within the call as before.
+#[tokio::test]
+async fn a_paused_claude_search_with_money_left_is_carried_on() {
+    let folder = Folder::new();
+    let replies = vec![
+        paused_search("srvtoolu_1"),
+        events(
+            &[
+                vec![message_start(10, 1_000)],
+                text_block(0, "Found it.").to_vec(),
+                ended("end_turn", 3).to_vec(),
+            ]
+            .concat(),
+        ),
+    ];
+    let (stand, base) = stand(replies).await;
+    let mut session = session_on(
+        &folder,
+        claude(&base),
+        Arc::new(Recorded::default()),
+        Arc::new(AllowAll),
+        "anthropic:claude-opus-5-5",
+    )
+    .with_spend(Arc::new(NearlySpent {
+        left: 5.0,
+        calls: Mutex::new(0),
+    }));
+    let end = session.prompt("Look it up.").await.unwrap();
+    assert_eq!(end.reply, "Found it.");
+    assert_eq!(stand.bodies.lock().unwrap().len(), 2);
+}
+
 /// The assistant message a request sent back, and the user message after it.
 fn sent_back(body: &Value) -> (Vec<Value>, Vec<Value>) {
     let messages = body["messages"].as_array().unwrap();

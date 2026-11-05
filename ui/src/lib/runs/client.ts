@@ -116,7 +116,8 @@ export interface CheckWait {
 
 /**
  * What a run has spent and may spend on model calls, in US dollars (ADR 0068). `limitUsd` is the
- * team's `spend.perRun` plus whatever was added this run; absent means no limit. `spentUsd` adds up
+ * team's `spend.perRun`, or the automatic limit when it names none (ADR 0115), plus whatever was
+ * added this run; absent on runs from before limits. `spentUsd` adds up
  * the exact cost OpenRouter reported for every call of the run.
  */
 export interface RunSpend {
@@ -129,6 +130,12 @@ export interface RunSpend {
       because nobody answered in time (ADR 0090). `nobody_to_ask`: a scheduled run stopped there,
       in runs recorded before then. */
   stopped?: 'finished' | 'no_answer' | 'nobody_to_ask' | null
+  /** The limit is LoomWatch's, from what the team's runs usually cost: its file names no figure (ADR 0115). */
+  automatic?: boolean
+  /** What the team's latest runs that succeeded usually cost, which an automatic limit is worked out from. */
+  usualUsd?: number | null
+  /** How many runs `usualUsd` is the middle of. */
+  usualRuns?: number
 }
 
 /**
@@ -142,8 +149,14 @@ export interface SpendStop {
   name?: string | null
   limitUsd: number
   spentUsd: number
-  /** What "Add and carry on" adds. */
+  /** What "Add and carry on" adds: what was spent past the limit, then half the limit again (ADR 0115). */
   addUsd: number
+  /** The limit reached is the team's automatic one, not a figure its file sets (ADR 0115). */
+  automatic?: boolean
+  /** What the team's runs usually cost, on the team's stop once it has runs to go by (ADR 0115). */
+  usualUsd?: number | null
+  /** How many runs `usualUsd` is the middle of. */
+  usualRuns?: number
   since: string
   /** When the team finishes with what it has if nobody answers: a scheduled run's stop (ADR 0090).
       Absent when it waits as long as it takes. */

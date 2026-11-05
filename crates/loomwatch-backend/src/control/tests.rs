@@ -1511,7 +1511,10 @@ async fn ask_builds_a_team_from_the_persons_own_agent_a_job_and_a_folder() {
         writer.capabilities[0].path.as_deref(),
         Some(notes.as_path())
     );
-    assert_eq!(team.spend.per_run, Some(crate::spend::DEFAULT_PER_RUN_USD));
+    assert_eq!(
+        team.spend.per_run, None,
+        "a new team names no figure: its runs get the automatic limit (ADR 0115)"
+    );
     assert_eq!(
         proposals[0]["agentNames"],
         json!({"researcher": "Researcher", "writer": "Writer"}),
@@ -1717,8 +1720,9 @@ async fn a_proposal_names_only_agents_places_and_tools_that_are_there() {
     let proposals = fixture.control.inner.proposals.read().await;
     let proposed = &proposals[answer["proposalId"].as_str().expect("an id")].yaml;
     assert!(
-        proposed.contains("name: Brief\nproject: brief\nspend:\n  perRun: 1.00\n"),
-        "{proposed}"
+        proposed.contains("name: Brief\nproject: brief\nentrypoint: a\n")
+            && !proposed.contains("spend"),
+        "a new team names no figure, so its runs get the automatic limit (ADR 0115): {proposed}"
     );
     drop(proposals);
 

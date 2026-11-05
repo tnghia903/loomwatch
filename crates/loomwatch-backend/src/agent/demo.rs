@@ -480,6 +480,7 @@ mod tests {
             tools_off: false,
             session_key: "s",
             agent_id: agent,
+            room_usd: None,
         })
     }
 

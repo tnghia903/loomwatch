@@ -44,9 +44,10 @@ properties:
       What one run of this team may spend on model calls, in US dollars (ADR 0068). Every agent of
       the run draws on it: stages, the lead, Team Bus helpers, summaries and checkpoints. Once a
       run has used it, the agents wait and the operator chooses to add money and carry on, or to
-      finish with what the team has. A scheduled run has nobody to ask, so it stops and keeps its
-      checkpoints. Absent means no limit; new teams are written with 1.00. A call's cost is known
-      only after it is made, so one call can take a run a few cents past its figure.
+      finish with what the team has. A scheduled run asks too, and finishes with what it has if
+      nobody answers in time (ADR 0090). Absent means the automatic limit: twice what the team's
+      latest runs usually cost, and at least 5.00 (ADR 0115); new teams are written without it.
+      A call's cost is known only after it is made, so one call can take a run past its figure.
     $ref: "#/$defs/Spend"
   guards:
     description: Server-enforced limits for delegation through the Team Bus.

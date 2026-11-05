@@ -38,6 +38,27 @@ describe('the spend stop (ADR 0068)', () => {
     expect(screen.queryByText(/If nobody answers/)).toBeNull()
   })
 
+  // ADR 0115: the team's stop says what its runs usually cost, so the person can tell this run
+  // from the usual, and a figure set below the usual from a run that went wrong.
+  it('says what the team’s runs usually cost, and when its own figure is below that', () => {
+    render(<SpendStopCard run={{ runId: 'r1', spendStops: [stop({ automatic: true, limitUsd: 5, spentUsd: 5.2, addUsd: 2.7, usualUsd: 2.27, usualRuns: 3 })] }} />)
+    expect(screen.getByText(/Spent \$5\.20 \(calls already under way took it \$0\.20 over\)\. This team’s runs usually cost about \$2\.27\. The agents wait/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Add $2.70 and carry on' })).toBeInTheDocument()
+    cleanup()
+    // The news brief's $1.00, written before the automatic limit.
+    render(<SpendStopCard run={{ runId: 'r1', spendStops: [stop({ limitUsd: 1, spentUsd: 2.57, addUsd: 2.07, usualUsd: 2.27, usualRuns: 3 })] }} />)
+    expect(screen.getByText(/This team’s runs usually cost about \$2\.27, more than its \$1\.00\. Ask LoomWatch to change it\./)).toBeInTheDocument()
+    cleanup()
+    render(<SpendStopCard run={{ runId: 'r1', spendStops: [stop({ automatic: true, limitUsd: 5, spentUsd: 5.1, addUsd: 2.6 })] }} />)
+    expect(screen.getByText(/LoomWatch asks at \$5\.00 until it knows what this team’s runs cost\./)).toBeInTheDocument()
+    cleanup()
+    render(<SpendStopCard run={{ runId: 'r1', spendStops: [stop({ automatic: true, limitUsd: 6.2, spentUsd: 6.3, addUsd: 3.2, usualUsd: 3.1, usualRuns: 1 })] }} />)
+    expect(screen.getByText(/This team’s last run cost \$3\.10\./)).toBeInTheDocument()
+    cleanup()
+    render(<SpendStopCard run={{ runId: 'r1', spendStops: [stop()] }} />)
+    expect(screen.queryByText(/cost about|last run cost|until it knows/)).toBeNull()
+  })
+
   it('never blames one call for what parallel work spent past the limit', () => {
     // A lead's two dispatches to the Researcher each cost $0.00316 and crossed a $0.003 guard
     // together: $0.00332 over, more than any one call cost.

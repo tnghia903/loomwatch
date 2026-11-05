@@ -168,7 +168,7 @@ export function AnswerSlip({ island, team, foot = false }: { island: Island; tea
 
 /**
  * The pinned agent asks one of your teams to do part of the job, in its own words, to the team named
- * under them, which says too when a run of it has no spending limit. Nothing runs until Start: under
+ * under them. Nothing runs until Start: under
  * the words on the card that drops from the notch (`start`), and in the message box's place in the
  * agent's row, where writing something turns it back into Send. In the row, × in the corner says
  * don't (`decline`); the card has none, so putting it away never answers it. The island gets no
@@ -195,7 +195,6 @@ export function TeamAskBody({ island, request, first, start, decline }: { island
             </span>
           )}
           {' '}<span className="island-team">{request.team.name}</span>
-          {limit === null && ' · no spending limit'}
         </small>
         {failed && <small className="island-problem" role="alert">That didn’t go through. Press Start again.</small>}
         {said && <small className="island-said" role="status">{said}</small>}
@@ -212,7 +211,7 @@ export function TeamAskBody({ island, request, first, start, decline }: { island
 /** Start on what the pinned agent asked a team, naming the team and what one run of it may spend
     for the screen reader and the tooltip, where there is one. */
 export function StartTeam({ island, request, first, limit }: { island: Island; request: TeamRequest; first: boolean; limit: number | null | undefined }) {
-  const said = `Start ${request.team.name}.${typeof limit === 'number' ? ` It may spend up to ${dollars(limit)}.` : ''}`
+  const said = `Start ${request.team.name}.${typeof limit === 'number' ? ` It stops to ask you at ${dollars(limit)}.` : ''}`
   return (
     <button type="button" className={`island-button${first ? ' is-primary' : ''}`} aria-label={`Start ${request.team.name}`} title={said} disabled={island.teamBusy === request.id} onClick={() => island.answerTeam(request, 'start')}>Start</button>
   )

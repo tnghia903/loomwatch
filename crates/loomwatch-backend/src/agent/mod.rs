@@ -66,7 +66,7 @@ pub use session::{
     SessionConfig, Snapshot, StopReason, ToolSet, TurnEnd, WORK,
 };
 pub use skills::{SkillEntry, SkillIndex, index_skills};
-pub use spend::{Go, Spend, Unmetered};
+pub use spend::{Go, Room, Spend, Unmetered};
 pub use store::SessionStore;
 
 /// A boxed future, for the traits the daemon implements ([`EventSink`], [`Permissions`],

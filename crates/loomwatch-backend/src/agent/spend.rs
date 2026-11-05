@@ -25,6 +25,25 @@ pub trait Spend: Send + Sync {
 
     /// Told after every model call what it cost.
     fn spent(&self, usage: &Usage);
+
+    /// What is left to spend before the next call would meet a limit, and of which limit. `None`
+    /// when nothing limits it. A provider that carries a paused reply on within one call stops
+    /// once it has spent what is left, and an agent that sees its run's money is told it (ADR
+    /// 0115).
+    fn room(&self) -> Option<Room> {
+        None
+    }
+}
+
+/// What a session has left to spend before its next call meets a limit (ADR 0115).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Room {
+    /// Dollars left, never below nothing.
+    pub left: f64,
+    /// The limit that is what is left of.
+    pub limit: f64,
+    /// The limit is the agent's own guard, nearer than the run's.
+    pub own: bool,
 }
 
 /// No limit: Ask, one-turn helpers, the tests.

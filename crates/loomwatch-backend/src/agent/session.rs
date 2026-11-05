@@ -440,6 +440,9 @@ pub struct Session {
     permissions: Arc<dyn Permissions>,
     host: Arc<dyn HostTools>,
     spend: Arc<dyn Spend>,
+    /// What the latest model call cost, for the line on the run's money after its step's results
+    /// (ADR 0115).
+    last_step_usd: Option<f64>,
     history: Vec<Message>,
     outputs: BTreeMap<String, String>,
     usage: Usage,
@@ -507,6 +510,7 @@ impl Session {
             permissions,
             host,
             spend: Arc::new(Unmetered),
+            last_step_usd: None,
             unsent_pictures: (0, 0),
             links: Vec::new(),
             web_granted: AtomicBool::new(false),
@@ -544,6 +548,7 @@ impl Session {
             permissions,
             host,
             spend: Arc::new(Unmetered),
+            last_step_usd: None,
             unsent_pictures: (0, 0),
             links: snapshot.links,
             web_granted: AtomicBool::new(snapshot.web),
@@ -735,6 +740,7 @@ impl Session {
                 }
             };
             self.count(&completion, &mut turn, call).await?;
+            self.last_step_usd = Some(completion.usage.cost_usd);
             self.record_server_tools(&completion.server_tool_calls)
                 .await?;
             let cut = completion.finish == Finish::Length;
@@ -935,6 +941,14 @@ impl Session {
                 pictures,
             });
         }
+        // What is left of the run's money, after the step's last result (ADR 0115): at the end of
+        // the conversation, so the cached part before it stays as it was.
+        if let Some(line) = self.money_line()
+            && let Some(Message::Tool { content, .. }) = self.history.last_mut()
+        {
+            content.push_str("\n\n");
+            content.push_str(&line);
+        }
         Ok(())
     }
 
@@ -1007,10 +1021,36 @@ impl Session {
             let system = instructions(&self.config, self.host.as_ref(), &self.skills, text);
             self.history[0] = Message::System { content: system };
         }
+        self.last_step_usd = None;
+        // With the switch on, an agent of a metered run is told the run has a limit, how to plan
+        // for it, and what is left (ADR 0115).
+        let money = self
+            .money_line()
+            .map(|line| {
+                format!(
+                    "\n\n{}\n{}\n{line}",
+                    crate::spend_aware::HEADING,
+                    crate::spend_aware::SECTION.text()
+                )
+            })
+            .unwrap_or_default();
         self.history.push(Message::User {
-            content: format!("{text}\n\n{}", self.today()),
+            content: format!("{text}\n\n{}{money}", self.today()),
             pictures,
         });
+    }
+
+    /// The line on the run's money an agent sees after the task and each step's results, when the
+    /// switch is on and the run has a limit (ADR 0115).
+    /// An agent on the `ChatGPT` plan spends no dollars, so it is told none.
+    fn money_line(&self) -> Option<String> {
+        if !crate::spend_aware::on()
+            || crate::ai::ModelRef::parse(&self.config.model).source == crate::ai::Source::ChatGpt
+        {
+            return None;
+        }
+        let room = self.spend.room()?;
+        Some(crate::spend_aware::line(room, self.last_step_usd))
     }
 
     /// The tools offered to the model. The same list on every call of the session: it leads the
@@ -1097,6 +1137,7 @@ impl Session {
             tools_off: bare && offered,
             session_key: &self.config.session_id,
             agent_id: &self.config.agent_id,
+            room_usd: self.spend.room().map(|room| room.left),
         };
         let deltas = Streaming {
             sink: self.sink.as_ref(),

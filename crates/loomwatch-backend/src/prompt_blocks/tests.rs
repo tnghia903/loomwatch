@@ -439,7 +439,42 @@ fn rendered() -> String {
     orientations(&mut out);
     check_items(&mut out);
     message_due(&mut out);
+    money(&mut out);
     out
+}
+
+/// What an agent of a run with a limit is told with the switch on (ADR 0115): under its task, and
+/// after a step's results once little is left.
+fn money(out: &mut String) {
+    section(
+        out,
+        "money for this run, under the task",
+        &format!(
+            "{}\n{}\n{}",
+            crate::spend_aware::HEADING,
+            crate::spend_aware::SECTION.text(),
+            crate::spend_aware::line(
+                crate::agent::Room {
+                    left: 5.0,
+                    limit: 5.0,
+                    own: false
+                },
+                None
+            )
+        ),
+    );
+    section(
+        out,
+        "money for this run, after a step",
+        &crate::spend_aware::line(
+            crate::agent::Room {
+                left: 0.62,
+                limit: 5.0,
+                own: false,
+            },
+            Some(0.4),
+        ),
+    );
 }
 
 /// The first line where `got` and `want` differ, with its number, or `None` when they are the same.

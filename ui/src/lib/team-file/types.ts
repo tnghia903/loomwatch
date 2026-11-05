@@ -270,7 +270,8 @@ export interface TeamDocument {
   memory?: MemoryConfig
   /** Who decides what the agents' switches leave open (ADR 0061). Absent asks you. */
   permissions?: TeamPermissions
-  /** What one run may spend (ADR 0068). Absent: no limit; new teams are written with $1.00. */
+  /** What one run may spend (ADR 0068). Absent: the automatic limit, twice what the team's runs
+      usually cost and at least $5.00 (ADR 0115); new teams are written without it. */
   spend?: SpendConfig
   agents: AgentConfig[]
   edges: EdgeConfig[]

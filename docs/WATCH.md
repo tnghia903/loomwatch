@@ -477,15 +477,24 @@ Response (`202 Accepted`):
   is fixed at launch and stored; every other run has none.
 - `spend` is what the run has spent and may spend on model calls, in US dollars: `{limitUsd,
   spentUsd, agents: {id: {spentUsd, limitUsd?, stopped?}}, added: [{agent?, atUsd, addUsd}],
-  stopped?}`. `limitUsd` is the team's `spend.perRun` plus whatever was added this run (absent: no limit);
+  stopped?, automatic?, usualUsd?, usualRuns?}`. `limitUsd` is the team's `spend.perRun`, or when
+  the team names none the automatic limit (`automatic: true`): twice `usualUsd`, rounded up to a
+  cent, and at least $5.00 (ADR 0115). `usualUsd` is the middle of what the team's latest ten runs
+  that succeeded spent, from `usualRuns` of them, and is absent until the team has such a run that
+  spent something. Whatever was added this run is on top. `limitUsd` is absent only on runs from
+  before limits;
   an agent's `limitUsd` is its own guard. `spentUsd` adds up the dollars of every call of the run:
   the exact cost OpenRouter reported, or a Claude call's cost at list prices. Calls on the ChatGPT
   plan cost no dollars. `stopped` is `finished` once the operator finished the run at its limit,
-  or `nobody_to_ask` once a scheduled run stopped there, in runs recorded before ADR 0090; since
+  `no_answer` once a scheduled run finished there because nobody answered in time, or
+  `nobody_to_ask` once a scheduled run stopped there, in runs recorded before ADR 0090; since
   then a scheduled run waits at its stop like any other. It is stored with the run; runs recorded
   before spend limits have none.
 - `spendStops` lists the limits the run is waiting at: `{id, agent?, name?, limitUsd, spentUsd,
-  addUsd, since, expiresAt?}`, with `agent` set when it is that agent's own guard, and
+  addUsd, automatic?, usualUsd?, usualRuns?, since, expiresAt?}`, with `agent` set when it is that
+  agent's own guard, `addUsd` what was spent past the limit plus half the limit again (so one "add"
+  carries on), `automatic` at the team's automatic limit, `usualUsd` and `usualRuns` on the team's
+  stop once the team has runs to go by, and
   `expiresAt` in a scheduled run: when it finishes with what it has if nobody answers (ADR 0090). Every agent that reaches
   the limit waits at the same stop, and nothing is spent while it waits. It is live only, like
   `permissionRequests`. `POST /api/runs/{id}/spend` with `{ "stopId": "…", "decision": "add" |
