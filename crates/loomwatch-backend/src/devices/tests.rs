@@ -47,6 +47,14 @@ async fn stand_in() -> (String, Calls) {
             }),
         )
         .route(
+            "/api/chat/widgets",
+            post(|State(calls): State<Calls>, request: Request| async move {
+                record(&calls, request).await;
+                Json(json!({"n": 1, "state": {"checked": [true, false]},
+                            "changedAt": "2026-11-05T10:00:00Z"}))
+            }),
+        )
+        .route(
             "/api/team",
             put(|State(calls): State<Calls>, request: Request| async move {
                 record(&calls, request).await;
@@ -206,6 +214,31 @@ async fn a_call_off_the_list_never_reaches_the_daemon() {
         calls.lock().unwrap().is_empty(),
         "a team edit reached the daemon"
     );
+}
+
+#[tokio::test]
+async fn what_you_tick_under_an_answer_on_the_phone_is_kept_on_the_mac() {
+    let (daemon, calls) = stand_in().await;
+    let helper = phone_door(&daemon).await;
+
+    let tick = json!({"teamPath": "trips/Tokyo trip.yaml", "runId": "r1", "n": 1,
+                      "state": {"checked": [true, false]}});
+    let reply = client()
+        .post(format!("{helper}/api/chat/widgets"))
+        .bearer_auth(KEY)
+        .json(&tick)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(reply.status(), 200, "the door turned the tick away");
+    assert_eq!(reply.json::<Value>().await.unwrap()["state"], tick["state"]);
+
+    let calls = calls.lock().unwrap();
+    assert_eq!(calls.len(), 1, "{calls:?}");
+    assert_eq!(calls[0]["method"], "POST");
+    assert_eq!(calls[0]["path"], "/api/chat/widgets");
+    let body: Value = serde_json::from_str(calls[0]["body"].as_str().unwrap()).unwrap();
+    assert_eq!(body, tick, "the tick reached the Mac changed");
 }
 
 #[tokio::test]

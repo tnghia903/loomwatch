@@ -431,14 +431,14 @@
 /* The answer's caret sits at the end of its last line, as `.caret` does elsewhere: solid while
    words arrive, then a soft breath. A new piece of text flips `data-tick`, which swaps between two
    identical keyframes and so restarts it. */
-.tc-answer .chat-bubble.streaming .chat-text > :last-child:not(ul, ol, pre, table, blockquote)::after,
-.tc-answer .chat-bubble.streaming .chat-text > :is(ul, ol):last-child > li:last-child::after {
+.tc-answer .chat-bubble.streaming .chat-text:not(.wg-before) > :last-child:not(ul, ol, pre, table, blockquote)::after,
+.tc-answer .chat-bubble.streaming .chat-text:not(.wg-before) > :is(ul, ol):last-child > li:last-child::after {
   content: ''; display: inline-block; width: 2px; height: 1.05em; margin-left: 2px; border-radius: 1px;
   background: var(--color-accent); vertical-align: -.15em;
   animation: caret-blink var(--t-caret) ease-in-out var(--t-caret) infinite alternate;
 }
-.tc-answer .chat-bubble.streaming[data-tick="1"] .chat-text > :last-child:not(ul, ol, pre, table, blockquote)::after,
-.tc-answer .chat-bubble.streaming[data-tick="1"] .chat-text > :is(ul, ol):last-child > li:last-child::after { animation-name: caret-blink-again; }
+.tc-answer .chat-bubble.streaming[data-tick="1"] .chat-text:not(.wg-before) > :last-child:not(ul, ol, pre, table, blockquote)::after,
+.tc-answer .chat-bubble.streaming[data-tick="1"] .chat-text:not(.wg-before) > :is(ul, ol):last-child > li:last-child::after { animation-name: caret-blink-again; }
 @keyframes caret-blink-again { 0%, 20% { opacity: 1 } 70%, 100% { opacity: 0 } }
 .tc-answer .chat-meta .chat-name { color: var(--hue); }
 .tc-answer .chat-under { gap: 4px 14px; }

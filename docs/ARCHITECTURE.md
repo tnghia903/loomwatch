@@ -467,7 +467,8 @@ iPhone or another computer connects to it and keeps nothing but a key of its own
   own address, from its own page (`api.rs`).
 - **What each may do.** Every request at the door carries its key. An iPhone gets the phone's
   routes (`/phone/v0/*`) and the short list in `phone::ALLOWED`: see, answer, approve, start,
-  stop, chat, Ask, and small changes to an agent or a team, never keys, sign-ins or settings
+  stop, chat (with what you tick or change under an answer, `POST /api/chat/widgets`), Ask, and
+  small changes to an agent or a team, never keys, sign-ins or settings
   (`phone/`). A phone's request stops at 1 MB, except a file it sends into a team's chat or an
   agent's own chat, such as the picture of a part circled in the reader: that goes to
   `PUT /api/chat/files` as raw bytes (`application/octet-stream`, anything else refused at the
@@ -568,35 +569,54 @@ watcher sends it as a message that rings, and the phone shows the agent's reply,
 that were set when the turn failed. `GET /api/messages-at` lists what is waiting, and
 `DELETE /api/messages-at/{id}` cancels one.
 
-### Widgets under an answer
+### Widgets in an answer
 
-The agent whose reply is the answer a person reads can put up to four widgets under it with the
-Team Bus's `show_widget` (ADR 0114): choices to tap, a checklist to tick, a calculator, steps to
-tap through, or a chart whose bars LoomWatch draws to scale from the agent's figures. The bus offers
-it only to that agent (`BusSeat.answers`): the run's responder, told to the bus once per run
-(`TeamBus::answered_by`), not a helper or an agent started by another, with a person there, and with
-its `widgets` switch on. Absent, the switch is `widgets::DEFAULT_ON`, which is on: an agent asked
-for a chart or something to use had no way to give one, and drew bars in text or wrote a page
-instead. `widgets: false` keeps an agent without it. A call from any other seat is refused. An
-agent offered it is told, in its instructions' "How you work" (`agent::prompt::WIDGETS`), to show
-its answer with one whenever one fits: a chart for figures to compare, a calculator for a sum it
-may change, a checklist, steps or choices, ahead of a table, a list or bars written in text.
+The agent whose reply is the answer a person reads can put up to four widgets in it with the Team
+Bus's `show_widget` (ADR 0114): choices to tap, a checklist to tick, a calculator, steps to tap
+through, a chart whose bars LoomWatch draws to scale from the agent's figures, a graph of bars or a
+line over labels, a row of marks, or a flow. The bus offers it only to that agent
+(`BusSeat.answers`): the run's responder, told to the bus once per run (`TeamBus::answered_by`), not
+a helper or an agent started by another, with a person there, and with its `widgets` switch on.
+Absent, the switch is `widgets::DEFAULT_ON`, which is on: an agent asked for a chart or something
+to use had no way to give one, and drew bars in text or wrote a page instead. `widgets: false` keeps
+an agent without it. A call from any other seat is refused. An agent offered it is told, in its
+instructions' "How you work" (`agent::prompt::WIDGETS`), to show its answer with one whenever one
+fits, ahead of a table, a list or bars written in text, and to put each where it belongs with the
+place line the call answers with.
 
 `widgets::read` checks a widget against limits kept in one place (`widgets::limits`) and says what
 to change when it is refused. A calculator's results are formulas in a small language that the
 daemon (`widgets/formula.rs`) and the app (`ui/src/lib/widgets/formula.ts`) both work out, tested
 with one case file (`schemas/formula.cases.json`), down to how a number is written: shortest
-decimal form at 15 significant digits, halves away from zero, `1,234,567.5` in every locale. The
-call answers with the results at the starting values, so the agent's words use LoomWatch's numbers,
-and tells it to write the answer now (words written beside a tool call are not part of the reply).
-A chart (2 to 12 bars, one `unit`, `prefix` and `decimals` for all) takes the agent's figures as
-they are; the call answers with them written as the person reads them (`bars`), and the app draws
-every bar from one zero (`ui/src/lib/widgets/chart.ts`), a figure below zero to its left.
+decimal form at 15 significant digits, halves away from zero, `1,234,567.5` in every locale. A
+result's note ("{found} of 3 found") is words with formulas in braces, in the same case file. The
+call answers with the results at the starting values and with each preset, so the agent's words use
+LoomWatch's numbers, and tells it to write the answer now (words written beside a tool call are not
+part of the reply). A chart (2 to 12 bars, one `unit`, `prefix` and `decimals` for all) takes the
+agent's figures as they are; the call answers with them written as the person reads them (`bars`),
+and the app draws every bar from one zero (`ui/src/lib/widgets/chart.ts`), a figure below zero to
+its left. A graph (2 to 24 labels, 1 to 3 series) is drawn to round ticks (`ui/src/lib/widgets/
+graph.ts`), its series in `--color-series-1..3`.
 
-Nothing is added to the reply. When the run succeeds, `runs::keep_widgets` reads the archive for
-the `show_widget` calls of the turn whose reply became the answer (or, when that turn showed none,
-the latest earlier turn of work in the same session that did) and keeps them in the `widgets` table
-before the run reads as done. The chat page's `work` items carry `widgets`. What the person ticks or
+The call also answers with a place line, `{{widget N}}`, `N` counting the widgets the session has
+shown. The agent writes it on a line of its own where the widget belongs. When the run succeeds,
+`runs::keep_widgets` reads the archive for the `show_widget` calls of the turn whose reply became the
+answer (or, when that turn showed none, the latest earlier turn of work in the same session that
+did), takes the place lines out of the reply (`widgets::place`, outside code blocks), and keeps
+each widget in the `widgets` table with the line of the words it stands before (`line`; NULL at the
+end), before the run reads as done. So the kept reply is words only, for Copy, Notion, search, the
+notch and the phone's notifications. The app places widgets the same way while the answer is
+streamed (`ui/src/lib/widgets/place.ts`, from the run's `show_widget` events), both reading
+`schemas/widget-place.cases.json`. The chat page's `work` items carry `widgets`.
+
+A quick question the agents answer in the chat without starting work (`chat::answer_instead`,
+`intent::reply`, one turn with no Team Bus) can have widgets too. The turn is served `show_widget`
+as one of the daemon's own tools (`widgets::host::WidgetTools`) when the agent's switch is on, and
+otherwise has no tools, as before. Its answer is placed the same way and kept in the `widgets`
+table under `note:<message id>:<agent>`, and the chat page's answered `note` items carry `widgets`
+by agent. `POST /api/chat/widgets` takes `note: {messageId, agent}` in place of `runId`, for a
+message of this team that agent answered. The next run's conversation names what each such answer
+showed and what the person changed, as for a run's answer. What the person ticks or
 changes is kept by `POST /api/chat/widgets` (`state`, `changedAt`), and the next run's
 `## Conversation so far` names what each answer showed and what changed, with the results worked
 out again; `earlier_work` includes them. A choice is sent as the person's message, replying to the
@@ -808,7 +828,7 @@ drawn on the canvas.
 | `ask_user(question, context?)` | A question for the person running the team. Returns at once; the answer arrives as the agent's next turn | none — the run waits on the operator |
 | `memory_search`, `memory_read`, `memory_write`, `checkpoint` | The team's Notebook, when the team turns it on (see [TEAM_MEMORY.md](TEAM_MEMORY.md)) | none |
 | `earlier_work(work)` | Read one earlier piece of the team's work in full. Offered in runs started from the app, which have a team chat to read | none |
-| `show_widget(kind, title, …)` | Put a widget under the answer: choices, a checklist, a calculator, steps or a chart (ADR 0114). Offered only to the agent whose reply is the answer, with its switch on (on unless `widgets: false`) | none — kept with the answer when the run succeeds |
+| `show_widget(kind, title, …)` | Put a widget in the answer: choices, a checklist, a calculator, steps, a chart, a graph, marks or a flow, placed by the line it answers with (ADR 0114). Offered only to the agent whose reply is the answer, with its switch on (on unless `widgets: false`) | none — kept with the answer when the run succeeds |
 
 The bus grants the *ability* to delegate. The *judgment* of when to comes with it:
 

@@ -117,14 +117,16 @@ describe('a notebook entry it read', () => {
   })
 })
 
-// ADR 0114: what the agent put under its answer reads as what it is, not as the tool's name.
-describe('a widget under the answer', () => {
+// ADR 0114: what the agent put in its answer reads as what it is, not as the tool's name.
+describe('a widget in the answer', () => {
   it('reads as what was shown', () => {
     seq = 0
     const evidence = projectRun([
       event(0, 'message', { role: 'user', content: { type: 'text', text: 'Work out the trip.' } }),
       ...call(1, 'w1', 'Team Bus: show_widget', 'other', { kind: 'calculator', title: 'Zoo trip' }, '{"shown":"a calculator"}'),
+      ...call(3, 'w2', 'Team Bus: show_widget', 'other', { kind: 'flow', title: 'How it goes' }, '{"shown":"a flow"}'),
+      ...call(5, 'w3', 'Team Bus: show_widget', 'other', { kind: 'gizmo', title: 'New' }, '{"shown":"?"}'),
     ]).evidence
-    expect(evidence.map(asUse).filter(Boolean).map((use) => use?.label)).toEqual(['Show a calculator under the answer'])
+    expect(evidence.map(asUse).filter(Boolean).map((use) => use?.label)).toEqual(['Show a calculator in the answer', 'Show a diagram in the answer', 'Show something in the answer'])
   })
 })

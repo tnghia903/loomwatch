@@ -269,6 +269,46 @@ export function evaluateFormula(formula: Formula, values: Readonly<Record<string
   return finite(evaluateExpr(formula.expr, values))
 }
 
+/** A result's note, read: words, and formulas in braces ("{found} of 3 found"). */
+export interface Note {
+  readonly parts: readonly ({ words: string } | { formula: Formula })[]
+}
+
+/** Read `text` as a result's note, as the daemon reads it. Throws a {@link FormulaError}. */
+export function parseNote(text: string): Note {
+  const parts: ({ words: string } | { formula: Formula })[] = []
+  let rest = text
+  while (rest.length > 0) {
+    const open = rest.indexOf('{')
+    const close = rest.indexOf('}')
+    if (open === -1 && close === -1) {
+      parts.push({ words: rest })
+      break
+    }
+    if (close !== -1 && (open === -1 || close < open)) throw syntax('a } in a note closes a { before it')
+    if (close === -1) throw syntax('a { in a note needs a } after its formula')
+    if (open > 0) parts.push({ words: rest.slice(0, open) })
+    const inside = rest.slice(open + 1, close)
+    if (inside.includes('{')) throw syntax('a { in a note needs a } after its formula')
+    parts.push({ formula: parse(inside) })
+    rest = rest.slice(close + 1)
+  }
+  return { parts }
+}
+
+/** Every name a note's formulas read, in order, each once. */
+export function noteNames(note: Note): string[] {
+  const out: string[] = []
+  for (const part of note.parts) if ('formula' in part) for (const name of names(part.formula)) if (!out.includes(name)) out.push(name)
+  return out
+}
+
+/** A note with each formula worked out with `values`, written with up to two decimals. Throws a
+    {@link FormulaError}. */
+export function fillNote(note: Note, values: Readonly<Record<string, number>>): string {
+  return note.parts.map((part) => ('words' in part ? part.words : display(evaluateFormula(part.formula, values)) ?? 'too large')).join('')
+}
+
 /** Read and work out `text` with `values`, in one step. Throws a {@link FormulaError}. */
 export function evaluate(text: string, values: Readonly<Record<string, number>>): number {
   return evaluateFormula(parse(text), values)

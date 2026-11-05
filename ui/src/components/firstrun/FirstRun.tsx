@@ -22,6 +22,7 @@ import { Markdown } from '../ui/Markdown'
 import { ConnectSheet, type AiOption } from './ConnectSheet'
 import { SaidText } from '../chat/SaidText'
 import { SendButton } from '../box/BoxButtons'
+import { wordsOf } from '../../lib/widgets/place'
 
 /** The colour the first run shows a connected AI in: LoomWatch's own indigo, not a brand's. */
 const AI_COLOR = '#5867A8'
@@ -251,7 +252,7 @@ function FirstAnswer({ turn, about, name, onSettled, onRetry }: { turn: Turn; ab
   const record = session.record
   const done = Boolean(record && isTerminalRun(record.status))
   const responder = session.projection.agents.find((agent) => agent.id === record?.responder)
-  const text = done ? record?.reply ?? '' : responder?.reply ?? ''
+  const text = wordsOf(done ? record?.reply ?? '' : responder?.reply ?? '')
   const status = record?.status
   // Said once the run ends; saying it again is harmless, as the same status changes nothing.
   useEffect(() => {

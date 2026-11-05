@@ -200,3 +200,83 @@ describe('AnswerWidgets', () => {
     expect(within(steps).getByRole('img', { name: 'Then back to step 1' })).toBeInTheDocument()
   })
 })
+
+const relevance: KeptWidget = {
+  n: 5,
+  spec: {
+    kind: 'calculator',
+    title: 'Select relevant documents',
+    inputs: ['#1', '#2', '#3', '#4', '#5'].map((label, at) => ({ id: `d${at + 1}`, label, on: at > 0 && at < 4, group: 'Relevant?' })),
+    results: [
+      { id: 'found', label: 'Recall@5', formula: '(d1 + d2 + d3 + d4 + d5) / 3', decimals: 3, note: '{d1 + d2 + d3 + d4 + d5} / 3 found' },
+      { id: 'rr', label: 'RR@5', formula: 'if(d1, 1, if(d2, 1/2, if(d3, 1/3, 0)))', decimals: 3, note: 'First at #{if(d1, 1, if(d2, 2, 3))}' },
+    ],
+    presets: [{ label: 'Try moving relevant documents to the top', values: { d1: true, d2: true, d3: true, d4: false } }],
+  },
+}
+
+describe('AnswerWidgets, new parts', () => {
+  it('draws a group’s switches as one row of boxes, says why under each result, and sets a preset', async () => {
+    const { kept, onChange } = keeper()
+    render(<AnswerWidgets widgets={[relevance]} onChange={onChange} />)
+    const calculator = screen.getByRole('region', { name: 'Select relevant documents' })
+    const row = within(calculator).getByRole('group', { name: 'Relevant?' })
+    expect(within(row).getAllByRole('button')).toHaveLength(5)
+    expect(within(row).getByRole('button', { name: '#2' })).toHaveAttribute('aria-pressed', 'true')
+    expect(calculator).toHaveTextContent('Recall@51.0003 / 3 found')
+    expect(calculator).toHaveTextContent('RR@50.500First at #2')
+
+    fireEvent.click(within(row).getByRole('button', { name: '#1' }))
+    expect(calculator).toHaveTextContent('RR@51.000First at #1')
+    await waitFor(() => expect(kept.at(-1)).toEqual({ n: 5, state: { values: { d1: true } } }))
+
+    // #5 isn't one the preset names: it goes back to its start, off.
+    fireEvent.click(within(row).getByRole('button', { name: '#5' }))
+    await waitFor(() => expect(kept.at(-1)).toEqual({ n: 5, state: { values: { d1: true, d5: true } } }))
+    const preset = within(calculator).getByRole('button', { name: 'Try moving relevant documents to the top' })
+    expect(preset).toHaveAttribute('aria-pressed', 'false')
+    fireEvent.click(preset)
+    await waitFor(() => expect(kept.at(-1)).toEqual({ n: 5, state: { values: { d1: true, d2: true, d3: true, d4: false } } }))
+    expect(preset).toHaveAttribute('aria-pressed', 'true')
+    expect(within(row).getByRole('button', { name: '#4' })).toHaveAttribute('aria-pressed', 'false')
+    expect(within(row).getByRole('button', { name: '#5' })).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('draws marks with their words, a flow in order, and a graph you can read point by point', () => {
+    const marks: KeptWidget = { n: 6, spec: { kind: 'marks', title: 'Top 5 retrieved documents', cells: [{ label: '#1', mark: 'no', note: 'Irrelevant' }, { label: '#2', mark: 'yes', note: 'Relevant' }, { label: '#3', mark: 'neither' }], facts: ['2 relevant documents retrieved out of 3'] } }
+    const flow: KeptWidget = { n: 7, spec: { kind: 'flow', title: 'A RAG pipeline', boxes: [{ label: 'User query' }, { label: 'Retriever', note: 'Recall@K: coverage' }, { label: 'Reranker' }], repeats: true } }
+    const graph: KeptWidget = { n: 8, spec: { kind: 'graph', title: 'Rent', style: 'line', labels: ['Jan', 'Feb', 'Mar'], series: [{ label: 'Flat', values: [1200, 1250, 1300] }, { label: 'House', values: [2000, 2000, 2100] }], prefix: '$' } }
+    render(<AnswerWidgets widgets={[marks, flow, graph]} onChange={keeper().onChange} />)
+
+    const row = screen.getByRole('region', { name: 'Top 5 retrieved documents' })
+    expect(within(row).getByLabelText('#2: Yes, Relevant')).toBeInTheDocument()
+    expect(within(row).getByLabelText('#3: Neither yes nor no')).toBeInTheDocument()
+    expect(row).toHaveTextContent('2 relevant documents retrieved out of 3')
+
+    const steps = within(screen.getByRole('region', { name: 'A RAG pipeline' })).getAllByRole('listitem')
+    expect(steps.map((step) => step.textContent)).toEqual(['User query', 'RetrieverRecall@K: coverage', 'Reranker'])
+    expect(screen.getByRole('img', { name: 'Then back to User query' })).toBeInTheDocument()
+
+    const plot = screen.getByRole('region', { name: 'Rent' })
+    expect(plot).toHaveTextContent('Mar: Flat $1,300, House $2,100')
+    fireEvent.keyDown(within(plot).getByRole('group'), { key: 'ArrowLeft' })
+    expect(plot).toHaveTextContent('Feb: Flat $1,250, House $2,000')
+    const table = within(plot).getByRole('table')
+    expect(within(table).getAllByRole('row')).toHaveLength(4)
+    expect(table).toHaveTextContent('Jan$1,200$2,000')
+  })
+
+  it('draws widgets while the answer is still written, and keeps nothing until it is done', () => {
+    const { onChange } = keeper()
+    const onChoose = vi.fn()
+    render(<AnswerWidgets widgets={[relevance, checklist, choices, trip]} onChange={onChange} onChoose={onChoose} live />)
+    for (const button of within(screen.getByRole('region', { name: 'Select relevant documents' })).getAllByRole('button')) expect(button).toBeDisabled()
+    const zoo = screen.getByRole('region', { name: 'Zoo trip' })
+    expect(within(zoo).getByLabelText('Pupils')).toBeDisabled()
+    expect(within(zoo).getByRole('switch', { name: 'Round up' })).toBeDisabled()
+    for (const button of within(zoo).getAllByRole('button')) expect(button).toBeDisabled()
+    for (const box of screen.getAllByRole('checkbox')) expect(box).toBeDisabled()
+    for (const button of within(screen.getByRole('region', { name: 'Which theme?' })).getAllByRole('button')) expect(button).toBeDisabled()
+    expect(onChange).not.toHaveBeenCalled()
+  })
+})

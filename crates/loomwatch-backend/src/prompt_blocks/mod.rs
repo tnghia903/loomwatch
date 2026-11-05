@@ -202,6 +202,8 @@ const ALL: &[Block] = {
         widgets::SHOW_WIDGET_OPTIONS,
         widgets::SHOW_WIDGET_FORMULA,
         widgets::SHOW_WIDGET_BARS,
+        widgets::SHOW_WIDGET_NOTE,
+        widgets::SHOW_WIDGET_PRESETS,
         widgets::SHOW_WIDGET_SHOWN,
         crate::messages_at::DUE,
         crate::messages_at::DUE_LATE,

@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
@@ -322,6 +322,8 @@ struct AgentSession {
     dispatch_depth: u32,
     /// A helper started by `ask`: its whole job is one answer, so it may not start agents.
     answering: bool,
+    /// How many widgets this session has shown, for the place line of the next (ADR 0114).
+    widgets_shown: Arc<AtomicU32>,
 }
 
 struct DelegationContext {
@@ -538,6 +540,7 @@ impl TeamBus {
                 delegation_path: vec![agent_id.to_owned()],
                 dispatch_depth: 0,
                 answering: false,
+                widgets_shown: Arc::default(),
             },
         );
         Ok(TeamBusConnection {
@@ -2745,6 +2748,7 @@ impl TeamBus {
                 delegation_path: context.path,
                 dispatch_depth: context.depth,
                 answering: context.answering,
+                widgets_shown: Arc::default(),
             },
         );
         Ok(TeamBusConnection {
@@ -3532,7 +3536,8 @@ impl TeamBus {
         }
         let widget = crate::widgets::read(arguments)
             .map_err(|error| refused("widget_refused", format!("It isn't shown: {error}.")))?;
-        Ok(crate::widgets::shown(&widget))
+        let place = session.widgets_shown.fetch_add(1, Ordering::Relaxed) + 1;
+        Ok(crate::widgets::shown(&widget, place))
     }
 
     /// `message_me_at`: keep the message for its time, and return at once.
@@ -4491,6 +4496,7 @@ mod tests {
             shown["structuredContent"]["shown"],
             "a checklist \"Before Wednesday\""
         );
+        assert_eq!(shown["structuredContent"]["place"], "{{widget 1}}");
         let bad = lead
             .call(
                 crate::widgets::TOOL,
@@ -4503,6 +4509,9 @@ mod tests {
                 .contains("It isn't shown: items has 0; give 1 to 20"),
             "{bad}"
         );
+        // Each widget the session shows has a place line of its own; a refused one takes none.
+        let second = lead.call(crate::widgets::TOOL, list.clone()).await;
+        assert_eq!(second["structuredContent"]["place"], "{{widget 2}}");
 
         // The answering agent's other sessions write to a teammate, not to the person: answering a
         // teammate's question, or started by one with work of its own.
@@ -5689,6 +5698,7 @@ mod tests {
                             delegation_path: vec!["a".into()],
                             dispatch_depth: 0,
                             answering: false,
+                            widgets_shown: Arc::default(),
                         },
                         "teardown-token",
                     ),

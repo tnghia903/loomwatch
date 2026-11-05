@@ -21,7 +21,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 const draw = (draft = BLANK_DRAFT, widgetsDefault?: boolean) => {
   const set = vi.fn()
   render(<ByHand draft={draft} set={set} skills={[]} skillsLoading={false} roleField={createRef()} figure={{ kind: 'yarn', color: 'sage' }} record={null} widgetsDefault={widgetsDefault} />)
-  return { set, toggle: screen.getByRole('button', { name: /Adds choices, checklists and calculators to its answers/ }) }
+  return { set, toggle: screen.getByRole('button', { name: /Adds charts, checklists and calculators to its answers/ }) }
 }
 
 // ADR 0114: each agent's own switch, under what it hands back; absent, LoomWatch's default.

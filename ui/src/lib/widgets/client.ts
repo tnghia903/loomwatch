@@ -8,10 +8,20 @@ import type { KeptWidget, WidgetState } from './types'
  * kept.
  */
 export async function changeWidget(teamPath: string, runId: string, n: number, state: WidgetState): Promise<KeptWidget> {
+  return keep({ teamPath, runId, n, state })
+}
+
+/** The same for widget `n` in `agent`'s answer to message `messageId` in the chat, answered there
+    without starting work. */
+export async function changeNoteWidget(teamPath: string, messageId: string, agent: string, n: number, state: WidgetState): Promise<KeptWidget> {
+  return keep({ teamPath, note: { messageId, agent }, n, state })
+}
+
+async function keep(body: object): Promise<KeptWidget> {
   const response = await daemonFetch('/api/chat/widgets', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ teamPath, runId, n, state }),
+    body: JSON.stringify(body),
     cache: 'no-store',
   })
   return readRun<KeptWidget>(response)

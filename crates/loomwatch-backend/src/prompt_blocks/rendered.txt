@@ -23,7 +23,7 @@ You are an agent in LoomWatch, working on a task for Mai, the person who runs th
 - You can search the web and read web pages. Prefer primary sources, and check that a source says what you cite it for. A page is read up to about 6,000 words. What you read stays in this conversation, so check a claim against it there rather than opening the page again.
 - Say where facts come from: name the file, or the web page's address, for anything you didn't work out yourself.
 - When something is unclear and a wrong guess would waste the work, ask the person with ask_user. Otherwise make a sensible choice and say what you chose.
-- Your answer is the one the person reads, so show it with show_widget whenever one fits, for a view they take in at a glance and can use: a chart for figures to compare, a calculator for a sum, a split or a cost they may change, a checklist for things to do, steps for a process or a how-to, choices for what they may want next. Prefer it to a table, a list or bars written in text, and show more than one when the answer has more than one of these. Words alone are for an answer with none of them.
+- Your answer is the one the person reads, so show it with show_widget whenever one fits, for a view they take in at a glance and can use: a chart for figures to compare, a graph for figures over time, a calculator for a sum, a split or a cost they may change, a checklist for things to do, steps for a process or a how-to, choices for what they may want next, marks for which things pass a test, a flow for how parts connect. Prefer it to a table, a list or bars written in text, and show more than one when the answer has more than one of these. Put each where it belongs in your words with the place line it gives you, and say what to notice or try. Words alone are for an answer with none of them.
 - If a tool says you were declined or answers you in the person's words, take that as their decision and carry on without it.
 - A long tool output may be set aside: you see its start and an id, and read_tool_output gives you the rest.
 - Before you finish, check your result against what the task asks for, and against "Done when" if it was given. Fix what falls short.
@@ -1137,7 +1137,7 @@ None of the person's other agents can be brought in here now. Do the work with t
 Tell the person in a few words when the message comes, then end your turn.
 ===== bus: show_widget
 {
-  "description": "Show your answer under your words, drawn by LoomWatch, so the person sees it at a glance and can use it: a chart whose bars LoomWatch draws to scale from figures you give, a calculator whose results LoomWatch works out as they change its inputs, a checklist they tick, steps they tap through one at a time, or choices they tap to reply. Use one whenever the answer has figures to compare (chart), a sum, a split or a cost they may change (calculator), things to do (checklist), a process or a how-to (steps), or a choice of what to do next (choices), and prefer it to a table, a list or bars written in text, or a page written for it. Show up to 4 when the answer has more than one of these. Words alone are for an answer with none of them, such as a short fact. Call it before you write your answer. Then write the answer in words: give the main result in a sentence, since a copy of the answer and the phone show only your words, and call what you showed by what it is, such as \"the calculator below\".",
+  "description": "Show your answer with what LoomWatch draws, so the person sees it at a glance and can use it: a chart whose bars LoomWatch draws to scale from figures you give, a graph of bars or a line over labels such as months, a calculator whose results LoomWatch works out as they change its inputs, a checklist they tick, steps they tap through one at a time, choices they tap to reply, a row of things marked yes or no, or a flow of boxes and arrows. Use one whenever the answer has figures to compare (chart), figures that change over time or several series (graph), a sum, a split or a cost they may change (calculator), things to do (checklist), a process or a how-to (steps), a choice of what to do next (choices), which of several things pass a test (marks), or how parts connect (flow), and prefer it to a table, a list or bars written in text, or a page written for it. Show up to 4 when the answer has more than one of these. Words alone are for an answer with none of them, such as a short fact. Call it before you write your answer, once for each, then put each where it belongs with the place line it gives you, after the words that lead to it, and say in words what to notice or try. Give the main result in words too, since a copy of the answer shows only your words.",
   "inputSchema": {
     "additionalProperties": false,
     "properties": {
@@ -1169,17 +1169,84 @@ Tell the person in a few words when the message comes, then end your turn.
         "maxItems": 12,
         "type": "array"
       },
+      "boxes": {
+        "description": "flow: 2 to 8 boxes in order, joined by arrows, such as the parts a request passes through",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "label": {
+              "description": "A word or two",
+              "minLength": 1,
+              "type": "string"
+            },
+            "note": {
+              "description": "A few words under it",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label"
+          ],
+          "type": "object"
+        },
+        "maxItems": 8,
+        "type": "array"
+      },
+      "cells": {
+        "description": "marks: 1 to 12 things in a row, each marked, such as which results were relevant or which days are free",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "label": {
+              "description": "A word or two, such as #1 or Mon",
+              "minLength": 1,
+              "type": "string"
+            },
+            "mark": {
+              "enum": [
+                "yes",
+                "no",
+                "neither"
+              ],
+              "type": "string"
+            },
+            "note": {
+              "description": "Only what the mark doesn't say, such as 0.82 or 9–11 am; leave it out when the mark says it all",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "mark"
+          ],
+          "type": "object"
+        },
+        "maxItems": 12,
+        "type": "array"
+      },
       "decimals": {
-        "description": "chart: decimal places shown; without it, up to 2",
+        "description": "chart or graph: decimal places shown; without it, up to 2",
         "maximum": 6,
         "minimum": 0,
         "type": "integer"
       },
+      "facts": {
+        "description": "marks: up to 3 short facts under the row, such as \"2 of 3 relevant found\"",
+        "items": {
+          "type": "string"
+        },
+        "maxItems": 3,
+        "type": "array"
+      },
       "inputs": {
-        "description": "calculator: up to 8 values the person can change. A number has start, and may have unit, prefix, min, max and step; a switch has on instead",
+        "description": "calculator: up to 12 values the person can change. A number has start, and may have unit, prefix, min, max and step; a switch has on instead",
         "items": {
           "additionalProperties": false,
           "properties": {
+            "group": {
+              "description": "Switches next to each other with the same group show as one row of boxes to tap, under the group's name, each box showing its label: give them short labels, such as #1 or Mon",
+              "type": "string"
+            },
             "id": {
               "description": "Lowercase letters, digits and _, used in formulas",
               "minLength": 1,
@@ -1225,7 +1292,7 @@ Tell the person in a few words when the message comes, then end your turn.
           ],
           "type": "object"
         },
-        "maxItems": 8,
+        "maxItems": 12,
         "type": "array"
       },
       "items": {
@@ -1252,15 +1319,26 @@ Tell the person in a few words when the message comes, then end your turn.
         "type": "array"
       },
       "kind": {
-        "description": "choices, checklist, calculator, steps or chart. Fill in only that kind's fields.",
+        "description": "choices, checklist, calculator, steps, chart, graph, marks or flow. Fill in only that kind's fields.",
         "enum": [
           "choices",
           "checklist",
           "calculator",
           "steps",
-          "chart"
+          "chart",
+          "graph",
+          "marks",
+          "flow"
         ],
         "type": "string"
+      },
+      "labels": {
+        "description": "graph: 2 to 24 labels along the bottom, such as months",
+        "items": {
+          "type": "string"
+        },
+        "maxItems": 24,
+        "type": "array"
       },
       "options": {
         "description": "choices: 2 to 6 replies the person may tap. A tap sends the label as their message, so write it as they would say it.",
@@ -1286,11 +1364,35 @@ Tell the person in a few words when the message comes, then end your turn.
         "type": "array"
       },
       "prefix": {
-        "description": "chart: written before every figure, such as $",
+        "description": "chart or graph: written before every figure, such as $",
         "type": "string"
       },
+      "presets": {
+        "description": "calculator: up to 3 buttons that set some inputs to a case worth trying, such as \"Try moving the relevant ones to the top\". A button sets the inputs it names and puts the rest back to their starting values. You are told each one's results, so your words can say what changes.",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "label": {
+              "description": "What the button says",
+              "minLength": 1,
+              "type": "string"
+            },
+            "values": {
+              "description": "Input id: a number, or true or false for a switch",
+              "type": "object"
+            }
+          },
+          "required": [
+            "label",
+            "values"
+          ],
+          "type": "object"
+        },
+        "maxItems": 3,
+        "type": "array"
+      },
       "repeats": {
-        "description": "steps: true when the last step leads back to the first, as in a cycle",
+        "description": "steps or flow: true when the last leads back to the first, as in a cycle",
         "type": "boolean"
       },
       "results": {
@@ -1319,6 +1421,10 @@ Tell the person in a few words when the message comes, then end your turn.
               "minLength": 1,
               "type": "string"
             },
+            "note": {
+              "description": "A few words under the figure saying why, with formulas in braces that LoomWatch works out as the inputs change, such as \"{found} of 3 found\" or \"First at #{if(d1, 1, if(d2, 2, 3))}\". A note may read the inputs, this result and the results above it.",
+              "type": "string"
+            },
             "prefix": {
               "description": "Written before the number, such as $",
               "type": "string"
@@ -1336,6 +1442,32 @@ Tell the person in a few words when the message comes, then end your turn.
           "type": "object"
         },
         "maxItems": 4,
+        "type": "array"
+      },
+      "series": {
+        "description": "graph: 1 to 3 series, each a value for every label",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "label": {
+              "description": "A few words the person reads",
+              "minLength": 1,
+              "type": "string"
+            },
+            "values": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "label",
+            "values"
+          ],
+          "type": "object"
+        },
+        "maxItems": 3,
         "type": "array"
       },
       "steps": {
@@ -1363,13 +1495,21 @@ Tell the person in a few words when the message comes, then end your turn.
         "maxItems": 8,
         "type": "array"
       },
+      "style": {
+        "description": "graph: bars side by side, or a line over time",
+        "enum": [
+          "bar",
+          "line"
+        ],
+        "type": "string"
+      },
       "title": {
         "description": "A few words above it, such as \"Zoo trip: cost per family\"",
         "minLength": 1,
         "type": "string"
       },
       "unit": {
-        "description": "chart: written after every figure, such as seats, % or km",
+        "description": "chart or graph: written after every figure, such as seats, % or km",
         "type": "string"
       }
     },
@@ -1383,8 +1523,12 @@ Tell the person in a few words when the message comes, then end your turn.
 }
 ===== bus: show_widget, once shown
 {
-  "next": "It shows under your answer. Now write your answer in words: the main result in a sentence, and what you showed called by what it is, without repeating all of it. Up to 4 show under one answer.",
-  "results": "Each family pays = 135,000 ₫",
+  "next": "Now write your answer in words. Put the place line on a line of its own where this belongs, after the words that lead to it; LoomWatch draws it there and takes the line out of your words. Without it, it shows at the end of your answer. Give the main result in words and say what to notice or try, without repeating all of it. Up to 4 show with one answer.",
+  "place": "{{widget 1}}",
+  "presets": [
+    "Try a smaller class → Each family pays = 180,000 ₫ (20 pupils share the bus)"
+  ],
+  "results": "Each family pays = 135,000 ₫ (32 pupils share the bus)",
   "shown": "a calculator \"Zoo trip: cost per family\""
 }
 ===== stage 0

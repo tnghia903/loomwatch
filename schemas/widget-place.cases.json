@@ -1,0 +1,112 @@
+{
+  "about": "Where an answer's widgets stand (ADR 0114): the agent writes a place line, {{widget N}}, where widget N belongs; it is taken out of the words and the widget stands before that line of what is left. `places` are the widgets' place numbers (null for one from before place lines); `lines` the line each stands before (null: at the end). Read by crates/loomwatch-backend/src/widgets/mod.rs (when the answer is kept) and ui/src/lib/widgets/place.ts (while it is written), which must agree on every case.",
+  "cases": [
+    {
+      "name": "a widget between two paragraphs, one at the end, one not placed",
+      "reply": "Here is how the two metrics differ.\n\n{{widget 1}}\n\nNotice that RR@5 moves and Recall doesn't.\n\n{{widget 2}}",
+      "places": [
+        1,
+        2,
+        3
+      ],
+      "words": "Here is how the two metrics differ.\n\nNotice that RR@5 moves and Recall doesn't.",
+      "lines": [
+        2,
+        3,
+        null
+      ]
+    },
+    {
+      "name": "at the start, inside a sentence, unknown, used twice, and in code",
+      "reply": "{{widget 1}}\n\nFirst {{widget 2}} words.\n\n```\n{{widget 2}}\n```\n{{ Widget 7 }}\n{{widget 1}}\nLast.\n",
+      "places": [
+        1,
+        2
+      ],
+      "words": "First words.\n\n```\n{{widget 2}}\n```\nLast.",
+      "lines": [
+        0,
+        null
+      ]
+    },
+    {
+      "name": "words with no place lines are kept exactly",
+      "reply": "No widgets here.\n\n  Indented, {{braces}} and all.  ",
+      "places": [
+        null
+      ],
+      "words": "No widgets here.\n\n  Indented, {{braces}} and all.  ",
+      "lines": [
+        null
+      ]
+    },
+    {
+      "name": "two widgets one after the other",
+      "reply": "Compare them:\n\n{{widget 1}}\n{{widget 2}}\n\nThat's all.",
+      "places": [
+        1,
+        2
+      ],
+      "words": "Compare them:\n\nThat's all.",
+      "lines": [
+        2,
+        2
+      ]
+    },
+    {
+      "name": "a place line indented or with spaces inside",
+      "reply": "Look:\n   {{  widget   4 }}   \nDone.",
+      "places": [
+        4
+      ],
+      "words": "Look:\nDone.",
+      "lines": [
+        1
+      ]
+    },
+    {
+      "name": "a tilde fence keeps its place lines",
+      "reply": "~~~\n{{widget 1}}\n~~~\n{{widget 1}}",
+      "places": [
+        1
+      ],
+      "words": "~~~\n{{widget 1}}\n~~~",
+      "lines": [
+        3
+      ]
+    },
+    {
+      "name": "not a place line",
+      "reply": "{{widget}}\n{{widget one}}\n{{gadget 1}}\n{widget 1}",
+      "places": [
+        1
+      ],
+      "words": "{{widget}}\n{{widget one}}\n{{gadget 1}}\n{widget 1}",
+      "lines": [
+        null
+      ]
+    },
+    {
+      "name": "a fence closes only on its own marker",
+      "reply": "```\n~~~\n{{widget 1}}\n```\n{{widget 1}}",
+      "places": [
+        1
+      ],
+      "words": "```\n~~~\n{{widget 1}}\n```",
+      "lines": [
+        4
+      ]
+    },
+    {
+      "name": "blank lines at the start go",
+      "reply": "{{widget 1}}\n\n\nHello.",
+      "places": [
+        1
+      ],
+      "words": "Hello.",
+      "lines": [
+        0
+      ]
+    }
+  ]
+}

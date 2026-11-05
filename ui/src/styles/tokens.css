@@ -97,6 +97,12 @@
   --color-fig-lilac:      #6851B8;
   --color-fig-rose:       #AC3B61;
   --color-fig-oat:        #76664C;
+  /* A chart's series in a widget (ADR 0114), in this order, never cycled: blue, clay, violet.
+     Checked for colour-blind separation and contrast on the panel, light and dark. Text beside a
+     series stays ink; the colour marks the bar or line. */
+  --color-series-1:       #2D69A6;
+  --color-series-2:       #A4512C;
+  --color-series-3:       #6851B8;
   /* hairline is a channel-alpha token, not a colour */
   --color-hairline:       color-mix(in srgb, var(--lw-ink-950) 10%, transparent);
   /* A produced document drawn as a sheet of paper (FileCard): paper in both themes. */
@@ -164,6 +170,9 @@
   --color-fig-lilac:      #C4B6F2;
   --color-fig-rose:       #F1ABC0;
   --color-fig-oat:        #E2D6C0;
+  --color-series-1:       #3A86D6;
+  --color-series-2:       #D0662F;
+  --color-series-3:       #8C70E0;
   --color-hairline: color-mix(in srgb, #FFFFFF 9%, transparent);
   --color-paper:      var(--lw-bone-100);
   --color-paper-rule: var(--lw-graphite-400);

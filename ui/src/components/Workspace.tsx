@@ -158,6 +158,7 @@ import { useLeaveTeam } from '../lib/team-file/leaveTeam'
 import { FileOriginContext, FileReaderContext, readerFormat, type FileToRead } from '../lib/files/reader'
 import { useFilesFound } from '../lib/files/useFile'
 import { lookupFile } from '../lib/files/client'
+import { wordsOf } from '../lib/widgets/place'
 
 // The Workflow canvas: the team as it is configured. A run is read in the team's chat and its
 // Details, never drawn here. The Output card is the planned one: the canvas holds no answer.
@@ -1046,7 +1047,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   const recordedText = useMemo(() => (recordedReply != null ? recordedReplyText(session.events, responderId, recordedReply) : null), [session.events, responderId, recordedReply])
   // The run's events as far as the replay cursor, as the projection reads them.
   const shownEvents = useMemo(() => (session.cursor === null ? session.events : session.events.filter((event) => event.seq <= (session.cursor ?? Infinity))), [session.events, session.cursor])
-  const responseText = session.cursor === null && recordedText != null ? recordedText : responderAgent?.reply ?? ''
+  const responseText = wordsOf(session.cursor === null && recordedText != null ? recordedText : responderAgent?.reply ?? '')
   const phase: RunPhase = projection.phase
   const live = session.mode === 'live'
   const attempt = useMemo(() => {

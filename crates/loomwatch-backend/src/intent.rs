@@ -21,6 +21,7 @@
 
 use std::fmt::Write as _;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 use uuid::Uuid;
@@ -121,10 +122,11 @@ pub(crate) struct OwnWords {
 }
 
 /// What an agent answering in the chat came back with.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Reply {
-    /// Its answer.
-    Said(String),
+    /// Its answer, and the widgets it showed in it (ADR 0114), each with its place number; the
+    /// words still hold their place lines.
+    Said(String, Vec<crate::widgets::Shown>),
     /// It had nothing to add: it said PASS, or nothing at all. It stays silent.
     Passed,
     /// Its turn failed, so it could not answer: why, in the words a run that stopped shows
@@ -132,8 +134,10 @@ pub(crate) enum Reply {
     Failed(String),
 }
 
-/// `agent`'s own answer to `message`, as itself in the team's chat: one turn on its own model with
-/// no tools, remembering what it said last in the newest work.
+/// `agent`'s own answer to `message`, as itself in the team's chat: one turn on its own model,
+/// remembering what it said last in the newest work. Its only tool is `show_widget` when `widgets`
+/// (its switch, ADR 0114); otherwise it has none.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn reply(
     archive: Option<&EventArchive>,
     teams_root: &Path,
@@ -142,6 +146,7 @@ pub(crate) async fn reply(
     context: &Context,
     own: Option<&OwnWords>,
     lessons: &[String],
+    widgets: bool,
 ) -> Reply {
     let Some(archive) = archive else {
         return Reply::Failed(NOT_STARTED.to_owned());
@@ -150,7 +155,8 @@ pub(crate) async fn reply(
     let instructions = own_instructions(addressed.team, agent);
     let prompt = reply_prompt(addressed, message.trim(), context, own);
     let model = agent.model_selector();
-    let turn = one_turn(
+    let tools = widgets.then(crate::widgets::host::WidgetTools::new);
+    let turn = one_turn_with(
         archive,
         teams_root,
         &agent.id,
@@ -158,8 +164,15 @@ pub(crate) async fn reply(
         &model,
         &prompt,
         lessons,
+        tools
+            .clone()
+            .map(|tools| tools as Arc<dyn crate::agent::HostTools>),
     );
-    reply_of(tokio::time::timeout(REPLY_LIMIT, turn).await.ok())
+    let reply = reply_of(tokio::time::timeout(REPLY_LIMIT, turn).await.ok());
+    match (reply, tools) {
+        (Reply::Said(text, _), Some(tools)) => Reply::Said(text, tools.taken()),
+        (reply, _) => reply,
+    }
 }
 
 /// What an answer's turn came to: `None` when it ran out of time.
@@ -176,7 +189,7 @@ fn reply_of(turn: Option<Result<String, String>>) -> Reply {
     if answer.is_empty() || passed {
         Reply::Passed
     } else {
-        Reply::Said(crate::cap_middle_text(answer, MAX_ANSWER_CHARS))
+        Reply::Said(crate::cap_middle_text(answer, MAX_ANSWER_CHARS), Vec::new())
     }
 }
 
@@ -190,6 +203,31 @@ pub(crate) async fn one_turn(
     prompt: &str,
     lessons: &[String],
 ) -> Result<String, String> {
+    one_turn_with(
+        archive,
+        teams_root,
+        agent_id,
+        instructions,
+        model,
+        prompt,
+        lessons,
+        None,
+    )
+    .await
+}
+
+/// One turn, recorded as a session of its own, with only `host`'s tools, or none.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn one_turn_with(
+    archive: &EventArchive,
+    teams_root: &Path,
+    agent_id: &str,
+    instructions: &str,
+    model: &str,
+    prompt: &str,
+    lessons: &[String],
+    host: Option<Arc<dyn crate::agent::HostTools>>,
+) -> Result<String, String> {
     let workspace = match crate::control::prepare_workspace(teams_root) {
         Ok(workspace) => workspace,
         Err(error) => {
@@ -200,10 +238,12 @@ pub(crate) async fn one_turn(
     // An agent answering as itself keeps to what it learned (ADR 0078); the reader learned nothing.
     let mut spec = crate::control::ask_spec(workspace);
     spec.lessons = lessons.to_vec();
-    let mut process = AgentRun::spawn(&spec)
-        .map_err(|_| NOT_STARTED.to_owned())?
-        .without_tools()
-        .with_instructions(instructions);
+    let process = AgentRun::spawn(&spec).map_err(|_| NOT_STARTED.to_owned())?;
+    let process = match host {
+        Some(host) => process.with_host_tools(host),
+        None => process.without_tools(),
+    };
+    let mut process = process.with_instructions(instructions);
     let context = TeamSessionContext {
         archive,
         bus: None,
@@ -770,11 +810,12 @@ mod tests {
             &context,
             None,
             &["When greeting, say what you work on.".to_owned()],
+            false,
         )
         .await;
         assert_eq!(
             said,
-            Reply::Said("Hi! I write enterprise RAG briefs.".to_owned())
+            Reply::Said("Hi! I write enterprise RAG briefs.".to_owned(), Vec::new())
         );
         let asked = researcher.requests();
         assert_eq!(asked.len(), 1);
@@ -799,6 +840,7 @@ mod tests {
             &context,
             None,
             &[],
+            false,
         )
         .await;
         assert_eq!(passed, Reply::Passed, "PASS is silence");
@@ -837,6 +879,7 @@ mod tests {
                 &Context::default(),
                 None,
                 &[],
+                false,
             )
             .await
         };
@@ -868,6 +911,7 @@ mod tests {
             &Context::default(),
             None,
             &[],
+            false,
         )
         .await;
         assert_eq!(said, Reply::Failed(NOT_STARTED.to_owned()));
@@ -910,7 +954,7 @@ mod tests {
         }
         assert_eq!(
             reply_of(Some(Ok(" Hello! \n".to_owned()))),
-            Reply::Said("Hello!".to_owned())
+            Reply::Said("Hello!".to_owned(), Vec::new())
         );
     }
 }

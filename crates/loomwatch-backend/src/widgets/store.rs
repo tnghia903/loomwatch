@@ -10,24 +10,29 @@ use sqlx::Row;
 use super::{Kept, Widget};
 use crate::db::Db;
 
-/// Keep `widgets` as `run_id`'s answer's, numbered from 1. A run's widgets are kept once: a second
-/// call changes nothing.
+/// Keep `widgets` as `run_id`'s answer's, numbered from 1, each with the line of the answer it
+/// stands before (`None` at the end). A run's widgets are kept once: a second call changes nothing.
 ///
 /// # Errors
 ///
 /// When the database fails.
-pub(crate) async fn keep(db: &Db, run_id: &str, widgets: &[Widget]) -> Result<(), sqlx::Error> {
-    for (at, widget) in widgets.iter().enumerate() {
+pub(crate) async fn keep(
+    db: &Db,
+    run_id: &str,
+    widgets: &[(Widget, Option<u32>)],
+) -> Result<(), sqlx::Error> {
+    for (at, (widget, line)) in widgets.iter().enumerate() {
         let spec = serde_json::to_string(widget).unwrap_or_else(|_| "{}".to_owned());
         sqlx::query(
-            "INSERT OR IGNORE INTO widgets (run_id, n, kind, title, spec)
-             VALUES ($1, $2, $3, $4, $5)",
+            "INSERT OR IGNORE INTO widgets (run_id, n, kind, title, spec, line)
+             VALUES ($1, $2, $3, $4, $5, $6)",
         )
         .bind(run_id)
         .bind(i64::try_from(at + 1).unwrap_or(i64::MAX))
         .bind(widget.kind())
         .bind(widget.title())
         .bind(spec)
+        .bind(line.map(i64::from))
         .execute(db.writer())
         .await?;
     }
@@ -48,7 +53,7 @@ pub(crate) async fn of_runs(
         return Ok(by_run);
     }
     let rows = sqlx::query(
-        "SELECT run_id, n, spec, state, changed_at FROM widgets
+        "SELECT run_id, n, line, spec, state, changed_at FROM widgets
          WHERE run_id IN (SELECT value FROM json_each($1))
          ORDER BY run_id, n",
     )
@@ -70,7 +75,7 @@ pub(crate) async fn of_runs(
 /// When the database fails.
 pub(crate) async fn one(db: &Db, run_id: &str, n: u32) -> Result<Option<Kept>, sqlx::Error> {
     let row = sqlx::query(
-        "SELECT run_id, n, spec, state, changed_at FROM widgets WHERE run_id = $1 AND n = $2",
+        "SELECT run_id, n, line, spec, state, changed_at FROM widgets WHERE run_id = $1 AND n = $2",
     )
     .bind(run_id)
     .bind(i64::from(n))
@@ -113,9 +118,11 @@ fn decode(row: &sqlx::sqlite::SqliteRow) -> Result<Option<Kept>, sqlx::Error> {
         return Ok(None);
     };
     let n: i64 = row.try_get("n")?;
+    let line: Option<i64> = row.try_get("line")?;
     let state: Option<String> = row.try_get("state")?;
     Ok(Some(Kept {
         n: u32::try_from(n).unwrap_or_default(),
+        line: line.and_then(|line| u32::try_from(line).ok()),
         spec,
         state: state.and_then(|state| serde_json::from_str(&state).ok()),
         changed_at: row.try_get("changed_at")?,

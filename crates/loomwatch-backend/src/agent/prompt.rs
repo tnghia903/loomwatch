@@ -97,11 +97,13 @@ pub(crate) const UNCLEAR: Block = Block::new(
 pub(crate) const WIDGETS: Block = Block::new(
     "system.widgets",
     "- Your answer is the one the person reads, so show it with show_widget whenever one fits, \
-     for a view they take in at a glance and can use: a chart for figures to compare, a \
-     calculator for a sum, a split or a cost they may change, a checklist for things to do, steps \
-     for a process or a how-to, choices for what they may want next. Prefer it to a table, a list \
-     or bars written in text, and show more than one when the answer has more than one of these. \
-     Words alone are for an answer with none of them.",
+     for a view they take in at a glance and can use: a chart for figures to compare, a graph for \
+     figures over time, a calculator for a sum, a split or a cost they may change, a checklist for \
+     things to do, steps for a process or a how-to, choices for what they may want next, marks for \
+     which things pass a test, a flow for how parts connect. Prefer it to a table, a list or bars \
+     written in text, and show more than one when the answer has more than one of these. Put each \
+     where it belongs in your words with the place line it gives you, and say what to notice or \
+     try. Words alone are for an answer with none of them.",
 );
 /// For every agent, last of how it works.
 pub(crate) const FINISH: Block = Block::new(

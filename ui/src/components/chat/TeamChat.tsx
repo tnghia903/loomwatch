@@ -10,7 +10,10 @@ import { nameWithHelpers } from '../../lib/chat/helpers'
 import { clockTime, dayKey, dayLabel, listNames } from '../../lib/chat/format'
 import { destination, withMention, type ChatAgent } from '../../lib/chat/route'
 import { answersDecision, replyOf } from '../../lib/chat/reply'
-import { changeWidget } from '../../lib/widgets/client'
+import { changeNoteWidget, changeWidget } from '../../lib/widgets/client'
+import { partsOf } from '../../lib/widgets/place'
+import { AnswerWidget } from './widgets/AnswerWidgets'
+import type { KeptWidget, WidgetState } from '../../lib/widgets/types'
 import { answerReply, askedPassages, partId, type AskedPassage } from '../../lib/files/passage'
 import { FileReaderContext } from '../../lib/files/reader'
 import { markSeen } from '../../lib/chat/seen'
@@ -496,6 +499,12 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
   const soloAgent = team.solo ? members.find((agent) => agent.id === team.solo) ?? null : null
   // ADR 0114: what each answer's choices sent, read from the message that replied to it.
   const chosenFor = new Map(chat.items.flatMap((item) => (item.kind === 'work' && item.request?.replyTo?.runId ? [[item.request.replyTo.runId, item.request.text.trim()] as const] : [])))
+  // And each quick answer's, by the message it answered and the agent that answered.
+  const chosenOnNote = new Map(chat.items.flatMap((item) => {
+    const asked = item.kind === 'work' ? item.request : item.message
+    const to = asked?.replyTo
+    return asked && to?.messageId?.startsWith('note:') && to.from ? [[`${to.messageId}|${to.from}`, asked.text.trim()] as const] : []
+  }))
   // Only the newest answer's choices can be tapped, and only while nothing is at work.
   const choose = (label: string, reply: ReplyTo) => send(label, soloAgent ? { kind: 'agent', agent: soloAgent.id } : null, false, undefined, replyOf(reply))
   const workingNow = new Set(live.flatMap((run) => run.working ?? []))
@@ -906,7 +915,10 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
                       detailsOpen={detailsRunId === item.run.runId} answerOpen={answerRunId === item.run.runId} recordOpen={recordRunId === undefined ? undefined : recordRunId === item.run.runId} onHandOver={onHandOver} onDetails={onDetails} onOpenAnswer={onOpenAnswer} onRun={chat.applyRun} onBaton={onBaton} onLine={line.onLine} onTryAgain={tryAgain} onContinue={keepGoing}
                       onDecided={() => setDraft('')} onAlwaysAllow={onAlwaysAllow} onOpenFinding={onOpenFinding} onReply={startReply} onShowReplied={showReplied} onReact={chat.react} onUndoLesson={undoLearned} onTellAllLesson={tellAllLearned}
                       onWidgetChange={(runId, n, state) => changeWidget(teamPath, runId, n, state)} onChoose={item.run.runId === newestRun && live.length === 0 && !blocked ? choose : undefined} chosen={chosenFor.get(item.run.runId) ?? null} />
-                  : <TeamNote message={item.message} reactions={item.reactions} lessons={item.lessons} fixFill={fixFill} name={name} hue={(id) => team.hues.get(id) ?? 1} flash={noteFlash?.id === item.message.id ? noteFlash.at : null} onReply={startReply} onShowReplied={showReplied} onStart={() => void startNote(item.message)} onReact={chat.react} onUndoLesson={undoLearned} onTellAllLesson={tellAllLearned} />}
+                  : <TeamNote message={item.message} reactions={item.reactions} lessons={item.lessons} widgets={item.widgets} fixFill={fixFill}
+                      onWidgetChange={(agent, n, state) => changeNoteWidget(teamPath, item.message.id, agent, n, state)}
+                      onChoose={item === chat.items.at(-1) && live.length === 0 && !blocked ? choose : undefined}
+                      chosen={(agent) => chosenOnNote.get(`note:${item.message.id}|${agent}`) ?? null} name={name} hue={(id) => team.hues.get(id) ?? 1} flash={noteFlash?.id === item.message.id ? noteFlash.at : null} onReply={startReply} onShowReplied={showReplied} onStart={() => void startNote(item.message)} onReact={chat.react} onUndoLesson={undoLearned} onTellAllLesson={tellAllLearned} />}
               </Fragment>
             )
           })}
@@ -1099,7 +1111,7 @@ function revealId(runId: string, target: string): string {
  * answer writes back to the agent that gave it, with the answer quoted (ADR 0051), or about the same
  * part of a file when that is what your message asked about (ADR 0077).
  */
-function TeamNote({ message, reactions, lessons, fixFill = null, name, hue, flash = null, onReply, onShowReplied, onStart, onReact, onUndoLesson, onTellAllLesson }: { message: ChatMessage; reactions?: readonly Reaction[]; lessons?: readonly Lesson[]; fixFill?: string | null; name: (id: string) => string; hue: (id: string) => number; flash?: number | null; onReply?: (reply: ReplyTo, to?: string) => void; onShowReplied: (reply: ReplyTo) => (() => void) | undefined; onStart: () => void; onReact?: (anchor: string, target: string, face: Face | null, about?: ReactionAbout) => Promise<void>; onUndoLesson?: (lesson: Lesson) => Promise<void>; onTellAllLesson?: (lesson: Lesson) => Promise<void> }) {
+function TeamNote({ message, reactions, lessons, widgets, fixFill = null, name, hue, flash = null, onReply, onShowReplied, onStart, onReact, onUndoLesson, onTellAllLesson, onWidgetChange, onChoose, chosen }: { message: ChatMessage; reactions?: readonly Reaction[]; lessons?: readonly Lesson[]; widgets?: Readonly<Record<string, KeptWidget[]>>; fixFill?: string | null; name: (id: string) => string; hue: (id: string) => number; flash?: number | null; onReply?: (reply: ReplyTo, to?: string) => void; onShowReplied: (reply: ReplyTo) => (() => void) | undefined; onStart: () => void; onReact?: (anchor: string, target: string, face: Face | null, about?: ReactionAbout) => Promise<void>; onUndoLesson?: (lesson: Lesson) => Promise<void>; onTellAllLesson?: (lesson: Lesson) => Promise<void>; onWidgetChange?: (agent: string, n: number, state: WidgetState) => Promise<KeptWidget>; onChoose?: (label: string, reply: ReplyTo) => Promise<boolean> | void; chosen?: (agent: string) => string | null }) {
   const [starting, setStarting] = useState(false)
   const appear = useAppear()
   // Found by a search and opened (ADR 0081): it comes into view, ringed for a moment.
@@ -1139,12 +1151,34 @@ function TeamNote({ message, reactions, lessons, fixFill = null, name, hue, flas
             </div>)}
           </div>
         </li>
-        {answers.said.map((said) => (
+        {answers.said.map((said) => {
+          // ADR 0114: the widgets in this answer, each where its words placed it, the rest after them.
+          const kept = widgets?.[said.from] ?? []
+          const placed = kept.length > 0 ? partsOf(said.text, kept) : null
+          const reply = answerReply(message.replyTo, { runId: null, messageId: `note:${message.id}`, from: said.from, to: null, kind: 'answer', text: said.text })
+          const draw = (one: KeptWidget) => (
+            <AnswerWidget kept={one} onChange={(n, state) => onWidgetChange ? onWidgetChange(said.from, n, state) : Promise.reject(new Error('not kept'))}
+              onChoose={onChoose ? (label) => onChoose(label, reply) : undefined} chosen={chosen?.(said.from) ?? null} />
+          )
+          const inWords = placed !== null && placed.parts.length > 1
+          return (
           <li key={`said-${said.from}`} className="chat-msg tc-answer tc-said-back tc-appear">
             {face(said.from)}
             <div className="chat-stack">
               <div className={`chat-meta hue-${hue(said.from)}`}><span className="chat-name">{name(said.from)}</span><span className="tc-to">to you</span><time>{clockTime(said.at)}</time></div>
-              {reactOn(targets.reply(said.from), `${name(said.from)}'s answer`)(<div className="chat-bubble"><div className="chat-text"><SaidText text={said.text} /></div></div>)}
+              {reactOn(targets.reply(said.from), `${name(said.from)}'s answer`)(
+                <div className={`chat-bubble${inWords ? ' wg-in' : ''}`}>
+                  {inWords
+                    ? placed.parts.map((part, at) => (
+                        <Fragment key={at}>
+                          {part.text.trim() && <div className={`chat-text${at < placed.parts.length - 1 ? ' wg-before' : ''}`}><SaidText text={part.text} /></div>}
+                          {part.widgets.map((one) => <div key={one.n} className="wg-here">{draw(one)}</div>)}
+                        </Fragment>
+                      ))
+                    : <div className="chat-text"><SaidText text={said.text} /></div>}
+                </div>,
+              )}
+              {placed && placed.end.length > 0 && <div className="wg-list">{placed.end.map((one) => <Fragment key={one.n}>{draw(one)}</Fragment>)}</div>}
               {onReply && said.text.trim() && (
                 <p className="chat-under">
                   <button type="button" className="chat-reply" aria-label={`Reply to ${name(said.from)}'s answer`}
@@ -1155,7 +1189,8 @@ function TeamNote({ message, reactions, lessons, fixFill = null, name, hue, flas
               )}
             </div>
           </li>
-        ))}
+          )
+        })}
         {couldNotAnswer(answers.failed ?? []).map(({ from, error }) => (
           <li key={`failed-${from.join(' ')}`} className="tc-said-failed">
             <Appearing className="tc-stopped bad" role="status">

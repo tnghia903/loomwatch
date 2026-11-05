@@ -6,12 +6,18 @@
 //! reply became the answer are kept with it ([`of_answer`], [`store`]); what the person ticks or
 //! changes is kept beside them, and the next run's conversation says so ([`showed`], [`changes`]).
 //!
-//! Five kinds, drawn by the app (`ui/src/components/chat/widgets/`): choices the person taps to
+//! Eight kinds, drawn by the app (`ui/src/components/chat/widgets/`): choices the person taps to
 //! reply, a checklist they tick, a calculator whose results `LoomWatch` works out as they change its
-//! inputs ([`formula`]), steps they tap through, and a chart whose bars `LoomWatch` draws to scale
-//! from the figures the agent gives. The agent never draws or writes markup.
+//! inputs ([`formula`]), steps they tap through, and four to look at: a chart whose bars `LoomWatch`
+//! draws to scale from the figures the agent gives, a graph of bars or a line over labels, a row of
+//! things marked yes or no, and a flow of boxes and arrows. The agent never draws or writes markup.
+//!
+//! Each widget is told a place line, `{{widget N}}`, that the agent writes on its own line where the
+//! widget belongs in its answer. When the run ends the line is taken out of the answer's words and
+//! the widget keeps the line it stood before ([`place`]), so the words read whole everywhere else.
 
 pub(crate) mod formula;
+pub(crate) mod host;
 pub(crate) mod store;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -46,15 +52,28 @@ pub(crate) mod limits {
     pub(crate) const ITEMS: (usize, usize) = (1, 20);
     pub(crate) const ITEM_CHARS: usize = 160;
     pub(crate) const NOTE_CHARS: usize = 24;
-    pub(crate) const INPUTS: (usize, usize) = (1, 8);
+    pub(crate) const INPUTS: (usize, usize) = (1, 12);
     pub(crate) const RESULTS: (usize, usize) = (1, 4);
     pub(crate) const LABEL_CHARS: usize = 60;
     pub(crate) const UNIT_CHARS: usize = 12;
     pub(crate) const ID_CHARS: usize = 24;
+    /// The words, and formulas, of the line under a result.
+    pub(crate) const RESULT_NOTE_CHARS: usize = 80;
+    pub(crate) const PRESETS: (usize, usize) = (0, 3);
     pub(crate) const STEPS: (usize, usize) = (2, 8);
     pub(crate) const STEP_LABEL_CHARS: usize = 40;
     pub(crate) const STEP_CHARS: usize = 320;
     pub(crate) const BARS: (usize, usize) = (2, 12);
+    pub(crate) const CELLS: (usize, usize) = (1, 12);
+    pub(crate) const CELL_CHARS: usize = 24;
+    pub(crate) const FACTS: (usize, usize) = (0, 3);
+    pub(crate) const FACT_CHARS: usize = 80;
+    pub(crate) const BOXES: (usize, usize) = (2, 8);
+    pub(crate) const BOX_LABEL_CHARS: usize = 40;
+    pub(crate) const BOX_NOTE_CHARS: usize = 60;
+    pub(crate) const POINTS: (usize, usize) = (2, 24);
+    pub(crate) const POINT_CHARS: usize = 16;
+    pub(crate) const SERIES: (usize, usize) = (1, 3);
     /// What the next run's conversation says of the person's changes under one answer.
     pub(crate) const CHANGES_CHARS: usize = 400;
 }
@@ -75,6 +94,9 @@ pub(crate) enum Widget {
         title: String,
         inputs: Vec<Input>,
         results: Vec<Figure>,
+        /// Buttons that set some inputs to a case worth trying.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        presets: Vec<Preset>,
     },
     Steps {
         title: String,
@@ -86,6 +108,34 @@ pub(crate) enum Widget {
     Chart {
         title: String,
         bars: Vec<Bar>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        unit: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        prefix: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        decimals: Option<u8>,
+    },
+    /// A row of things, each marked yes, no or neither, with facts under it. To look at.
+    Marks {
+        title: String,
+        cells: Vec<Cell>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        facts: Vec<String>,
+    },
+    /// Boxes joined by arrows, in order. To look at.
+    Flow {
+        title: String,
+        boxes: Vec<FlowBox>,
+        #[serde(default, skip_serializing_if = "is_false")]
+        repeats: bool,
+    },
+    /// A graph: bars or a line over labelled points, up to three series. To look at; tapping a
+    /// point reads its values.
+    Graph {
+        title: String,
+        style: GraphStyle,
+        labels: Vec<String>,
+        series: Vec<Series>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         unit: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -134,6 +184,10 @@ pub(crate) struct Input {
     pub(crate) max: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) step: Option<f64>,
+    /// Switches next to each other with the same group are drawn as one row of boxes to tap,
+    /// under the group's name, each box showing its switch's label.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) group: Option<String>,
 }
 
 impl Input {
@@ -154,6 +208,18 @@ pub(crate) struct Figure {
     pub(crate) prefix: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) decimals: Option<u8>,
+    /// A short line under the figure saying why, its formulas in braces worked out as the inputs
+    /// change: "{found} of 3 found".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) note: Option<String>,
+}
+
+/// A calculator's button that sets some inputs to a case worth trying.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct Preset {
+    pub(crate) label: String,
+    /// Input id → a number, or true or false for a switch.
+    pub(crate) values: serde_json::Map<String, Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -171,6 +237,45 @@ pub(crate) struct Bar {
     pub(crate) note: Option<String>,
 }
 
+/// One thing in a row of marks.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct Cell {
+    pub(crate) label: String,
+    pub(crate) mark: Mark,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) note: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum Mark {
+    Yes,
+    No,
+    Neither,
+}
+
+/// One box in a flow.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct FlowBox {
+    pub(crate) label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) note: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum GraphStyle {
+    Bar,
+    Line,
+}
+
+/// One series of a graph: a value for each of its labels.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct Series {
+    pub(crate) label: String,
+    pub(crate) values: Vec<f64>,
+}
+
 impl Widget {
     pub(crate) fn title(&self) -> &str {
         match self {
@@ -178,7 +283,10 @@ impl Widget {
             | Self::Checklist { title, .. }
             | Self::Calculator { title, .. }
             | Self::Steps { title, .. }
-            | Self::Chart { title, .. } => title,
+            | Self::Chart { title, .. }
+            | Self::Marks { title, .. }
+            | Self::Flow { title, .. }
+            | Self::Graph { title, .. } => title,
         }
     }
 
@@ -189,6 +297,9 @@ impl Widget {
             Self::Calculator { .. } => "calculator",
             Self::Steps { .. } => "steps",
             Self::Chart { .. } => "chart",
+            Self::Marks { .. } => "marks",
+            Self::Flow { .. } => "flow",
+            Self::Graph { .. } => "graph",
         }
     }
 
@@ -200,6 +311,16 @@ impl Widget {
             Self::Calculator { .. } => "a calculator",
             Self::Steps { .. } => "steps",
             Self::Chart { .. } => "a chart",
+            Self::Marks { .. } => "a row of marks",
+            Self::Flow { .. } => "a flow",
+            Self::Graph {
+                style: GraphStyle::Bar,
+                ..
+            } => "a bar graph",
+            Self::Graph {
+                style: GraphStyle::Line,
+                ..
+            } => "a line graph",
         };
         format!("{what} \"{}\"", self.title())
     }
@@ -237,26 +358,19 @@ pub(crate) fn read(arguments: &Value) -> Result<Widget, String> {
             })?,
             title,
         },
-        "calculator" => {
-            let inputs = list(arguments, "inputs", limits::INPUTS, read_input)?;
-            let results = list(arguments, "results", limits::RESULTS, |figure| {
-                Ok(Figure {
-                    id: id(figure)?,
-                    label: text(figure, "label", 1, limits::LABEL_CHARS)?,
-                    formula: text(figure, "formula", 1, formula::MAX_FORMULA_CHARS)?,
-                    unit: optional_text(figure, "unit", limits::UNIT_CHARS)?,
-                    prefix: optional_text(figure, "prefix", limits::UNIT_CHARS)?,
-                    decimals: decimals(figure)?,
+        "calculator" => read_calculator(arguments, title)?,
+        "marks" => read_marks(arguments, title)?,
+        "flow" => Widget::Flow {
+            boxes: list(arguments, "boxes", limits::BOXES, |each| {
+                Ok(FlowBox {
+                    label: text(each, "label", 1, limits::BOX_LABEL_CHARS)?,
+                    note: optional_text(each, "note", limits::BOX_NOTE_CHARS)?,
                 })
-            })?;
-            let widget = Widget::Calculator {
-                title,
-                inputs,
-                results,
-            };
-            check_calculator(&widget)?;
-            widget
-        }
+            })?,
+            repeats: repeats(arguments)?,
+            title,
+        },
+        "graph" => read_graph(arguments, title)?,
         "steps" => Widget::Steps {
             steps: list(arguments, "steps", limits::STEPS, |step| {
                 Ok(Step {
@@ -264,11 +378,7 @@ pub(crate) fn read(arguments: &Value) -> Result<Widget, String> {
                     text: text(step, "text", 1, limits::STEP_CHARS)?,
                 })
             })?,
-            repeats: match arguments.get("repeats") {
-                None | Some(Value::Null) => false,
-                Some(Value::Bool(repeats)) => *repeats,
-                Some(_) => return Err("repeats is true or false".to_owned()),
-            },
+            repeats: repeats(arguments)?,
             title,
         },
         "chart" => Widget::Chart {
@@ -286,12 +396,153 @@ pub(crate) fn read(arguments: &Value) -> Result<Widget, String> {
         },
         other => {
             return Err(format!(
-                "kind \"{other}\" isn't a widget: use choices, checklist, calculator, steps or \
-                 chart"
+                "kind \"{other}\" isn't a widget: use choices, checklist, calculator, steps, \
+                 chart, graph, marks or flow"
             ));
         }
     };
     Ok(widget)
+}
+
+/// A calculator, read and checked.
+fn read_calculator(arguments: &Value, title: String) -> Result<Widget, String> {
+    let inputs = list(arguments, "inputs", limits::INPUTS, read_input)?;
+    let results = list(arguments, "results", limits::RESULTS, |figure| {
+        Ok(Figure {
+            id: id(figure)?,
+            label: text(figure, "label", 1, limits::LABEL_CHARS)?,
+            formula: text(figure, "formula", 1, formula::MAX_FORMULA_CHARS)?,
+            unit: optional_text(figure, "unit", limits::UNIT_CHARS)?,
+            prefix: optional_text(figure, "prefix", limits::UNIT_CHARS)?,
+            decimals: decimals(figure)?,
+            note: optional_text(figure, "note", limits::RESULT_NOTE_CHARS)?,
+        })
+    })?;
+    let presets = match arguments.get("presets") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(_) => list(arguments, "presets", limits::PRESETS, |preset| {
+            Ok(Preset {
+                label: text(preset, "label", 1, limits::LABEL_CHARS)?,
+                values: preset
+                    .get("values")
+                    .and_then(Value::as_object)
+                    .filter(|values| !values.is_empty())
+                    .cloned()
+                    .ok_or("values is missing: give input id → value for each input it sets")?,
+            })
+        })?,
+    };
+    let widget = Widget::Calculator {
+        title,
+        inputs,
+        results,
+        presets,
+    };
+    check_calculator(&widget)?;
+    Ok(widget)
+}
+
+/// A row of marks, read and checked.
+fn read_marks(arguments: &Value, title: String) -> Result<Widget, String> {
+    Ok(Widget::Marks {
+        cells: list(arguments, "cells", limits::CELLS, |cell| {
+            Ok(Cell {
+                label: text(cell, "label", 1, limits::CELL_CHARS)?,
+                mark: match cell.get("mark").and_then(Value::as_str) {
+                    Some("yes") => Mark::Yes,
+                    Some("no") => Mark::No,
+                    Some("neither") => Mark::Neither,
+                    _ => return Err("mark is yes, no or neither".to_owned()),
+                },
+                note: optional_text(cell, "note", limits::CELL_CHARS)?,
+            })
+        })?,
+        facts: match arguments.get("facts") {
+            None | Some(Value::Null) => Vec::new(),
+            Some(_) => list(arguments, "facts", limits::FACTS, |fact| {
+                let Some(fact) = fact.as_str().map(str::trim).filter(|fact| !fact.is_empty())
+                else {
+                    return Err("a fact is a few words".to_owned());
+                };
+                let length = fact.chars().count();
+                if length > limits::FACT_CHARS {
+                    return Err(format!(
+                        "a fact is {length} characters; keep it to {}",
+                        limits::FACT_CHARS
+                    ));
+                }
+                Ok(fact.to_owned())
+            })?,
+        },
+        title,
+    })
+}
+
+fn repeats(arguments: &Value) -> Result<bool, String> {
+    match arguments.get("repeats") {
+        None | Some(Value::Null) => Ok(false),
+        Some(Value::Bool(repeats)) => Ok(*repeats),
+        Some(_) => Err("repeats is true or false".to_owned()),
+    }
+}
+
+fn read_graph(arguments: &Value, title: String) -> Result<Widget, String> {
+    let style = match arguments.get("style").and_then(Value::as_str) {
+        Some("bar") => GraphStyle::Bar,
+        Some("line") => GraphStyle::Line,
+        _ => return Err("style is bar or line".to_owned()),
+    };
+    let labels = list(arguments, "labels", limits::POINTS, |label| {
+        let Some(label) = label
+            .as_str()
+            .map(str::trim)
+            .filter(|label| !label.is_empty())
+        else {
+            return Err("a label is a word or two".to_owned());
+        };
+        let length = label.chars().count();
+        if length > limits::POINT_CHARS {
+            return Err(format!(
+                "a label is {length} characters; keep it to {}",
+                limits::POINT_CHARS
+            ));
+        }
+        Ok(label.to_owned())
+    })?;
+    let points = labels.len();
+    let series = list(arguments, "series", limits::SERIES, |series| {
+        let values = series
+            .get("values")
+            .and_then(Value::as_array)
+            .ok_or_else(|| format!("values is missing: give {points} numbers, one per label"))?;
+        if values.len() != points {
+            return Err(format!(
+                "values has {}; give {points}, one per label",
+                values.len()
+            ));
+        }
+        Ok(Series {
+            label: text(series, "label", 1, limits::LABEL_CHARS)?,
+            values: values
+                .iter()
+                .map(|value| {
+                    value
+                        .as_f64()
+                        .filter(|value| value.is_finite())
+                        .ok_or_else(|| "each value is a number".to_owned())
+                })
+                .collect::<Result<_, _>>()?,
+        })
+    })?;
+    Ok(Widget::Graph {
+        title,
+        style,
+        labels,
+        series,
+        unit: optional_text(arguments, "unit", limits::UNIT_CHARS)?,
+        prefix: optional_text(arguments, "prefix", limits::UNIT_CHARS)?,
+        decimals: decimals(arguments)?,
+    })
 }
 
 /// `decimals`: the places a figure is shown with, from 0 to [`formula::MAX_DECIMALS`].
@@ -401,7 +652,11 @@ fn read_input(value: &Value) -> Result<Input, String> {
         min: number(value, "min")?,
         max: number(value, "max")?,
         step: number(value, "step")?,
+        group: optional_text(value, "group", limits::LABEL_CHARS)?,
     };
+    if input.group.is_some() && input.on.is_none() {
+        return Err("group is for switches; a number stands on its own".to_owned());
+    }
     match (input.start, input.on) {
         (Some(_), Some(_)) => {
             return Err("give start for a number or on for a switch, not both".to_owned());
@@ -427,11 +682,15 @@ fn read_input(value: &Value) -> Result<Input, String> {
     Ok(input)
 }
 
-/// Every id once, every formula read, reading only inputs and the results above it, and worked
-/// out with the starting values.
+/// Every id once, a group's switches next to each other, every formula and note read, reading
+/// only inputs and the results above it (a note may read its own result too), every preset a
+/// value its inputs take, and all worked out with the starting values and with each preset.
 fn check_calculator(widget: &Widget) -> Result<(), String> {
     let Widget::Calculator {
-        inputs, results, ..
+        inputs,
+        results,
+        presets,
+        ..
     } = widget
     else {
         return Ok(());
@@ -442,26 +701,60 @@ fn check_calculator(widget: &Widget) -> Result<(), String> {
             return Err(format!("id \"{id}\" is used twice"));
         }
     }
-    for figure in results {
-        let read = formula::parse(&figure.formula)
-            .map_err(|error| format!("result \"{}\": {error}", figure.label))?;
-        for name in read.names() {
+    let mut groups: Vec<&str> = Vec::new();
+    for group in inputs.iter().filter_map(|input| input.group.as_deref()) {
+        if groups.last() != Some(&group) {
+            if groups.contains(&group) {
+                return Err(format!(
+                    "group \"{group}\": put its switches next to each other"
+                ));
+            }
+            groups.push(group);
+        }
+    }
+    let reads_known = |label: &str, names: Vec<String>, known: &BTreeSet<&str>, what: &str| {
+        for name in names {
             if !known.contains(name.as_str()) {
                 let can = known.iter().copied().collect::<Vec<_>>().join(", ");
                 return Err(format!(
-                    "result \"{}\" reads \"{name}\", which isn't an input or a result above it; \
-                     it can read {can}",
-                    figure.label
+                    "result \"{label}\"{what} reads \"{name}\", which isn't an input or a result \
+                     above it; it can read {can}"
                 ));
             }
         }
+        Ok(())
+    };
+    for figure in results {
+        let read = formula::parse(&figure.formula)
+            .map_err(|error| format!("result \"{}\": {error}", figure.label))?;
+        reads_known(&figure.label, read.names(), &known, "")?;
         if !known.insert(figure.id.as_str()) {
             return Err(format!("id \"{}\" is used twice", figure.id));
         }
+        if let Some(note) = &figure.note {
+            let read = formula::parse_note(note)
+                .map_err(|error| format!("result \"{}\"'s note: {error}", figure.label))?;
+            reads_known(&figure.label, read.names(), &known, "'s note")?;
+        }
+    }
+    for preset in presets {
+        read_state(widget, &json!({"values": preset.values}))
+            .map_err(|error| format!("preset \"{}\": {error}", preset.label))?;
     }
     work_out(widget, None)
         .map(|_| ())
-        .map_err(|(label, error)| format!("result \"{label}\" with the starting values: {error}"))
+        .map_err(|(label, error)| {
+            format!("result \"{label}\" with the starting values: {error}")
+        })?;
+    for preset in presets {
+        work_out(widget, Some(&json!({"values": preset.values}))).map_err(|(label, error)| {
+            format!(
+                "result \"{label}\" with preset \"{}\": {error}",
+                preset.label
+            )
+        })?;
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -490,12 +783,20 @@ fn values_of(inputs: &[Input], state: Option<&Value>) -> BTreeMap<String, f64> {
         .collect()
 }
 
-/// A calculator's results with its inputs as in `state` (the starting values when `None`), each
-/// as `(label, value)`; or the label of the first that can't be worked out, and why.
+/// One result of a calculator, worked out.
+struct Worked {
+    label: String,
+    value: f64,
+    /// The line under it, filled in.
+    note: Option<String>,
+}
+
+/// A calculator's results with its inputs as in `state` (the starting values when `None`); or the
+/// label of the first that can't be worked out, and why.
 fn work_out(
     widget: &Widget,
     state: Option<&Value>,
-) -> Result<Vec<(String, f64)>, (String, formula::FormulaError)> {
+) -> Result<Vec<Worked>, (String, formula::FormulaError)> {
     let Widget::Calculator {
         inputs, results, ..
     } = widget
@@ -508,7 +809,17 @@ fn work_out(
         let value = formula::evaluate(&figure.formula, &values)
             .map_err(|error| (figure.label.clone(), error))?;
         values.insert(figure.id.clone(), value);
-        out.push((figure.label.clone(), value));
+        let note = figure
+            .note
+            .as_deref()
+            .map(|note| formula::parse_note(note).and_then(|note| note.fill(&values)))
+            .transpose()
+            .map_err(|error| (figure.label.clone(), error))?;
+        out.push(Worked {
+            label: figure.label.clone(),
+            value,
+            note,
+        });
     }
     Ok(out)
 }
@@ -556,7 +867,8 @@ fn written_around(number: &str, prefix: Option<&str>, unit: Option<&str>) -> Str
     )
 }
 
-/// "Each family pays = 135,000 ₫; Total = …": a calculator's results as `state` gives them.
+/// "Each family pays = 135,000 ₫; Found = 2 (2 of 3 found)": a calculator's results as `state`
+/// gives them, each with its note.
 fn results_line(widget: &Widget, state: Option<&Value>) -> Option<String> {
     let Widget::Calculator { results, .. } = widget else {
         return None;
@@ -566,20 +878,40 @@ fn results_line(widget: &Widget, state: Option<&Value>) -> Option<String> {
         results
             .iter()
             .zip(worked)
-            .map(|(figure, (label, value))| {
-                format!(
-                    "{label} = {}",
+            .map(|(figure, worked)| {
+                let mut line = format!(
+                    "{} = {}",
+                    worked.label,
                     written(
-                        value,
+                        worked.value,
                         figure.prefix.as_deref(),
                         figure.unit.as_deref(),
                         figure.decimals
                     )
-                )
+                );
+                if let Some(note) = worked.note {
+                    let _ = write!(line, " ({note})");
+                }
+                line
             })
             .collect::<Vec<_>>()
             .join("; "),
     )
+}
+
+/// Each preset of a calculator with what its results would be: "Try moving relevant documents to
+/// the top → RR@5 = 1 (First at #1)", for the agent to write about it.
+fn preset_lines(widget: &Widget) -> Vec<String> {
+    let Widget::Calculator { presets, .. } = widget else {
+        return Vec::new();
+    };
+    presets
+        .iter()
+        .filter_map(|preset| {
+            let results = results_line(widget, Some(&json!({"values": preset.values})))?;
+            Some(format!("{} → {results}", preset.label))
+        })
+        .collect()
 }
 
 /// "Democrats 51 seats; Republicans 49 seats": a chart's figures as the person reads them.
@@ -616,23 +948,44 @@ fn bars_line(widget: &Widget) -> Option<String> {
 /// message as a tool call are left out of its answer.
 pub(crate) const SHOW_WIDGET: Block = Block::new(
     "bus.show_widget",
-    "Show your answer under your words, drawn by LoomWatch, so the person sees it at a glance and \
-     can use it: a chart whose bars LoomWatch draws to scale from figures you give, a calculator \
-     whose results LoomWatch works out as they change its inputs, a checklist they tick, steps they \
-     tap through one at a time, or choices they tap to reply. Use one whenever the answer has \
-     figures to compare (chart), a sum, a split or a cost they may change (calculator), things to \
-     do (checklist), a process or a how-to (steps), or a choice of what to do next (choices), and \
-     prefer it to a table, a list or bars written in text, or a page written for it. Show up to 4 \
-     when the answer has more than one of these. Words alone are for an answer with none of them, \
-     such as a short fact. Call it before you write your answer. Then write the answer in words: give the main result in a sentence, since \
-     a copy of the answer and the phone show only your words, and call what you showed by what it \
-     is, such as \"the calculator below\".",
+    "Show your answer with what LoomWatch draws, so the person sees it at a glance and can use \
+     it: a chart whose bars LoomWatch draws to scale from figures you give, a graph of bars or a \
+     line over labels such as months, a calculator whose results LoomWatch works out as they \
+     change its inputs, a checklist they tick, steps they tap through one at a time, choices they \
+     tap to reply, a row of things marked yes or no, or a flow of boxes and arrows. Use one \
+     whenever the answer has figures to compare (chart), figures that change over time or several \
+     series (graph), a sum, a split or a cost they may change (calculator), things to do \
+     (checklist), a process or a how-to (steps), a choice of what to do next (choices), which of \
+     several things pass a test (marks), or how parts connect (flow), and prefer it to a table, a \
+     list or bars written in text, or a page written for it. Show up to 4 when the answer has more \
+     than one of these. Words alone are for an answer with none of them, such as a short fact. \
+     Call it before you write your answer, once for each, then put each where it belongs with the \
+     place line it gives you, after the words that lead to it, and say in words what to notice or \
+     try. Give the main result in words too, since a copy of the answer shows only your words.",
 );
 
 /// `show_widget`'s `kind`.
 pub(crate) const SHOW_WIDGET_KIND: Block = Block::new(
     "bus.show_widget.kind",
-    "choices, checklist, calculator, steps or chart. Fill in only that kind's fields.",
+    "choices, checklist, calculator, steps, chart, graph, marks or flow. Fill in only that kind's \
+     fields.",
+);
+
+/// A calculator result's `note`.
+pub(crate) const SHOW_WIDGET_NOTE: Block = Block::new(
+    "bus.show_widget.note",
+    "A few words under the figure saying why, with formulas in braces that LoomWatch works out as \
+     the inputs change, such as \"{found} of 3 found\" or \"First at #{if(d1, 1, if(d2, 2, 3))}\". \
+     A note may read the inputs, this result and the results above it.",
+);
+
+/// A calculator's `presets`.
+pub(crate) const SHOW_WIDGET_PRESETS: Block = Block::new(
+    "bus.show_widget.presets",
+    "calculator: up to 3 buttons that set some inputs to a case worth trying, such as \"Try \
+     moving the relevant ones to the top\". A button sets the inputs it names and puts the rest \
+     back to their starting values. You are told each one's results, so your words can say what \
+     changes.",
 );
 
 /// `show_widget`'s `options`.
@@ -662,9 +1015,10 @@ pub(crate) const SHOW_WIDGET_BARS: Block = Block::new(
 /// What `show_widget` answers with, beside a calculator's results.
 pub(crate) const SHOW_WIDGET_SHOWN: Block = Block::new(
     "bus.show_widget.shown",
-    "It shows under your answer. Now write your answer in words: the main result in a sentence, \
-     and what you showed called by what it is, without repeating all of it. Up to 4 show under one \
-     answer.",
+    "Now write your answer in words. Put the place line on a line of its own where this belongs, \
+     after the words that lead to it; LoomWatch draws it there and takes the line out of your \
+     words. Without it, it shows at the end of your answer. Give the main result in words and say \
+     what to notice or try, without repeating all of it. Up to 4 show with one answer.",
 );
 
 /// The tool, as the Team Bus offers it. One schema literal, read top to bottom.
@@ -685,7 +1039,7 @@ pub(crate) fn tool_definition() -> Value {
                 "kind": {
                     "type": "string",
                     "description": SHOW_WIDGET_KIND.text(),
-                    "enum": ["choices", "checklist", "calculator", "steps", "chart"]
+                    "enum": ["choices", "checklist", "calculator", "steps", "chart", "graph", "marks", "flow"]
                 },
                 "title": {
                     "type": "string",
@@ -722,7 +1076,7 @@ pub(crate) fn tool_definition() -> Value {
                 },
                 "inputs": {
                     "type": "array",
-                    "description": "calculator: up to 8 values the person can change. A number has start, and may have unit, prefix, min, max and step; a switch has on instead",
+                    "description": "calculator: up to 12 values the person can change. A number has start, and may have unit, prefix, min, max and step; a switch has on instead",
                     "maxItems": limits::INPUTS.1,
                     "items": {
                         "type": "object",
@@ -735,7 +1089,8 @@ pub(crate) fn tool_definition() -> Value {
                             "prefix": prefix,
                             "min": {"type": "number", "description": "The least it may be"},
                             "max": {"type": "number", "description": "The most it may be"},
-                            "step": {"type": "number", "description": "How much one press changes it"}
+                            "step": {"type": "number", "description": "How much one press changes it"},
+                            "group": {"type": "string", "description": "Switches next to each other with the same group show as one row of boxes to tap, under the group's name, each box showing its label: give them short labels, such as #1 or Mon"}
                         },
                         "required": ["id", "label"],
                         "additionalProperties": false
@@ -753,9 +1108,24 @@ pub(crate) fn tool_definition() -> Value {
                             "formula": {"type": "string", "description": SHOW_WIDGET_FORMULA.text(), "minLength": 1},
                             "unit": unit,
                             "prefix": prefix,
-                            "decimals": {"type": "integer", "description": "Decimal places shown; without it, up to 2", "minimum": 0, "maximum": formula::MAX_DECIMALS}
+                            "decimals": {"type": "integer", "description": "Decimal places shown; without it, up to 2", "minimum": 0, "maximum": formula::MAX_DECIMALS},
+                            "note": {"type": "string", "description": SHOW_WIDGET_NOTE.text()}
                         },
                         "required": ["id", "label", "formula"],
+                        "additionalProperties": false
+                    }
+                },
+                "presets": {
+                    "type": "array",
+                    "description": SHOW_WIDGET_PRESETS.text(),
+                    "maxItems": limits::PRESETS.1,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "label": {"type": "string", "description": "What the button says", "minLength": 1},
+                            "values": {"type": "object", "description": "Input id: a number, or true or false for a switch"}
+                        },
+                        "required": ["label", "values"],
                         "additionalProperties": false
                     }
                 },
@@ -773,7 +1143,7 @@ pub(crate) fn tool_definition() -> Value {
                         "additionalProperties": false
                     }
                 },
-                "repeats": {"type": "boolean", "description": "steps: true when the last step leads back to the first, as in a cycle"},
+                "repeats": {"type": "boolean", "description": "steps or flow: true when the last leads back to the first, as in a cycle"},
                 "bars": {
                     "type": "array",
                     "description": SHOW_WIDGET_BARS.text(),
@@ -789,9 +1159,65 @@ pub(crate) fn tool_definition() -> Value {
                         "additionalProperties": false
                     }
                 },
-                "unit": {"type": "string", "description": "chart: written after every figure, such as seats, % or km"},
-                "prefix": {"type": "string", "description": "chart: written before every figure, such as $"},
-                "decimals": {"type": "integer", "description": "chart: decimal places shown; without it, up to 2", "minimum": 0, "maximum": formula::MAX_DECIMALS}
+                "style": {"type": "string", "description": "graph: bars side by side, or a line over time", "enum": ["bar", "line"]},
+                "labels": {
+                    "type": "array",
+                    "description": "graph: 2 to 24 labels along the bottom, such as months",
+                    "maxItems": limits::POINTS.1,
+                    "items": {"type": "string"}
+                },
+                "series": {
+                    "type": "array",
+                    "description": "graph: 1 to 3 series, each a value for every label",
+                    "maxItems": limits::SERIES.1,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "label": label,
+                            "values": {"type": "array", "items": {"type": "number"}}
+                        },
+                        "required": ["label", "values"],
+                        "additionalProperties": false
+                    }
+                },
+                "cells": {
+                    "type": "array",
+                    "description": "marks: 1 to 12 things in a row, each marked, such as which results were relevant or which days are free",
+                    "maxItems": limits::CELLS.1,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "label": {"type": "string", "description": "A word or two, such as #1 or Mon", "minLength": 1},
+                            "mark": {"type": "string", "enum": ["yes", "no", "neither"]},
+                            "note": {"type": "string", "description": "Only what the mark doesn't say, such as 0.82 or 9–11 am; leave it out when the mark says it all"}
+                        },
+                        "required": ["label", "mark"],
+                        "additionalProperties": false
+                    }
+                },
+                "facts": {
+                    "type": "array",
+                    "description": "marks: up to 3 short facts under the row, such as \"2 of 3 relevant found\"",
+                    "maxItems": limits::FACTS.1,
+                    "items": {"type": "string"}
+                },
+                "boxes": {
+                    "type": "array",
+                    "description": "flow: 2 to 8 boxes in order, joined by arrows, such as the parts a request passes through",
+                    "maxItems": limits::BOXES.1,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "label": {"type": "string", "description": "A word or two", "minLength": 1},
+                            "note": {"type": "string", "description": "A few words under it"}
+                        },
+                        "required": ["label"],
+                        "additionalProperties": false
+                    }
+                },
+                "unit": {"type": "string", "description": "chart or graph: written after every figure, such as seats, % or km"},
+                "prefix": {"type": "string", "description": "chart or graph: written before every figure, such as $"},
+                "decimals": {"type": "integer", "description": "chart or graph: decimal places shown; without it, up to 2", "minimum": 0, "maximum": formula::MAX_DECIMALS}
             },
             "required": ["kind", "title"],
             "additionalProperties": false
@@ -799,12 +1225,17 @@ pub(crate) fn tool_definition() -> Value {
     })
 }
 
-/// What the agent is told when its widget is shown: what it is, a calculator's results with the
-/// starting values, and to write the answer now.
-pub(crate) fn shown(widget: &Widget) -> Value {
-    let mut out = json!({"shown": widget.named()});
+/// What the agent is told when its widget is shown: what it is, the line that places it, a
+/// calculator's results with the starting values and with each preset, and to write the answer
+/// now. `place` counts the widgets this agent's session has shown, from 1.
+pub(crate) fn shown(widget: &Widget, place: u32) -> Value {
+    let mut out = json!({"shown": widget.named(), "place": place_line(place)});
     if let Some(results) = results_line(widget, None) {
         out["results"] = json!(results);
+    }
+    let presets = preset_lines(widget);
+    if !presets.is_empty() {
+        out["presets"] = json!(presets);
     }
     if let Some(bars) = bars_line(widget) {
         out["bars"] = json!(bars);
@@ -813,9 +1244,147 @@ pub(crate) fn shown(widget: &Widget) -> Value {
     out
 }
 
+/// `{{widget 3}}`: the line an agent writes where its third widget belongs.
+pub(crate) fn place_line(place: u32) -> String {
+    format!("{{{{widget {place}}}}}")
+}
+
+/// The number in a place line, read loosely (`{{ Widget 3 }}`), when `text` is one.
+fn place_of(text: &str) -> Option<u32> {
+    let inside = text.trim().strip_prefix("{{")?.strip_suffix("}}")?.trim();
+    let (word, number) = inside.split_once(char::is_whitespace)?;
+    if !word.eq_ignore_ascii_case("widget") {
+        return None;
+    }
+    number.trim().parse().ok()
+}
+
+/// `line` with every place line inside it taken out, as `(the rest, whether any was)`.
+fn without_places(line: &str) -> (String, bool) {
+    let mut out = String::new();
+    let mut rest = line;
+    let mut found = false;
+    while let Some(open) = rest.find("{{") {
+        let Some(close) = rest[open..].find("}}").map(|close| open + close + 2) else {
+            break;
+        };
+        out.push_str(&rest[..open]);
+        let taken = place_of(&rest[open..close]).is_some();
+        if taken {
+            found = true;
+        } else {
+            out.push_str(&rest[open..close]);
+        }
+        rest = &rest[close..];
+        // "First {{widget 2}} words." reads "First words.", not with two spaces.
+        if taken && out.ends_with(' ') && rest.starts_with(' ') {
+            rest = &rest[1..];
+        }
+    }
+    out.push_str(rest);
+    (out, found)
+}
+
+/// `reply` with any place line taken out, for an answer none of whose widgets were kept (a call
+/// that was refused, a database that failed): the line never shows as written. Words with none are
+/// kept exactly.
+pub(crate) fn without_place_lines(reply: &str) -> String {
+    if reply
+        .split('\n')
+        .any(|line| place_of(line).is_some() || without_places(line).1)
+    {
+        place(reply, &[]).0
+    } else {
+        reply.to_owned()
+    }
+}
+
+/// The answer's words with every place line taken out, and for each of `shown`, the line of those
+/// words it now stands before: `None` for one the answer didn't place, which shows at the end.
+///
+/// A place line on a line of its own puts its widget there, the first time; one inside a sentence
+/// is taken out and places nothing. Code blocks are left as written. Blank lines at the start or
+/// the end go too.
+pub(crate) fn place(reply: &str, shown: &[Shown]) -> (String, Vec<Option<u32>>) {
+    let mut lines: Vec<String> = Vec::new();
+    let mut at: Vec<Option<usize>> = vec![None; shown.len()];
+    let mut fence: Option<&str> = None;
+    // A place line between two blank lines leaves one of them.
+    let mut after_place = false;
+    for line in reply.split('\n') {
+        let trimmed = line.trim_start();
+        if std::mem::take(&mut after_place)
+            && fence.is_none()
+            && trimmed.is_empty()
+            && lines.last().is_none_or(|last| last.trim().is_empty())
+        {
+            continue;
+        }
+        let marker = ["```", "~~~"]
+            .into_iter()
+            .find(|marker| trimmed.starts_with(marker));
+        if let Some(open) = fence {
+            if trimmed.starts_with(open) {
+                fence = None;
+            }
+            lines.push(line.to_owned());
+            continue;
+        }
+        if let Some(marker) = marker {
+            fence = Some(marker);
+            lines.push(line.to_owned());
+            continue;
+        }
+        if let Some(number) = place_of(line) {
+            if let Some(index) = shown
+                .iter()
+                .zip(&at)
+                .position(|(one, placed)| one.place == Some(number) && placed.is_none())
+            {
+                at[index] = Some(lines.len());
+            }
+            after_place = true;
+            continue;
+        }
+        let (rest, found) = without_places(line);
+        lines.push(if found {
+            rest.trim_end().to_owned()
+        } else {
+            rest
+        });
+    }
+    let lead = lines
+        .iter()
+        .take_while(|line| line.trim().is_empty())
+        .count();
+    lines.drain(..lead);
+    while lines.last().is_some_and(|line| line.trim().is_empty()) {
+        lines.pop();
+    }
+    let total = lines.len();
+    let at = at
+        .into_iter()
+        .map(|line| {
+            line.map(|line| {
+                let line = line.saturating_sub(lead).min(total);
+                u32::try_from(line).unwrap_or(u32::MAX)
+            })
+        })
+        .collect();
+    (lines.join("\n"), at)
+}
+
 // ---------------------------------------------------------------------------------------------
 // The answer's widgets, at the end of a run
 // ---------------------------------------------------------------------------------------------
+
+/// A widget an agent showed, with the number of its place line (`None` in a run from before place
+/// lines).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Shown {
+    pub(crate) place: Option<u32>,
+    pub(crate) widget: Widget,
+}
 
 /// The widgets of `responder`'s answer: the `show_widget` calls that went through in the turn
 /// whose reply became the answer, or, when that turn showed none, in the latest earlier turn of
@@ -824,11 +1393,11 @@ pub(crate) fn shown(widget: &Widget) -> Value {
 ///
 /// Turns are read as [`crate::runs`]' `last_words` reads them: by agent and session, starting at
 /// each prompt, with the coordinator's checkpoints and handovers skipped.
-pub(crate) fn of_answer(events: &[RunEvent], responder: Option<&str>) -> Vec<Widget> {
+pub(crate) fn of_answer(events: &[RunEvent], responder: Option<&str>) -> Vec<Shown> {
     #[derive(Default)]
     struct Turns {
-        current: Vec<Widget>,
-        earlier: Vec<Widget>,
+        current: Vec<Shown>,
+        earlier: Vec<Shown>,
     }
     let Some(responder) = responder else {
         return Vec::new();
@@ -871,7 +1440,14 @@ pub(crate) fn of_answer(events: &[RunEvent], responder: Option<&str>) -> Vec<Wid
                 if let Some((at, arguments)) = asked.remove(call)
                     && let Ok(widget) = read(&arguments)
                 {
-                    turns.entry(at).or_default().current.push(widget);
+                    let place = event.payload["rawOutput"]["place"]
+                        .as_str()
+                        .and_then(place_of);
+                    turns
+                        .entry(at)
+                        .or_default()
+                        .current
+                        .push(Shown { place, widget });
                 }
             }
             _ => {}
@@ -946,9 +1522,12 @@ pub(crate) fn read_state(widget: &Widget, state: &Value) -> Result<Value, String
             }
             Ok(json!({"values": kept}))
         }
-        Widget::Choices { .. } | Widget::Steps { .. } | Widget::Chart { .. } => {
-            Err("choices, steps and charts keep nothing".to_owned())
-        }
+        Widget::Choices { .. }
+        | Widget::Steps { .. }
+        | Widget::Chart { .. }
+        | Widget::Marks { .. }
+        | Widget::Flow { .. }
+        | Widget::Graph { .. } => Err(format!("{} keep nothing", widget.kind())),
     }
 }
 
@@ -956,8 +1535,11 @@ pub(crate) fn read_state(widget: &Widget, state: &Value) -> Result<Value, String
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Kept {
-    /// Its place under the answer, from 1.
+    /// Its place among the answer's widgets, from 1.
     pub n: u32,
+    /// The line of the answer's words it stands before; `None` for one shown at the end.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
     pub(crate) spec: Widget,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub state: Option<Value>,
@@ -999,16 +1581,52 @@ pub(crate) fn showed(widgets: &[Kept]) -> Option<String> {
                 Some(bars) => format!("{} ({bars})", kept.spec.named()),
                 None => kept.spec.named(),
             },
+            Widget::Marks { cells, facts, .. } => {
+                let mut each = cells
+                    .iter()
+                    .map(|cell| {
+                        let mark = match cell.mark {
+                            Mark::Yes => "yes",
+                            Mark::No => "no",
+                            Mark::Neither => "neither",
+                        };
+                        format!("{} {mark}", cell.label)
+                    })
+                    .collect::<Vec<_>>();
+                each.extend(facts.iter().cloned());
+                format!("{} ({})", kept.spec.named(), each.join(", "))
+            }
+            Widget::Flow { boxes, repeats, .. } => format!(
+                "{} ({}{})",
+                kept.spec.named(),
+                boxes
+                    .iter()
+                    .map(|each| each.label.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" → "),
+                if *repeats {
+                    " → back to the first"
+                } else {
+                    ""
+                }
+            ),
+            Widget::Graph { .. } => format!("{} ({})", kept.spec.named(), graph_line(&kept.spec)),
         })
         .collect();
     Some(format!("[Under this answer: {}.]", each.join("; ")))
 }
 
-/// What `person` changed in the widgets under work `work`'s answer at or before `before` (RFC
-/// 3339), in a line of about [`limits::CHANGES_CHARS`]: "Mai changed what is under the answer of
-/// work 3f2a9c1e: "Zoo trip": Pupils 25, … → Each family pays = 160,000 ₫. In "Before Wednesday",
-/// ticked: Print 32 copies (of 2)."
-pub(crate) fn changes(person: &str, work: &str, widgets: &[Kept], before: &str) -> Option<String> {
+/// What `person` changed in the widgets of `answer` ("the answer of work 3f2a9c1e", "Researcher's
+/// answer in the chat") at or before `before` (RFC 3339), in a line of about
+/// [`limits::CHANGES_CHARS`]: "Mai changed what is under the answer of work 3f2a9c1e: "Zoo trip":
+/// Pupils 25, … → Each family pays = 160,000 ₫. In "Before Wednesday", ticked: Print 32 copies (of
+/// 2)."
+pub(crate) fn changes(
+    person: &str,
+    answer: &str,
+    widgets: &[Kept],
+    before: &str,
+) -> Option<String> {
     let parts: Vec<String> = widgets
         .iter()
         .filter(|kept| kept.changed_at.as_deref().is_some_and(|at| at <= before))
@@ -1017,7 +1635,7 @@ pub(crate) fn changes(person: &str, work: &str, widgets: &[Kept], before: &str) 
     if parts.is_empty() {
         return None;
     }
-    let mut line = format!("{person} changed what is under the answer of work {work}:");
+    let mut line = format!("{person} changed what is under {answer}:");
     for (at, part) in parts.iter().enumerate() {
         let candidate = format!(" {part}");
         if line.chars().count() + candidate.chars().count() > limits::CHANGES_CHARS {
@@ -1067,9 +1685,56 @@ fn change(widget: &Widget, state: &Value) -> Option<String> {
                 )
             })
         }
-        Widget::Choices { .. } | Widget::Steps { .. } | Widget::Chart { .. } => None,
+        Widget::Choices { .. }
+        | Widget::Steps { .. }
+        | Widget::Chart { .. }
+        | Widget::Marks { .. }
+        | Widget::Flow { .. }
+        | Widget::Graph { .. } => None,
     }
 }
+
+/// A graph's figures in a line, for the next run: "Rent: Jan 1,200 $, Feb 1,250 $; …", at most
+/// [`GRAPH_LINE_POINTS`] points a series before "and N more".
+fn graph_line(widget: &Widget) -> String {
+    let Widget::Graph {
+        labels,
+        series,
+        unit,
+        prefix,
+        decimals,
+        ..
+    } = widget
+    else {
+        return String::new();
+    };
+    series
+        .iter()
+        .map(|series| {
+            let mut points = labels
+                .iter()
+                .zip(&series.values)
+                .take(GRAPH_LINE_POINTS)
+                .map(|(label, value)| {
+                    format!(
+                        "{label} {}",
+                        written(*value, prefix.as_deref(), unit.as_deref(), *decimals)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            let more = labels.len().saturating_sub(GRAPH_LINE_POINTS);
+            if more > 0 {
+                let _ = write!(points, " and {more} more");
+            }
+            format!("{}: {points}", series.label)
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+/// How many points of each series the next run reads in a graph's line.
+const GRAPH_LINE_POINTS: usize = 12;
 
 #[cfg(test)]
 mod tests;

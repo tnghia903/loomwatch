@@ -19,7 +19,7 @@ fn zoo_trip() -> Value {
 #[test]
 fn a_calculator_is_checked_and_worked_out_with_its_starting_values() {
     let widget = read(&zoo_trip()).expect("a good calculator");
-    let told = shown(&widget);
+    let told = shown(&widget, 1);
     assert_eq!(told["shown"], "a calculator \"Zoo trip: cost per family\"");
     assert_eq!(told["results"], "Each family pays = 140,000 ₫");
     assert_eq!(told["next"], SHOW_WIDGET_SHOWN.text());
@@ -162,7 +162,7 @@ fn a_chart_is_checked_and_its_figures_said_as_the_person_reads_them() {
         }),
         "only a chart's own fields are kept"
     );
-    let told = shown(&chart);
+    let told = shown(&chart, 1);
     assert_eq!(told["shown"], "a chart \"US Senate after the midterms\"");
     assert_eq!(told["bars"], "Democrats 51 seats; Republicans 49 seats");
     assert!(told.get("results").is_none());
@@ -172,7 +172,7 @@ fn a_chart_is_checked_and_its_figures_said_as_the_person_reads_them() {
         "bars": [{"label": "S&P 500", "value": 2.36}, {"label": "Nikkei", "value": -0.4}]
     }))
     .unwrap();
-    assert_eq!(shown(&markets)["bars"], "S&P 500 2.4 %; Nikkei -0.4 %");
+    assert_eq!(shown(&markets, 1)["bars"], "S&P 500 2.4 %; Nikkei -0.4 %");
     assert_eq!(
         showed(&[kept(1, chart.clone(), None, None)]).unwrap(),
         "[Under this answer: a chart \"US Senate after the midterms\" (Democrats 51 seats; \
@@ -209,7 +209,10 @@ fn a_result_reads_the_results_above_it() {
         ]
     }))
     .unwrap();
-    assert_eq!(shown(&widget)["results"], "Each = 30; With a tip = 33.00");
+    assert_eq!(
+        shown(&widget, 1)["results"],
+        "Each = 30; With a tip = 33.00"
+    );
 }
 
 #[test]
@@ -298,8 +301,8 @@ fn turn(events: &mut Vec<RunEvent>, purpose: &str, titles: &[&str]) {
     ));
 }
 
-fn titles(widgets: &[Widget]) -> Vec<&str> {
-    widgets.iter().map(Widget::title).collect()
+fn titles(widgets: &[Shown]) -> Vec<&str> {
+    widgets.iter().map(|shown| shown.widget.title()).collect()
 }
 
 #[test]
@@ -387,6 +390,7 @@ fn state_is_checked_against_the_widget() {
 fn kept(n: u32, spec: Widget, state: Option<Value>, changed_at: Option<&str>) -> Kept {
     Kept {
         n,
+        line: None,
         spec,
         state,
         changed_at: changed_at.map(str::to_owned),
@@ -417,19 +421,36 @@ fn the_next_run_reads_what_the_answer_showed_and_what_the_person_changed() {
          140,000 ₫); a checklist \"Before Wednesday\" (2 items).]"
     );
     assert_eq!(
-        changes("Mai", "1a2b3c4d", &widgets, "2026-11-05T11:00:00Z").unwrap(),
+        changes(
+            "Mai",
+            "the answer of work 1a2b3c4d",
+            &widgets,
+            "2026-11-05T11:00:00Z"
+        )
+        .unwrap(),
         "Mai changed what is under the answer of work 1a2b3c4d: \"Zoo trip: cost per family\": Pupils 25, Bus \
          2,400,000 ₫, Ticket 60,000 ₫, Round up on → Each family pays = 160,000 ₫. In \"Before \
          Wednesday\", ticked: Print 32 copies (of 2)."
     );
     // A change made after the new run was created is the run after's.
     assert_eq!(
-        changes("Mai", "1a2b3c4d", &widgets, "2026-11-05T10:05:30Z").unwrap(),
+        changes(
+            "Mai",
+            "the answer of work 1a2b3c4d",
+            &widgets,
+            "2026-11-05T10:05:30Z"
+        )
+        .unwrap(),
         "Mai changed what is under the answer of work 1a2b3c4d: \"Zoo trip: cost per family\": Pupils 25, Bus \
          2,400,000 ₫, Ticket 60,000 ₫, Round up on → Each family pays = 160,000 ₫."
     );
     assert_eq!(
-        changes("Mai", "1a2b3c4d", &widgets, "2026-11-05T10:00:00Z"),
+        changes(
+            "Mai",
+            "the answer of work 1a2b3c4d",
+            &widgets,
+            "2026-11-05T10:00:00Z"
+        ),
         None
     );
     assert_eq!(showed(&[]), None);
@@ -451,7 +472,261 @@ fn many_changes_stay_short() {
             )
         })
         .collect();
-    let line = changes("Mai", "1a2b3c4d", &widgets, "2026-11-05T11:00:00Z").unwrap();
+    let line = changes(
+        "Mai",
+        "the answer of work 1a2b3c4d",
+        &widgets,
+        "2026-11-05T11:00:00Z",
+    )
+    .unwrap();
     assert!(line.chars().count() <= limits::CHANGES_CHARS + 20, "{line}");
     assert!(line.ends_with("more."), "{line}");
+}
+
+/// The relevance calculator a person taps through: five switches in one row, two results with a
+/// line saying why, and a button that sets a case worth trying.
+fn relevance() -> Value {
+    json!({
+        "kind": "calculator",
+        "title": "Select relevant documents",
+        "inputs": [
+            {"id": "d1", "label": "#1", "on": false, "group": "Relevant?"},
+            {"id": "d2", "label": "#2", "on": true, "group": "Relevant?"},
+            {"id": "d3", "label": "#3", "on": true, "group": "Relevant?"},
+            {"id": "d4", "label": "#4", "on": true, "group": "Relevant?"},
+            {"id": "d5", "label": "#5", "on": false, "group": "Relevant?"}
+        ],
+        "results": [
+            {"id": "found", "label": "Recall@5", "formula": "(d1 + d2 + d3 + d4 + d5) / 3", "decimals": 3, "note": "{d1 + d2 + d3 + d4 + d5} / 3 found"},
+            {"id": "rr", "label": "RR@5", "formula": "if(d1, 1, if(d2, 1/2, if(d3, 1/3, 0)))", "decimals": 3, "note": "First at #{if(d1, 1, if(d2, 2, 3))}"}
+        ],
+        "presets": [{"label": "Try moving relevant documents to the top", "values": {"d1": true, "d2": true, "d3": true, "d4": false}}]
+    })
+}
+
+#[test]
+fn a_result_says_why_and_a_preset_is_worked_out_for_the_agent() {
+    let widget = read(&relevance()).expect("a good calculator");
+    let told = shown(&widget, 2);
+    assert_eq!(told["place"], "{{widget 2}}");
+    assert_eq!(
+        told["results"],
+        "Recall@5 = 1.000 (3 / 3 found); RR@5 = 0.500 (First at #2)"
+    );
+    assert_eq!(
+        told["presets"],
+        json!([
+            "Try moving relevant documents to the top → Recall@5 = 1.000 (3 / 3 found); RR@5 = 1.000 (First at #1)"
+        ]),
+        "a preset sets what it names and puts the rest back to the start"
+    );
+    let Widget::Calculator { inputs, .. } = &widget else {
+        panic!("a calculator");
+    };
+    assert_eq!(inputs[0].group.as_deref(), Some("Relevant?"));
+}
+
+/// A change to the relevance calculator that should be refused.
+type Change<'a> = &'a dyn Fn(&mut Value);
+
+#[test]
+fn notes_presets_and_groups_say_what_to_change() {
+    let with = |change: &dyn Fn(&mut Value)| {
+        let mut widget = relevance();
+        change(&mut widget);
+        read(&widget).expect_err("refused")
+    };
+    let cases: [(Change, &str); 7] = [
+        (
+            &|w| w["results"][0]["note"] = json!("{d1 + d9} found"),
+            "result \"Recall@5\"'s note reads \"d9\", which isn't an input or a result above it",
+        ),
+        (
+            &|w| w["results"][0]["note"] = json!("{d1 found"),
+            "result \"Recall@5\"'s note: a { in a note needs a } after its formula",
+        ),
+        (
+            &|w| w["results"][0]["note"] = json!("{rr}"),
+            "reads \"rr\", which isn't an input or a result above it",
+        ),
+        (
+            &|w| w["presets"][0]["values"] = json!({"d9": true}),
+            "preset \"Try moving relevant documents to the top\": \"d9\" isn't one of the calculator's inputs",
+        ),
+        (
+            &|w| w["presets"][0]["values"] = json!({"d1": 1}),
+            "\"d1\" is a switch: true or false",
+        ),
+        (
+            &|w| w["inputs"][2]["group"] = json!("Other"),
+            "group \"Relevant?\": put its switches next to each other",
+        ),
+        (
+            &|w| {
+                w["inputs"][0] =
+                    json!({"id": "d1", "label": "#1", "start": 1, "group": "Relevant?"});
+            },
+            "group is for switches",
+        ),
+    ];
+    for (change, says) in cases {
+        let error = with(change);
+        assert!(error.contains(says), "{error:?} should say {says:?}");
+    }
+    // A preset whose figures can't be worked out is refused too.
+    let error = read(&json!({
+        "kind": "calculator", "title": "Share",
+        "inputs": [{"id": "people", "label": "People", "start": 2}],
+        "results": [{"id": "each", "label": "Each", "formula": "100 / people"}],
+        "presets": [{"label": "Nobody comes", "values": {"people": 0}}]
+    }))
+    .expect_err("refused");
+    assert!(
+        error.contains("result \"Each\" with preset \"Nobody comes\": the formula divides by zero"),
+        "{error}"
+    );
+}
+
+#[test]
+fn marks_a_flow_and_a_graph_are_read_and_checked() {
+    let marks = read(&json!({
+        "kind": "marks", "title": "Top 5 retrieved documents",
+        "cells": [{"label": "#1", "mark": "no", "note": "Irrelevant"}, {"label": "#2", "mark": "yes", "note": "Relevant"}, {"label": "#3", "mark": "neither"}],
+        "facts": ["2 relevant documents retrieved out of 3", "First relevant at #2"]
+    }))
+    .expect("good marks");
+    assert_eq!(marks.kind(), "marks");
+    let flow = read(&json!({
+        "kind": "flow", "title": "A RAG pipeline",
+        "boxes": [{"label": "User query"}, {"label": "Retriever", "note": "Recall@K: coverage"}, {"label": "Reranker", "note": "MRR@K: ranking quality"}]
+    }))
+    .expect("a good flow");
+    let graph = read(&json!({
+        "kind": "graph", "title": "Rent", "style": "line", "labels": ["Jan", "Feb", "Mar"],
+        "series": [{"label": "Flat", "values": [1200, 1250, 1300]}], "prefix": "$"
+    }))
+    .expect("a good graph");
+    let widgets = [
+        kept(1, marks, None, None),
+        kept(2, flow, None, None),
+        kept(3, graph.clone(), None, None),
+    ];
+    assert_eq!(
+        showed(&widgets).unwrap(),
+        "[Under this answer: a row of marks \"Top 5 retrieved documents\" (#1 no, #2 yes, #3 \
+         neither, 2 relevant documents retrieved out of 3, First relevant at #2); a flow \"A RAG \
+         pipeline\" (User query → Retriever → Reranker); a line graph \"Rent\" (Flat: Jan $1,200, \
+         Feb $1,250, Mar $1,300).]"
+    );
+    assert!(
+        read_state(&graph, &json!({"values": {}})).is_err(),
+        "a graph keeps nothing"
+    );
+
+    let cases = [
+        (
+            json!({"kind": "marks", "title": "x", "cells": [{"label": "a", "mark": "maybe"}]}),
+            "cells 1: mark is yes, no or neither",
+        ),
+        (
+            json!({"kind": "marks", "title": "x", "cells": [{"label": "a", "mark": "yes"}], "facts": ["a", "b", "c", "d"]}),
+            "facts has 4; give 0 to 3",
+        ),
+        (
+            json!({"kind": "flow", "title": "x", "boxes": [{"label": "only"}]}),
+            "boxes has 1; give 2 to 8",
+        ),
+        (
+            json!({"kind": "graph", "title": "x", "style": "pie", "labels": ["a", "b"], "series": [{"label": "s", "values": [1, 2]}]}),
+            "style is bar or line",
+        ),
+        (
+            json!({"kind": "graph", "title": "x", "style": "bar", "labels": ["a", "b"], "series": [{"label": "s", "values": [1]}]}),
+            "series 1: values has 1; give 2, one per label",
+        ),
+        (
+            json!({"kind": "graph", "title": "x", "style": "bar", "labels": ["a", "b"], "series": [{"label": "s", "values": [1, "two"]}]}),
+            "each value is a number",
+        ),
+    ];
+    for (arguments, says) in cases {
+        let error = read(&arguments).expect_err(&format!("{arguments} should be refused"));
+        assert!(
+            error.contains(says),
+            "{arguments}: {error:?} should say {says:?}"
+        );
+    }
+}
+
+fn shown_at(places: &[Option<u32>]) -> Vec<Shown> {
+    places
+        .iter()
+        .map(|place| Shown {
+            place: *place,
+            widget: read(&json!({"kind": "checklist", "title": "x", "items": [{"text": "one"}]}))
+                .unwrap(),
+        })
+        .collect()
+}
+
+/// Every case in `schemas/widget-place.cases.json`, which the app reads too: it places widgets the
+/// same way while the answer is still being written.
+#[test]
+fn a_place_line_puts_its_widget_there_as_the_app_does() {
+    let cases: Value =
+        serde_json::from_str(include_str!("../../../../schemas/widget-place.cases.json"))
+            .expect("schemas/widget-place.cases.json holds the cases");
+    let cases = cases["cases"].as_array().expect("cases");
+    assert!(cases.len() > 5, "the cases are all read");
+    for case in cases {
+        let name = case["name"].as_str().unwrap_or_default();
+        let places: Vec<Option<u32>> = case["places"]
+            .as_array()
+            .expect("places")
+            .iter()
+            .map(|place| place.as_u64().map(|place| u32::try_from(place).unwrap()))
+            .collect();
+        let (words, at) = place(case["reply"].as_str().expect("a reply"), &shown_at(&places));
+        assert_eq!(words, case["words"].as_str().expect("words"), "{name}");
+        let lines: Vec<Option<u32>> = case["lines"]
+            .as_array()
+            .expect("lines")
+            .iter()
+            .map(|line| line.as_u64().map(|line| u32::try_from(line).unwrap()))
+            .collect();
+        assert_eq!(at, lines, "{name}");
+    }
+}
+
+#[test]
+fn the_place_comes_from_what_the_agent_was_told() {
+    let mut events = Vec::new();
+    turn(&mut events, "work", &["a", "b"]);
+    let mut seq = events.len() as u64;
+    for event in &mut events {
+        if event.kind == EventKind::ToolUpdate {
+            seq += 1;
+            event.payload["rawOutput"] = json!({"place": place_line(u32::try_from(seq).unwrap())});
+        }
+    }
+    let places: Vec<Option<u32>> = of_answer(&events, Some("writer"))
+        .iter()
+        .map(|shown| shown.place)
+        .collect();
+    let told = u32::try_from(events.len()).unwrap();
+    assert_eq!(places, [Some(told + 1), Some(told + 2)]);
+}
+
+#[test]
+fn a_place_line_never_shows_when_no_widget_was_kept() {
+    assert_eq!(
+        without_place_lines("Here it is.\n\n{{widget 1}}\n\nTry it."),
+        "Here it is.\n\nTry it."
+    );
+    let plain = "No widgets, {{braces}} and a last line\n";
+    assert_eq!(
+        without_place_lines(plain),
+        plain,
+        "words with none are kept exactly"
+    );
 }

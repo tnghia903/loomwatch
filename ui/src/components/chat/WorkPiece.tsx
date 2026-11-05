@@ -34,8 +34,10 @@ import type { AgentConfig } from '../../lib/team-file/types'
 import type { AlwaysAllowed } from '../../lib/tools/allow'
 import { AgentMessages } from '../run/AgentMessages'
 import { ChatFiles } from './ChatFiles'
-import { AnswerWidgets } from './widgets/AnswerWidgets'
+import { AnswerWidget } from './widgets/AnswerWidgets'
+import { partsOf } from '../../lib/widgets/place'
 import type { KeptWidget, WidgetState } from '../../lib/widgets/types'
+import { useAnswerWidgets } from '../../lib/widgets/useAnswerWidgets'
 import { MessageDoneWhen } from './MessageDoneWhen'
 import { PermissionActions, PermissionPrompt } from '../run/PermissionPrompt'
 import { SpendStopCard } from '../run/SpendStopCard'
@@ -253,6 +255,9 @@ export function WorkPiece({ item, newest = false, approveFilled = true, fixFille
   const checked = [...(team.configs?.values() ?? [])].some((config) => config.checks === run.responder)
   const streamed = live && !checked ? responder?.reply ?? '' : ''
   const answer = isTerminalRun(record.status) ? record.reply ?? '' : streamed
+  // ADR 0114: the widgets in the answer, kept with it once it is done; while it is written, the
+  // ones its agent has shown, standing where its words place them.
+  const inAnswer = useAnswerWidgets({ answer, finished: isTerminalRun(record.status), kept: record.status === 'succeeded' ? item.widgets ?? [] : null, events: session.events, responder: run.responder })
   // Whoever is writing now (lib/watch/workPhase.ts), its figure typing at the bench, is typing in
   // the chat too: its face and a bubble of dots under the work. Not twice: the answer coming in, or
   // a reply the talk shows it owes, already says so.
@@ -602,14 +607,18 @@ export function WorkPiece({ item, newest = false, approveFilled = true, fixFille
         </Handed>
       ))}
       <FileOriginContext.Provider value={fileOrigin}>
-      <Outcome widgets={item.widgets?.length && record.status === 'succeeded' && onWidgetChange ? (
-        <AnswerWidgets
-          widgets={item.widgets}
-          onChange={(n, state) => onWidgetChange(run.runId, n, state)}
-          onChoose={onChoose ? (label) => onChoose(label, answerReply(item.request?.replyTo, { runId: run.runId, messageId: answerKey, from: run.responder, to: null, kind: 'answer', text: answer })) : undefined}
-          chosen={chosen}
-        />
-      ) : undefined} tour={newest} run={record} tries={tryingAgain(ended) ? tries : null} fixFilled={fixFilled} answer={answer} touched={touched} folder={folder} written={written} streaming={streaming} name={name} hue={hue} open={answerOpen} flash={answerFlash !== null} solo={Boolean(team.solo)} reactions={reactOn(targets.answer, `${name(record.responder)}'s answer`, [])} onOpen={() => onOpenAnswer(run.runId)} onTryAgain={() => onTryAgain(item)} onDetails={loaded ? undefined : () => onDetails(run.runId)}>
+      <Outcome widgets={inAnswer.widgets.length > 0 && onWidgetChange ? {
+        kept: inAnswer.widgets,
+        render: (kept) => (
+          <AnswerWidget
+            kept={kept}
+            live={inAnswer.live}
+            onChange={(n, state) => onWidgetChange(run.runId, n, state)}
+            onChoose={onChoose ? (label) => onChoose(label, answerReply(item.request?.replyTo, { runId: run.runId, messageId: answerKey, from: run.responder, to: null, kind: 'answer', text: answer })) : undefined}
+            chosen={chosen}
+          />
+        ),
+      } : undefined} tour={newest} run={record} tries={tryingAgain(ended) ? tries : null} fixFilled={fixFilled} answer={inAnswer.words} touched={touched} folder={folder} written={written} streaming={streaming} name={name} hue={hue} open={answerOpen} flash={answerFlash !== null} solo={Boolean(team.solo)} reactions={reactOn(targets.answer, `${name(record.responder)}'s answer`, [])} onOpen={() => onOpenAnswer(run.runId)} onTryAgain={() => onTryAgain(item)} onDetails={loaded ? undefined : () => onDetails(run.runId)}>
         <AnswerTools
           run={record}
           answer={answer}
@@ -944,8 +953,9 @@ interface AnswerProps {
   solo: boolean
   /** The answer with its reactions under it. */
   reactions: (said: ReactNode) => ReactNode
-  /** The widgets under it (ADR 0114), after its words and before its tools. */
-  widgets?: ReactNode
+  /** The widgets in it (ADR 0114): each where its words placed it, the rest after its words and
+      before its tools. */
+  widgets?: { kept: readonly KeptWidget[]; render: (kept: KeptWidget) => ReactNode }
   children: ReactNode
 }
 
@@ -1017,6 +1027,8 @@ function Answer({ tour, run, answer, touched, folder, written, streaming, name, 
   // files in the sentence too; copy and save keep the agent's words.
   const shown = useMemo(() => withFolderPaths(answer, touched, folder, written), [answer, touched, folder, written])
   const facts = useMemo(() => (isDocument(answer) ? describeDocument(answer) : null), [answer])
+  // The words cut where its widgets stand; a document's widgets follow its card.
+  const placed = useMemo(() => (widgets && !facts ? partsOf(shown, widgets.kept) : null), [widgets, facts, shown])
   const responder = run.responder
   return (
     <div className={`chat-msg tc-answer${appear ? ' tc-appear' : ''}${flash ? ' flash' : ''}`} data-tour={tour ? 'output' : undefined}>
@@ -1036,11 +1048,23 @@ function Answer({ tour, run, answer, touched, folder, written, streaming, name, 
             </span>
           </button>
         ) : (
-          <div className={`chat-bubble${streaming ? ' streaming' : ''}`} data-tick={streaming ? answer.length % 2 : undefined}>
-            <div className="chat-text"><SaidText text={shown} /></div>
+          <div className={`chat-bubble${streaming ? ' streaming' : ''}${placed && placed.parts.length > 1 ? ' wg-in' : ''}`} data-tick={streaming ? answer.length % 2 : undefined}>
+            {placed && placed.parts.length > 1
+              ? placed.parts.map((part, at) => (
+                  <Fragment key={at}>
+                    {part.text.trim()
+                      ? <div className={`chat-text${at < placed.parts.length - 1 ? ' wg-before' : ''}`}><SaidText text={part.text} /></div>
+                      // A widget the words have just placed: the caret after it says more is coming.
+                      : streaming && at === placed.parts.length - 1 && <div className="chat-text"><p /></div>}
+                    {part.widgets.map((kept) => <div key={kept.n} className="wg-here">{widgets?.render(kept)}</div>)}
+                  </Fragment>
+                ))
+              : <div className="chat-text"><SaidText text={shown} /></div>}
           </div>
         ))}
-        {widgets}
+        {widgets && (facts || !placed ? widgets.kept : placed.end).length > 0 && (
+          <div className="wg-list">{(facts || !placed ? widgets.kept : placed.end).map((kept) => <Fragment key={kept.n}>{widgets.render(kept)}</Fragment>)}</div>
+        )}
         {children}
       </div>
     </div>
