@@ -687,6 +687,7 @@ async fn run_team_mode(
             agent,
             archive: &archive,
             bus: &bus,
+            seat: &connection,
             shared_log: event_log.as_ref(),
             lineage,
             team_path,
@@ -879,7 +880,6 @@ async fn run_pipeline_nodes(
                 team,
                 agent,
                 archive,
-                bus,
                 shared_log.as_ref(),
                 &handovers,
                 lineage,
@@ -1087,6 +1087,7 @@ async fn run_pipeline_nodes(
                     agent,
                     archive,
                     bus,
+                    seat: &connection,
                     shared_log: shared_log.as_ref(),
                     lineage,
                     team_path,
@@ -1129,6 +1130,7 @@ async fn run_pipeline_nodes(
                         agent,
                         archive,
                         bus,
+                        seat: &connection,
                         shared_log: shared_log.as_ref(),
                         lineage,
                         team_path,
@@ -1283,6 +1285,7 @@ async fn run_pipeline_nodes(
                 ParkedStage::park(
                     agent,
                     spec.clone(),
+                    connection.clone(),
                     StageSession { process, recorder },
                     exit_timeout,
                 )
@@ -1318,6 +1321,10 @@ pub(crate) struct AskedQuestion<'a> {
     pub(crate) agent: &'a config::AgentConfig,
     pub(crate) archive: &'a EventArchive,
     pub(crate) bus: &'a TeamBus,
+    /// The connection the stage's session was opened with. Parked behind `ask_user`, it is
+    /// reopened on this one, so it keeps its seat (what it is offered, its place in a chain of
+    /// helpers, whether it is answering a question) and what it hands out comes back to it.
+    pub(crate) seat: &'a TeamBusConnection,
     pub(crate) shared_log: Option<&'a EventLog>,
     pub(crate) lineage: &'a RunLineage,
     pub(crate) team_path: &'a Path,
@@ -1502,8 +1509,14 @@ async fn answer_a_parked_question(
         .with_context(|| format!("pipeline node {agent_id} failed to checkpoint before parking"))?;
     boundary.record(agent_id, &answer).await;
 
-    let mut park =
-        ParkedStage::park(asked.agent, asked.spec.clone(), session, asked.exit_timeout).await?;
+    let mut park = ParkedStage::park(
+        asked.agent,
+        asked.spec.clone(),
+        asked.seat.clone(),
+        session,
+        asked.exit_timeout,
+    )
+    .await?;
     if let (Some(desk), Some(run_id)) = (asked.lineage.operator.as_ref(), run_id) {
         note_parked(desk, run_id, asked.agent).await;
     }
@@ -1529,13 +1542,8 @@ async fn answer_a_parked_question(
         )
         .await;
     }
-    park.reopen(
-        asked.bus,
-        asked.archive,
-        asked.shared_log,
-        asked.exit_timeout,
-    )
-    .await?;
+    park.reopen(asked.archive, asked.shared_log, asked.exit_timeout)
+        .await?;
     let mut session = park.into_session().with_context(|| {
         format!("{agent_id}'s session could not be reopened to take your answer")
     })?;
@@ -1949,7 +1957,6 @@ async fn run_review_stop(
     team: &TeamConfig,
     node: &config::AgentConfig,
     archive: &EventArchive,
-    bus: &TeamBus,
     shared_log: Option<&EventLog>,
     handovers: &BTreeMap<String, String>,
     lineage: &RunLineage,
@@ -2059,7 +2066,7 @@ async fn run_review_stop(
         let feedback = send_back_note(&answer.text);
         let stage_id = stage.agent_id.clone();
         let reply = stage
-            .send_back(&feedback, lineage, bus, archive, shared_log, exit_timeout)
+            .send_back(&feedback, lineage, archive, shared_log, exit_timeout)
             .await?;
         // The redone work is handed on by the rule the first pass was: as written when it fits.
         handover = if reply_is_its_own_handover(team, &stage_id, &reply) {
@@ -2460,6 +2467,10 @@ struct ParkedStage {
     agent_name: String,
     /// What to spawn to get this session back.
     spec: ProcessSpec,
+    /// The connection it was opened with, which it is reopened on: a helper stays a helper, an
+    /// agent answering a question stays one, and what it hands out comes back to the token that
+    /// collects it.
+    seat: TeamBusConnection,
     state: ParkedState,
 }
 
@@ -2480,6 +2491,7 @@ impl ParkedStage {
     async fn park(
         agent: &config::AgentConfig,
         spec: ProcessSpec,
+        seat: TeamBusConnection,
         mut session: StageSession,
         exit_timeout: Duration,
     ) -> Result<Self> {
@@ -2488,6 +2500,7 @@ impl ParkedStage {
             agent_id: agent.id.clone(),
             agent_name: helpers::shown(agent).to_owned(),
             spec,
+            seat,
             state: ParkedState::Parked { session_id },
         })
     }
@@ -2507,12 +2520,11 @@ impl ParkedStage {
         &mut self,
         note: &str,
         lineage: &RunLineage,
-        bus: &TeamBus,
         archive: &EventArchive,
         shared_log: Option<&EventLog>,
         exit_timeout: Duration,
     ) -> Result<String> {
-        self.reopen(bus, archive, shared_log, exit_timeout).await?;
+        self.reopen(archive, shared_log, exit_timeout).await?;
         let (agent_id, agent_name) = (self.agent_id.clone(), self.agent_name.clone());
         let session = self
             .session_mut()
@@ -2532,14 +2544,14 @@ impl ParkedStage {
         work.deliver_notes(session, shared_log, reply).await
     }
 
-    /// Bring the parked session back on a fresh process. A no-op for one that is already open.
+    /// Bring the parked session back on a fresh process, on the connection it was opened with. A
+    /// no-op for one that is already open.
     ///
     /// # Errors
     ///
     /// Returns an error when the respawn or the reload fails.
     async fn reopen(
         &mut self,
-        bus: &TeamBus,
         archive: &EventArchive,
         shared_log: Option<&EventLog>,
         _exit_timeout: Duration,
@@ -2551,10 +2563,9 @@ impl ParkedStage {
         let mut process = AgentRun::spawn(&self.spec).with_context(|| {
             format!("failed to respawn {} to reopen its session", self.agent_id)
         })?;
-        let connection = bus.connection(&self.agent_id).await?;
         let mut context = TeamSessionContext {
             archive,
-            bus: Some(&connection),
+            bus: Some(&self.seat),
             event_log: shared_log.cloned(),
             // Both were archived when this session opened. A reload adds nothing to supply, and a
             // second record would make the inspector show one prompt twice.
@@ -12161,6 +12172,203 @@ mod tests {
             .map_err(|error| anyhow::anyhow!("{error}"))?;
         assert_eq!(checkpoints.len(), 1, "{checkpoints:?}");
         assert_eq!(checkpoints[0].source, memory::CheckpointSource::Agent);
+        Ok(())
+    }
+
+    /// **A teammate that stops to ask you keeps its seat when it comes back for your answer.**
+    ///
+    /// Brought in with `ask`, b answers that one question: it is offered neither `dispatch` nor
+    /// `ask`. It calls `ask_user`, its session is parked, and your answer reopens it. Reopened on
+    /// a plain seat, it was offered both, as if the person had written to it; it must be offered
+    /// what it was before, every turn.
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn a_teammate_that_asks_you_keeps_its_seat_when_it_takes_your_answer() -> Result<()> {
+        use crate::test_support::{stand_in, turn};
+        let pool = crate::db::Db::temp().await;
+        let (lead, _) = stand_in(vec![turn(&[], "the lead used the second budget").calling(
+            "ask",
+            json!({"agent": "b", "question": "which budget do we use?"}),
+            "used the second budget",
+        )]);
+        let (b, b_demo) = stand_in(vec![
+            turn(&["which budget do we use?"], "asked and stopped").calling(
+                "ask_user",
+                json!({"question": "which budget applies?"}),
+                "\"parked\":true",
+            ),
+            turn(&["Record where this work stands"], CHECKPOINT_REPLY),
+            turn(&["the second one"], "used the second budget"),
+        ]);
+        let team = Arc::new(TeamConfig {
+            project: None,
+            shares: None,
+            project_file: None,
+            schema_version: 1,
+            id: "asking-team".into(),
+            name: "Asking team".into(),
+            entrypoint: "lead".into(),
+            responder: None,
+            schedule: None,
+            deliver: None,
+            conversation: ConversationConfig::default(),
+            permissions: crate::config::TeamPermissions::default(),
+            spend: crate::spend::SpendConfig::default(),
+            memory: None,
+            guards: GuardsConfig::default(),
+            agents: vec![pipeline_agent("lead", &lead), pipeline_agent("b", &b)],
+            edges: Vec::new(),
+        });
+        let archive = EventArchive::new(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let (_registry, desk, run_id) = operator_desk(&team, &archive);
+        let answering = tokio::spawn({
+            let desk = desk.clone();
+            let run_id = run_id.clone();
+            async move {
+                let waiting = wait_for_stop(&desk, &run_id, |waiting| {
+                    waiting.kind == crate::operator::StopKind::Question
+                })
+                .await;
+                desk.deliver(&run_id, &waiting.node, answer("the second one", None))
+                    .await
+                    .expect("a parked question takes its answer");
+                waiting
+            }
+        });
+        let outcome = run_team_mode(
+            &team,
+            &team_path,
+            archive.clone(),
+            "plan the trip",
+            Duration::from_secs(5),
+            Some(EventLog::new(archive.clone(), run_id.clone())),
+            &Arc::new(memory::TeamMemory::default()),
+            &RunLineage {
+                operator: Some(desk.clone()),
+                ..RunLineage::default()
+            },
+        )
+        .await?;
+        let waiting = answering.await?;
+        assert_eq!(waiting.node, "b");
+        assert_eq!(outcome.reply, "the lead used the second budget");
+
+        let requests = b_demo.requests();
+        let first = &requests[0].tools;
+        assert!(first.contains(&"ask_user".to_owned()), "{first:?}");
+        for handing_out in ["dispatch", "ask"] {
+            assert!(
+                !first.contains(&handing_out.to_owned()),
+                "answering a question, b hands nothing out: {first:?}"
+            );
+        }
+        let answered = requests
+            .iter()
+            .position(|request| request.prompt().contains("the second one"))
+            .expect("your answer is b's next turn");
+        for (at, request) in requests.iter().enumerate() {
+            assert_eq!(
+                &request.tools,
+                first,
+                "b's request {at} ({}) offered other tools than its first",
+                if at >= answered {
+                    "after your answer"
+                } else {
+                    "before it"
+                }
+            );
+        }
+        Ok(())
+    }
+
+    /// **What a lead hands out after your answer comes back to it, as what it handed out before.**
+    ///
+    /// The lead asks you something, and with your answer dispatches a worker. Reopened on a new
+    /// connection, its dispatch was kept under that one while its round waited on the first, so
+    /// the worker's reply never reached it and the run answered without it.
+    #[tokio::test]
+    async fn what_a_lead_dispatches_after_your_answer_comes_back_to_it() -> Result<()> {
+        use crate::test_support::{stand_in, turn};
+        let pool = crate::db::Db::temp().await;
+        let (lead, _) = stand_in(vec![
+            turn(&["how many sources?"], "asked and stopped").calling(
+                "ask_user",
+                json!({"question": "which year?"}),
+                "\"parked\":true",
+            ),
+            turn(&["Record where this work stands"], CHECKPOINT_REPLY),
+            turn(&["2026"], "dispatched the count").calling(
+                "dispatch",
+                json!({"agent": "worker", "task": "count the sources for 2026"}),
+                "\"accepted\":true",
+            ),
+            turn(
+                &[
+                    "## What the agents you started came back with",
+                    "worker found 42 sources",
+                ],
+                "final: 42 sources",
+            ),
+        ]);
+        let (worker, _) = stand_in(vec![turn(
+            &["count the sources for 2026"],
+            "worker found 42 sources",
+        )]);
+        let team = Arc::new(TeamConfig {
+            project: None,
+            shares: None,
+            project_file: None,
+            schema_version: 1,
+            id: "dispatching-team".into(),
+            name: "Dispatching team".into(),
+            entrypoint: "lead".into(),
+            responder: None,
+            schedule: None,
+            deliver: None,
+            conversation: ConversationConfig::default(),
+            permissions: crate::config::TeamPermissions::default(),
+            spend: crate::spend::SpendConfig::default(),
+            memory: None,
+            guards: GuardsConfig::default(),
+            agents: vec![
+                pipeline_agent("lead", &lead),
+                pipeline_agent("worker", &worker),
+            ],
+            edges: Vec::new(),
+        });
+        let archive = EventArchive::new(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let (_registry, desk, run_id) = operator_desk(&team, &archive);
+        let answering = tokio::spawn({
+            let desk = desk.clone();
+            let run_id = run_id.clone();
+            async move {
+                let waiting = wait_for_stop(&desk, &run_id, |waiting| {
+                    waiting.kind == crate::operator::StopKind::Question
+                })
+                .await;
+                desk.deliver(&run_id, &waiting.node, answer("2026", None))
+                    .await
+                    .expect("a parked question takes its answer");
+            }
+        });
+        let outcome = run_team_mode(
+            &team,
+            &team_path,
+            archive.clone(),
+            "how many sources?",
+            Duration::from_secs(5),
+            Some(EventLog::new(archive.clone(), run_id.clone())),
+            &Arc::new(memory::TeamMemory::default()),
+            &RunLineage {
+                operator: Some(desk.clone()),
+                ..RunLineage::default()
+            },
+        )
+        .await?;
+        answering.await?;
+        assert_eq!(outcome.reply, "final: 42 sources");
         Ok(())
     }
 
