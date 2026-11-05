@@ -6,9 +6,10 @@
 //! reply became the answer are kept with it ([`of_answer`], [`store`]); what the person ticks or
 //! changes is kept beside them, and the next run's conversation says so ([`showed`], [`changes`]).
 //!
-//! Four kinds, drawn by the app (`ui/src/components/chat/widgets/`): choices the person taps to
+//! Five kinds, drawn by the app (`ui/src/components/chat/widgets/`): choices the person taps to
 //! reply, a checklist they tick, a calculator whose results `LoomWatch` works out as they change its
-//! inputs ([`formula`]), and steps they tap through. The agent never draws or writes markup.
+//! inputs ([`formula`]), steps they tap through, and a chart whose bars `LoomWatch` draws to scale
+//! from the figures the agent gives. The agent never draws or writes markup.
 
 pub(crate) mod formula;
 pub(crate) mod store;
@@ -22,10 +23,11 @@ use serde_json::{Value, json};
 use crate::prompt_blocks::Block;
 use crate::{EventKind, RunEvent};
 
-/// Whether an agent with no `widgets` setting may show widgets. Off until the bench shows answers
-/// that need none are no worse with the tool offered (ADR 0114, decision 7); turning it on is this
-/// line.
-pub(crate) const DEFAULT_ON: bool = false;
+/// Whether an agent with no `widgets` setting may show widgets. On: an agent asked for something to
+/// use, or for a chart, had no way to give one and drew bars in text or wrote a page instead. The
+/// tool says to use one only when it helps more than words, and `widgets: false` keeps an agent
+/// without it (ADR 0114, decision 7, revisited).
+pub(crate) const DEFAULT_ON: bool = true;
 
 /// The Team Bus tool's name.
 pub(crate) const TOOL: &str = "show_widget";
@@ -51,6 +53,7 @@ pub(crate) mod limits {
     pub(crate) const STEPS: (usize, usize) = (2, 8);
     pub(crate) const STEP_LABEL_CHARS: usize = 40;
     pub(crate) const STEP_CHARS: usize = 320;
+    pub(crate) const BARS: (usize, usize) = (2, 12);
     /// What the next run's conversation says of the person's changes under one answer.
     pub(crate) const CHANGES_CHARS: usize = 400;
 }
@@ -77,6 +80,17 @@ pub(crate) enum Widget {
         steps: Vec<Step>,
         #[serde(default, skip_serializing_if = "is_false")]
         repeats: bool,
+    },
+    /// Bars drawn to scale from the agent's figures, one unit for all of them.
+    Chart {
+        title: String,
+        bars: Vec<Bar>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        unit: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        prefix: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        decimals: Option<u8>,
     },
 }
 
@@ -147,13 +161,23 @@ pub(crate) struct Step {
     pub(crate) text: String,
 }
 
+/// One bar of a chart: what it is and its figure, which may be below zero.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct Bar {
+    pub(crate) label: String,
+    pub(crate) value: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) note: Option<String>,
+}
+
 impl Widget {
     pub(crate) fn title(&self) -> &str {
         match self {
             Self::Choices { title, .. }
             | Self::Checklist { title, .. }
             | Self::Calculator { title, .. }
-            | Self::Steps { title, .. } => title,
+            | Self::Steps { title, .. }
+            | Self::Chart { title, .. } => title,
         }
     }
 
@@ -163,6 +187,7 @@ impl Widget {
             Self::Checklist { .. } => "checklist",
             Self::Calculator { .. } => "calculator",
             Self::Steps { .. } => "steps",
+            Self::Chart { .. } => "chart",
         }
     }
 
@@ -173,6 +198,7 @@ impl Widget {
             Self::Checklist { .. } => "a checklist",
             Self::Calculator { .. } => "a calculator",
             Self::Steps { .. } => "steps",
+            Self::Chart { .. } => "a chart",
         };
         format!("{what} \"{}\"", self.title())
     }
@@ -219,21 +245,7 @@ pub(crate) fn read(arguments: &Value) -> Result<Widget, String> {
                     formula: text(figure, "formula", 1, formula::MAX_FORMULA_CHARS)?,
                     unit: optional_text(figure, "unit", limits::UNIT_CHARS)?,
                     prefix: optional_text(figure, "prefix", limits::UNIT_CHARS)?,
-                    decimals: match figure.get("decimals") {
-                        None | Some(Value::Null) => None,
-                        Some(decimals) => Some(
-                            decimals
-                                .as_u64()
-                                .and_then(|places| u8::try_from(places).ok())
-                                .filter(|places| *places <= formula::MAX_DECIMALS)
-                                .ok_or_else(|| {
-                                    format!(
-                                        "a result's decimals is a whole number from 0 to {}",
-                                        formula::MAX_DECIMALS
-                                    )
-                                })?,
-                        ),
-                    },
+                    decimals: decimals(figure)?,
                 })
             })?;
             let widget = Widget::Calculator {
@@ -258,13 +270,45 @@ pub(crate) fn read(arguments: &Value) -> Result<Widget, String> {
             },
             title,
         },
+        "chart" => Widget::Chart {
+            bars: list(arguments, "bars", limits::BARS, |bar| {
+                Ok(Bar {
+                    label: text(bar, "label", 1, limits::LABEL_CHARS)?,
+                    value: number(bar, "value")?.ok_or("value is missing: give it as a number")?,
+                    note: optional_text(bar, "note", limits::NOTE_CHARS)?,
+                })
+            })?,
+            unit: optional_text(arguments, "unit", limits::UNIT_CHARS)?,
+            prefix: optional_text(arguments, "prefix", limits::UNIT_CHARS)?,
+            decimals: decimals(arguments)?,
+            title,
+        },
         other => {
             return Err(format!(
-                "kind \"{other}\" isn't a widget: use choices, checklist, calculator or steps"
+                "kind \"{other}\" isn't a widget: use choices, checklist, calculator, steps or \
+                 chart"
             ));
         }
     };
     Ok(widget)
+}
+
+/// `decimals`: the places a figure is shown with, from 0 to [`formula::MAX_DECIMALS`].
+fn decimals(value: &Value) -> Result<Option<u8>, String> {
+    match value.get("decimals") {
+        None | Some(Value::Null) => Ok(None),
+        Some(decimals) => decimals
+            .as_u64()
+            .and_then(|places| u8::try_from(places).ok())
+            .filter(|places| *places <= formula::MAX_DECIMALS)
+            .map(Some)
+            .ok_or_else(|| {
+                format!(
+                    "decimals is a whole number from 0 to {}",
+                    formula::MAX_DECIMALS
+                )
+            }),
+    }
 }
 
 fn text(value: &Value, field: &str, least: usize, most: usize) -> Result<String, String> {
@@ -537,6 +581,32 @@ fn results_line(widget: &Widget, state: Option<&Value>) -> Option<String> {
     )
 }
 
+/// "Democrats 51 seats; Republicans 49 seats": a chart's figures as the person reads them.
+fn bars_line(widget: &Widget) -> Option<String> {
+    let Widget::Chart {
+        bars,
+        unit,
+        prefix,
+        decimals,
+        ..
+    } = widget
+    else {
+        return None;
+    };
+    Some(
+        bars.iter()
+            .map(|bar| {
+                format!(
+                    "{} {}",
+                    bar.label,
+                    written(bar.value, prefix.as_deref(), unit.as_deref(), *decimals)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("; "),
+    )
+}
+
 // ---------------------------------------------------------------------------------------------
 // The tool
 // ---------------------------------------------------------------------------------------------
@@ -547,10 +617,12 @@ pub(crate) const SHOW_WIDGET: Block = Block::new(
     "bus.show_widget",
     "Put something the person can use under your answer, drawn by LoomWatch: choices they tap to \
      reply, a checklist they tick, a calculator whose results LoomWatch works out as they change \
-     its inputs, or steps they tap through one at a time. Use one only when it helps more than \
-     words: numbers they may want to change, a choice of what to do next, things for them to do, \
-     or the steps of a process. For a simple answer, words alone are better. Call it before you \
-     write your answer. Then write the answer in words: give the main result in a sentence, since \
+     its inputs, steps they tap through one at a time, or a chart whose bars LoomWatch draws to \
+     scale from figures you give. Use one only when it helps more than words: numbers they may \
+     want to change, a choice of what to do next, things for them to do, the steps of a process, \
+     or a few figures to compare at a glance. For a simple answer, words alone are better. When \
+     you are asked for a chart, a graph or an infographic, show a chart here rather than drawing \
+     bars with characters or writing a page for it. Call it before you write your answer. Then write the answer in words: give the main result in a sentence, since \
      a copy of the answer and the phone show only your words, and call what you showed by what it \
      is, such as \"the calculator below\".",
 );
@@ -558,7 +630,7 @@ pub(crate) const SHOW_WIDGET: Block = Block::new(
 /// `show_widget`'s `kind`.
 pub(crate) const SHOW_WIDGET_KIND: Block = Block::new(
     "bus.show_widget.kind",
-    "choices, checklist, calculator or steps. Fill in only that kind's fields.",
+    "choices, checklist, calculator, steps or chart. Fill in only that kind's fields.",
 );
 
 /// `show_widget`'s `options`.
@@ -575,6 +647,14 @@ pub(crate) const SHOW_WIDGET_FORMULA: Block = Block::new(
      * / and brackets, one comparison (< <= > >= == !=, giving 1 or 0), min, max, round(x, \
      digits), ceil(x, digits), floor(x, digits), abs, if(condition, then, else), and, or, not. A \
      switch is 1 when on. Digits may be negative: ceil(x, -4) rounds up to the nearest 10,000.",
+);
+
+/// A chart's `bars`.
+pub(crate) const SHOW_WIDGET_BARS: Block = Block::new(
+    "bus.show_widget.bars",
+    "chart: 2 to 12 bars, in the order to read them, each a label and its figure in the chart's \
+     one unit. Give the figures you found or worked out, never ones you guess; a figure below \
+     zero is drawn to the left.",
 );
 
 /// What `show_widget` answers with, beside a calculator's results.
@@ -603,7 +683,7 @@ pub(crate) fn tool_definition() -> Value {
                 "kind": {
                     "type": "string",
                     "description": SHOW_WIDGET_KIND.text(),
-                    "enum": ["choices", "checklist", "calculator", "steps"]
+                    "enum": ["choices", "checklist", "calculator", "steps", "chart"]
                 },
                 "title": {
                     "type": "string",
@@ -691,7 +771,25 @@ pub(crate) fn tool_definition() -> Value {
                         "additionalProperties": false
                     }
                 },
-                "repeats": {"type": "boolean", "description": "steps: true when the last step leads back to the first, as in a cycle"}
+                "repeats": {"type": "boolean", "description": "steps: true when the last step leads back to the first, as in a cycle"},
+                "bars": {
+                    "type": "array",
+                    "description": SHOW_WIDGET_BARS.text(),
+                    "maxItems": limits::BARS.1,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "label": label,
+                            "value": {"type": "number", "description": "Its figure"},
+                            "note": {"type": "string", "description": "A few words beside it, such as a change since last time"}
+                        },
+                        "required": ["label", "value"],
+                        "additionalProperties": false
+                    }
+                },
+                "unit": {"type": "string", "description": "chart: written after every figure, such as seats, % or km"},
+                "prefix": {"type": "string", "description": "chart: written before every figure, such as $"},
+                "decimals": {"type": "integer", "description": "chart: decimal places shown; without it, up to 2", "minimum": 0, "maximum": formula::MAX_DECIMALS}
             },
             "required": ["kind", "title"],
             "additionalProperties": false
@@ -705,6 +803,9 @@ pub(crate) fn shown(widget: &Widget) -> Value {
     let mut out = json!({"shown": widget.named()});
     if let Some(results) = results_line(widget, None) {
         out["results"] = json!(results);
+    }
+    if let Some(bars) = bars_line(widget) {
+        out["bars"] = json!(bars);
     }
     out["next"] = json!(SHOW_WIDGET_SHOWN.text());
     out
@@ -843,8 +944,8 @@ pub(crate) fn read_state(widget: &Widget, state: &Value) -> Result<Value, String
             }
             Ok(json!({"values": kept}))
         }
-        Widget::Choices { .. } | Widget::Steps { .. } => {
-            Err("choices and steps keep nothing".to_owned())
+        Widget::Choices { .. } | Widget::Steps { .. } | Widget::Chart { .. } => {
+            Err("choices, steps and charts keep nothing".to_owned())
         }
     }
 }
@@ -892,6 +993,10 @@ pub(crate) fn showed(widgets: &[Kept]) -> Option<String> {
                 None => kept.spec.named(),
             },
             Widget::Steps { steps, .. } => format!("{} ({} steps)", kept.spec.named(), steps.len()),
+            Widget::Chart { .. } => match bars_line(&kept.spec) {
+                Some(bars) => format!("{} ({bars})", kept.spec.named()),
+                None => kept.spec.named(),
+            },
         })
         .collect();
     Some(format!("[Under this answer: {}.]", each.join("; ")))
@@ -960,7 +1065,7 @@ fn change(widget: &Widget, state: &Value) -> Option<String> {
                 )
             })
         }
-        Widget::Choices { .. } | Widget::Steps { .. } => None,
+        Widget::Choices { .. } | Widget::Steps { .. } | Widget::Chart { .. } => None,
     }
 }
 

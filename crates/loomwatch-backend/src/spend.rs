@@ -32,6 +32,10 @@ pub const AUTOMATIC_LEAST_USD: f64 = 5.0;
 pub const AUTOMATIC_TIMES: f64 = 2.0;
 /// How many of a team's latest runs say what its runs usually cost.
 pub const AUTOMATIC_RUNS: usize = 10;
+/// The figures `LoomWatch` itself wrote into new teams before the automatic limit (ADR 0096): $1.00,
+/// or $2.00 for a bigger team, whatever the work cost. A team still carrying one whose runs
+/// usually cost more is held to the automatic limit instead ([`RunSpend::go_by`]).
+pub const OLD_DEFAULTS_USD: [f64; 2] = [1.0, 2.0];
 /// The least "Add and carry on" offers.
 const MIN_TOP_UP_USD: f64 = 0.10;
 /// The most one answer may add, so a slip of the keyboard can't add a fortune.
@@ -159,6 +163,11 @@ pub struct RunSpend {
     /// How many runs `usual_usd` is the middle of.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub usual_runs: u32,
+    /// The team file's figure, set aside for the automatic limit: one `LoomWatch` wrote by default
+    /// ([`OLD_DEFAULTS_USD`]) below what the team's runs usually cost, so it stopped the team's
+    /// ordinary work rather than a run that went wrong. Kept so the run says what it replaced.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub set_aside_usd: Option<f64>,
 }
 
 #[expect(
@@ -342,10 +351,23 @@ impl RunSpend {
 
     /// Takes in what the team's latest runs that succeeded spent: what they usually cost, and from
     /// it, when the limit is automatic, the limit: twice the usual, never below
-    /// [`AUTOMATIC_LEAST_USD`]. A limit the team file sets is left as it is.
+    /// [`AUTOMATIC_LEAST_USD`]. A limit the team file sets is left as it is, except one of the
+    /// figures `LoomWatch` wrote by default ([`OLD_DEFAULTS_USD`]) when the team's runs usually cost
+    /// more than it: that figure stopped every ordinary run, so it is set aside
+    /// ([`RunSpend::set_aside_usd`]) and the run gets the automatic limit. Any other figure is the
+    /// person's own.
     pub fn go_by(&mut self, past: &[f64]) {
         self.usual_usd = usual_cost(past);
         self.usual_runs = runs_that_spent(past);
+        if !self.automatic
+            && self.added.is_empty()
+            && let (Some(figure), Some(usual)) = (self.limit_usd, self.usual_usd)
+            && is_old_default(figure)
+            && usual > figure
+        {
+            self.set_aside_usd = Some(figure);
+            self.automatic = true;
+        }
         if self.automatic {
             self.limit_usd = Some(automatic_limit(self.usual_usd));
         }
@@ -359,6 +381,13 @@ impl RunSpend {
         self.spent_usd += usd;
         self.agents.entry(agent.to_owned()).or_default().spent_usd += usd;
     }
+}
+
+/// Whether `usd` is one of the figures `LoomWatch` wrote into new teams by default.
+// The defaults were written as exactly 1.00 and 2.00, which read back exactly.
+#[allow(clippy::float_cmp)]
+fn is_old_default(usd: f64) -> bool {
+    OLD_DEFAULTS_USD.contains(&usd)
 }
 
 fn guard(agent: &AgentConfig) -> Option<f64> {
@@ -1068,18 +1097,81 @@ mod tests {
         assert_eq!(spool.limit_usd, Some(6.0));
 
         let set = TeamConfig::parse(
-            "schemaVersion: 1\nentrypoint: a\nspend:\n  perRun: 1\nagents:\n  - id: a\n    model: m\n",
+            "schemaVersion: 1\nentrypoint: a\nspend:\n  perRun: 1.5\nagents:\n  - id: a\n    model: m\n",
         )
         .unwrap();
         let mut spool = RunSpend::for_team(&set);
         spool.go_by(&[3.1, 2.9, 3.0]);
         assert!(!spool.automatic);
-        assert_eq!(spool.limit_usd, Some(1.0), "the team's own figure stays");
+        assert_eq!(spool.limit_usd, Some(1.5), "the team's own figure stays");
+        assert_eq!(spool.set_aside_usd, None);
         assert_eq!(
             spool.usual_usd,
             Some(3.0),
             "what its runs usually cost is known beside it"
         );
+    }
+
+    /// The daily news brief: Ask wrote `perRun: 1.00` into it before the automatic limit, its runs
+    /// cost about $2.27, and every morning it stopped. A figure `LoomWatch` wrote by default and
+    /// below the usual is set aside for the automatic limit, and the run says what it replaced. The
+    /// same figure on a team whose runs cost less, a run with nothing to go by, and any other
+    /// figure stay as written.
+    #[test]
+    fn an_old_default_below_the_usual_gives_way_to_the_automatic_limit() {
+        let with = |figure: &str| {
+            RunSpend::for_team(
+                &TeamConfig::parse(&format!(
+                    "schemaVersion: 1\nentrypoint: a\nspend:\n  perRun: {figure}\nagents:\n  - id: a\n    model: m\n"
+                ))
+                .unwrap(),
+            )
+        };
+        for figure in ["1.00", "2.00", "1", "2"] {
+            let mut spool = with(figure);
+            spool.go_by(&[2.27, 2.26, 2.31]);
+            assert!(spool.automatic, "{figure}: the automatic limit");
+            assert_eq!(spool.limit_usd, Some(AUTOMATIC_LEAST_USD), "{figure}");
+            assert!(
+                spool
+                    .set_aside_usd
+                    .is_some_and(|usd| approx(usd, figure.parse().unwrap())),
+                "{figure}: what it replaced is kept"
+            );
+            // Taken in again, as a run's record is when it is stored, it stays as it is.
+            spool.go_by(&[2.27, 2.26, 2.31]);
+            assert!(spool.automatic && spool.set_aside_usd.is_some(), "{figure}");
+        }
+
+        let mut cheap = with("1.00");
+        cheap.go_by(&[0.31, 0.29, 0.30]);
+        assert!(!cheap.automatic, "its runs fit under it");
+        assert_eq!(cheap.limit_usd, Some(1.0));
+        assert_eq!(cheap.set_aside_usd, None);
+
+        let mut new = with("1.00");
+        new.go_by(&[]);
+        assert!(!new.automatic, "nothing to go by");
+        assert_eq!(new.limit_usd, Some(1.0));
+
+        for own in ["1.01", "0.99", "3.00"] {
+            let mut spool = with(own);
+            spool.go_by(&[2.27, 2.26, 2.31, 3.5]);
+            assert!(!spool.automatic, "{own} is the person's own figure");
+            assert_eq!(spool.set_aside_usd, None, "{own}");
+        }
+
+        // $1.00 with $1.00 added reads $2.00, but it is what the person chose at the stop.
+        let mut grown = with("1.00");
+        grown.added.push(TopUp {
+            agent: None,
+            at_usd: 1.0,
+            add_usd: 1.0,
+        });
+        grown.limit_usd = Some(2.0);
+        grown.go_by(&[2.27]);
+        assert!(!grown.automatic, "a run that was added to keeps its limit");
+        assert_eq!(grown.limit_usd, Some(2.0));
     }
 
     /// ADR 0115: the team's stop says whether its limit is automatic and what its runs usually
@@ -1102,17 +1194,17 @@ mod tests {
         assert_eq!(stop.usual_usd, Some(2.26));
         assert_eq!(stop.usual_runs, 3);
 
-        // The news brief's $1.00, written before ADR 0115, below what its runs cost.
-        let mut set = spool(1.0);
+        // A figure the person wrote below what the team's runs cost: the stop says so.
+        let mut set = spool(1.5);
         set.go_by(&[2.26, 2.27]);
-        set.count("researcher", 1.2);
+        set.count("researcher", 1.6);
         let mut stops = Vec::new();
         let Check::Wait { stop, .. } = check(&mut set, &mut stops, "researcher", "R", true, "n")
         else {
             panic!("over the team's own figure");
         };
         assert!(!stop.automatic);
-        assert_eq!(set.limit_usd, Some(1.0), "the team's figure stays");
+        assert_eq!(set.limit_usd, Some(1.5), "the team's figure stays");
         assert_eq!(stop.usual_usd, Some(2.265));
         assert_eq!(stop.usual_runs, 2);
 

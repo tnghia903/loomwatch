@@ -244,8 +244,8 @@ depend on the document as a whole:
   of My agents, its lessons go with it.
 - Optional `Agent.widgets` says whether the agent may put widgets under its answer when its reply
   is the answer the person reads (ADR 0114): choices to tap, a checklist to tick, a calculator
-  LoomWatch works out, or steps to tap through. Absent means LoomWatch's default, which is off for
-  now; `true` turns it on for that agent, `false` keeps it off. One of My agents keeps it
+  LoomWatch works out, steps to tap through, or a chart LoomWatch draws to scale. Absent means
+  LoomWatch's default, which is on; `false` keeps it off for that agent. One of My agents keeps it
   as its own (`widgets` in its file), and every team that uses it follows. Not for an operator node.
 - **Notes set aside from the answer.** Some sections an agent ends its reply with are for the
   operator, not the answer's reader:
@@ -419,7 +419,10 @@ depend on the document as a whole:
   `5.00`; a team with no such run yet gets `5.00`. A run stops only when it goes far past the
   usual. New teams, the starter teams and teams Ask proposes are written without it; write a
   figure only to hold the team to one. Teams written before this keep the `1.00` or `2.00`
-  LoomWatch gave them: take the `spend` block off to move one to the automatic limit. A file from
+  LoomWatch gave them, until the team's runs usually cost more than that figure: then each run
+  sets it aside for the automatic limit and says so (`setAsideUsd`), since it stopped the team's
+  ordinary work. Any other figure is kept as written; take the `spend` block off to move a team to
+  the automatic limit. A file from
   before limits, with no `spend`, now has the automatic limit too. Every agent of the run draws on it: stages, the lead, Team Bus helpers,
   summaries, checkpoints and handovers. The daemon adds up each call's dollars: the exact cost
   OpenRouter reports, or for a call on the Claude credit its cost at Claude's list prices. A call on
