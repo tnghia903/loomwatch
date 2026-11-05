@@ -11,14 +11,16 @@
    rather than shrinking to its content. */
 .wg-list { display: flex; flex-direction: column; gap: var(--sp-2); margin-top: var(--sp-2); width: min(100%, 640px); }
 
+/* --wg-surface: the card's own colour, which a graph's selected point is ringed in. */
 .wg {
+  --wg-surface: var(--color-panel-solid);
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
   padding: var(--sp-3);
   border: 1px solid var(--color-hairline);
   border-radius: var(--r-lg);
-  background: var(--color-panel-solid);
+  background: var(--wg-surface);
   min-width: 0;
 }
 .wg-title { margin: 0; display: flex; align-items: baseline; gap: var(--sp-2); font: 600 14px/20px var(--font-sans); color: var(--color-ink); }
@@ -190,8 +192,14 @@
 .chat-bubble.wg-in,
 .tc-reactable:has(> .chat-bubble.wg-in) { width: 100%; }
 .wg-here { margin: var(--sp-2) 0; }
+.wg-here:first-child { margin-top: 2px; }
 .wg-here:last-child { margin-bottom: 2px; }
-.wg-here .wg { background: color-mix(in srgb, var(--color-ink) 3%, var(--color-panel-solid)); }
+.wg-here .wg { --wg-surface: color-mix(in srgb, var(--color-ink) 3%, var(--color-panel-solid)); }
+/* On a narrow phone the card gives its row of boxes a little more room, so five still fit. */
+@media (max-width: 400px) {
+  .wg-here .wg { padding-inline: var(--sp-2); }
+  .wg-boxes { gap: 2px; }
+}
 
 /* A group's switches: one row of boxes to tap, each its label under a check or a dash. On is the
    accent's tint with a ring and a gold check, never a fill. */
@@ -218,11 +226,18 @@
 .wg-box.on { border-color: var(--color-accent); background: var(--color-accent-tint); box-shadow: 0 0 0 1px var(--color-accent); }
 .wg-box.on .wg-box-mark svg { color: var(--color-accent); }
 .wg-box:disabled, .wg-preset:disabled { cursor: default; }
+.wg-box:disabled, .wg-preset:disabled, .wg-field input:disabled, .wg-switch-input:disabled + .wg-switch-track { opacity: .7; }
+/* An off box is an empty square, as the checklist's box; on, a gold check. */
+.wg-box-empty { display: block; width: 12px; height: 12px; border: 1.5px solid var(--color-ink-3); border-radius: 3px; box-sizing: border-box; }
 .wg-box-label { overflow-wrap: anywhere; text-align: center; }
 
 /* Buttons that set a case worth trying: a line, the one now set a ring. */
-.wg-presets { display: flex; flex-direction: column; gap: var(--sp-1); }
+.wg-presets { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
 .wg-preset {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   min-height: 36px;
   padding: 6px var(--sp-3);
   border: 1px solid color-mix(in srgb, var(--color-ink) 22%, transparent);
@@ -233,7 +248,8 @@
   cursor: pointer;
 }
 .wg-preset:hover:not(:disabled) { border-color: var(--color-ink-3); }
-.wg-preset.on { border-color: var(--color-accent); background: var(--color-accent-tint); }
+.wg-preset.on { border-color: var(--color-accent); background: var(--color-accent-tint); box-shadow: 0 0 0 1px var(--color-accent); }
+.wg-preset.on svg { color: var(--color-accent); }
 
 /* Marks: a row of things, each a glyph and its words. Yes is green's glyph on a faint green edge;
    no is quiet, since it marks a fact, not something wrong. */
@@ -251,6 +267,7 @@
 .wg-cell-label { font: 500 12px/16px var(--font-sans); color: var(--color-ink-2); font-variant-numeric: tabular-nums; }
 .wg-cell-mark { display: grid; place-items: center; height: 20px; color: var(--color-ink-3); }
 .wg-cell-note { font: 400 12px/16px var(--font-sans); color: var(--color-ink-2); overflow-wrap: anywhere; }
+.wg-cell.no, .wg-cell.neither { border-color: transparent; }
 .wg-cell.yes { border-color: color-mix(in srgb, var(--color-ok) 45%, transparent); background: color-mix(in srgb, var(--color-ok) 8%, transparent); }
 .wg-cell.yes .wg-cell-mark { color: var(--color-ok); }
 .wg-cell.yes .wg-cell-note { color: var(--color-ink); }
@@ -270,6 +287,7 @@
   border-radius: var(--r-md);
   text-align: center;
 }
+.wg-flow-box:not(:last-child)::before { content: ''; position: absolute; left: 50%; top: 100%; width: 1px; height: 21px; background: var(--color-warp); }
 .wg-flow-box:not(:last-child)::after,
 .wg-flow-again::before {
   content: '';
@@ -278,8 +296,8 @@
   bottom: -15px;
   width: 7px;
   height: 7px;
-  border-right: 1.5px solid var(--color-ink-3);
-  border-bottom: 1.5px solid var(--color-ink-3);
+  border-right: 1.5px solid var(--color-warp);
+  border-bottom: 1.5px solid var(--color-warp);
   transform: translateX(-50%) rotate(45deg);
 }
 .wg-flow-label { font: 600 14px/20px var(--font-sans); color: var(--color-ink); }
@@ -291,21 +309,27 @@
 /* A graph: ink words, recessive grid, thin marks in the series' colours, one plot. */
 .wg-legend { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 2px var(--sp-3); font: 400 12px/16px var(--font-sans); color: var(--color-ink); }
 .wg-legend li { display: inline-flex; align-items: center; gap: 6px; }
+.wg-graph.many .wg-reading { min-height: 36px; }
 .wg-reading { margin: 0; min-height: 18px; font: 500 13px/18px var(--font-sans); color: var(--color-ink); font-variant-numeric: tabular-nums; }
-.wg-plot { min-width: 0; border-radius: var(--r-sm); }
+.wg-plot { min-width: 0; border-radius: var(--r-sm); touch-action: pan-y; }
 .wg-plot:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 .wg-plot svg { display: block; overflow: visible; }
 .wg-grid { stroke: var(--color-hairline); stroke-width: 1; }
-.wg-axis { fill: var(--color-ink-2); font: 400 11px/1 var(--font-sans); font-variant-numeric: tabular-nums; }
+.wg-axis { fill: var(--color-ink-2); font: 400 12px/1 var(--font-sans); font-variant-numeric: tabular-nums; }
+.wg-axis-label { fill: var(--color-ink); }
 .wg-axis.on { fill: var(--color-ink); font-weight: 600; }
 .wg-at { stroke: color-mix(in srgb, var(--color-ink) 22%, transparent); stroke-width: 1; }
 .wg-hit { fill: transparent; cursor: pointer; }
 .wg-gline { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
-.wg-gdot { stroke: var(--color-panel-solid); stroke-width: 2; }
-.wg-swatch line { stroke-width: 2; }
+.wg-gdot { stroke: var(--wg-surface); stroke-width: 2; }
+.wg-swatch line { stroke-width: 2; stroke-linecap: round; }
 .wg-gbar.s1, .wg-gdot.s1, .wg-swatch.s1 rect { fill: var(--color-series-1); }
-.wg-gbar.s2, .wg-gdot.s2, .wg-swatch.s2 rect { fill: var(--color-series-2); }
-.wg-gbar.s3, .wg-gdot.s3, .wg-swatch.s3 rect { fill: var(--color-series-3); }
+.wg-gdot.s2 { fill: var(--color-series-2); }
+/* Bars after the first: an outline, then a hatch, so a series isn't told by colour alone. */
+.wg-gbar.s2, .wg-swatch.s2 rect { fill: color-mix(in srgb, var(--color-series-2) 22%, transparent); stroke: var(--color-series-2); stroke-width: 1.5; }
+.wg-gdot.s3 { fill: var(--color-series-3); }
+.wg-gbar.s3, .wg-swatch.s3 rect { stroke: var(--color-series-3); stroke-width: 1; }
+.wg-hatch.s3 { stroke: var(--color-series-3); stroke-width: 1.5; }
 .wg-gline.s1, .wg-swatch.s1 line { stroke: var(--color-series-1); }
 .wg-gline.s2, .wg-swatch.s2 line { stroke: var(--color-series-2); }
 .wg-gline.s3, .wg-swatch.s3 line { stroke: var(--color-series-3); }

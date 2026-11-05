@@ -249,8 +249,8 @@ describe('AnswerWidgets, new parts', () => {
     render(<AnswerWidgets widgets={[marks, flow, graph]} onChange={keeper().onChange} />)
 
     const row = screen.getByRole('region', { name: 'Top 5 retrieved documents' })
-    expect(within(row).getByLabelText('#2: Relevant')).toBeInTheDocument()
-    expect(within(row).getByLabelText('#3: Neither')).toBeInTheDocument()
+    expect(within(row).getByLabelText('#2: Yes, Relevant')).toBeInTheDocument()
+    expect(within(row).getByLabelText('#3: Neither yes nor no')).toBeInTheDocument()
     expect(row).toHaveTextContent('2 relevant documents retrieved out of 3')
 
     const steps = within(screen.getByRole('region', { name: 'A RAG pipeline' })).getAllByRole('listitem')

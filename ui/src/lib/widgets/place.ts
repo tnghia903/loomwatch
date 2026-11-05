@@ -90,6 +90,12 @@ export function withoutPartPlace(streamed: string): string {
   return /^\{\{\s*(w(i(d(g(e(t(\s+\d*\}?)?)?)?)?)?)?)?$/iu.test(streamed.slice(open)) ? streamed.slice(0, open) : streamed
 }
 
+/** Words to show where widgets aren't drawn (a long answer's pane, Details, a replay): any place
+    line taken out, written or still being written. Words with none are kept exactly. */
+export function wordsOf(text: string): string {
+  return text.includes('{{') ? place(withoutPartPlace(text), []).words : text
+}
+
 /** A piece of an answer's words and the widgets that follow it. */
 export interface AnswerPart {
   text: string

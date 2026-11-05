@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { inputText, isPreset, presetState, readNumber, stillTyping, thousandsWithDots, valuesOf, workOut } from '../../../lib/widgets/calculator'
 import type { WidgetInput, WidgetSpec, WidgetState } from '../../../lib/widgets/types'
 import { Check, Minus, Plus } from '../../ui/icon'
+import { LIVE } from './WidgetChoices'
 
 type Calculator = Extract<WidgetSpec, { kind: 'calculator' }>
 
@@ -83,7 +84,7 @@ export function WidgetCalculator({ spec, state, onShow, onKeep, error, disabled 
           const on = values[input.id] !== 0
           return (
             <button key={input.id} type="button" className={`wg-box${on ? ' on' : ''}`} aria-pressed={on} disabled={disabled} onClick={() => set(input.id, !on, true)}>
-              <span className="wg-box-mark" aria-hidden="true">{on ? <Check size={14} /> : <Minus size={14} />}</span>
+              <span className="wg-box-mark" aria-hidden="true">{on ? <Check size={16} strokeWidth={2.5} /> : <span className="wg-box-empty" />}</span>
               <span className="wg-box-label">{input.label}</span>
             </button>
           )
@@ -136,7 +137,7 @@ export function WidgetCalculator({ spec, state, onShow, onKeep, error, disabled 
   }
 
   return (
-    <section className="wg wg-calculator" aria-label={spec.title}>
+    <section className="wg wg-calculator" aria-label={spec.title} title={disabled ? LIVE : undefined}>
       <p className="wg-title">{spec.title}</p>
       <div className="wg-calc">
         <div className="wg-results" aria-live="polite">
@@ -162,7 +163,7 @@ export function WidgetCalculator({ spec, state, onShow, onKeep, error, disabled 
             const current = isPreset(spec.inputs, state, preset.values)
             return (
               <button key={preset.label} type="button" className={`wg-preset${current ? ' on' : ''}`} aria-pressed={current} disabled={disabled} onClick={() => { setTyped({}); show(presetState(preset.values), true) }}>
-                {preset.label}
+                {current && <Check size={14} strokeWidth={2.5} aria-hidden="true" />}{preset.label}
               </button>
             )
           })}

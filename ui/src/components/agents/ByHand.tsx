@@ -454,7 +454,7 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
             {/* ADR 0114: the agent's own switch; absent, LoomWatch's default, which is on. */}
             <button type="button" className={`check byhand-helpers${(draft.widgets ?? widgetsDefault) ? ' on' : ''}`} disabled={readOnly} aria-pressed={draft.widgets ?? widgetsDefault} onClick={() => set('widgets', !(draft.widgets ?? widgetsDefault))}>
               <span className="box"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg></span>
-              <span className="txt"><b className="t-body">Adds choices, checklists and calculators to its answers</b><span className="t-meta">And steps to tap through, and charts drawn to scale. Only under the answers you read from it, when they help more than words.</span></span>
+              <span className="txt"><b className="t-body">Adds charts, checklists and calculators to its answers</b><span className="t-meta">And choices, steps and diagrams. Only in the answers you read from it, when they help more than words.</span></span>
             </button>
           </>)}
           {learned && <LearnedBlock of={learned} name={draft.name.trim() || 'this agent'} readOnly={readOnly} />}

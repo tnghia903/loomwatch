@@ -1,5 +1,6 @@
 import type { WidgetSpec, WidgetState } from '../../../lib/widgets/types'
 import { Check } from '../../ui/icon'
+import { LIVE } from './WidgetChoices'
 
 type Checklist = Extract<WidgetSpec, { kind: 'checklist' }>
 
@@ -9,7 +10,7 @@ export function WidgetChecklist({ spec, state, onToggle, error, disabled = false
   const checked = spec.items.map((_, at) => (state && 'checked' in state ? state.checked[at] === true : false))
   const done = checked.filter(Boolean).length
   return (
-    <section className="wg wg-checklist" aria-label={spec.title}>
+    <section className="wg wg-checklist" aria-label={spec.title} title={disabled ? LIVE : undefined}>
       <p className="wg-title">{spec.title}<span className="wg-count">{done} of {spec.items.length} done</span></p>
       <ul className="wg-items">
         {spec.items.map((item, at) => (

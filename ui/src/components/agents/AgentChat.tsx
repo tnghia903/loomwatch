@@ -23,6 +23,7 @@ import type { TeamView } from '../chat/WorkPiece'
 import { FileReader } from '../reader/FileReader'
 import { TeamReviewDialog } from '../run/TeamReviewDialog'
 import { GuestNamesContext, TeamFiguresContext } from './figureContext'
+import { wordsOf } from '../../lib/widgets/place'
 
 export interface AgentChatProps {
   draft: AgentDraft
@@ -232,7 +233,7 @@ export function AgentAnswer({ runId, name, onClose }: { runId: string; name: str
   const session = useRunSession(runId, null)
   const record = session.record
   const responder = session.projection.agents.find((agent) => agent.id === record?.responder)
-  const text = record && isTerminalRun(record.status) ? record.reply ?? '' : responder?.reply ?? ''
+  const text = wordsOf(record && isTerminalRun(record.status) ? record.reply ?? '' : responder?.reply ?? '')
   const touched = useMemo(() => filesTouched(session.projection.evidence), [session.projection.evidence])
   const written = useMemo(() => filesWritten(session.projection.evidence), [session.projection.evidence])
   return (

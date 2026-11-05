@@ -23,6 +23,7 @@ import { HandoverPanel } from '../run/HandoverPanel'
 import { ProvenancePanel } from '../run/ProvenancePanel'
 import { runAgentNodes, type RunAgentsInput } from '../workspace/runAgents'
 import { GuestNamesContext, TeamFiguresContext } from './figureContext'
+import { wordsOf } from '../../lib/widgets/place'
 
 export interface AgentDetailsProps {
   asked: DetailsAsked
@@ -111,7 +112,7 @@ export function AgentDetails({ asked, draft, model, chatId, figure, onClose, onA
   const responder = projection.agents.find((each) => each.id === responderId)
   const recordedReply = record?.reply ?? null
   const recordedText = useMemo(() => (recordedReply != null ? recordedReplyText(session.events, responderId, recordedReply) : null), [session.events, responderId, recordedReply])
-  const answer = session.cursor === null && recordedText != null ? recordedText : responder?.reply ?? ''
+  const answer = wordsOf(session.cursor === null && recordedText != null ? recordedText : responder?.reply ?? '')
   const shownEvents = useMemo(() => (session.cursor === null ? session.events : session.events.filter((event) => event.seq <= (session.cursor ?? Infinity))), [session.events, session.cursor])
   const attempt = useMemo(() => {
     const all = teamRunIds(mergeHistory(runs, []), record?.teamPath ?? null)

@@ -3998,13 +3998,13 @@ async fn keep_widgets(
     reply: &str,
 ) -> String {
     let Some(db) = registry.db() else {
-        return reply.to_owned();
+        return crate::widgets::without_place_lines(reply);
     };
     let kept = async {
         let events = archive.load_session(run_id).await?;
         let shown = crate::widgets::of_answer(&events, responder);
         if shown.is_empty() {
-            return anyhow::Ok(reply.to_owned());
+            return anyhow::Ok(crate::widgets::without_place_lines(reply));
         }
         let (words, lines) = crate::widgets::place(reply, &shown);
         let widgets: Vec<_> = shown
@@ -4019,7 +4019,7 @@ async fn keep_widgets(
         Ok(words) => words,
         Err(error) => {
             eprintln!("warning: could not keep the widgets under run {run_id}'s answer: {error:#}");
-            reply.to_owned()
+            crate::widgets::without_place_lines(reply)
         }
     }
 }

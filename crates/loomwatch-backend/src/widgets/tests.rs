@@ -693,3 +693,17 @@ fn the_place_comes_from_what_the_agent_was_told() {
     let told = u32::try_from(events.len()).unwrap();
     assert_eq!(places, [Some(told + 1), Some(told + 2)]);
 }
+
+#[test]
+fn a_place_line_never_shows_when_no_widget_was_kept() {
+    assert_eq!(
+        without_place_lines("Here it is.\n\n{{widget 1}}\n\nTry it."),
+        "Here it is.\n\nTry it."
+    );
+    let plain = "No widgets, {{braces}} and a last line\n";
+    assert_eq!(
+        without_place_lines(plain),
+        plain,
+        "words with none are kept exactly"
+    );
+}

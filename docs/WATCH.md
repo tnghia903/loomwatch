@@ -84,7 +84,7 @@ At a check's stop, **Send back** works with no note: the checks still open say w
 `ui/src/lib/chat/doneWhen.ts` reads the run's `done_when` records.
 
 An answer can have things to use and to look at in it (ADR 0114), when the agent that wrote it has
-**Adds choices, checklists and calculators to its answers** on, as it is unless turned off: choices
+**Adds charts, checklists and calculators to its answers** on, as it is unless turned off: choices
 to tap, a checklist to tick, a calculator, steps to tap through, a chart whose bars LoomWatch draws
 to scale from the agent's figures, a graph of bars or a line, a row of things marked yes or no, or a
 diagram of boxes and arrows. The agent that answers shows one whenever its answer has figures to

@@ -1211,7 +1211,7 @@ Tell the person in a few words when the message comes, then end your turn.
               "type": "string"
             },
             "note": {
-              "description": "A word or two under it, such as Relevant",
+              "description": "Only what the mark doesn't say, such as 0.82 or 9–11 am; leave it out when the mark says it all",
               "type": "string"
             }
           },

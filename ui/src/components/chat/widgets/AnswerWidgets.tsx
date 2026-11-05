@@ -42,7 +42,7 @@ export function AnswerWidgets(props: AnswerWidgetsProps) {
  */
 export function AnswerWidget({ kept, onChange, onChoose, chosen = null, live = false }: Omit<AnswerWidgetsProps, 'widgets'> & { kept: KeptWidget }) {
   switch (kept.spec.kind) {
-    case 'choices': return <WidgetChoices spec={kept.spec} onChoose={live ? undefined : onChoose} chosen={chosen} />
+    case 'choices': return <WidgetChoices spec={kept.spec} onChoose={live ? undefined : onChoose} chosen={chosen} live={live} />
     case 'checklist': return <HeldChecklist kept={kept} onChange={onChange} live={live} />
     case 'calculator': return <HeldCalculator kept={kept} onChange={onChange} live={live} />
     case 'steps': return <WidgetSteps spec={kept.spec} />

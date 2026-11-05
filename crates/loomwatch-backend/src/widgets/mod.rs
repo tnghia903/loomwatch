@@ -1188,7 +1188,7 @@ pub(crate) fn tool_definition() -> Value {
                         "properties": {
                             "label": {"type": "string", "description": "A word or two, such as #1 or Mon", "minLength": 1},
                             "mark": {"type": "string", "enum": ["yes", "no", "neither"]},
-                            "note": {"type": "string", "description": "A word or two under it, such as Relevant"}
+                            "note": {"type": "string", "description": "Only what the mark doesn't say, such as 0.82 or 9–11 am; leave it out when the mark says it all"}
                         },
                         "required": ["label", "mark"],
                         "additionalProperties": false
@@ -1282,6 +1282,20 @@ fn without_places(line: &str) -> (String, bool) {
     }
     out.push_str(rest);
     (out, found)
+}
+
+/// `reply` with any place line taken out, for an answer none of whose widgets were kept (a call
+/// that was refused, a database that failed): the line never shows as written. Words with none are
+/// kept exactly.
+pub(crate) fn without_place_lines(reply: &str) -> String {
+    if reply
+        .split('\n')
+        .any(|line| place_of(line).is_some() || without_places(line).1)
+    {
+        place(reply, &[]).0
+    } else {
+        reply.to_owned()
+    }
 }
 
 /// The answer's words with every place line taken out, and for each of `shown`, the line of those

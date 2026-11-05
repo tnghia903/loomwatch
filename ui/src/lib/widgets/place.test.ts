@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import type { RunEvent } from '../watch/events'
-import { partsOf, place, placedSoFar, shownSoFar, withoutPartPlace } from './place'
+import { partsOf, place, placedSoFar, shownSoFar, withoutPartPlace, wordsOf } from './place'
 import type { KeptWidget, WidgetSpec } from './types'
 
 // The same cases the daemon reads (crates/loomwatch-backend/src/widgets/mod.rs `place`), so a
@@ -28,6 +28,12 @@ describe('place', () => {
       ['Two.\n\nThree.', []],
     ])
     expect(end.map((kept) => kept.n)).toEqual([2, 5])
+  })
+
+  it('shows words without place lines where widgets aren’t drawn, and other words exactly', () => {
+    expect(wordsOf('Here it is.\n\n{{widget 1}}\n\nTry it.')).toBe('Here it is.\n\nTry it.')
+    expect(wordsOf('Writing:\n\n{{widg')).toBe('Writing:')
+    expect(wordsOf('Plain words\n')).toBe('Plain words\n')
   })
 
   it('hides a place line still being written', () => {

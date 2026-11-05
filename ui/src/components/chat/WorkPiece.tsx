@@ -1052,7 +1052,10 @@ function Answer({ tour, run, answer, touched, folder, written, streaming, name, 
             {placed && placed.parts.length > 1
               ? placed.parts.map((part, at) => (
                   <Fragment key={at}>
-                    {part.text.trim() && <div className={`chat-text${at < placed.parts.length - 1 ? ' wg-before' : ''}`}><SaidText text={part.text} /></div>}
+                    {part.text.trim()
+                      ? <div className={`chat-text${at < placed.parts.length - 1 ? ' wg-before' : ''}`}><SaidText text={part.text} /></div>
+                      // A widget the words have just placed: the caret after it says more is coming.
+                      : streaming && at === placed.parts.length - 1 && <div className="chat-text"><p /></div>}
                     {part.widgets.map((kept) => <div key={kept.n} className="wg-here">{widgets?.render(kept)}</div>)}
                   </Fragment>
                 ))
