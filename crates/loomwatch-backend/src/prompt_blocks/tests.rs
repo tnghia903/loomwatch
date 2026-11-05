@@ -81,6 +81,7 @@ fn system_prompts(out: &mut String) {
         edits_ask: false,
         plan: false,
         ask_user: false,
+        widgets: false,
     };
     section(
         out,
@@ -103,6 +104,7 @@ fn system_prompts(out: &mut String) {
         edits_ask: false,
         plan: true,
         ask_user: true,
+        widgets: true,
     };
     let mai = AboutYou {
         name: Some("Mai".into()),
@@ -132,6 +134,7 @@ fn system_prompts(out: &mut String) {
         edits_ask: false,
         plan: false,
         ask_user: false,
+        widgets: false,
     };
     let named = AboutYou {
         name: Some("Mai".into()),
@@ -150,6 +153,7 @@ fn system_prompts(out: &mut String) {
         edits_ask: false,
         plan: false,
         ask_user: true,
+        widgets: false,
     };
     asking_prompt(out);
     let unnamed = AboutYou {
@@ -181,6 +185,7 @@ fn asking_prompt(out: &mut String) {
         edits_ask: true,
         plan: true,
         ask_user: true,
+        widgets: false,
     };
     section(
         out,

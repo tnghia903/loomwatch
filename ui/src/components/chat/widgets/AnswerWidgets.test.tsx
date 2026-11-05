@@ -25,6 +25,8 @@ const trip: KeptWidget = {
     ],
   },
 }
+const senate: KeptWidget = { n: 5, spec: { kind: 'chart', title: 'US Senate after the midterms', unit: 'seats', bars: [{ label: 'Democrats', value: 51, note: '+4' }, { label: 'Republicans', value: 49 }] } }
+const markets: KeptWidget = { n: 6, spec: { kind: 'chart', title: 'Markets on Wednesday', unit: '%', decimals: 1, bars: [{ label: 'S&P 500', value: 2.36 }, { label: 'Nikkei', value: -0.4 }, { label: 'FTSE', value: 0 }] } }
 const water: KeptWidget = { n: 4, spec: { kind: 'steps', title: 'The water cycle', repeats: true, steps: [{ label: 'Evaporation', text: 'The sun warms the sea.' }, { label: 'Condensation', text: 'The drops make a cloud.' }, { label: 'Rain', text: 'Heavy drops fall.' }] } }
 
 /** The daemon, keeping what it is sent: what `onChange` answers. */
@@ -154,6 +156,34 @@ describe('AnswerWidgets', () => {
     fireEvent.click(screen.getByRole('button', { name: 'More: Pupils' }))
     expect(screen.getByRole('textbox', { name: 'Pupils' })).toHaveValue('33')
     await waitFor(() => expect(kept).toEqual([{ n: 3, state: { values: { pupils: 33 } } }]))
+  })
+
+  it('draws a chart’s bars to scale from one zero, each with its figure written beside it', () => {
+    render(<AnswerWidgets widgets={[senate]} onChange={keeper().onChange} />)
+    const chart = screen.getByRole('region', { name: 'US Senate after the midterms' })
+    const rows = within(chart).getAllByRole('listitem')
+    expect(rows.map((row) => row.textContent)).toEqual(['Democrats51 seats +4', 'Republicans49 seats'])
+    const fills = within(chart).getAllByTestId('wg-bar-fill')
+    // The largest figure is the whole track; the next is its share of it.
+    expect(fills[0]).toHaveStyle({ left: '0%', width: '100%' })
+    expect(fills[1].style.width).toMatch(/^96\.07\d*%$/u)
+    // Nothing to press: a chart is for reading.
+    expect(within(chart).queryAllByRole('button')).toHaveLength(0)
+  })
+
+  it('runs a figure below zero left of the zero line, and writes figures as the daemon does', () => {
+    render(<AnswerWidgets widgets={[markets]} onChange={keeper().onChange} />)
+    const chart = screen.getByRole('region', { name: 'Markets on Wednesday' })
+    expect(within(chart).getAllByRole('listitem').map((row) => row.textContent)).toEqual(['S&P 5002.4 %', 'Nikkei-0.4 %', 'FTSE0.0 %'])
+    const [up, down, flat] = within(chart).getAllByTestId('wg-bar-fill')
+    // 2.36 above zero and 0.4 below share the track: zero sits at 0.4 / 2.76 of it.
+    const zero = (0.4 / 2.76) * 100
+    expect(parseFloat(up.style.left)).toBeCloseTo(zero, 5)
+    expect(parseFloat(up.style.width)).toBeCloseTo((2.36 / 2.76) * 100, 5)
+    expect(parseFloat(down.style.left)).toBeCloseTo(0, 5)
+    expect(parseFloat(down.style.width)).toBeCloseTo(zero, 5)
+    expect(down).toHaveClass('below')
+    expect(parseFloat(flat.style.width)).toBe(0)
   })
 
   it('shows the step you tap, with one control per step, and marks steps that repeat', () => {

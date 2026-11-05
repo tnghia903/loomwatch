@@ -1,6 +1,6 @@
 /* ===========================================================================
-   Widgets in an answer (ADR 0114): choices, a checklist, a calculator, steps, marks, a flow, a
-   graph; each where the answer's words place it, the rest after them.
+   Widgets in an answer (ADR 0114): choices, a checklist, a calculator, steps, a chart, a graph,
+   marks, a flow; each where the answer's words place it, the rest after them.
    components/chat/widgets/. Every rule is under a .wg- class; tokens only. No gold fill: the
    chat's send is the screen's one. A choice, a step, a tick or a switch that is on is the
    accent's tint with a ring, a line or a gold mark (DESIGN.md §Components; settings.css's
@@ -309,6 +309,28 @@
 .wg-gline.s1, .wg-swatch.s1 line { stroke: var(--color-series-1); }
 .wg-gline.s2, .wg-swatch.s2 line { stroke: var(--color-series-2); }
 .wg-gline.s3, .wg-swatch.s3 line { stroke: var(--color-series-3); }
+/* Chart: label, bar, figure on one line; bars share one zero, so their lengths compare. The fill
+   is ink, not gold (no gold fill, as above); a figure below zero runs left of the zero line, in a
+   lighter ink. Narrow, the label sits above its bar. */
+.wg-chart { container-type: inline-size; }
+.wg-bars { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.wg-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 32%) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.wg-bar-label { font: 400 14px/20px var(--font-sans); color: var(--color-ink); overflow-wrap: anywhere; }
+.wg-bar-track { position: relative; height: 12px; border-radius: var(--r-full); background: color-mix(in srgb, var(--color-ink) 6%, transparent); }
+.wg-bar-fill { position: absolute; top: 0; bottom: 0; border-radius: var(--r-full); background: var(--color-ink-2); min-width: 2px; }
+.wg-bar-fill.below { background: var(--color-ink-3); }
+.wg-bar-zero { position: absolute; top: -3px; bottom: -3px; width: 1px; background: var(--color-ink-3); }
+.wg-bar-figure { font: 600 13px/18px var(--font-sans); color: var(--color-ink); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.wg-bar-note { font-weight: 400; color: var(--color-ink-2); }
+@container (max-width: 360px) {
+  .wg-bar { grid-template-columns: minmax(0, 1fr) auto; row-gap: 2px; }
+  .wg-bar-label { grid-column: 1 / -1; }
+}
 
 @media (pointer: coarse) {
   .wg-option, .wg-input, .wg-step, .wg-preset, .wg-box { min-height: 44px; }

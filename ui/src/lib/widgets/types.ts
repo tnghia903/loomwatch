@@ -39,6 +39,9 @@ export interface WidgetPreset { label: string; values: Record<string, number | b
 
 export interface WidgetStep { label: string; text: string }
 
+/** One bar of a chart: what it is and its figure, which may be below zero. */
+export interface WidgetBar { label: string; value: number; note?: string }
+
 /** One thing in a row of marks. */
 export interface WidgetCell { label: string; mark: 'yes' | 'no' | 'neither'; note?: string }
 
@@ -53,6 +56,7 @@ export type WidgetSpec =
   | { kind: 'checklist'; title: string; items: WidgetItem[] }
   | { kind: 'calculator'; title: string; inputs: WidgetInput[]; results: WidgetFigure[]; presets?: WidgetPreset[] }
   | { kind: 'steps'; title: string; steps: WidgetStep[]; repeats?: boolean }
+  | { kind: 'chart'; title: string; bars: WidgetBar[]; unit?: string; prefix?: string; decimals?: number }
   | { kind: 'marks'; title: string; cells: WidgetCell[]; facts?: string[] }
   | { kind: 'flow'; title: string; boxes: WidgetBox[]; repeats?: boolean }
   | { kind: 'graph'; title: string; style: 'bar' | 'line'; labels: string[]; series: WidgetSeries[]; unit?: string; prefix?: string; decimals?: number }

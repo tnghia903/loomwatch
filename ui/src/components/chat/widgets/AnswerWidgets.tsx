@@ -1,6 +1,7 @@
 import type { KeptWidget, WidgetState } from '../../../lib/widgets/types'
 import { useHeldState } from '../../../lib/widgets/useHeldState'
 import { WidgetCalculator } from './WidgetCalculator'
+import { WidgetChart } from './WidgetChart'
 import { WidgetChecklist } from './WidgetChecklist'
 import { WidgetChoices } from './WidgetChoices'
 import { WidgetFlow } from './WidgetFlow'
@@ -36,7 +37,7 @@ export function AnswerWidgets(props: AnswerWidgetsProps) {
 
 /**
  * One widget in an answer (ADR 0114): choices to tap, a checklist to tick, a calculator LoomWatch
- * works out, steps to tap through, or a row of marks, a flow or a graph to look at. What you tick or
+ * works out, steps to tap through, or a chart, a graph, a row of marks or a flow to look at. What you tick or
  * change is kept, and the next work's conversation says so.
  */
 export function AnswerWidget({ kept, onChange, onChoose, chosen = null, live = false }: Omit<AnswerWidgetsProps, 'widgets'> & { kept: KeptWidget }) {
@@ -47,6 +48,7 @@ export function AnswerWidget({ kept, onChange, onChoose, chosen = null, live = f
     case 'steps': return <WidgetSteps spec={kept.spec} />
     case 'marks': return <WidgetMarks spec={kept.spec} />
     case 'flow': return <WidgetFlow spec={kept.spec} />
+    case 'chart': return <WidgetChart spec={kept.spec} />
     case 'graph': return <WidgetGraph spec={kept.spec} />
   }
   return null

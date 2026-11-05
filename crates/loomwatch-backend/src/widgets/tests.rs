@@ -54,7 +54,23 @@ fn each_kind_reads_with_only_its_own_fields() {
 #[test]
 fn a_bad_widget_says_what_to_change() {
     let cases = [
-        (json!({"kind": "table", "title": "x"}), "isn't a widget"),
+        (json!({"kind": "map", "title": "x"}), "isn't a widget"),
+        (
+            json!({"kind": "chart", "title": "x", "bars": [{"label": "a", "value": 1}]}),
+            "bars has 1; give 2 to 12",
+        ),
+        (
+            json!({"kind": "chart", "title": "x", "bars": [{"label": "a", "value": 1}, {"label": "b"}]}),
+            "bars 2: value is missing",
+        ),
+        (
+            json!({"kind": "chart", "title": "x", "bars": [{"label": "a", "value": 1}, {"label": "b", "value": "51"}]}),
+            "bars 2: value is a number",
+        ),
+        (
+            json!({"kind": "chart", "title": "x", "decimals": 9, "bars": [{"label": "a", "value": 1}, {"label": "b", "value": 2}]}),
+            "decimals is a whole number from 0 to",
+        ),
         (json!({"kind": "choices"}), "title is missing"),
         (
             json!({"kind": "choices", "title": "x", "options": [{"label": "only one"}]}),
@@ -112,6 +128,74 @@ fn a_bad_widget_says_what_to_change() {
             "{arguments}: {error:?} should say {says:?}"
         );
     }
+}
+
+fn senate() -> Value {
+    json!({
+        "kind": "chart",
+        "title": "US Senate after the midterms",
+        "unit": "seats",
+        "bars": [
+            {"label": "Democrats", "value": 51, "note": "+4"},
+            {"label": "Republicans", "value": 49, "note": "−4"}
+        ],
+        "options": [{"label": "ignored"}]
+    })
+}
+
+/// A chart reads its bars and one unit for all of them; the agent is told the figures as the person
+/// reads them, and the next run's conversation says them too. It keeps nothing.
+#[test]
+fn a_chart_is_checked_and_its_figures_said_as_the_person_reads_them() {
+    let chart = read(&senate()).expect("a good chart");
+    assert_eq!(chart.kind(), "chart");
+    assert_eq!(
+        serde_json::to_value(&chart).unwrap(),
+        json!({
+            "kind": "chart",
+            "title": "US Senate after the midterms",
+            "unit": "seats",
+            "bars": [
+                {"label": "Democrats", "value": 51.0, "note": "+4"},
+                {"label": "Republicans", "value": 49.0, "note": "−4"}
+            ]
+        }),
+        "only a chart's own fields are kept"
+    );
+    let told = shown(&chart, 1);
+    assert_eq!(told["shown"], "a chart \"US Senate after the midterms\"");
+    assert_eq!(told["bars"], "Democrats 51 seats; Republicans 49 seats");
+    assert!(told.get("results").is_none());
+
+    let markets = read(&json!({
+        "kind": "chart", "title": "Markets on Wednesday", "unit": "%", "decimals": 1,
+        "bars": [{"label": "S&P 500", "value": 2.36}, {"label": "Nikkei", "value": -0.4}]
+    }))
+    .unwrap();
+    assert_eq!(shown(&markets, 1)["bars"], "S&P 500 2.4 %; Nikkei -0.4 %");
+    assert_eq!(
+        showed(&[kept(1, chart.clone(), None, None)]).unwrap(),
+        "[Under this answer: a chart \"US Senate after the midterms\" (Democrats 51 seats; \
+         Republicans 49 seats).]"
+    );
+    assert!(
+        read_state(&chart, &json!({})).is_err(),
+        "a chart keeps nothing"
+    );
+    assert_eq!(
+        changes(
+            "Mai",
+            "1a2b3c4d",
+            &[kept(
+                1,
+                chart,
+                Some(json!({})),
+                Some("2026-11-05T10:00:00Z")
+            )],
+            "2026-11-05T11:00:00Z"
+        ),
+        None
+    );
 }
 
 #[test]
@@ -566,10 +650,9 @@ fn shown_at(places: &[Option<u32>]) -> Vec<Shown> {
 /// same way while the answer is still being written.
 #[test]
 fn a_place_line_puts_its_widget_there_as_the_app_does() {
-    let cases: Value = serde_json::from_str(include_str!(
-        "../../../../schemas/widget-place.cases.json"
-    ))
-    .expect("schemas/widget-place.cases.json holds the cases");
+    let cases: Value =
+        serde_json::from_str(include_str!("../../../../schemas/widget-place.cases.json"))
+            .expect("schemas/widget-place.cases.json holds the cases");
     let cases = cases["cases"].as_array().expect("cases");
     assert!(cases.len() > 5, "the cases are all read");
     for case in cases {
