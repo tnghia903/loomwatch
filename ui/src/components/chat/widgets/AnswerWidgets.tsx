@@ -1,6 +1,7 @@
 import type { KeptWidget, WidgetState } from '../../../lib/widgets/types'
 import { useHeldState } from '../../../lib/widgets/useHeldState'
 import { WidgetCalculator } from './WidgetCalculator'
+import { WidgetChart } from './WidgetChart'
 import { WidgetChecklist } from './WidgetChecklist'
 import { WidgetChoices } from './WidgetChoices'
 import { WidgetSteps } from './WidgetSteps'
@@ -18,7 +19,7 @@ export interface AnswerWidgetsProps {
 
 /**
  * The widgets under an answer (ADR 0114): choices to tap, a checklist to tick, a calculator
- * LoomWatch works out, steps to tap through. What you tick or change is kept, and the next work's
+ * LoomWatch works out, steps to tap through, a chart LoomWatch draws to scale. What you tick or change is kept, and the next work's
  * conversation says so. The answer's words stay above them, as they are.
  */
 export function AnswerWidgets({ widgets, onChange, onChoose, chosen = null }: AnswerWidgetsProps) {
@@ -30,6 +31,7 @@ export function AnswerWidgets({ widgets, onChange, onChoose, chosen = null }: An
           case 'checklist': return <HeldChecklist key={kept.n} kept={kept} onChange={onChange} />
           case 'calculator': return <HeldCalculator key={kept.n} kept={kept} onChange={onChange} />
           case 'steps': return <WidgetSteps key={kept.n} spec={kept.spec} />
+          case 'chart': return <WidgetChart key={kept.n} spec={kept.spec} />
         }
         return null
       })}

@@ -92,6 +92,17 @@ pub(crate) const UNCLEAR: Block = Block::new(
     "- When something is unclear, make a sensible choice and say what you chose, or say exactly \
      what you need.",
 );
+/// For the agent whose reply is the answer the person reads, with `show_widget` (ADR 0114): the
+/// answer shown, not only told, whenever a widget fits it.
+pub(crate) const WIDGETS: Block = Block::new(
+    "system.widgets",
+    "- Your answer is the one the person reads, so show it with show_widget whenever one fits, \
+     for a view they take in at a glance and can use: a chart for figures to compare, a \
+     calculator for a sum, a split or a cost they may change, a checklist for things to do, steps \
+     for a process or a how-to, choices for what they may want next. Prefer it to a table, a list \
+     or bars written in text, and show more than one when the answer has more than one of these. \
+     Words alone are for an answer with none of them.",
+);
 /// For every agent, last of how it works.
 pub(crate) const FINISH: Block = Block::new(
     "system.finish",
@@ -174,6 +185,8 @@ pub(crate) struct Abilities {
     pub plan: bool,
     /// The Team Bus's `ask_user` is among its tools.
     pub ask_user: bool,
+    /// The Team Bus's `show_widget` is among its tools: its reply is the answer (ADR 0114).
+    pub widgets: bool,
 }
 
 /// The built-in instructions, then what the person told their agents about themselves (ADR 0074),
@@ -231,6 +244,9 @@ pub(crate) fn system_prompt(
     } else {
         UNCLEAR.text()
     });
+    if abilities.widgets {
+        habit(WIDGETS.text());
+    }
     habit(FINISH.text());
     if let Some(about) = person.and_then(|person| person.about.as_deref()) {
         person_section(&mut prompt, name, about);
@@ -294,6 +310,7 @@ mod tests {
             edits_ask: false,
             plan: false,
             ask_user: false,
+            widgets: false,
         };
         let talking = system_prompt(
             Path::new("/w"),
@@ -314,6 +331,7 @@ mod tests {
             edits_ask: false,
             plan: true,
             ask_user: true,
+            widgets: false,
         };
         let working = system_prompt(
             Path::new("/w"),
@@ -364,6 +382,25 @@ mod tests {
         assert!(!free.contains("Each file change asks"));
     }
 
+    /// ADR 0114: the agent whose reply is the answer is told to show it with a widget whenever one
+    /// fits, ahead of how it finishes; no other agent hears of widgets.
+    #[test]
+    fn the_agent_that_answers_is_told_to_show_its_answer_when_a_widget_fits() {
+        let answering = Abilities {
+            widgets: true,
+            ..working()
+        };
+        let told = system_prompt(Path::new("/w"), answering, None, &[], "", None, None);
+        let habit = told.find(WIDGETS.text()).expect("the widgets habit");
+        assert!(
+            habit < told.find(FINISH.text()).expect("finish"),
+            "before it finishes"
+        );
+        assert!(told.contains("a chart for figures to compare"));
+        let other = system_prompt(Path::new("/w"), working(), None, &[], "", None, None);
+        assert!(!other.contains("show_widget"));
+    }
+
     fn working() -> Abilities {
         Abilities {
             files: true,
@@ -373,6 +410,7 @@ mod tests {
             edits_ask: false,
             plan: true,
             ask_user: true,
+            widgets: false,
         }
     }
 

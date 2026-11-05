@@ -5185,20 +5185,33 @@ pub(crate) mod tests {
         assert_eq!(spend.limit_usd, Some(6.0));
 
         let set = TeamConfig::parse(
-            "schemaVersion: 1\nid: brief\nspend:\n  perRun: 1\nentrypoint: a\nagents:\n  - id: a\n    model: m\n",
+            "schemaVersion: 1\nid: brief\nspend:\n  perRun: 1.5\nentrypoint: a\nagents:\n  - id: a\n    model: m\n",
         )
         .unwrap();
         let own = run(&set, 7, RunStatus::Queued, 0.0);
         let own_id = own.run_id.clone();
         registry.insert(own);
         let spend = registry.get(&own_id).unwrap().spend.unwrap();
-        assert_eq!(spend.limit_usd, Some(1.0));
+        assert_eq!(spend.limit_usd, Some(1.5));
         assert!(!spend.automatic);
         assert_eq!(
             spend.usual_usd,
             Some(3.0),
             "what its runs usually cost, beside its figure"
         );
+
+        // The $1.00 Ask used to write, below what the brief's runs usually cost, gives way.
+        let old = TeamConfig::parse(
+            "schemaVersion: 1\nid: brief\nspend:\n  perRun: 1.00\nentrypoint: a\nagents:\n  - id: a\n    model: m\n",
+        )
+        .unwrap();
+        let next = run(&old, 8, RunStatus::Queued, 0.0);
+        let next_id = next.run_id.clone();
+        registry.insert(next);
+        let spend = registry.get(&next_id).unwrap().spend.unwrap();
+        assert!(spend.automatic);
+        assert_eq!(spend.limit_usd, Some(6.0));
+        assert_eq!(spend.set_aside_usd, Some(1.0));
     }
 
     fn permission_request(id: &str, kind: &str) -> crate::permissions::PermissionRequest {

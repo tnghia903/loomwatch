@@ -136,6 +136,9 @@ export interface RunSpend {
   usualUsd?: number | null
   /** How many runs `usualUsd` is the middle of. */
   usualRuns?: number
+  /** The $1.00 or $2.00 LoomWatch used to write into the team, set aside for the automatic limit
+      because the team's runs usually cost more. */
+  setAsideUsd?: number | null
 }
 
 /**

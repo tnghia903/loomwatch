@@ -4557,10 +4557,18 @@ mod tests {
             "{refused}"
         );
 
-        // The answering agent with its switch absent has LoomWatch's default, off for now; and a
-        // run that never said who answers offers it to nobody.
-        const { assert!(!crate::widgets::DEFAULT_ON) };
-        for bus in [bus_with(None, Some("lead"))?, bus_with(Some(true), None)?] {
+        // The answering agent with its switch absent has LoomWatch's default, which is on.
+        const { assert!(crate::widgets::DEFAULT_ON) };
+        let default = bus_with(None, Some("lead"))?;
+        let lead = default.connection("lead").await?;
+        lead.register(EventLog::new(archive.clone(), "default".into()))
+            .await;
+        assert!(offered(&lead), "LoomWatch's default");
+        // Its switch off, it isn't; and a run that never said who answers offers it to nobody.
+        for bus in [
+            bus_with(Some(false), Some("lead"))?,
+            bus_with(Some(true), None)?,
+        ] {
             let lead = bus.connection("lead").await?;
             lead.register(EventLog::new(archive.clone(), "off".into()))
                 .await;

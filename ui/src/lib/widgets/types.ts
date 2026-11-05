@@ -31,11 +31,15 @@ export interface WidgetFigure {
 
 export interface WidgetStep { label: string; text: string }
 
+/** One bar of a chart: what it is and its figure, which may be below zero. */
+export interface WidgetBar { label: string; value: number; note?: string }
+
 export type WidgetSpec =
   | { kind: 'choices'; title: string; options: WidgetChoice[] }
   | { kind: 'checklist'; title: string; items: WidgetItem[] }
   | { kind: 'calculator'; title: string; inputs: WidgetInput[]; results: WidgetFigure[] }
   | { kind: 'steps'; title: string; steps: WidgetStep[]; repeats?: boolean }
+  | { kind: 'chart'; title: string; bars: WidgetBar[]; unit?: string; prefix?: string; decimals?: number }
 
 /** What you made of a widget: a checklist's ticks, or a calculator's values by input id. */
 export type WidgetState = { checked: boolean[] } | { values: Record<string, number | boolean> }

@@ -2217,6 +2217,10 @@ fn instructions(
         edits_ask: config.asks.edits,
         plan: config.tools.plan,
         ask_user: host.specs().iter().any(|tool| tool.name == "ask_user"),
+        widgets: host
+            .specs()
+            .iter()
+            .any(|tool| tool.name == crate::widgets::TOOL),
     };
     let notes = if config.tools.files {
         project_notes(&config.cwd)

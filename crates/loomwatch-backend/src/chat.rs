@@ -5406,15 +5406,13 @@ mod tests {
         );
     }
 
-    /// ADR 0114: an agent with no `widgets` setting has `LoomWatch`'s default, off for now, and isn't
-    /// offered the tool.
+    /// ADR 0114: an agent with no `widgets` setting has `LoomWatch`'s default, which is on, and is
+    /// offered the tool; one with its switch off isn't.
     #[tokio::test]
-    async fn an_agent_with_widgets_off_is_not_offered_the_tool() {
+    async fn an_agent_is_offered_the_tool_unless_its_switch_is_off() {
         use crate::test_support::{stand_in, turn};
-        // This test is for the default being off: once it is on, `None` belongs with the agents
-        // that are offered the tool.
-        const { assert!(!crate::widgets::DEFAULT_ON) };
-        for widgets in [None, Some(false)] {
+        const { assert!(crate::widgets::DEFAULT_ON) };
+        for (widgets, offered) in [(None, true), (Some(false), false)] {
             let pool = crate::db::Db::temp().await;
             let dir = TeamsDir::new();
             let (planner, demo) = stand_in(vec![turn(&["plan the zoo trip"], "In words.")]);
@@ -5428,10 +5426,19 @@ mod tests {
             let run_id = started["run"]["runId"].as_str().unwrap().to_owned();
             let done = wait_for(&rig.registry, &run_id, |run| run.status.is_terminal()).await;
             assert_eq!(done.status, RunStatus::Succeeded, "{done:?}");
-            assert!(
-                !demo.requests()[0]
-                    .tools
-                    .contains(&crate::widgets::TOOL.to_owned()),
+            let request = &demo.requests()[0];
+            assert_eq!(
+                request.tools.contains(&crate::widgets::TOOL.to_owned()),
+                offered,
+                "{widgets:?}"
+            );
+            // Offered the tool, it is told to show its answer with one whenever one fits.
+            let crate::agent::Message::System { content: system } = &request.messages[0] else {
+                panic!("the instructions come first");
+            };
+            assert_eq!(
+                system.contains(crate::agent::prompt::WIDGETS.text()),
+                offered,
                 "{widgets:?}"
             );
             assert!(page(&rig.app).await["items"][0]["widgets"].is_null());
