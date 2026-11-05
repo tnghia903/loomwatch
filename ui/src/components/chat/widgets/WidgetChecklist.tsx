@@ -3,8 +3,9 @@ import { Check } from '../../ui/icon'
 
 type Checklist = Extract<WidgetSpec, { kind: 'checklist' }>
 
-/** A checklist to tick (ADR 0114). Each tick is kept, and the next work reads what is ticked. */
-export function WidgetChecklist({ spec, state, onToggle, error }: { spec: Checklist; state?: WidgetState; onToggle: (checked: boolean[]) => void; error: string | null }) {
+/** A checklist to tick (ADR 0114). Each tick is kept, and the next work reads what is ticked.
+    `disabled` while the answer is still being written. */
+export function WidgetChecklist({ spec, state, onToggle, error, disabled = false }: { spec: Checklist; state?: WidgetState; onToggle: (checked: boolean[]) => void; error: string | null; disabled?: boolean }) {
   const checked = spec.items.map((_, at) => (state && 'checked' in state ? state.checked[at] === true : false))
   const done = checked.filter(Boolean).length
   return (
@@ -17,6 +18,7 @@ export function WidgetChecklist({ spec, state, onToggle, error }: { spec: Checkl
               type="button"
               role="checkbox"
               aria-checked={checked[at]}
+              disabled={disabled}
               className={`check wg-tick${checked[at] ? ' on' : ''}`}
               onClick={() => onToggle(checked.map((on, which) => (which === at ? !on : on)))}
             >

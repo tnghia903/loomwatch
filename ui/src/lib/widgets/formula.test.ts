@@ -2,13 +2,14 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-import { display, evaluate, FormulaError, names, parse, workingOf } from './formula'
+import { display, evaluate, fillNote, FormulaError, names, noteNames, parse, parseNote, workingOf } from './formula'
 
 // The same cases the daemon reads (crates/loomwatch-backend/src/widgets/formula.rs), so a calculator
 // shows the person the figures the agent was given.
 interface Cases {
   evaluate: { name: string; formula: string; values: Record<string, number>; result?: number; error?: string }[]
   display: { value: number; decimals: number | null; text: string | null }[]
+  notes: { name: string; note: string; values: Record<string, number>; text?: string; error?: string }[]
 }
 const cases = JSON.parse(readFileSync(resolve(process.cwd(), '../schemas/formula.cases.json'), 'utf8')) as Cases
 
@@ -16,6 +17,7 @@ describe('formula', () => {
   it('reads every case', () => {
     expect(cases.evaluate.length).toBeGreaterThan(40)
     expect(cases.display.length).toBeGreaterThan(15)
+    expect(cases.notes.length).toBeGreaterThan(5)
   })
 
   for (const c of cases.evaluate) {
@@ -37,6 +39,27 @@ describe('formula', () => {
       expect(display(c.value, c.decimals)).toBe(c.text)
     })
   }
+
+  for (const c of cases.notes) {
+    it(`fills in a note: ${c.name}`, () => {
+      if (c.error === undefined) {
+        expect(fillNote(parseNote(c.note), c.values)).toBe(c.text)
+        return
+      }
+      let thrown: unknown = null
+      try { fillNote(parseNote(c.note), c.values) } catch (error) { thrown = error }
+      expect(thrown).toBeInstanceOf(FormulaError)
+      expect((thrown as FormulaError).kind).toBe(c.error)
+    })
+  }
+
+  it('says to close the first brace when another opens inside it', () => {
+    expect(() => parseNote('{a {b}}')).toThrow('a { in a note needs a } after its formula')
+  })
+
+  it('names what a note reads, once each', () => {
+    expect(noteNames(parseNote('{found} of {total} found, {found / total * 100}%'))).toEqual(['found', 'total'])
+  })
 
   it('writes the sum out only when it is plain arithmetic', () => {
     expect(workingOf('(bus + pupils * ticket) / pupils', { bus: 2400000, pupils: 32, ticket: 60000 })).toBe('(2,400,000 + 32 × 60,000) ÷ 32')

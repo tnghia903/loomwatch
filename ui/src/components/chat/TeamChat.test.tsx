@@ -3103,6 +3103,23 @@ describe('widgets under an answer', () => {
     }
   })
 
+  it('draws a widget between the paragraphs its words placed it, and the rest after them', async () => {
+    said.read = true
+    const placed = [{ ...widgets[1], line: 2 }, { n: 3, spec: { kind: 'flow' as const, title: 'How it goes', boxes: [{ label: 'Print' }, { label: 'Read' }] } }]
+    page = [{ kind: 'work', run: run({ reply: 'Do these first.\n\nThen tell me how it went.' }), request: message({}), notes: [], widgets: placed }]
+    renderChat()
+    const list = await screen.findByRole('region', { name: 'Before Wednesday' })
+    const flow = screen.getByRole('region', { name: 'How it goes' })
+    const first = screen.getByText('Do these first.')
+    const then = screen.getByText('Then tell me how it went.')
+    const after = (a: Node, b: Node) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(after(first, list) && after(list, then) && after(then, flow)).toBe(true)
+    // Inside the answer's bubble, between its words; the unplaced one after the bubble.
+    expect(list.closest('.chat-bubble')).not.toBeNull()
+    expect(flow.closest('.chat-bubble')).toBeNull()
+    expect(flow.closest('.tc-answer')).not.toBeNull()
+  })
+
   it('closes the newest answer’s choices while the chat can’t send', async () => {
     said.read = true
     page = [{ kind: 'work', run: run({ reply: 'Which theme this time?' }), request: message({}), notes: [], widgets: [widgets[0]] }]

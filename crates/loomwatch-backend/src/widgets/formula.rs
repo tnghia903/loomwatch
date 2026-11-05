@@ -516,6 +516,96 @@ pub(crate) fn evaluate(text: &str, values: &BTreeMap<String, f64>) -> Result<f64
     parse(text)?.evaluate(values)
 }
 
+/// A piece of a result's note: words as written, or a formula in braces.
+#[derive(Debug, Clone, PartialEq)]
+enum NotePart {
+    Words(String),
+    Formula(Formula),
+}
+
+/// A result's note, read: words with formulas in braces, such as `"{found} of 3 found"`.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Note {
+    parts: Vec<NotePart>,
+}
+
+/// Read `text` as a result's note: words, with each formula in braces.
+///
+/// # Errors
+///
+/// A `{` with no `}` after it, a `}` with no `{` before it, or a formula in braces that can't be
+/// read.
+pub(crate) fn parse_note(text: &str) -> Result<Note, FormulaError> {
+    let mut parts = Vec::new();
+    let mut rest = text;
+    while !rest.is_empty() {
+        let open = rest.find('{');
+        let close = rest.find('}');
+        match (open, close) {
+            (None, None) => {
+                parts.push(NotePart::Words(rest.to_owned()));
+                break;
+            }
+            (open, Some(close)) if open.is_none_or(|open| close < open) => {
+                return Err(syntax("a } in a note closes a { before it"));
+            }
+            (Some(open), close) => {
+                let Some(close) = close else {
+                    return Err(syntax("a { in a note needs a } after its formula"));
+                };
+                if open > 0 {
+                    parts.push(NotePart::Words(rest[..open].to_owned()));
+                }
+                let inside = &rest[open + 1..close];
+                if inside.contains('{') {
+                    return Err(syntax("a { in a note needs a } after its formula"));
+                }
+                parts.push(NotePart::Formula(parse(inside)?));
+                rest = &rest[close + 1..];
+            }
+            (None, Some(_)) => unreachable!("a closing brace with no opening one is refused above"),
+        }
+    }
+    Ok(Note { parts })
+}
+
+impl Note {
+    /// Every name the note's formulas read, in order, each once.
+    pub(crate) fn names(&self) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for part in &self.parts {
+            if let NotePart::Formula(formula) = part {
+                for name in formula.names() {
+                    if !out.contains(&name) {
+                        out.push(name);
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// The note with each formula worked out with `values` and written as [`display`] writes it,
+    /// with up to two decimals.
+    ///
+    /// # Errors
+    ///
+    /// As [`Formula::evaluate`].
+    pub(crate) fn fill(&self, values: &BTreeMap<String, f64>) -> Result<String, FormulaError> {
+        let mut out = String::new();
+        for part in &self.parts {
+            match part {
+                NotePart::Words(words) => out.push_str(words),
+                NotePart::Formula(formula) => {
+                    let value = formula.evaluate(values)?;
+                    out.push_str(&display(value, None).unwrap_or_else(|| "too large".to_owned()));
+                }
+            }
+        }
+        Ok(out)
+    }
+}
+
 fn finite(value: f64) -> Result<f64, FormulaError> {
     if value.is_finite() {
         Ok(value)
@@ -895,6 +985,44 @@ mod tests {
                 "{value} with {decimals:?} decimals"
             );
         }
+    }
+
+    #[test]
+    fn every_note_is_filled_in_as_the_app_fills_it() {
+        let cases = cases();
+        let notes = cases["notes"].as_array().expect("note cases");
+        assert!(notes.len() > 5, "the note cases are all read");
+        for case in notes {
+            let name = case["name"].as_str().unwrap_or_default();
+            let note = case["note"].as_str().expect("a note");
+            let values: BTreeMap<String, f64> = case["values"]
+                .as_object()
+                .expect("values")
+                .iter()
+                .map(|(key, value)| (key.clone(), value.as_f64().expect("a number")))
+                .collect();
+            let got = parse_note(note).and_then(|read| read.fill(&values));
+            if let Some(expected) = case["text"].as_str() {
+                let got = got.unwrap_or_else(|error| panic!("{name}: {note} failed: {error}"));
+                assert_eq!(got, expected, "{name}: {note}");
+            } else {
+                let expected = case["error"].as_str().expect("a text or an error");
+                let error = got.expect_err(&format!("{name}: {note} should fail"));
+                assert_eq!(error.kind.code(), expected, "{name}: {note}: {error}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_brace_inside_braces_says_to_close_the_first() {
+        let error = parse_note("{a {b}}").unwrap_err();
+        assert_eq!(error.message, "a { in a note needs a } after its formula");
+    }
+
+    #[test]
+    fn a_note_names_what_its_formulas_read_once_each() {
+        let note = parse_note("{found} of {total} found, {found / total * 100}%").unwrap();
+        assert_eq!(note.names(), ["found", "total"]);
     }
 
     #[test]

@@ -5406,6 +5406,45 @@ mod tests {
         );
     }
 
+    /// ADR 0114: the agent is told a place line for its widget and writes it where the widget
+    /// belongs. The answer is kept without it, and the chat says which line the widget stands
+    /// before, so it is drawn there and the words read whole everywhere else.
+    #[tokio::test]
+    async fn a_widget_stands_where_the_answer_placed_it() {
+        use crate::test_support::{stand_in, turn};
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        let (planner, _) = stand_in(vec![
+            turn(
+                &["plan the zoo trip"],
+                "It comes to 140,000 ₫ a family.\n\n{{widget 1}}\n\nTry fewer pupils to see it rise.",
+            )
+            .calling(crate::widgets::TOOL, zoo_trip(), "{{widget 1}}"),
+        ]);
+        write_planner(&dir, &planner, Some(true));
+        let rig = rig(pool, &dir);
+        let (_, started) = send(
+            &rig.app,
+            json!({"teamPath": "news.yaml", "text": "plan the zoo trip", "to": {"kind": "team"}}),
+        )
+        .await;
+        let run_id = started["run"]["runId"].as_str().unwrap().to_owned();
+        let done = wait_for(&rig.registry, &run_id, |run| run.status.is_terminal()).await;
+        assert_eq!(done.status, RunStatus::Succeeded, "{done:?}");
+        assert_eq!(
+            done.reply.as_deref(),
+            Some("It comes to 140,000 ₫ a family.\n\nTry fewer pupils to see it rise."),
+            "the place line is taken out of the words"
+        );
+        let chat = page(&rig.app).await;
+        let widget = &chat["items"][0]["widgets"][0];
+        assert_eq!(widget["spec"]["title"], "Zoo trip", "{chat}");
+        assert_eq!(
+            widget["line"], 2,
+            "it stands before the line that tells the person what to try"
+        );
+    }
+
     /// ADR 0114: an agent with no `widgets` setting has `LoomWatch`'s default, off for now, and isn't
     /// offered the tool.
     #[tokio::test]

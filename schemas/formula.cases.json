@@ -1,5 +1,5 @@
 {
-  "about": "A calculator widget's formulas and how its numbers are written (ADR 0114). Read by crates/loomwatch-backend/src/widgets/formula.rs and ui/src/lib/widgets/formula.ts, which must agree on every case.",
+  "about": "A calculator widget's formulas, the notes under its results, and how its numbers are written (ADR 0114). Read by crates/loomwatch-backend/src/widgets/formula.rs and ui/src/lib/widgets/formula.ts, which must agree on every case.",
   "evaluate": [
     { "name": "a trip's cost per family", "formula": "(bus + pupils * ticket) / pupils", "values": { "bus": 2400000, "pupils": 32, "ticket": 60000 }, "result": 135000 },
     { "name": "rounding up to ten thousand by hand", "formula": "ceil(x / 10000) * 10000", "values": { "x": 135000 }, "result": 140000 },
@@ -74,5 +74,21 @@
     { "value": 0.0000005, "decimals": 6, "text": "0.000001" },
     { "value": 1e15, "decimals": null, "text": null },
     { "value": 1e16, "decimals": null, "text": null }
+  ],
+  "notes": [
+    { "name": "a count beside its words", "note": "{a + b + c} of 3 found", "values": { "a": 1, "b": 0, "c": 1 }, "text": "2 of 3 found" },
+    { "name": "a rank picked by switches", "note": "First at #{if(d1, 1, if(d2, 2, 3))}", "values": { "d1": 0, "d2": 1 }, "text": "First at #2" },
+    { "name": "words alone", "note": "Before tax", "values": {}, "text": "Before tax" },
+    { "name": "a formula alone", "note": "{x}", "values": { "x": 1234567.5 }, "text": "1,234,567.5" },
+    { "name": "up to two decimals, as a result without decimals", "note": "{x / 3} each", "values": { "x": 10 }, "text": "3.33 each" },
+    { "name": "two formulas", "note": "{a} + {b}", "values": { "a": 1, "b": 2 }, "text": "1 + 2" },
+    { "name": "spaces inside braces are ignored", "note": "{ a * 2 } left", "values": { "a": 4 }, "text": "8 left" },
+    { "name": "too large to write", "note": "{x}", "values": { "x": 1e16 }, "text": "too large" },
+    { "name": "a brace left open", "note": "{a of 3", "values": { "a": 1 }, "error": "syntax" },
+    { "name": "a brace closed without opening", "note": "a} of 3", "values": { "a": 1 }, "error": "syntax" },
+    { "name": "empty braces", "note": "{} found", "values": {}, "error": "syntax" },
+    { "name": "a brace inside braces", "note": "{a {b}}", "values": { "a": 1, "b": 2 }, "error": "syntax" },
+    { "name": "an unknown name in a note", "note": "{y} found", "values": { "x": 1 }, "error": "unknown_name" },
+    { "name": "a note that divides by zero", "note": "{a / b}", "values": { "a": 1, "b": 0 }, "error": "divide_by_zero" }
   ]
 }

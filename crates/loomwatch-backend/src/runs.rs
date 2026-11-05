@@ -3968,29 +3968,59 @@ async fn succeed(
     outcome: &SessionOutcome,
 ) -> bool {
     let (_, _, stop_reason) = archived_exit(archive, run_id, responder).await;
-    Box::pin(keep_widgets(registry, archive, run_id, responder)).await;
-    registry.mark_succeeded(run_id, outcome, stop_reason)
+    let reply = Box::pin(keep_widgets(
+        registry,
+        archive,
+        run_id,
+        responder,
+        &outcome.reply,
+    ))
+    .await;
+    if reply == outcome.reply {
+        return registry.mark_succeeded(run_id, outcome, stop_reason);
+    }
+    let placed = SessionOutcome {
+        reply,
+        ..outcome.clone()
+    };
+    registry.mark_succeeded(run_id, &placed, stop_reason)
 }
 
-/// Keep the widgets under a succeeded run's answer, from its archive (ADR 0114). Logged, never
-/// propagated: how a run ended must not change because they could not be read.
+/// Keep the widgets of a succeeded run's answer, from its archive, each at the line of the answer
+/// its place line put it (ADR 0114), and give back `reply` with the place lines taken out. Logged,
+/// never propagated: how a run ended must not change because they could not be read, and the
+/// answer is then kept as written.
 async fn keep_widgets(
     registry: &RunRegistry,
     archive: &EventArchive,
     run_id: &str,
     responder: Option<&str>,
-) {
+    reply: &str,
+) -> String {
     let Some(db) = registry.db() else {
-        return;
+        return reply.to_owned();
     };
     let kept = async {
         let events = archive.load_session(run_id).await?;
-        let widgets = crate::widgets::of_answer(&events, responder);
+        let shown = crate::widgets::of_answer(&events, responder);
+        if shown.is_empty() {
+            return anyhow::Ok(reply.to_owned());
+        }
+        let (words, lines) = crate::widgets::place(reply, &shown);
+        let widgets: Vec<_> = shown
+            .into_iter()
+            .zip(lines)
+            .map(|(shown, line)| (shown.widget, line))
+            .collect();
         crate::widgets::store::keep(&db, run_id, &widgets).await?;
-        anyhow::Ok(())
+        anyhow::Ok(words)
     };
-    if let Err(error) = kept.await {
-        eprintln!("warning: could not keep the widgets under run {run_id}'s answer: {error:#}");
+    match kept.await {
+        Ok(words) => words,
+        Err(error) => {
+            eprintln!("warning: could not keep the widgets under run {run_id}'s answer: {error:#}");
+            reply.to_owned()
+        }
     }
 }
 
@@ -4030,7 +4060,7 @@ async fn settle_at_spool(
         crate::spend::Stopped::NobodyToAsk => None,
     };
     if let Some(reply) = words {
-        Box::pin(keep_widgets(registry, archive, run_id, responder)).await;
+        let reply = Box::pin(keep_widgets(registry, archive, run_id, responder, &reply)).await;
         let outcome = SessionOutcome {
             session_id: run_id.to_owned(),
             event_count: event_count.unwrap_or_default(),

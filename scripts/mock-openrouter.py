@@ -11,7 +11,8 @@ Replies are scripted from what the request says, so a run exercises real tool ca
 - "MOCK-WRITE: <path>" in the task    -> a write_file call, then a summary
 - "MOCK-READ: <path>" in the task     -> a read_file call, then a summary
 - "MOCK-TOOL: <call> <json>" in the task -> a call of any offered tool whose name is <call> or ends
-  in "__<call>" (a connected tool's, such as deepwiki__ask_question), then a summary
+  in "__<call>" (a connected tool's, such as deepwiki__ask_question), then a summary; after
+  show_widget, words with its place line on a line of their own between them
 - "MOCK-FAIL-402" in the task         -> a 402 out-of-credits answer
 - the chat's read of an @ message     -> TALK for a greeting, thanks or a question ("hi", "thanks",
                                          "Explain …", "… ?"), so the agents answer it in the chat;
@@ -187,6 +188,15 @@ def plan(body):
         if call_name.endswith("dispatch"):
             # Both dispatches answered with "accepted": end this turn; the results come back later.
             return ("text", "I handed the two parts of the question to the Researcher. Their findings come back next.")
+        if call_name.endswith("show_widget"):
+            # ADR 0114: write the place line on a line of its own, between words that lead to the
+            # widget and words that say what to try, as the tool asks.
+            try:
+                place = json.loads(said).get("place", "")
+            except (ValueError, AttributeError):
+                place = ""
+            if place:
+                return ("text", f"Here it is, worked out.\n\n{place}\n\nTry changing it, then tell me what you changed.")
         return ("text", f"Done. The tool answered: {said[:300]}")
 
     # The chat's read of an @ message (intent.rs): one turn, one word.

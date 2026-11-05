@@ -242,9 +242,10 @@ depend on the document as a whole:
   With `false` it learns nothing new and is given none of its lessons. One of My agents keeps one
   list of lessons in every team that uses it (`from: {agent}`); when a team's own agent becomes one
   of My agents, its lessons go with it.
-- Optional `Agent.widgets` says whether the agent may put widgets under its answer when its reply
+- Optional `Agent.widgets` says whether the agent may put widgets in its answer when its reply
   is the answer the person reads (ADR 0114): choices to tap, a checklist to tick, a calculator
-  LoomWatch works out, or steps to tap through. Absent means LoomWatch's default, which is off for
+  LoomWatch works out, steps to tap through, a row of marks, a flow, or a bar or line chart.
+  Absent means LoomWatch's default, which is off for
   now; `true` turns it on for that agent, `false` keeps it off. One of My agents keeps it
   as its own (`widgets` in its file), and every team that uses it follows. Not for an operator node.
 - **Notes set aside from the answer.** Some sections an agent ends its reply with are for the

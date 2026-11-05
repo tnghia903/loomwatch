@@ -3,6 +3,9 @@ import { useHeldState } from '../../../lib/widgets/useHeldState'
 import { WidgetCalculator } from './WidgetCalculator'
 import { WidgetChecklist } from './WidgetChecklist'
 import { WidgetChoices } from './WidgetChoices'
+import { WidgetFlow } from './WidgetFlow'
+import { WidgetGraph } from './WidgetGraph'
+import { WidgetMarks } from './WidgetMarks'
 import { WidgetSteps } from './WidgetSteps'
 
 export interface AnswerWidgetsProps {
@@ -14,37 +17,49 @@ export interface AnswerWidgetsProps {
   onChoose?: (label: string) => Promise<boolean> | void
   /** The choice already sent, read from the message that replied with it. */
   chosen?: string | null
+  /** The answer is still being written: the widgets are drawn as they will be, and work once it is
+      done. */
+  live?: boolean
 }
 
 /**
- * The widgets under an answer (ADR 0114): choices to tap, a checklist to tick, a calculator
- * LoomWatch works out, steps to tap through. What you tick or change is kept, and the next work's
- * conversation says so. The answer's words stay above them, as they are.
+ * Widgets at the end of an answer (ADR 0114): those its words didn't place, or every one in an
+ * answer drawn before place lines. The answer's words stay above them, as they are.
  */
-export function AnswerWidgets({ widgets, onChange, onChoose, chosen = null }: AnswerWidgetsProps) {
+export function AnswerWidgets(props: AnswerWidgetsProps) {
   return (
     <div className="wg-list">
-      {widgets.map((kept) => {
-        switch (kept.spec.kind) {
-          case 'choices': return <WidgetChoices key={kept.n} spec={kept.spec} onChoose={onChoose} chosen={chosen} />
-          case 'checklist': return <HeldChecklist key={kept.n} kept={kept} onChange={onChange} />
-          case 'calculator': return <HeldCalculator key={kept.n} kept={kept} onChange={onChange} />
-          case 'steps': return <WidgetSteps key={kept.n} spec={kept.spec} />
-        }
-        return null
-      })}
+      {props.widgets.map((kept) => <AnswerWidget key={kept.n} kept={kept} {...props} />)}
     </div>
   )
 }
 
-function HeldChecklist({ kept, onChange }: { kept: KeptWidget; onChange: AnswerWidgetsProps['onChange'] }) {
-  const held = useHeldState(kept, onChange)
-  if (kept.spec.kind !== 'checklist') return null
-  return <WidgetChecklist spec={kept.spec} state={held.state} onToggle={(checked) => held.keep({ checked })} error={held.error} />
+/**
+ * One widget in an answer (ADR 0114): choices to tap, a checklist to tick, a calculator LoomWatch
+ * works out, steps to tap through, or a row of marks, a flow or a graph to look at. What you tick or
+ * change is kept, and the next work's conversation says so.
+ */
+export function AnswerWidget({ kept, onChange, onChoose, chosen = null, live = false }: Omit<AnswerWidgetsProps, 'widgets'> & { kept: KeptWidget }) {
+  switch (kept.spec.kind) {
+    case 'choices': return <WidgetChoices spec={kept.spec} onChoose={live ? undefined : onChoose} chosen={chosen} />
+    case 'checklist': return <HeldChecklist kept={kept} onChange={onChange} live={live} />
+    case 'calculator': return <HeldCalculator kept={kept} onChange={onChange} live={live} />
+    case 'steps': return <WidgetSteps spec={kept.spec} />
+    case 'marks': return <WidgetMarks spec={kept.spec} />
+    case 'flow': return <WidgetFlow spec={kept.spec} />
+    case 'graph': return <WidgetGraph spec={kept.spec} />
+  }
+  return null
 }
 
-function HeldCalculator({ kept, onChange }: { kept: KeptWidget; onChange: AnswerWidgetsProps['onChange'] }) {
+function HeldChecklist({ kept, onChange, live }: { kept: KeptWidget; onChange: AnswerWidgetsProps['onChange']; live: boolean }) {
+  const held = useHeldState(kept, onChange)
+  if (kept.spec.kind !== 'checklist') return null
+  return <WidgetChecklist spec={kept.spec} state={held.state} onToggle={(checked) => held.keep({ checked })} error={held.error} disabled={live} />
+}
+
+function HeldCalculator({ kept, onChange, live }: { kept: KeptWidget; onChange: AnswerWidgetsProps['onChange']; live: boolean }) {
   const held = useHeldState(kept, onChange)
   if (kept.spec.kind !== 'calculator') return null
-  return <WidgetCalculator spec={kept.spec} state={held.state} onShow={held.show} onKeep={held.keep} error={held.error} />
+  return <WidgetCalculator spec={kept.spec} state={held.state} onShow={held.show} onKeep={held.keep} error={held.error} disabled={live} />
 }

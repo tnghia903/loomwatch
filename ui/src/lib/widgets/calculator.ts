@@ -1,4 +1,4 @@
-import { display, evaluateFormula, FormulaError, names, parse, workingOf } from './formula'
+import { display, evaluateFormula, fillNote, FormulaError, names, parse, parseNote, workingOf } from './formula'
 import type { WidgetFigure, WidgetInput, WidgetState } from './types'
 
 /** A calculator's input values: the starting ones, with yours from `state` over them. A switch is
@@ -22,6 +22,8 @@ export interface WorkedOut {
   /** "(2,400,000 + 32 × 60,000) ÷ 32", for plain arithmetic on numbers; null for a formula with a
       function, a comparison or a switch in it, which would read as code. */
   working: string | null
+  /** The line under it saying why, filled in: "3 / 3 found". */
+  note: string | null
 }
 
 /** A calculator's results with `values`, in order: each reads the inputs and the results above it.
@@ -37,11 +39,13 @@ export function workOut(results: readonly WidgetFigure[], values: Readonly<Recor
       return {
         label: figure.label,
         text: number === null ? null : `${figure.prefix ?? ''}${number}${figure.unit ? ` ${figure.unit}` : ''}`,
-        working: names(formula).some((name) => switches.has(name)) ? null : workingOf(figure.formula, known),
+        // A note says why in its own words; the sum's working would say it twice.
+        working: figure.note || names(formula).some((name) => switches.has(name)) ? null : workingOf(figure.formula, known),
+        note: figure.note ? fillNote(parseNote(figure.note), known) : null,
       }
     } catch (error) {
       if (!(error instanceof FormulaError)) throw error
-      return { label: figure.label, text: null, working: null }
+      return { label: figure.label, text: null, working: null, note: null }
     }
   })
 }
@@ -72,4 +76,16 @@ export function inputText(value: number): string {
   const written = display(value, 6)
   if (written === null) return String(value)
   return written.includes('.') ? written.replace(/0+$/u, '').replace(/\.$/u, '') : written
+}
+
+/** The values a preset sets: the inputs it names, and the rest back to their starting values. */
+export function presetState(values: Readonly<Record<string, number | boolean>>): WidgetState {
+  return { values: { ...values } }
+}
+
+/** Whether `state` is what `preset` sets: every input as it says, the rest at their start. */
+export function isPreset(inputs: readonly WidgetInput[], state: WidgetState | undefined, preset: Readonly<Record<string, number | boolean>>): boolean {
+  const now = valuesOf(inputs, state)
+  const then = valuesOf(inputs, presetState(preset))
+  return inputs.every((input) => now[input.id] === then[input.id])
 }

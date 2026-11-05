@@ -296,13 +296,14 @@ fn bus_tools(out: &mut String) {
             {"id": "bus", "label": "Bus", "start": 2_400_000, "unit": "₫"},
             {"id": "ticket", "label": "Ticket", "start": 60000, "unit": "₫"}
         ],
-        "results": [{"id": "each", "label": "Each family pays", "formula": "(bus + pupils * ticket) / pupils", "unit": "₫"}]
+        "results": [{"id": "each", "label": "Each family pays", "formula": "(bus + pupils * ticket) / pupils", "unit": "₫", "note": "{pupils} pupils share the bus"}],
+        "presets": [{"label": "Try a smaller class", "values": {"pupils": 20}}]
     }))
     .expect("a calculator");
     section(
         out,
         "bus: show_widget, once shown",
-        &serde_json::to_string_pretty(&crate::widgets::shown(&calculator)).expect("shown"),
+        &serde_json::to_string_pretty(&crate::widgets::shown(&calculator, 1)).expect("shown"),
     );
 }
 
