@@ -90,8 +90,8 @@ answer's choices can be tapped while nothing is at work; the one sent stays mark
 shows its results first and works them out again as you change an input, with the sum written out
 when it is plain arithmetic; a number outside the input's range says what it takes and isn't kept.
 Ticks and values are kept (`POST /api/chat/widgets`) and the next work reads what you changed, with
-the results worked out again. Copy, Notion, search, the notch and the phone read the answer's words
-only.
+the results worked out again. A connected iPhone shows them too and keeps what you tick or change
+there through its door. Copy, Notion, search and the notch read the answer's words only.
 
 Who said what to whom is read from the record, not from the team file as it is now:
 

@@ -59,6 +59,8 @@ pub const ALLOWED: &[(&str, &str)] = &[
     ("PUT", "/api/chat/files"),
     // A face on something said in a chat, as the Mac's reactions put one on.
     ("POST", "/api/chat/reactions"),
+    // What you tick or change under an answer, kept as the Mac keeps it (ADR 0114).
+    ("POST", "/api/chat/widgets"),
     // A note that started nothing, started: "Start the team on this".
     ("POST", "/api/chat/messages/{}/start"),
     ("POST", "/api/team-requests/{}"),
@@ -596,6 +598,7 @@ mod tests {
         assert!(allowed(&Method::POST, "/api/runs/abc-123/permissions"));
         assert!(allowed(&Method::POST, "/api/team-requests/7"));
         assert!(allowed(&Method::POST, "/api/chat/reactions"));
+        assert!(allowed(&Method::POST, "/api/chat/widgets"));
         assert!(allowed(&Method::GET, "/api/skills"));
         assert!(allowed(&Method::GET, "/api/wardrobe"));
         assert!(allowed(&Method::PUT, "/api/chat/files"));

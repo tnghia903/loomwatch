@@ -467,7 +467,8 @@ iPhone or another computer connects to it and keeps nothing but a key of its own
   own address, from its own page (`api.rs`).
 - **What each may do.** Every request at the door carries its key. An iPhone gets the phone's
   routes (`/phone/v0/*`) and the short list in `phone::ALLOWED`: see, answer, approve, start,
-  stop, chat, Ask, and small changes to an agent or a team, never keys, sign-ins or settings
+  stop, chat (with what you tick or change under an answer, `POST /api/chat/widgets`), Ask, and
+  small changes to an agent or a team, never keys, sign-ins or settings
   (`phone/`). A phone's request stops at 1 MB, except a file it sends into a team's chat or an
   agent's own chat, such as the picture of a part circled in the reader: that goes to
   `PUT /api/chat/files` as raw bytes (`application/octet-stream`, anything else refused at the
