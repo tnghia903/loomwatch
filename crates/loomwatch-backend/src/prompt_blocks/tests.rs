@@ -475,6 +475,18 @@ fn money(out: &mut String) {
             Some(0.4),
         ),
     );
+    section(
+        out,
+        "money for this run, at the agent's own limit",
+        &crate::spend_aware::line(
+            crate::agent::Room {
+                left: 0.2,
+                limit: 0.3,
+                own: true,
+            },
+            Some(0.05),
+        ),
+    );
 }
 
 /// The first line where `got` and `want` differ, with its number, or `None` when they are the same.
