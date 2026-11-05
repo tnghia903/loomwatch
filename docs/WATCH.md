@@ -86,7 +86,9 @@ At a check's stop, **Send back** works with no note: the checks still open say w
 An answer can have things to use under its words (ADR 0114), when the agent that wrote it has
 **Adds choices, checklists and calculators to its answers** on, as it is unless turned off: choices
 to tap, a checklist to tick, a calculator, steps to tap through, or a chart whose bars LoomWatch
-draws to scale from the agent's figures, each figure written beside its bar. A choice goes as your message, replying to the answer, and only the newest
+draws to scale from the agent's figures, each figure written beside its bar. The agent that
+answers shows one whenever its answer has figures to compare, a sum to change, things to do, a
+process or a choice of what next; words alone are for answers with none of these. A choice goes as your message, replying to the answer, and only the newest
 answer's choices can be tapped while nothing is at work; the one sent stays marked. A calculator
 shows its results first and works them out again as you change an input, with the sum written out
 when it is plain arithmetic; a number outside the input's range says what it takes and isn't kept.

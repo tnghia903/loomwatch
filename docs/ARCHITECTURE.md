@@ -577,7 +577,10 @@ it only to that agent (`BusSeat.answers`): the run's responder, told to the bus 
 (`TeamBus::answered_by`), not a helper or an agent started by another, with a person there, and with
 its `widgets` switch on. Absent, the switch is `widgets::DEFAULT_ON`, which is on: an agent asked
 for a chart or something to use had no way to give one, and drew bars in text or wrote a page
-instead. `widgets: false` keeps an agent without it. A call from any other seat is refused.
+instead. `widgets: false` keeps an agent without it. A call from any other seat is refused. An
+agent offered it is told, in its instructions' "How you work" (`agent::prompt::WIDGETS`), to show
+its answer with one whenever one fits: a chart for figures to compare, a calculator for a sum it
+may change, a checklist, steps or choices, ahead of a table, a list or bars written in text.
 
 `widgets::read` checks a widget against limits kept in one place (`widgets::limits`) and says what
 to change when it is refused. A calculator's results are formulas in a small language that the

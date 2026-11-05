@@ -132,6 +132,7 @@ const ALL: &[Block] = {
         prompt::SOURCES,
         prompt::ASK_USER,
         prompt::UNCLEAR,
+        prompt::WIDGETS,
         prompt::FINISH,
         prompt::PERSON,
         prompt::PERSON_USE,

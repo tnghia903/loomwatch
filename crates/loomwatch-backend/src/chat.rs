@@ -5426,10 +5426,18 @@ mod tests {
             let run_id = started["run"]["runId"].as_str().unwrap().to_owned();
             let done = wait_for(&rig.registry, &run_id, |run| run.status.is_terminal()).await;
             assert_eq!(done.status, RunStatus::Succeeded, "{done:?}");
+            let request = &demo.requests()[0];
             assert_eq!(
-                demo.requests()[0]
-                    .tools
-                    .contains(&crate::widgets::TOOL.to_owned()),
+                request.tools.contains(&crate::widgets::TOOL.to_owned()),
+                offered,
+                "{widgets:?}"
+            );
+            // Offered the tool, it is told to show its answer with one whenever one fits.
+            let crate::agent::Message::System { content: system } = &request.messages[0] else {
+                panic!("the instructions come first");
+            };
+            assert_eq!(
+                system.contains(crate::agent::prompt::WIDGETS.text()),
                 offered,
                 "{widgets:?}"
             );

@@ -25,8 +25,9 @@ use crate::{EventKind, RunEvent};
 
 /// Whether an agent with no `widgets` setting may show widgets. On: an agent asked for something to
 /// use, or for a chart, had no way to give one and drew bars in text or wrote a page instead. The
-/// tool says to use one only when it helps more than words, and `widgets: false` keeps an agent
-/// without it (ADR 0114, decision 7, revisited).
+/// agent that answers is told to show its answer with one whenever one fits
+/// (`agent::prompt::WIDGETS`), and `widgets: false` keeps an agent without it (ADR 0114, decision
+/// 7, revisited).
 pub(crate) const DEFAULT_ON: bool = true;
 
 /// The Team Bus tool's name.
@@ -615,14 +616,15 @@ fn bars_line(widget: &Widget) -> Option<String> {
 /// message as a tool call are left out of its answer.
 pub(crate) const SHOW_WIDGET: Block = Block::new(
     "bus.show_widget",
-    "Put something the person can use under your answer, drawn by LoomWatch: choices they tap to \
-     reply, a checklist they tick, a calculator whose results LoomWatch works out as they change \
-     its inputs, steps they tap through one at a time, or a chart whose bars LoomWatch draws to \
-     scale from figures you give. Use one only when it helps more than words: numbers they may \
-     want to change, a choice of what to do next, things for them to do, the steps of a process, \
-     or a few figures to compare at a glance. For a simple answer, words alone are better. When \
-     you are asked for a chart, a graph or an infographic, show a chart here rather than drawing \
-     bars with characters or writing a page for it. Call it before you write your answer. Then write the answer in words: give the main result in a sentence, since \
+    "Show your answer under your words, drawn by LoomWatch, so the person sees it at a glance and \
+     can use it: a chart whose bars LoomWatch draws to scale from figures you give, a calculator \
+     whose results LoomWatch works out as they change its inputs, a checklist they tick, steps they \
+     tap through one at a time, or choices they tap to reply. Use one whenever the answer has \
+     figures to compare (chart), a sum, a split or a cost they may change (calculator), things to \
+     do (checklist), a process or a how-to (steps), or a choice of what to do next (choices), and \
+     prefer it to a table, a list or bars written in text, or a page written for it. Show up to 4 \
+     when the answer has more than one of these. Words alone are for an answer with none of them, \
+     such as a short fact. Call it before you write your answer. Then write the answer in words: give the main result in a sentence, since \
      a copy of the answer and the phone show only your words, and call what you showed by what it \
      is, such as \"the calculator below\".",
 );
