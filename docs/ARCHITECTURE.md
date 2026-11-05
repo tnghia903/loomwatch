@@ -208,6 +208,9 @@ park, reopen, finish. `engine/bridge.rs` joins a session to its run:
 A parked agent, waiting for the operator's answer or for work it delegated, is only data (a
 `Snapshot`), kept in the `agent_sessions` table rather than in memory. Nothing runs while it waits.
 Reopening it takes the row out, and the end of its stop or of its run removes whatever is left.
+It is reopened on the Team Bus connection it was opened with, so it keeps its seat (a helper's
+tools, its place in a chain of helpers, whether it is answering a question), and what it hands out
+afterwards comes back to it as what it handed out before.
 
 A session reports its work in the update shapes the archive has always stored
 (`agent_message_chunk`, `tool_call`, `plan`, `usage_update`, …), under the same event kinds. A
