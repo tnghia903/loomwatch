@@ -1491,3 +1491,11 @@ stand up
 (From LoomWatch, not the person.) It is today at 17:20 (UTC+07:00). You set a message for the person for this time, and the words above are what you set. Write them the message now: your reply is the message they read. If it asks you to check or find something first, do that, then write it. Keep to what they asked for.
 
 It was due today at 16:40 (UTC+07:00) and comes late, because this computer was asleep, LoomWatch was closed, or you were busy in this chat then: say so in a few words.
+===== money for this run, under the task
+## Money for this run
+Every agent in this run draws on the same money, and the run has a limit. A line in [brackets] after the task and after each step's results says how much is left. Plan the work to fit it: with plenty left, work as you normally would and give your best answer; when little is left, finish with what you have rather than start something new. If agents work after you in this run, leave them enough for their part.
+[Money for this run: $5.00 left of $5.00.]
+===== money for this run, after a step
+[Money for this run: $0.62 left of $5.00. Your last step cost $0.40. Little is left: finish with what you have.]
+===== money for this run, at the agent's own limit
+[Your own limit in this run: $0.20 left of $0.30. Your last step cost $0.05.]

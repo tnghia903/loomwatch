@@ -174,6 +174,10 @@ impl Spend for SpoolGate {
     fn spent(&self, usage: &Usage) {
         self.asker.count_spend(usage.cost_usd);
     }
+
+    fn room(&self) -> Option<crate::agent::Room> {
+        self.asker.spend_room()
+    }
 }
 
 impl SpoolGate {
@@ -752,6 +756,27 @@ mod tests {
         );
         let (note, _) = answered(&mut received);
         assert_eq!(note["outcome"], "timed_out");
+    }
+
+    /// ADR 0115: the run's spool tells the session what the run has left, so a provider stops
+    /// carrying a paused search on once the call has spent it.
+    #[tokio::test]
+    async fn the_spool_says_what_the_run_has_left() {
+        let (_, registry, run_id, _) = gate_for(RunTrigger::Manual, None);
+        registry.count_spend(&run_id, "a", 0.02);
+        let desk = crate::operator::OperatorDesk::new(registry.clone(), None);
+        let (records, _received) = mpsc::unbounded_channel();
+        let spool = super::SpoolGate {
+            asker: PermissionAsker::new(desk, &run_id, "a", "Builder"),
+            records,
+        };
+        let room = crate::agent::Spend::room(&spool).expect("the team has a limit");
+        assert!((room.left - 0.03).abs() < 1e-9, "{room:?}");
+        assert!((room.limit - 0.05).abs() < 1e-12, "{room:?}");
+        assert!(!room.own, "the run's money, not the agent's own guard");
+        registry.count_spend(&run_id, "a", 0.05);
+        let room = crate::agent::Spend::room(&spool).expect("the team has a limit");
+        assert!(room.left.abs() < 1e-12, "never below nothing: {room:?}");
     }
 
     /// ADR 0090: at its spool a routine's run waits for the person like any other, and when

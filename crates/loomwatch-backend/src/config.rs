@@ -69,7 +69,8 @@ pub struct TeamConfig {
     /// (ADR 0061). Absent asks the operator, as before Auto mode existed.
     #[serde(default)]
     pub permissions: TeamPermissions,
-    /// What one run may spend (ADR 0068). Absent: no limit, though spend is still counted.
+    /// What one run may spend (ADR 0068). Absent: the automatic limit, from what the team's runs
+    /// usually cost (ADR 0115).
     #[serde(default)]
     pub spend: crate::spend::SpendConfig,
     /// The project this team works in (ADR 0097): `<teams root>/.projects/<id>.yaml`.
@@ -2625,8 +2626,9 @@ mod tests {
         assert_eq!(team.agents[0].model, "anthropic/claude-sonnet-5.5");
     }
 
-    /// ADR 0068: `spend.perRun` on the team and on an agent. A team that says nothing has no limit
-    /// and its agents no guard; an operator node spends nothing, so it may not say.
+    /// ADR 0068: `spend.perRun` on the team and on an agent. A team that says nothing gets the
+    /// automatic limit (ADR 0115) and its agents no guard; an operator node spends nothing, so it
+    /// may not say.
     #[test]
     fn spend_limits_load_at_team_and_agent_level() {
         let team = TeamConfig::parse(
@@ -2645,7 +2647,9 @@ mod tests {
             "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    model: m\n",
         )
         .expect("valid config");
-        assert_eq!(crate::spend::RunSpend::for_team(&silent).limit_usd, None);
+        let automatic = crate::spend::RunSpend::for_team(&silent);
+        assert!(automatic.automatic);
+        assert_eq!(automatic.limit_usd, Some(crate::spend::AUTOMATIC_LEAST_USD));
 
         let error = TeamConfig::parse(
             "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    model: m\n  - id: stop\n    kind: operator\n    role: Approve.\n    spend:\n      perRun: 1\n",

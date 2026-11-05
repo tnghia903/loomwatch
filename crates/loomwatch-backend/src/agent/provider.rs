@@ -186,6 +186,11 @@ pub struct ChatRequest<'a> {
     pub session_key: &'a str,
     /// Which agent is asking. Only the offline demo reads it.
     pub agent_id: &'a str,
+    /// What the run has left to spend as this call starts, when something limits it. A provider
+    /// that carries a paused reply on within one call (Anthropic's long web searches) takes the
+    /// reply as it stands once the call has cost this much, so the session asks the run's spool
+    /// before the next request (ADR 0115).
+    pub room_usd: Option<f64>,
 }
 
 /// Why the model stopped writing.
@@ -479,6 +484,7 @@ impl Provider {
             tools_off: false,
             session_key: &key,
             agent_id: "",
+            room_usd: None,
         };
         // Nobody stops it: it ends with the reply, or fails.
         let (_stop, never) = watch::channel(false);

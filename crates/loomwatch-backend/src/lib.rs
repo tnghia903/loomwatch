@@ -53,6 +53,7 @@ pub mod skills_api;
 pub mod skills_store;
 pub mod spa;
 pub mod spend;
+pub mod spend_aware;
 pub mod suggestions;
 mod team_bus;
 pub mod team_places;

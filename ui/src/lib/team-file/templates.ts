@@ -7,7 +7,6 @@ import { modelForPreset, ROLE_PRESETS, roleSource } from '../library/roles'
 import { checkStepFields } from './checkStep'
 import type { AgentConfig, EdgeConfig } from './types'
 import { slugifyTeamName } from './useTeamDocument'
-import { NEW_TEAM_PER_RUN_USD } from '../runs/spend'
 
 /**
  * Starter teams for the New team dialog.
@@ -173,7 +172,7 @@ export function templateTeamYaml(template: TeamTemplateId, name: string, now = n
     ]
     edges = [sequence('researcher', 'review', ts), sequence('review', 'writer', ts)]
   }
-  return stringify({ schemaVersion: 1, id, name: name.trim(), spend: { perRun: NEW_TEAM_PER_RUN_USD }, entrypoint: agents[0].id, agents, edges }, { lineWidth: 0 })
+  return stringify({ schemaVersion: 1, id, name: name.trim(), entrypoint: agents[0].id, agents, edges }, { lineWidth: 0 })
 }
 
 /**
@@ -190,5 +189,5 @@ export function agentsTeamYaml(agents: readonly SavedJob[], name: string, id = s
   for (const job of agents) placed.push(buildAgentFromSource(roleSource(savedJobPreset(job)), placed))
   const ts = now.toISOString()
   const edges = placed.slice(1).map((agent, index) => sequence(placed[index].id, agent.id, ts))
-  return stringify({ schemaVersion: 1, id, name: name.trim(), spend: { perRun: NEW_TEAM_PER_RUN_USD }, entrypoint: placed[0].id, agents: placed, edges }, { lineWidth: 0 })
+  return stringify({ schemaVersion: 1, id, name: name.trim(), entrypoint: placed[0].id, agents: placed, edges }, { lineWidth: 0 })
 }

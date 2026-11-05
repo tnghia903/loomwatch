@@ -1,7 +1,9 @@
 import type { RunRecord, RunSpend, SpendStop } from './client'
 
-/** What a new team, and every starter team, may spend on one run (ADR 0068). A file that says nothing has no limit. */
-export const NEW_TEAM_PER_RUN_USD = 1
+/*
+ * A new team names no figure: each run of it gets the automatic limit, twice what its runs usually
+ * cost and at least $5.00 (ADR 0115). Only a figure the person names goes in the team file.
+ */
 
 /**
  * What a run spent and may spend, as the operator reads it (ADR 0068). The figures are the
@@ -44,6 +46,22 @@ export function typedDollars(text: string): number | null {
 /** "The team used its $1.00", "Researcher used its $0.30": what a stop is about. */
 export function stopSentence(stop: SpendStop): string {
   return `${stop.agent ? stop.name || stop.agent : 'The team'} used its ${dollars(stop.limitUsd)} for this run.`
+}
+
+/**
+ * What the team's runs usually cost, said at the team's stop so this run can be told from the usual
+ * (ADR 0115): "This team's runs usually cost about $2.27." When the team's own figure is below that,
+ * it says so and who can change it. At the automatic limit with nothing to go by yet, where the
+ * figure came from. Nothing at an agent's own limit.
+ */
+export function usualSentence(stop: SpendStop): string {
+  if (stop.agent) return ''
+  const usual = stop.usualUsd
+  if (!usual) return stop.automatic ? `LoomWatch asks at ${dollars(stop.limitUsd)} until it knows what this team’s runs cost.` : ''
+  const said = stop.usualRuns === 1 ? `This team’s last run cost ${dollars(usual)}` : `This team’s runs usually cost about ${dollars(usual)}`
+  return !stop.automatic && usual > stop.limitUsd
+    ? `${said}, more than its ${dollars(stop.limitUsd)}. Ask LoomWatch to change it.`
+    : `${said}.`
 }
 
 /** The two answers at a stop, worded for whose limit it is. */

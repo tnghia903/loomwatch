@@ -728,6 +728,12 @@ impl PermissionAsker {
             .spend_gate(&self.run_id, &self.agent, &self.name)
     }
 
+    /// What this agent may still spend before its next call meets a limit, and the limit that is
+    /// of (ADR 0115).
+    pub(crate) fn spend_room(&self) -> Option<crate::agent::Room> {
+        self.desk.registry().spend_room(&self.run_id, &self.agent)
+    }
+
     /// Adds what one of this agent's model calls cost to its run's spool.
     pub(crate) fn count_spend(&self, usd: f64) {
         self.desk

@@ -17,9 +17,6 @@ use crate::chat_files::SentFile;
 /// Where My agents' chats are kept, relative to the teams folder (`jobs::BENCH_DIR`).
 pub const CHATS: &str = ".jobs/.bench";
 
-/// What a new team may spend in one run (`NEW_TEAM_PER_RUN_USD` in the app).
-const PER_RUN_USD: u32 = 1;
-
 /// A message for the pinned agent, as the phone sends it.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -65,7 +62,6 @@ pub fn chat_yaml(job: &str, name: &str) -> String {
         "schemaVersion": 1,
         "id": format!("bench-{job}"),
         "name": format!("{name} · chat"),
-        "spend": {"perRun": PER_RUN_USD},
         "entrypoint": agent,
         "agents": [{"id": agent, "from": {"agent": job}}],
     });

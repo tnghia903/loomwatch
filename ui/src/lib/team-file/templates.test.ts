@@ -23,8 +23,8 @@ describe('team templates', () => {
     expect(result.documentProblems).toEqual([])
     expect(result.valid).toBe(true)
     expect(doc).toMatchObject({ id: 'blog-writer', name: 'Blog writer', entrypoint: doc.agents[0].id })
-    // A run spends real money: a new team may spend $1.00 a run until you change it (ADR 0068).
-    expect(doc.spend).toEqual({ perRun: 1 })
+    // A new team names no figure: each run gets the automatic limit (ADR 0115).
+    expect(doc.spend).toBeUndefined()
     for (const agent of doc.agents.filter((candidate) => candidate.kind !== 'operator')) {
       // Every agent runs on LoomWatch's engine, in the team file's own folder.
       expect(agent).not.toHaveProperty('spawn')
@@ -44,7 +44,8 @@ describe('team templates', () => {
     const result = validate(doc)
     expect(result.documentProblems).toEqual([])
     expect(result.valid).toBe(true)
-    expect(doc).toMatchObject({ id: 'digest', name: 'Digest', entrypoint: 'reader', spend: { perRun: 1 } })
+    expect(doc).toMatchObject({ id: 'digest', name: 'Digest', entrypoint: 'reader' })
+    expect(doc).not.toHaveProperty('spend')
     expect(doc.agents[0]).toMatchObject({ id: 'reader', model: FAST_MODEL, capabilities: [{ kind: 'skill', name: 'notebooklm' }], allow: { web: true }, from: { agent: 'reader', version: 3 } })
     // Two agents with one name still get their own ids.
     expect(doc.agents[1]).toMatchObject({ name: 'Reader', from: { agent: 'reader-2', version: 1 } })

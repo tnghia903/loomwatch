@@ -21,13 +21,17 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use crate::agent::WebLimits;
+use crate::agent::{Room, WebLimits};
 use crate::config::{AgentConfig, TeamConfig};
 
-/// What a new team, and every starter team, is written with: one run may spend $1.00. A team file
-/// that says nothing has no limit (the owner's ruling on ADR 0068), so a team made before spend
-/// limits runs as it did.
-pub const DEFAULT_PER_RUN_USD: f64 = 1.0;
+/// The least automatic limit (ADR 0115): what a run of a team whose file names no figure may spend
+/// before it has runs to go by, and the floor after. Generous on purpose: the limit is there to
+/// catch a run that went wrong, not to stop the work a team usually does.
+pub const AUTOMATIC_LEAST_USD: f64 = 5.0;
+/// How many times what its runs usually cost a team's automatic limit is.
+pub const AUTOMATIC_TIMES: f64 = 2.0;
+/// How many of a team's latest runs say what its runs usually cost.
+pub const AUTOMATIC_RUNS: usize = 10;
 /// The least "Add and carry on" offers.
 const MIN_TOP_UP_USD: f64 = 0.10;
 /// The most one answer may add, so a slip of the keyboard can't add a fortune.
@@ -127,7 +131,8 @@ impl WebConfig {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RunSpend {
-    /// The team's spool for this run, with whatever the operator added. `None`: no limit.
+    /// The team's spool for this run, with whatever the operator added: the team file's figure,
+    /// or the automatic limit (ADR 0115). `None` only on runs from before that.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limit_usd: Option<f64>,
     /// Every model call of the run, added up.
@@ -142,6 +147,26 @@ pub struct RunSpend {
     /// Set once the run may make no more calls at all.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stopped: Option<Stopped>,
+    /// The limit is `LoomWatch`'s, from what the team's runs usually cost, because its file names
+    /// no figure (ADR 0115). Absent on a limit the team file sets, and on runs from before.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub automatic: bool,
+    /// What the team's latest runs that succeeded usually cost (the middle of what they spent),
+    /// which an automatic limit is worked out from. Absent before the team has a run that spent
+    /// anything.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usual_usd: Option<f64>,
+    /// How many runs `usual_usd` is the middle of.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub usual_runs: u32,
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde's skip_serializing_if passes a reference"
+)]
+fn is_zero(count: &u32) -> bool {
+    *count == 0
 }
 
 // The run record compares as `Eq`. Every amount here is a finite number of dollars — `count`
@@ -207,6 +232,17 @@ pub struct SpendStop {
     pub spent_usd: f64,
     /// What "Add and carry on" adds.
     pub add_usd: f64,
+    /// The limit reached is the team's automatic one (ADR 0115), not a figure the team file sets.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub automatic: bool,
+    /// What the team's runs usually cost, at the team's limit, once it has runs to go by (ADR
+    /// 0115): the stop says it, so the person can tell this run from the usual, and a figure set
+    /// below it from a run that went wrong.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usual_usd: Option<f64>,
+    /// How many runs `usual_usd` is the middle of.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub usual_runs: u32,
     pub since: String,
     /// RFC 3339: when the team finishes with what it has if nobody answers, in a run nobody
     /// started by hand (ADR 0090). Absent in a run someone started, which waits as long as it
@@ -239,12 +275,15 @@ pub struct SpendAnswer {
 }
 
 impl RunSpend {
-    /// A new run's spool, from its team file: the team's `spend.perRun` (no limit when it says
-    /// nothing), and each agent's own guard. Spend is counted either way.
+    /// A new run's spool, from its team file: the team's `spend.perRun`, or the automatic limit
+    /// when it names none (ADR 0115), and each agent's own guard. Until the run registry has the
+    /// team's past runs to go by ([`RunSpend::go_by`]), the automatic limit is the least one.
     #[must_use]
     pub fn for_team(team: &TeamConfig) -> Self {
+        let set = team.spend.limit();
         Self {
-            limit_usd: team.spend.limit(),
+            limit_usd: set.or(Some(AUTOMATIC_LEAST_USD)),
+            automatic: set.is_none(),
             agents: team
                 .agents
                 .iter()
@@ -263,6 +302,55 @@ impl RunSpend {
         }
     }
 
+    /// What `agent` may still spend before its next call meets a limit: the least of what the
+    /// run's spool and its own guard have left, never below nothing. Nothing left once the run or
+    /// the agent was stopped. `None` when neither has a limit.
+    #[must_use]
+    pub fn left(&self, agent: &str) -> Option<f64> {
+        self.room(agent).map(|room| room.left)
+    }
+
+    /// What `agent` has left, and of which limit: the run's spool or its own guard, whichever
+    /// leaves less. Nothing left once the run or the agent was stopped. `None` with no limit.
+    #[must_use]
+    pub fn room(&self, agent: &str) -> Option<Room> {
+        let mine = self.agents.get(agent);
+        let team = self
+            .limit_usd
+            .map(|limit| (limit - self.spent_usd, limit, false));
+        let own = mine.and_then(|mine| {
+            mine.limit_usd
+                .map(|limit| (limit - mine.spent_usd, limit, true))
+        });
+        let (left, limit, own) = match (team, own) {
+            (Some(team), Some(own)) => {
+                if own.0 < team.0 {
+                    own
+                } else {
+                    team
+                }
+            }
+            (one, other) => one.or(other)?,
+        };
+        let stopped = self.stopped.is_some() || mine.is_some_and(|mine| mine.stopped);
+        Some(Room {
+            left: if stopped { 0.0 } else { left.max(0.0) },
+            limit,
+            own,
+        })
+    }
+
+    /// Takes in what the team's latest runs that succeeded spent: what they usually cost, and from
+    /// it, when the limit is automatic, the limit: twice the usual, never below
+    /// [`AUTOMATIC_LEAST_USD`]. A limit the team file sets is left as it is.
+    pub fn go_by(&mut self, past: &[f64]) {
+        self.usual_usd = usual_cost(past);
+        self.usual_runs = runs_that_spent(past);
+        if self.automatic {
+            self.limit_usd = Some(automatic_limit(self.usual_usd));
+        }
+    }
+
     /// Adds one call's cost to the run and to `agent`.
     pub fn count(&mut self, agent: &str, usd: f64) {
         if !usd.is_finite() || usd <= 0.0 {
@@ -277,14 +365,65 @@ fn guard(agent: &AgentConfig) -> Option<f64> {
     agent.spend.limit()
 }
 
-/// What "Add and carry on" offers at a limit: half of it, at least ten cents, in whole cents.
+/// What a team's runs usually cost: the middle of what `past` runs spent (the mean of the two
+/// middle ones for an even count), counting only runs that spent something. The middle, not the
+/// most, so one run that went wrong doesn't raise the next limit.
 #[must_use]
-pub fn top_up_for(limit: f64) -> f64 {
-    cents((limit / 2.0).max(MIN_TOP_UP_USD))
+pub fn usual_cost(past: &[f64]) -> Option<f64> {
+    let mut spent: Vec<f64> = past
+        .iter()
+        .copied()
+        .filter(|usd| usd.is_finite() && *usd > 0.0)
+        .collect();
+    if spent.is_empty() {
+        return None;
+    }
+    spent.sort_by(f64::total_cmp);
+    let middle = spent.len() / 2;
+    let usual = if spent.len().is_multiple_of(2) {
+        f64::midpoint(spent[middle - 1], spent[middle])
+    } else {
+        spent[middle]
+    };
+    Some(micros(usual))
+}
+
+/// How many of `past` spent something: the runs [`usual_cost`] is the middle of.
+fn runs_that_spent(past: &[f64]) -> u32 {
+    let count = past
+        .iter()
+        .filter(|usd| usd.is_finite() && **usd > 0.0)
+        .count();
+    u32::try_from(count).unwrap_or(u32::MAX)
+}
+
+/// The automatic limit for runs that usually cost `usual`: twice that, up to a whole cent, and
+/// never below [`AUTOMATIC_LEAST_USD`].
+#[must_use]
+pub fn automatic_limit(usual: Option<f64>) -> f64 {
+    usual.map_or(AUTOMATIC_LEAST_USD, |usual| {
+        cents_up(usual * AUTOMATIC_TIMES).max(AUTOMATIC_LEAST_USD)
+    })
+}
+
+/// What "Add and carry on" offers at a limit the run has spent `spent` of: what it already went
+/// past the limit, then half the limit again (at least ten cents), in whole cents. A call that ran
+/// past the limit (a long web search is one call) leaves the run above it, and an offer of half
+/// the limit alone could leave the new limit still below what was spent, so the run asked again at
+/// once: on 2026-11-04 a $1.00 run that had spent $1.85 took three taps (ADR 0115).
+#[must_use]
+pub fn top_up_for(limit: f64, spent: f64) -> f64 {
+    let over = (spent - limit).max(0.0);
+    cents_up(over) + cents((limit / 2.0).max(MIN_TOP_UP_USD))
 }
 
 fn cents(usd: f64) -> f64 {
     (usd * 100.0).round() / 100.0
+}
+
+/// Up to the next whole cent, so what is added always covers what was spent past the limit.
+fn cents_up(usd: f64) -> f64 {
+    (micros(usd) * 100.0).ceil() / 100.0
 }
 
 /// To the millionth of a dollar, the finest `OpenRouter` prices in, so sums carry no float noise.
@@ -339,13 +478,23 @@ pub fn check(
     let Some((whose, limit, used)) = reached else {
         return Check::Ahead;
     };
+    // What the team's runs usually cost goes on the team's stop, not on an agent's own guard.
+    let team = whose.is_none();
+    let (usual, usual_runs) = if team {
+        (spend.usual_usd, spend.usual_runs)
+    } else {
+        (None, 0)
+    };
     let stop = SpendStop {
         id: uuid::Uuid::new_v4().to_string(),
         name: whose.as_ref().map(|_| name.to_owned()),
         agent: whose,
         limit_usd: limit,
         spent_usd: used,
-        add_usd: top_up_for(limit),
+        add_usd: top_up_for(limit, used),
+        automatic: team && spend.automatic,
+        usual_usd: usual,
+        usual_runs,
         since: now.to_owned(),
         expires_at: None,
     };
@@ -354,8 +503,10 @@ pub fn check(
         return Check::Stop { first: Some(stop) };
     }
     if let Some(open) = stops.iter_mut().find(|open| open.agent == stop.agent) {
-        // The figure moves while it waits: another agent's call can finish after the stop opened.
+        // The figure moves while it waits: another agent's call can finish after the stop opened,
+        // and the offer follows it so one "Add" still carries on.
         open.spent_usd = used;
+        open.add_usd = top_up_for(open.limit_usd, used);
         return Check::Wait {
             stop: open.clone(),
             opened: false,
@@ -581,7 +732,8 @@ mod tests {
         assert!(opened);
         assert_eq!(stop.agent, None);
         assert!(approx(stop.spent_usd, 0.055));
-        assert!(approx(stop.add_usd, 0.10));
+        // The half cent past the limit, as a whole cent, then the least offer.
+        assert!(approx(stop.add_usd, 0.11));
         // A second agent reaching it waits at the same stop rather than opening another.
         let Check::Wait { stop: same, opened } =
             check(&mut spend, &mut stops, "b", "B", true, "now")
@@ -601,18 +753,18 @@ mod tests {
         let Check::Wait { stop, .. } = check(&mut spend, &mut stops, "a", "A", true, "now") else {
             panic!("over the spool");
         };
-        assert!(approx(stop.add_usd, 0.5));
+        assert!(approx(stop.add_usd, 0.53), "{stop:?}");
         let (_, answered) =
             answer(&mut spend, &mut stops, &stop.id, SpendDecision::Add, None).expect("open");
-        assert!(approx(answered.limit_usd, 1.5));
-        assert_eq!(spend.limit_usd, Some(1.5));
+        assert!(approx(answered.limit_usd, 1.53));
+        assert_eq!(spend.limit_usd, Some(1.53));
         assert!(stops.is_empty());
         assert_eq!(
             spend.added,
             vec![TopUp {
                 agent: None,
                 at_usd: 1.0,
-                add_usd: 0.5
+                add_usd: 0.53
             }]
         );
         assert_eq!(
@@ -688,7 +840,7 @@ mod tests {
         };
         assert_eq!(stop.agent.as_deref(), Some("r"));
         assert_eq!(stop.name.as_deref(), Some("Researcher"));
-        assert!(approx(stop.add_usd, 0.15));
+        assert!(approx(stop.add_usd, 0.16));
         assert_eq!(
             check(&mut spend, &mut stops, "w", "Writer", true, "n"),
             Check::Ahead,
@@ -738,7 +890,7 @@ mod tests {
         };
         let (_, answered) =
             answer(&mut spend, &mut stops, &stop.id, SpendDecision::Add, None).expect("open");
-        assert!(approx(answered.limit_usd, 0.103), "{answered:?}");
+        assert!(approx(answered.limit_usd, 0.113), "{answered:?}");
     }
 
     #[test]
@@ -767,10 +919,72 @@ mod tests {
 
     #[test]
     fn the_offer_is_half_the_limit_in_whole_cents_and_at_least_ten() {
-        assert!(approx(top_up_for(1.0), 0.5));
-        assert!(approx(top_up_for(0.3), 0.15));
-        assert!(approx(top_up_for(0.05), 0.10));
-        assert!(approx(top_up_for(0.333), 0.17));
+        assert!(approx(top_up_for(1.0, 1.0), 0.5));
+        assert!(approx(top_up_for(0.3, 0.3), 0.15));
+        assert!(approx(top_up_for(0.05, 0.05), 0.10));
+        assert!(approx(top_up_for(0.333, 0.333), 0.17));
+    }
+
+    #[test]
+    fn the_offer_covers_what_one_call_spent_past_the_limit() {
+        // The news brief of 2026-11-04: $1.85 spent of $1.00.
+        assert!(approx(top_up_for(1.0, 1.852_507_6), 1.36));
+        // A thousandth of a cent over still adds a whole cent.
+        assert!(approx(top_up_for(1.0, 1.000_01), 0.51));
+    }
+
+    /// ADR 0115: a run one call took far past its limit carries on after one "Add", where the old
+    /// offer of half the limit opened a second stop at once.
+    #[test]
+    fn one_add_carries_on_a_run_that_went_far_past_its_limit() {
+        let mut spend = spool(1.0);
+        let mut stops = Vec::new();
+        spend.count("researcher", 2.570_472_2);
+        let Check::Wait { stop, .. } = check(
+            &mut spend,
+            &mut stops,
+            "researcher",
+            "Researcher",
+            true,
+            "now",
+        ) else {
+            panic!("over the spool");
+        };
+        answer(&mut spend, &mut stops, &stop.id, SpendDecision::Add, None).expect("open");
+        assert_eq!(
+            check(
+                &mut spend,
+                &mut stops,
+                "researcher",
+                "Researcher",
+                true,
+                "now"
+            ),
+            Check::Ahead,
+            "{spend:?}"
+        );
+    }
+
+    #[test]
+    fn the_offer_at_an_open_stop_follows_what_is_spent_while_it_waits() {
+        let mut spend = spool(1.0);
+        let mut stops = Vec::new();
+        spend.count("a", 1.1);
+        let Check::Wait { stop, .. } = check(&mut spend, &mut stops, "a", "A", true, "now") else {
+            panic!("over the spool");
+        };
+        assert!(approx(stop.add_usd, 0.6));
+        // Another agent's call lands after the stop opened.
+        spend.count("b", 0.4);
+        let Check::Wait { stop, .. } = check(&mut spend, &mut stops, "b", "B", true, "now") else {
+            panic!("still over");
+        };
+        assert!(approx(stop.add_usd, 1.0), "{stop:?}");
+        answer(&mut spend, &mut stops, &stop.id, SpendDecision::Add, None).expect("open");
+        assert_eq!(
+            check(&mut spend, &mut stops, "a", "A", true, "now"),
+            Check::Ahead
+        );
     }
 
     #[test]
@@ -784,6 +998,148 @@ mod tests {
         assert_eq!(usd(0.003), "$0.003");
         assert_eq!(usd(0.000_479), "$0.000479");
         assert_eq!(usd(0.0), "$0.00");
+    }
+
+    #[test]
+    fn what_is_left_is_the_least_of_the_run_and_the_agents_guard() {
+        assert_eq!(
+            RunSpend::default().left("a"),
+            None,
+            "no limit, nothing to say"
+        );
+        let mut spend = spool(1.0);
+        spend.count("a", 0.25);
+        assert!(approx(spend.left("a").unwrap(), 0.75));
+        spend.agents.get_mut("a").unwrap().limit_usd = Some(0.3);
+        assert!(
+            approx(spend.left("a").unwrap(), 0.05),
+            "its own guard is nearer"
+        );
+        assert!(
+            approx(spend.left("b").unwrap(), 0.75),
+            "another agent has the run's"
+        );
+        spend.count("a", 0.1);
+        assert!(approx(spend.left("a").unwrap(), 0.0), "never below nothing");
+        let mut finished = spool(1.0);
+        finished.stopped = Some(Stopped::Finished);
+        assert_eq!(finished.left("a"), Some(0.0));
+    }
+
+    #[test]
+    fn what_runs_usually_cost_is_the_middle_of_what_they_spent() {
+        assert_eq!(usual_cost(&[]), None);
+        assert_eq!(
+            usual_cost(&[0.0, f64::NAN]),
+            None,
+            "runs that spent nothing say nothing"
+        );
+        assert!(approx(usual_cost(&[2.27, 2.26, 2.26]).unwrap(), 2.26));
+        assert!(approx(usual_cost(&[1.0, 3.0]).unwrap(), 2.0));
+        // One run that went wrong doesn't move it.
+        assert!(approx(usual_cost(&[2.2, 2.3, 40.0]).unwrap(), 2.3));
+    }
+
+    #[test]
+    fn the_automatic_limit_is_twice_the_usual_and_never_below_the_least() {
+        assert!(approx(automatic_limit(None), AUTOMATIC_LEAST_USD));
+        assert!(approx(automatic_limit(Some(0.12)), AUTOMATIC_LEAST_USD));
+        // The news brief: about $2.27 a run.
+        assert!(approx(automatic_limit(Some(2.27)), 5.0));
+        assert!(
+            approx(automatic_limit(Some(4.001)), 8.01),
+            "up to a whole cent"
+        );
+    }
+
+    /// ADR 0115: a team whose file names no figure gets `LoomWatch`'s limit, worked out from its
+    /// runs; one whose file sets a figure keeps it.
+    #[test]
+    fn a_team_that_names_no_figure_gets_the_automatic_limit() {
+        let silent = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    model: m\n",
+        )
+        .unwrap();
+        let mut spool = RunSpend::for_team(&silent);
+        assert!(spool.automatic);
+        assert_eq!(spool.limit_usd, Some(AUTOMATIC_LEAST_USD));
+        spool.go_by(&[3.1, 2.9, 3.0]);
+        assert_eq!(spool.usual_usd, Some(3.0));
+        assert_eq!(spool.limit_usd, Some(6.0));
+
+        let set = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nspend:\n  perRun: 1\nagents:\n  - id: a\n    model: m\n",
+        )
+        .unwrap();
+        let mut spool = RunSpend::for_team(&set);
+        spool.go_by(&[3.1, 2.9, 3.0]);
+        assert!(!spool.automatic);
+        assert_eq!(spool.limit_usd, Some(1.0), "the team's own figure stays");
+        assert_eq!(
+            spool.usual_usd,
+            Some(3.0),
+            "what its runs usually cost is known beside it"
+        );
+    }
+
+    /// ADR 0115: the team's stop says whether its limit is automatic and what its runs usually
+    /// cost, from how many runs, so a run that went wrong can be told from a figure set below the
+    /// usual. An agent's own guard says neither.
+    #[test]
+    fn a_teams_stop_says_what_its_runs_usually_cost() {
+        let mut spend = RunSpend {
+            automatic: true,
+            ..spool(5.0)
+        };
+        spend.go_by(&[2.26, 2.27, 2.26]);
+        spend.count("researcher", 5.2);
+        let mut stops = Vec::new();
+        let Check::Wait { stop, .. } = check(&mut spend, &mut stops, "researcher", "R", true, "n")
+        else {
+            panic!("over the automatic limit");
+        };
+        assert!(stop.automatic);
+        assert_eq!(stop.usual_usd, Some(2.26));
+        assert_eq!(stop.usual_runs, 3);
+
+        // The news brief's $1.00, written before ADR 0115, below what its runs cost.
+        let mut set = spool(1.0);
+        set.go_by(&[2.26, 2.27]);
+        set.count("researcher", 1.2);
+        let mut stops = Vec::new();
+        let Check::Wait { stop, .. } = check(&mut set, &mut stops, "researcher", "R", true, "n")
+        else {
+            panic!("over the team's own figure");
+        };
+        assert!(!stop.automatic);
+        assert_eq!(set.limit_usd, Some(1.0), "the team's figure stays");
+        assert_eq!(stop.usual_usd, Some(2.265));
+        assert_eq!(stop.usual_runs, 2);
+
+        // An agent's own guard, reached before the run's limit.
+        let mut guarded = RunSpend {
+            automatic: true,
+            ..spool(5.0)
+        };
+        guarded.go_by(&[2.26]);
+        guarded.agents.insert(
+            "researcher".into(),
+            AgentSpend {
+                limit_usd: Some(0.3),
+                ..AgentSpend::default()
+            },
+        );
+        guarded.count("researcher", 0.31);
+        let mut stops = Vec::new();
+        let Check::Wait { stop, .. } =
+            check(&mut guarded, &mut stops, "researcher", "R", true, "n")
+        else {
+            panic!("over its own guard");
+        };
+        assert_eq!(stop.agent.as_deref(), Some("researcher"));
+        assert!(!stop.automatic);
+        assert_eq!(stop.usual_usd, None);
+        assert_eq!(stop.usual_runs, 0);
     }
 
     #[test]

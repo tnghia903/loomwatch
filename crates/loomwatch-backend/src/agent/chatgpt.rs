@@ -864,6 +864,7 @@ mod tests {
             tools_off: false,
             session_key: "s-1",
             agent_id: "writer",
+            room_usd: None,
         }
     }
 

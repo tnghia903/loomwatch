@@ -3,7 +3,7 @@ import type { RunRecord } from '../runs/client'
 import { plainRunError, runAgents } from '../runs/errors'
 import { dueAt } from '../chat/format'
 import { permissionSentence, permissionWhat } from '../runs/permissionRequests'
-import { dollars, openStops, stopActions, stopSentence } from '../runs/spend'
+import { dollars, openStops, stopActions, stopSentence, usualSentence } from '../runs/spend'
 import { checkStopLines } from './checkStop'
 import { triedAgain } from '../chat/tries'
 
@@ -101,7 +101,7 @@ export function ticketsFrom(records: readonly RunRecord[], names: ReadonlyMap<st
         sendBackTo: null,
         asker: stop.agent ? stop.name || stop.agent : teamName,
         text: stopSentence(stop),
-        context: `Spent ${dollars(stop.spentUsd)}. Nothing more is spent until you answer.`,
+        context: [`Spent ${dollars(stop.spentUsd)}.`, usualSentence(stop), 'Nothing more is spent until you answer.'].filter(Boolean).join(' '),
         since: stop.since,
         stopId: stop.id,
         spendActions: stopActions(stop),

@@ -282,7 +282,12 @@ false`, the system prompt in `instructions`, tools in a `loomwatch` namespace, r
 replayed; a web search's results, which the API shows only inside the response that ran it, handed
 back after their step as the output of a `web_results` call). Each call's `Usage` says who paid (`paid_by`): a ChatGPT call costs $0 and counts against
 the plan, and a Claude call is priced from the list prices OpenRouter's catalogue shows (or
-`agent::list_price`), marked `cost_estimated`. Spend limits count dollars only. A refusal comes back
+`agent::list_price`), marked `cost_estimated`. Spend limits count dollars only (`spend.rs`, ADR 0068): a team
+that names no figure gets the automatic limit, twice what its latest runs that succeeded usually cost and
+at least $5.00, worked out by the run registry as a run starts (ADR 0115). The session tells a provider
+what the run has left (`ChatRequest::room_usd`), so a paused Claude web search isn't carried on past it,
+and with `spend_aware::DEFAULT` on (it is off until the quality bench says otherwise) an agent of a
+metered run is told what is left under its task and after each step's results. A refusal comes back
 as a `Problem` (`not_connected`, `key_refused`, `out_of_credits`, `plan_limit`,
 `plan_not_eligible`, `plan_use_off`, `sign_in_again`) that the app turns into a button, such as
 Manage usage. Every call is a row in `model_calls`, filled from the run events, and
@@ -749,9 +754,8 @@ allow it rather than "not found". Ask is told never to ask the person for a path
 that points at one of My agents is filled in from it, a skill must be installed, a tool connected,
 and a folder or file it connects, or a folder an agent works in, must be on this computer. What the
 saved team already names is let through. A check step that doesn't say how it sends work back gets
-`sendBack: {rounds: 2, whenStillNotMet: ask}`, as the editor writes it, and a new team that sets no
-`spend` gets `perRun: 1.00`, or `2.00` when it has three or more agents or a check step that sends
-work back. Ask's first turn also says whether this computer is a Mac, where an agent's commands run
+`sendBack: {rounds: 2, whenStillNotMet: ask}`, as the editor writes it. A new team is written with
+no `spend` figure unless the person names one, so its runs get the automatic limit (ADR 0115). Ask's first turn also says whether this computer is a Mac, where an agent's commands run
 in a sandbox: there Ask gives a maker or the Analyst the edits and commands switches, so a newcomer
 isn't asked to approve each program it runs; elsewhere they ask first.
 

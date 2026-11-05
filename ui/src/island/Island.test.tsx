@@ -1925,11 +1925,10 @@ describe('the notch as the pinned agent’s slot, and its crew', () => {
     const island = container.querySelector('.island')!
     await waitFor(() => expect(island.getAttribute('data-view')).toBe('ask'))
     const card = within(container.querySelector<HTMLElement>('.island-card')!)
-    // Maya's words, the team they are to and that a run of it has no spending limit, from its file,
-    // and Start. No ×: putting the card away doesn't answer it.
+    // Maya's words, the team they are to, and Start. No ×: putting the card away doesn't answer it.
     expect(card.getByText('Plan three gentle days in Đà Lạt')).toBeTruthy()
     const toTeam = (within: ParentNode) => within.querySelector('.island-for')?.textContent?.replace(/\s+/g, ' ').trim()
-    await waitFor(() => expect(toTeam(container.querySelector('.island-card')!)).toBe('to Trip planner · no spending limit'))
+    await waitFor(() => expect(toTeam(container.querySelector('.island-card')!)).toBe('to Trip planner'))
     expect(card.getAllByRole('button').map((button) => button.getAttribute('aria-label'))).toEqual(['Start Trip planner'])
     fireEvent.click(card.getByRole('button', { name: 'Start Trip planner' }))
     await waitFor(() => expect(answeredTeams).toEqual([{ id: 'tr1', decision: 'start' }]))
@@ -1987,7 +1986,7 @@ describe('the notch as the pinned agent’s slot, and its crew', () => {
     const inRow = within(row)
     // Her words, the team they are to with its agents' figures, and × to say don't: no other line.
     expect(inRow.getByText('Retry and complete this exact assignment, then send the lesson back')).toBeTruthy()
-    await waitFor(() => expect(row.querySelector('.island-for')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('to First-principles school · no spending limit'))
+    await waitFor(() => expect(row.querySelector('.island-for')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('to First-principles school'))
     await waitFor(() => expect(row.querySelectorAll('.island-crew-figure')).toHaveLength(2))
     expect(row.querySelector('.island-request')?.querySelectorAll('small')).toHaveLength(1)
     // Start sits where Send would, and is the only other button but her figure, her workbench's,

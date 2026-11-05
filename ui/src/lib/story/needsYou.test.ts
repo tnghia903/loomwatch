@@ -110,6 +110,14 @@ describe('ticketsFrom', () => {
     })
   })
 
+  // ADR 0115: the tray and the notch say what the team's runs usually cost, as the card does.
+  it('says on a spend ticket what the team’s runs usually cost', () => {
+    const tickets = ticketsFrom([
+      run('r1', { status: 'running', spendStops: [{ id: 's1', limitUsd: 1, spentUsd: 2.57, addUsd: 2.07, usualUsd: 2.27, usualRuns: 3, since: '2026-10-01T03:58:00Z' }] }),
+    ], names, new Set(), NOW)
+    expect(tickets[0].context).toBe('Spent $2.57. This team’s runs usually cost about $2.27, more than its $1.00. Ask LoomWatch to change it. Nothing more is spent until you answer.')
+  })
+
   // ADR 0062: a check step that stopped to ask leads with what is still not met, then the work.
   it('leads a check step’s stop with the checks still not met', () => {
     const check = { checked: 'writer', rounds: 2, reason: 'rounds' as const, met: 2, items: [{ verdict: 'not_met' as const, item: 'Cites the 2025 report', evidence: 'cites 2023' }] }

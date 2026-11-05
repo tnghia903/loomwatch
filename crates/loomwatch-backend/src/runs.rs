@@ -500,6 +500,39 @@ impl RunRecord {
     }
 }
 
+/// ADR 0115: a new run goes by what the same team's latest runs that succeeded spent, newest
+/// first, from the runs this registry holds (the archive's most recent, reloaded at start): what
+/// they usually cost, and from it an automatic limit. A run that failed or was cancelled part way
+/// says little about what the work costs.
+fn go_by_past_runs(inner: &RegistryInner, record: &mut RunRecord) {
+    if record.spend.is_none() {
+        return;
+    }
+    let mut past: Vec<(&str, f64)> = inner
+        .runs
+        .values()
+        .map(|entry| &entry.record)
+        .filter(|run| {
+            run.run_id != record.run_id
+                && run.team_key == record.team_key
+                && run.status == RunStatus::Succeeded
+        })
+        .filter_map(|run| {
+            let spend = run.spend.as_ref()?;
+            Some((run.created_at.as_str(), spend.spent_usd))
+        })
+        .collect();
+    past.sort_by(|a, b| b.0.cmp(a.0));
+    let spent: Vec<f64> = past
+        .into_iter()
+        .take(crate::spend::AUTOMATIC_RUNS)
+        .map(|(_, usd)| usd)
+        .collect();
+    if let Some(spend) = record.spend.as_mut() {
+        spend.go_by(&spent);
+    }
+}
+
 /// The team file's `name`, as a run keeps it ([`RunRecord::team_name`]): `None` when it has none.
 pub(crate) fn team_name(team: &TeamConfig) -> Option<String> {
     Some(team.name.trim())
@@ -1255,8 +1288,9 @@ impl RunRegistry {
     }
 
     /// Register a new run. Its `run_id` must be unique.
-    pub fn insert(&self, record: RunRecord) {
+    pub fn insert(&self, mut record: RunRecord) {
         let mut inner = self.inner.write().unwrap_or_else(PoisonError::into_inner);
+        go_by_past_runs(&inner, &mut record);
         let run_id = record.run_id.clone();
         inner.runs.insert(
             run_id.clone(),
@@ -1270,8 +1304,14 @@ impl RunRegistry {
 
     /// Atomically bind a start key to a request fingerprint and insert its run. The lock
     /// makes two concurrent submissions with the same key enqueue at most once.
-    fn insert_started(&self, record: RunRecord, key: &str, fingerprint: &str) -> StartKeyOutcome {
+    fn insert_started(
+        &self,
+        mut record: RunRecord,
+        key: &str,
+        fingerprint: &str,
+    ) -> StartKeyOutcome {
         let mut inner = self.inner.write().unwrap_or_else(PoisonError::into_inner);
+        go_by_past_runs(&inner, &mut record);
         if let Some(bound) = inner.start_keys.get(key) {
             let run = inner
                 .runs
@@ -1616,6 +1656,18 @@ impl RunRegistry {
                 }
             }
         }
+    }
+
+    /// What `agent` may still spend in `run_id` before its next call meets a limit, and the limit
+    /// that is of: the run's spool or the agent's own guard, whichever leaves less, never below
+    /// nothing. `None` when neither limits it, or the registry doesn't know the run (ADR 0115).
+    pub(crate) fn spend_room(&self, run_id: &str, agent: &str) -> Option<crate::agent::Room> {
+        let inner = self.inner.read().unwrap_or_else(PoisonError::into_inner);
+        inner
+            .runs
+            .get(run_id)
+            .and_then(|entry| entry.record.spend.as_ref())
+            .and_then(|spend| spend.room(agent))
     }
 
     /// Adds what one model call of `agent` cost to its run's spool.
@@ -5077,6 +5129,78 @@ pub(crate) mod tests {
         .unwrap_or_else(|_| panic!("the run's record was never stored in the awaited state"))
     }
 
+    /// ADR 0115: a run of a team whose file names no figure may spend twice what the team's latest
+    /// runs that succeeded usually cost, and never less than the least automatic limit. Another
+    /// team's runs, a run still going and one that failed say nothing about it; a team that names
+    /// a figure keeps it, and is told what its runs usually cost too. A run started from the app
+    /// comes in with a start key (`insert_started`), one started otherwise without (`insert`).
+    #[test]
+    fn a_new_run_goes_by_what_the_teams_latest_runs_cost() {
+        use crate::spend::AUTOMATIC_LEAST_USD;
+        let brief = TeamConfig::parse(
+            "schemaVersion: 1\nid: brief\nentrypoint: a\nagents:\n  - id: a\n    model: m\n",
+        )
+        .unwrap();
+        let other = TeamConfig::parse(
+            "schemaVersion: 1\nid: other\nentrypoint: a\nagents:\n  - id: a\n    model: m\n",
+        )
+        .unwrap();
+        let registry = RunRegistry::default();
+        let run = |team: &TeamConfig, day: u32, status: RunStatus, spent: f64| {
+            let mut record =
+                RunRecord::queued("t.yaml".into(), "go".into(), team, RunTrigger::Schedule)
+                    .unwrap();
+            record.status = status;
+            record.created_at = format!("2026-11-{day:02}T00:00:00Z");
+            record.spend.as_mut().unwrap().spent_usd = spent;
+            record
+        };
+        let first = run(&brief, 1, RunStatus::Queued, 0.0);
+        let first_id = first.run_id.clone();
+        registry.insert(first);
+        let spend = registry.get(&first_id).unwrap().spend.unwrap();
+        assert_eq!(
+            spend.limit_usd,
+            Some(AUTOMATIC_LEAST_USD),
+            "nothing to go by yet"
+        );
+        assert_eq!(spend.usual_usd, None);
+
+        registry.insert(run(&brief, 2, RunStatus::Succeeded, 3.1));
+        registry.insert(run(&brief, 3, RunStatus::Failed, 0.05));
+        registry.insert(run(&brief, 4, RunStatus::Succeeded, 3.0));
+        registry.insert(run(&brief, 5, RunStatus::Succeeded, 2.9));
+        registry.insert(run(&brief, 5, RunStatus::Running, 30.0));
+        registry.insert(run(&other, 5, RunStatus::Succeeded, 40.0));
+        let next = run(&brief, 6, RunStatus::Queued, 0.0);
+        let next_id = next.run_id.clone();
+        assert!(matches!(
+            registry.insert_started(next, "start-1", "fingerprint"),
+            StartKeyOutcome::Accepted
+        ));
+        let spend = registry.get(&next_id).unwrap().spend.unwrap();
+        assert!(spend.automatic);
+        assert_eq!(spend.usual_usd, Some(3.0));
+        assert_eq!(spend.usual_runs, 3);
+        assert_eq!(spend.limit_usd, Some(6.0));
+
+        let set = TeamConfig::parse(
+            "schemaVersion: 1\nid: brief\nspend:\n  perRun: 1\nentrypoint: a\nagents:\n  - id: a\n    model: m\n",
+        )
+        .unwrap();
+        let own = run(&set, 7, RunStatus::Queued, 0.0);
+        let own_id = own.run_id.clone();
+        registry.insert(own);
+        let spend = registry.get(&own_id).unwrap().spend.unwrap();
+        assert_eq!(spend.limit_usd, Some(1.0));
+        assert!(!spend.automatic);
+        assert_eq!(
+            spend.usual_usd,
+            Some(3.0),
+            "what its runs usually cost, beside its figure"
+        );
+    }
+
     fn permission_request(id: &str, kind: &str) -> crate::permissions::PermissionRequest {
         crate::permissions::PermissionRequest {
             id: id.to_owned(),
@@ -8319,7 +8443,8 @@ pub(crate) mod tests {
             (stop.spent_usd - 0.08).abs() < 1e-9,
             "one call went over: {stop:?}"
         );
-        assert!((stop.add_usd - 0.10).abs() < 1e-9, "{stop:?}");
+        // The three cents one call went past, then the least offer: one "Add" carries it on.
+        assert!((stop.add_usd - 0.13).abs() < 1e-9, "{stop:?}");
         assert_eq!(waiting.status, RunStatus::Running);
         // Nothing is spent while it waits.
         tokio::time::sleep(Duration::from_millis(150)).await;
@@ -8343,7 +8468,7 @@ pub(crate) mod tests {
             "the turn carried on to its answer, past what it said on the way"
         );
         let spend = done.spend.expect("kept on the record");
-        assert_eq!(spend.limit_usd, Some(0.15));
+        assert_eq!(spend.limit_usd, Some(0.18));
         assert!((spend.spent_usd - 0.12).abs() < 1e-9, "{spend:?}");
         assert_eq!(spend.added.len(), 1);
         assert!(done.spend_stops.is_empty());

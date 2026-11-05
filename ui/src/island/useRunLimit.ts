@@ -3,8 +3,8 @@ import { parse } from 'yaml'
 
 import { fetchTeamFile } from '../lib/team-file/client'
 
-/** What one run of the team at `path` may spend, from its file: `null` when it sets no limit,
-    `undefined` until read, and for no team. */
+/** What one run of the team at `path` may spend, from its file: `null` when it names no figure
+    (its runs get the automatic limit, ADR 0115), `undefined` until read, and for no team. */
 export function useRunLimit(path: string | null): number | null | undefined {
   const [limit, setLimit] = useState<{ path: string; perRun: number | null } | null>(null)
   useEffect(() => {

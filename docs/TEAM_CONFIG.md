@@ -414,20 +414,27 @@ depend on the document as a whole:
     takes an item off the check from the next round on; `"checked": true` puts it back. Refused
     once the check has ended.
 - `spend.perRun` (team level) is what one run may spend on model calls, in US dollars. Absent
-  means no limit; new teams and the starter teams are written with `1.00`, and so is a new team Ask
-LoomWatch proposes, or `2.00` when it has three or more agents or a check step that sends work
-back. Every agent of the run draws on it: stages, the lead, Team Bus helpers,
+  means the automatic limit (ADR 0115): twice the middle of what the team's latest ten runs that
+  succeeded spent (runs that spent nothing are skipped), rounded up to a cent and never below
+  `5.00`; a team with no such run yet gets `5.00`. A run stops only when it goes far past the
+  usual. New teams, the starter teams and teams Ask proposes are written without it; write a
+  figure only to hold the team to one. Teams written before this keep the `1.00` or `2.00`
+  LoomWatch gave them: take the `spend` block off to move one to the automatic limit. A file from
+  before limits, with no `spend`, now has the automatic limit too. Every agent of the run draws on it: stages, the lead, Team Bus helpers,
   summaries, checkpoints and handovers. The daemon adds up each call's dollars: the exact cost
   OpenRouter reports, or for a call on the Claude credit its cost at Claude's list prices. A call on
   the ChatGPT plan costs no dollars and counts against the plan's limits instead. Before each call, an agent whose run has used its figure waits, and the run shows a
-  stop: "Add $0.50 and carry on" grows this run's figure (the file is not changed), and "Finish
+  stop: "Add … and carry on" grows this run's figure by what was spent past it plus half the
+  figure again, so one answer carries on (the file is not changed), and "Finish
   with what it has" ends the run as done, with the last words an agent wrote as its answer, stop
   reason `spend_limit`, and its checkpoints kept. A scheduled run waits at the stop too, for its
   schedule's `waitForYouMinutes` (12 hours by default); if nobody answers by then it finishes with
   what it has, or at an agent's own limit that agent stops, and the run's spend record says nobody
   answered (ADR 0090). A call's cost is known
   only after it is made, so the calls under way when the figure is reached, one for each agent at
-  work, can take a run a few cents past it.
+  work, can take a run past it. A Claude web search that pauses and resumes inside one call stops
+  resuming once the run's money is used, so that call goes past by one request at most (ADR 0115).
+  The stop says what the team's runs usually cost, and when the team's own figure is below that.
 - `spend.perRun` on an agent is that agent's own guard, for an agent that runs away; there is
   none unless set. At it, that agent waits, and "Stop it here" ends its turn with what it wrote
   while the rest of the team carries on. Operator nodes spend nothing and may not set it. The

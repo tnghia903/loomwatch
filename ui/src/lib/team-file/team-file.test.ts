@@ -116,8 +116,8 @@ describe('TeamFileModel mutations touch only the affected lines', () => {
     expect(plain.toYaml()).not.toMatch(/spend:/)
   })
 
-  it('writes a new team with $1.00 a run (ADR 0068)', () => {
-    expect(TeamFileModel.create('blog', 'Blog').snapshot().spend).toEqual({ perRun: 1 })
+  it('writes a new team with no figure, so its runs get the automatic limit (ADR 0115)', () => {
+    expect(TeamFileModel.create('blog', 'Blog').snapshot().spend).toBeUndefined()
   })
 
   it('adds and removes a schedule without touching any other line', () => {
