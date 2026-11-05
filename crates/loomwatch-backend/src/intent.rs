@@ -57,6 +57,14 @@ const READER_PROMPT: &str = "You read one message sent to a LoomWatch team's cha
      you are asked for.";
 /// What an agent answering for itself replies when it has nothing to add.
 const PASS: &str = "PASS";
+/// What an agent answering in the chat with `show_widget` (ADR 0114) is asked beside keeping its
+/// reply short. The ask for a few plain sentences comes last, so without this a model takes it
+/// as words only, though its instructions say to show a widget whenever one fits.
+const SHOW_IN_REPLY: &str = "Keep your words that short, and when a widget fits what you answer, \
+     as your instructions describe, show it with show_widget as well: steps for how something \
+     works or how to do it, a chart for figures to compare, a calculator for a sum or a split they \
+     may change, a checklist for things to do. Put its place line where it belongs, and let your \
+     sentences say what to notice.";
 
 /// Who a message was for.
 pub(crate) struct Addressed<'a> {
@@ -153,7 +161,7 @@ pub(crate) async fn reply(
     };
     let agent = addressed.speaker;
     let instructions = own_instructions(addressed.team, agent);
-    let prompt = reply_prompt(addressed, message.trim(), context, own);
+    let prompt = reply_prompt(addressed, message.trim(), context, own, widgets);
     let model = agent.model_selector();
     let tools = widgets.then(crate::widgets::host::WidgetTools::new);
     let turn = one_turn_with(
@@ -394,12 +402,13 @@ fn own_instructions(team: &TeamConfig, agent: &AgentConfig) -> String {
 }
 
 /// What an agent answering in the chat is asked: the conversation, the message, and to answer as
-/// a person on a team would.
+/// a person on a team would; with `widgets` (it has `show_widget`), to show one where it fits.
 fn reply_prompt(
     addressed: &Addressed<'_>,
     message: &str,
     context: &Context,
     own: Option<&OwnWords>,
+    widgets: bool,
 ) -> String {
     let others = answerers(addressed.team)
         .filter(|agent| agent.id != addressed.speaker.id)
@@ -431,9 +440,9 @@ fn reply_prompt(
          {together}\n\n{}\
          Reply as yourself, the way a person on a team replies in a group chat: in the language of \
          the message, plainly, in one to four short sentences unless the question needs a little \
-         more. Answer from what you know about your own work and from the conversation, and speak \
-         only for yourself. Don't start your work or produce your usual result: if they want \
-         that, they will ask the team for it. If you have nothing to add, reply with exactly \
+         more.{} Answer from what you know about your own work and from the conversation, and \
+         speak only for yourself. Don't start your work or produce your usual result: if they \
+         want that, they will ask the team for it. If you have nothing to add, reply with exactly \
          {PASS}.",
         conversation_block(context),
         context
@@ -441,6 +450,11 @@ fn reply_prompt(
             .as_deref()
             .map_or_else(String::new, |reply| format!(", replying to {reply}")),
         part_block(context),
+        if widgets {
+            format!(" {SHOW_IN_REPLY}")
+        } else {
+            String::new()
+        },
     )
 }
 
@@ -631,7 +645,7 @@ mod tests {
         ));
         assert!(system.contains("<instructions>\nCheck every claim.\n</instructions>"));
         assert!(system.contains("Right now you are not doing that work."));
-        let prompt = reply_prompt(&to_team(&team), "hi", &Context::default(), None);
+        let prompt = reply_prompt(&to_team(&team), "hi", &Context::default(), None, false);
         assert!(!prompt.contains("<your_words>"));
         let own = OwnWords {
             work: "fb49588f".to_owned(),
@@ -642,6 +656,7 @@ mod tests {
             "did you check it?",
             &Context::default(),
             Some(&own),
+            false,
         );
         assert!(remembering.contains(
             "What you said last, in work fb49588f:\n<your_words>\n## Check\n1. Met\n</your_words>"
@@ -681,6 +696,7 @@ mod tests {
             "Explain this part in plain words.",
             &context,
             None,
+            false,
         );
         assert!(answer.contains(&whole), "{answer}");
         assert!(
@@ -688,7 +704,7 @@ mod tests {
             "the part sits right before what the agent is asked to do: {answer}"
         );
 
-        let without = reply_prompt(&to_team(&team), "hi", &Context::default(), None);
+        let without = reply_prompt(&to_team(&team), "hi", &Context::default(), None, false);
         assert!(!without.contains("<part>"));
         assert!(!read_prompt(&to_team(&team), "hi", &Context::default()).contains("<part>"));
     }

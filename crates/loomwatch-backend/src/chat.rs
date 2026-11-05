@@ -5695,6 +5695,21 @@ mod tests {
             writer.requests()[0].tools.is_empty(),
             "one with its switch off has no tools here, as before"
         );
+        // A real model reads the ask for a few short sentences, which comes last, as words only:
+        // the same ask says a widget goes with them where one fits.
+        let asked = researcher.requests()[0].prompt().to_owned();
+        let short = asked
+            .find("in one to four short sentences")
+            .expect("the ask to keep it short");
+        let show = asked
+            .find("show it with show_widget as well")
+            .unwrap_or_else(|| panic!("an agent with its switch on is asked to show one: {asked}"));
+        assert!(show > short, "after the ask to keep it short: {asked}");
+        let plain = writer.requests()[0].prompt().to_owned();
+        assert!(
+            plain.contains("in one to four short sentences") && !plain.contains("show_widget"),
+            "one with its switch off is asked as before: {plain}"
+        );
         let _ = std::fs::remove_dir_all(folder);
     }
 
