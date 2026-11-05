@@ -17,6 +17,7 @@
 //! the widget keeps the line it stood before ([`place`]), so the words read whole everywhere else.
 
 pub(crate) mod formula;
+pub(crate) mod host;
 pub(crate) mod store;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -1615,11 +1616,17 @@ pub(crate) fn showed(widgets: &[Kept]) -> Option<String> {
     Some(format!("[Under this answer: {}.]", each.join("; ")))
 }
 
-/// What `person` changed in the widgets under work `work`'s answer at or before `before` (RFC
-/// 3339), in a line of about [`limits::CHANGES_CHARS`]: "Mai changed what is under the answer of
-/// work 3f2a9c1e: "Zoo trip": Pupils 25, … → Each family pays = 160,000 ₫. In "Before Wednesday",
-/// ticked: Print 32 copies (of 2)."
-pub(crate) fn changes(person: &str, work: &str, widgets: &[Kept], before: &str) -> Option<String> {
+/// What `person` changed in the widgets of `answer` ("the answer of work 3f2a9c1e", "Researcher's
+/// answer in the chat") at or before `before` (RFC 3339), in a line of about
+/// [`limits::CHANGES_CHARS`]: "Mai changed what is under the answer of work 3f2a9c1e: "Zoo trip":
+/// Pupils 25, … → Each family pays = 160,000 ₫. In "Before Wednesday", ticked: Print 32 copies (of
+/// 2)."
+pub(crate) fn changes(
+    person: &str,
+    answer: &str,
+    widgets: &[Kept],
+    before: &str,
+) -> Option<String> {
     let parts: Vec<String> = widgets
         .iter()
         .filter(|kept| kept.changed_at.as_deref().is_some_and(|at| at <= before))
@@ -1628,7 +1635,7 @@ pub(crate) fn changes(person: &str, work: &str, widgets: &[Kept], before: &str) 
     if parts.is_empty() {
         return None;
     }
-    let mut line = format!("{person} changed what is under the answer of work {work}:");
+    let mut line = format!("{person} changed what is under {answer}:");
     for (at, part) in parts.iter().enumerate() {
         let candidate = format!(" {part}");
         if line.chars().count() + candidate.chars().count() > limits::CHANGES_CHARS {

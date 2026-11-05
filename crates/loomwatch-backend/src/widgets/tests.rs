@@ -421,19 +421,36 @@ fn the_next_run_reads_what_the_answer_showed_and_what_the_person_changed() {
          140,000 ₫); a checklist \"Before Wednesday\" (2 items).]"
     );
     assert_eq!(
-        changes("Mai", "1a2b3c4d", &widgets, "2026-11-05T11:00:00Z").unwrap(),
+        changes(
+            "Mai",
+            "the answer of work 1a2b3c4d",
+            &widgets,
+            "2026-11-05T11:00:00Z"
+        )
+        .unwrap(),
         "Mai changed what is under the answer of work 1a2b3c4d: \"Zoo trip: cost per family\": Pupils 25, Bus \
          2,400,000 ₫, Ticket 60,000 ₫, Round up on → Each family pays = 160,000 ₫. In \"Before \
          Wednesday\", ticked: Print 32 copies (of 2)."
     );
     // A change made after the new run was created is the run after's.
     assert_eq!(
-        changes("Mai", "1a2b3c4d", &widgets, "2026-11-05T10:05:30Z").unwrap(),
+        changes(
+            "Mai",
+            "the answer of work 1a2b3c4d",
+            &widgets,
+            "2026-11-05T10:05:30Z"
+        )
+        .unwrap(),
         "Mai changed what is under the answer of work 1a2b3c4d: \"Zoo trip: cost per family\": Pupils 25, Bus \
          2,400,000 ₫, Ticket 60,000 ₫, Round up on → Each family pays = 160,000 ₫."
     );
     assert_eq!(
-        changes("Mai", "1a2b3c4d", &widgets, "2026-11-05T10:00:00Z"),
+        changes(
+            "Mai",
+            "the answer of work 1a2b3c4d",
+            &widgets,
+            "2026-11-05T10:00:00Z"
+        ),
         None
     );
     assert_eq!(showed(&[]), None);
@@ -455,7 +472,13 @@ fn many_changes_stay_short() {
             )
         })
         .collect();
-    let line = changes("Mai", "1a2b3c4d", &widgets, "2026-11-05T11:00:00Z").unwrap();
+    let line = changes(
+        "Mai",
+        "the answer of work 1a2b3c4d",
+        &widgets,
+        "2026-11-05T11:00:00Z",
+    )
+    .unwrap();
     assert!(line.chars().count() <= limits::CHANGES_CHARS + 20, "{line}");
     assert!(line.ends_with("more."), "{line}");
 }

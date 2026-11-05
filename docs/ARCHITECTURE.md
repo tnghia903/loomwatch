@@ -607,7 +607,16 @@ each widget in the `widgets` table with the line of the words it stands before (
 end), before the run reads as done. So the kept reply is words only, for Copy, Notion, search, the
 notch and the phone's notifications. The app places widgets the same way while the answer is
 streamed (`ui/src/lib/widgets/place.ts`, from the run's `show_widget` events), both reading
-`schemas/widget-place.cases.json`. The chat page's `work` items carry `widgets`. What the person ticks or
+`schemas/widget-place.cases.json`. The chat page's `work` items carry `widgets`.
+
+A quick question the agents answer in the chat without starting work (`chat::answer_instead`,
+`intent::reply`, one turn with no Team Bus) can have widgets too. The turn is served `show_widget`
+as one of the daemon's own tools (`widgets::host::WidgetTools`) when the agent's switch is on, and
+otherwise has no tools, as before. Its answer is placed the same way and kept in the `widgets`
+table under `note:<message id>:<agent>`, and the chat page's answered `note` items carry `widgets`
+by agent. `POST /api/chat/widgets` takes `note: {messageId, agent}` in place of `runId`, for a
+message of this team that agent answered. The next run's conversation names what each such answer
+showed and what the person changed, as for a run's answer. What the person ticks or
 changes is kept by `POST /api/chat/widgets` (`state`, `changedAt`), and the next run's
 `## Conversation so far` names what each answer showed and what changed, with the results worked
 out again; `earlier_work` includes them. A choice is sent as the person's message, replying to the

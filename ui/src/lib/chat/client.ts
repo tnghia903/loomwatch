@@ -228,8 +228,9 @@ export type ChatItem =
    * the agents learned from your feedback on it (ADR 0078).
    */
   | { kind: 'work'; run: RunRecord; request: ChatMessage | null; notes: ChatMessage[]; reactions?: Reaction[]; lessons?: Lesson[]; widgets?: KeptWidget[] }
-  /** A team note: it started nothing, and the next work reads it. With your reactions to it and to its replies. */
-  | { kind: 'note'; message: ChatMessage; reactions?: Reaction[]; lessons?: Lesson[] }
+  /** A team note: it started nothing, and the next work reads it. With your reactions to it and to
+      its replies, and the widgets in each agent's answer to it, by agent (ADR 0114). */
+  | { kind: 'note'; message: ChatMessage; reactions?: Reaction[]; lessons?: Lesson[]; widgets?: Record<string, KeptWidget[]> }
 
 export interface ChatPage {
   teamKey: string

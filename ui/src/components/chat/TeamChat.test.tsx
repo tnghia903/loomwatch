@@ -3120,6 +3120,33 @@ describe('widgets under an answer', () => {
     expect(flow.closest('.tc-answer')).not.toBeNull()
   })
 
+  it('draws a quick answer’s widget between its words, keeps a tick for that answer, and sends a choice as a reply to it', async () => {
+    said.read = true
+    const list = { n: 1, line: 2, spec: { kind: 'checklist' as const, title: 'Before Wednesday', items: [{ text: 'Print 32 copies' }, { text: 'Read the words aloud' }] } }
+    const next = { n: 2, spec: { kind: 'choices' as const, title: 'What next?', options: [{ label: 'Book the bus' }, { label: 'Ask the parents' }] } }
+    page = [{
+      kind: 'note',
+      message: message({ id: 'q-1', text: 'what should I do before Wednesday @team', route: 'team_note', runId: null, answers: { waiting: [], said: [{ from: 'researcher', text: 'Do these first:\n\nThen tell me how it went.', at: '2026-11-05T02:00:05.000Z' }] } }),
+      widgets: { researcher: [list, next] },
+    }]
+    answer = (url) => (url === '/api/chat/widgets'
+      ? new Response(JSON.stringify({ ...list, state: { checked: [true, false] }, changedAt: '2026-11-05T10:00:00.000Z' }), { status: 200 })
+      : new Response(JSON.stringify({ route: 'team', message: message({ id: 'm-2', text: 'Book the bus' }), run: run({ runId: 'run-2', status: 'running', reply: null, finishedAt: null }) }), { status: 202 }))
+    renderChat()
+    const checklist = await screen.findByRole('region', { name: 'Before Wednesday' })
+    const after = (a: Node, b: Node) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(after(screen.getByText('Do these first:'), checklist) && after(checklist, screen.getByText('Then tell me how it went.'))).toBe(true)
+    expect(checklist.closest('.chat-bubble')).not.toBeNull()
+    const choices = screen.getByRole('region', { name: 'What next?' })
+    expect(choices.closest('.chat-bubble')).toBeNull()
+
+    fireEvent.click(within(checklist).getByRole('checkbox', { name: /Print 32 copies/ }))
+    await waitFor(() => expect(posted.find((post) => post.url === '/api/chat/widgets')).toMatchObject({ body: { teamPath: 'news.yaml', note: { messageId: 'q-1', agent: 'researcher' }, n: 1, state: { checked: [true, false] } } }))
+
+    fireEvent.click(within(choices).getByRole('button', { name: 'Book the bus' }))
+    await waitFor(() => expect(posted.find((post) => post.url === '/api/chat/messages')).toMatchObject({ body: { teamPath: 'news.yaml', text: 'Book the bus', replyTo: { messageId: 'note:q-1', from: 'researcher', kind: 'answer' } } }))
+  })
+
   it('closes the newest answer’s choices while the chat can’t send', async () => {
     said.read = true
     page = [{ kind: 'work', run: run({ reply: 'Which theme this time?' }), request: message({}), notes: [], widgets: [widgets[0]] }]
