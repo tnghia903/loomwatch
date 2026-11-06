@@ -6,14 +6,17 @@
 //! reply became the answer are kept with it ([`of_answer`], [`store`]); what the person ticks or
 //! changes is kept beside them, and the next run's conversation says so ([`showed`], [`changes`]).
 //!
-//! Nine kinds, drawn by the app (`ui/src/components/chat/widgets/`): choices the person taps to
+//! Ten kinds, drawn by the app (`ui/src/components/chat/widgets/`): choices the person taps to
 //! reply, a checklist they tick, a calculator whose results `LoomWatch` works out as they change its
-//! inputs ([`formula`]), steps they tap through, and five to look at: a comparison of two or three
-//! things side by side (or the parts of one thing) with facts read across, a chart whose bars
-//! `LoomWatch` draws to scale from the figures the agent gives, a graph of bars or a line over
-//! labels, a row of things marked yes or no, and a flow of boxes and arrows. Figures that count
-//! whole things (`counted`) are drawn as dots. The agent never draws or writes markup; the tool's
-//! description tells it which kind fits which shape of answer ([`SHOW_WIDGET`]).
+//! inputs ([`formula`]), steps they tap through, a picture whose numbered parts they step through,
+//! and five to look at: a comparison of two or three things side by side (or the parts of one
+//! thing) with facts read across, a chart whose bars `LoomWatch` draws to scale from the figures
+//! the agent gives, a graph of bars or a line over labels, a row of things marked yes or no, and a
+//! flow of boxes and arrows. Figures that count whole things (`counted`) are drawn as dots. A
+//! picture is the one the agent draws (ADR 0117): `LoomWatch` keeps only the shapes of its SVG and
+//! draws them again in its own lines ([`picture`]), so nothing the agent writes is shown as
+//! markup. The tool's description tells it which kind fits which shape of answer
+//! ([`SHOW_WIDGET`]).
 //!
 //! Each widget is told a place line, `{{widget N}}`, that the agent writes on its own line where the
 //! widget belongs in its answer. When the run ends the line is taken out of the answer's words and
@@ -21,6 +24,7 @@
 
 pub(crate) mod formula;
 pub(crate) mod host;
+pub(crate) mod picture;
 pub(crate) mod store;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -86,6 +90,17 @@ pub(crate) mod limits {
     pub(crate) const ROW_VALUE_CHARS: usize = 60;
     /// What the next run's conversation says of the person's changes under one answer.
     pub(crate) const CHANGES_CHARS: usize = 400;
+    /// A picture's drawing as the agent writes it, and what it may hold once read: room for a
+    /// detailed figure, short of a page of markup.
+    pub(crate) const DRAWING_CHARS: usize = 30_000;
+    pub(crate) const SHAPES: usize = 160;
+    pub(crate) const SEGMENTS: usize = 6_000;
+    pub(crate) const DEPTH: usize = 24;
+    /// Wide to tall, and tall to wide: past it a picture reads poorly in a chat.
+    pub(crate) const MOST_ASPECT: f64 = 3.0;
+    pub(crate) const PARTS: (usize, usize) = (0, 8);
+    pub(crate) const PART_LABEL_CHARS: usize = 40;
+    pub(crate) const PART_TEXT_CHARS: usize = 320;
 }
 
 /// One widget, as the agent asked for it and `LoomWatch` checked it.
@@ -160,6 +175,17 @@ pub(crate) enum Widget {
         boxes: Vec<FlowBox>,
         #[serde(default, skip_serializing_if = "is_false")]
         repeats: bool,
+    },
+    /// A picture the agent drew, redrawn in `LoomWatch`'s own lines (ADR 0117): outlines in the
+    /// picture's units, [`picture::WIDTH`] wide, and up to 8 numbered parts the person taps or steps
+    /// through, whose shapes turn gold. To look at.
+    Picture {
+        title: String,
+        width: f64,
+        height: f64,
+        shapes: Vec<picture::Shape>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        parts: Vec<picture::Part>,
     },
     /// A graph: bars or a line over labelled points, up to three series. To look at; tapping a
     /// point reads its values.
@@ -344,6 +370,7 @@ impl Widget {
             | Self::Compare { title, .. }
             | Self::Marks { title, .. }
             | Self::Flow { title, .. }
+            | Self::Picture { title, .. }
             | Self::Graph { title, .. } => title,
         }
     }
@@ -358,6 +385,7 @@ impl Widget {
             Self::Compare { .. } => "compare",
             Self::Marks { .. } => "marks",
             Self::Flow { .. } => "flow",
+            Self::Picture { .. } => "picture",
             Self::Graph { .. } => "graph",
         }
     }
@@ -373,6 +401,7 @@ impl Widget {
             Self::Compare { .. } => "a comparison",
             Self::Marks { .. } => "a row of marks",
             Self::Flow { .. } => "a flow",
+            Self::Picture { .. } => "a picture",
             Self::Graph {
                 style: GraphStyle::Bar,
                 ..
@@ -463,10 +492,11 @@ pub(crate) fn read(arguments: &Value) -> Result<Widget, String> {
             }
         }
         "compare" => read_compare(arguments, title)?,
+        "picture" => picture::read(arguments, title)?,
         other => {
             return Err(format!(
                 "kind \"{other}\" isn't a widget: use compare, chart, graph, flow, steps, \
-                 calculator, checklist, marks or choices"
+                 picture, calculator, checklist, marks or choices"
             ));
         }
     };
@@ -1190,14 +1220,19 @@ pub(crate) const SHOW_WIDGET: Block = Block::new(
      across: compare\n\
      - figures to compare, one for each thing: chart\n\
      - figures that change over time, or several series: graph\n\
-     - one thing leading to the next, in order: flow\n\
+     - something to see: how a machine, a body or nature works, where a thing's parts are, or how \
+     it moves, even in stages, drawn by you: picture\n\
+     - one thing leading to the next, in order, when there is nothing to see: flow\n\
      - a process the person follows, one step at a time: steps\n\
      - a sum, a split or a cost they may change: calculator\n\
      - things to do: checklist\n\
      - which of several things pass a test: marks\n\
      - what they may want next: choices\n\
      A flow's line says that one thing leads to the next, so two or three parts that sit side by \
-     side, such as a shop's sales and support teams, are shown with compare, not flow. When \
+     side, such as a shop's sales and support teams, are shown with compare, not flow. When what \
+     you explain can be seen, such as how an engine or a lung works or how a tide moves, draw it \
+     in a picture with its stages or parts numbered, not boxes in a flow: a flow only names what \
+     a picture shows. When \
      figures count whole things, such as seats or people, set counted. Prefer one of these to a \
      table, a list or bars written in text, or a page written for it. Show up to 4 when the answer has more than one of these. Words alone \
      are for an answer with none of them, such as a short fact. Call it before you write your \
@@ -1209,8 +1244,31 @@ pub(crate) const SHOW_WIDGET: Block = Block::new(
 /// `show_widget`'s `kind`.
 pub(crate) const SHOW_WIDGET_KIND: Block = Block::new(
     "bus.show_widget.kind",
-    "compare, chart, graph, flow, steps, calculator, checklist, marks or choices, picked by the \
-     shape of what you are telling. Fill in only that kind's fields.",
+    "compare, chart, graph, flow, steps, picture, calculator, checklist, marks or choices, picked \
+     by the shape of what you are telling. Fill in only that kind's fields.",
+);
+
+/// A picture's `drawing` (ADR 0117).
+pub(crate) const SHOW_WIDGET_DRAWING: Block = Block::new(
+    "bus.show_widget.drawing",
+    "picture: the picture as SVG, such as <svg viewBox=\"0 0 640 360\">…</svg>, with path, \
+     circle, ellipse, rect, line, polyline, polygon and g, transforms too. Draw the real thing in \
+     clear, simple outlines and in proportion, as a good textbook figure does; to show it moving, \
+     draw it again at each stage. No background, sky, words or colours: LoomWatch draws every \
+     line in its own ink and leaves words out. A shape with a fill is shaded, dark when the fill \
+     is dark, and fill=\"none\" leaves it an outline; stroke-dasharray dashes a line, and \
+     marker-end puts an arrowhead at its end, with no defs needed. Put data-part=\"N\" on the \
+     shapes, or the g, that show part N.",
+);
+
+/// A picture's `parts` (ADR 0117).
+pub(crate) const SHOW_WIDGET_PARTS: Block = Block::new(
+    "bus.show_widget.parts",
+    "picture: up to 8 parts in the order to read them, such as the stages of what moves or the \
+     parts to know, each a short label and a sentence or two. The person taps a part's number on \
+     the picture, or steps through them, and its shapes turn gold. at is [x, y] in the drawing's \
+     units where its number stands, on empty ground beside what it names; without it, the \
+     number stands above its shapes.",
 );
 
 /// A comparison's `sides`.
@@ -1306,7 +1364,7 @@ pub(crate) fn tool_definition() -> Value {
                 "kind": {
                     "type": "string",
                     "description": SHOW_WIDGET_KIND.text(),
-                    "enum": ["compare", "chart", "graph", "flow", "steps", "calculator", "checklist", "marks", "choices"]
+                    "enum": ["compare", "chart", "graph", "flow", "steps", "picture", "calculator", "checklist", "marks", "choices"]
                 },
                 "title": {
                     "type": "string",
@@ -1411,6 +1469,22 @@ pub(crate) fn tool_definition() -> Value {
                     }
                 },
                 "repeats": {"type": "boolean", "description": "steps or flow: true when the last leads back to the first, as in a cycle"},
+                "drawing": {"type": "string", "description": SHOW_WIDGET_DRAWING.text(), "minLength": 1},
+                "parts": {
+                    "type": "array",
+                    "description": SHOW_WIDGET_PARTS.text(),
+                    "maxItems": limits::PARTS.1,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "label": {"type": "string", "description": "A word or two", "minLength": 1},
+                            "text": {"type": "string", "description": "What it is or what happens there", "minLength": 1},
+                            "at": {"type": "array", "description": "[x, y]: two numbers, where its number stands", "items": {"type": "number"}, "maxItems": 2}
+                        },
+                        "required": ["label", "text"],
+                        "additionalProperties": false
+                    }
+                },
                 "bars": {
                     "type": "array",
                     "description": SHOW_WIDGET_BARS.text(),
@@ -1838,6 +1912,7 @@ pub(crate) fn read_state(widget: &Widget, state: &Value) -> Result<Value, String
         | Widget::Compare { .. }
         | Widget::Marks { .. }
         | Widget::Flow { .. }
+        | Widget::Picture { .. }
         | Widget::Graph { .. } => Err(format!("{} keep nothing", widget.kind())),
     }
 }
@@ -1922,6 +1997,17 @@ pub(crate) fn showed(widgets: &[Kept]) -> Option<String> {
                 }
             ),
             Widget::Graph { .. } => format!("{} ({})", kept.spec.named(), graph_line(&kept.spec)),
+            Widget::Picture { parts, .. } if !parts.is_empty() => format!(
+                "{} ({})",
+                kept.spec.named(),
+                parts
+                    .iter()
+                    .enumerate()
+                    .map(|(at, part)| format!("{} {}", at + 1, part.label))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            Widget::Picture { .. } => kept.spec.named(),
             Widget::Compare { .. } => {
                 format!("{} ({})", kept.spec.named(), compare_line(&kept.spec))
             }
@@ -2005,6 +2091,7 @@ fn change(widget: &Widget, state: &Value) -> Option<String> {
         | Widget::Compare { .. }
         | Widget::Marks { .. }
         | Widget::Flow { .. }
+        | Widget::Picture { .. }
         | Widget::Graph { .. } => None,
     }
 }

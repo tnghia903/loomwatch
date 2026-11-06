@@ -10,6 +10,7 @@ import { WidgetCompare } from './WidgetCompare'
 import { WidgetFlow } from './WidgetFlow'
 import { WidgetGraph } from './WidgetGraph'
 import { WidgetMarks } from './WidgetMarks'
+import { WidgetPicture } from './WidgetPicture'
 import { WidgetSteps } from './WidgetSteps'
 
 export interface AnswerWidgetsProps {
@@ -40,8 +41,8 @@ export function AnswerWidgets(props: AnswerWidgetsProps) {
 
 /**
  * One widget in an answer (ADR 0114): choices to tap, a checklist to tick, a calculator LoomWatch
- * works out, steps to tap through, or a comparison, a chart, a graph, a row of marks or a flow to
- * look at. What you tick or change is kept, and the next work's conversation says so. When it
+ * works out, steps to tap through, a picture the agent drew whose parts you step through, or a
+ * comparison, a chart, a graph, a row of marks or a flow to look at. What you tick or change is kept, and the next work's conversation says so. When it
  * arrives as news (ADR 0051) and this window hasn't drawn it before, its marks grow in once
  * (`wg-fresh`); history and a widget drawn again are simply there.
  */
@@ -63,6 +64,7 @@ function drawn({ kept, onChange, onChoose, chosen = null, live = false }: Omit<A
     case 'compare': return <WidgetCompare spec={kept.spec} />
     case 'chart': return <WidgetChart spec={kept.spec} />
     case 'graph': return <WidgetGraph spec={kept.spec} />
+    case 'picture': return <WidgetPicture spec={kept.spec} />
   }
   return null
 }

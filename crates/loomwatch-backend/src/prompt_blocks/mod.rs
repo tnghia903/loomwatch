@@ -199,6 +199,8 @@ const ALL: &[Block] = {
         team_bus::CANCEL_MESSAGE,
         widgets::SHOW_WIDGET,
         widgets::SHOW_WIDGET_KIND,
+        widgets::SHOW_WIDGET_DRAWING,
+        widgets::SHOW_WIDGET_PARTS,
         widgets::SHOW_WIDGET_OPTIONS,
         widgets::SHOW_WIDGET_FORMULA,
         widgets::SHOW_WIDGET_BARS,

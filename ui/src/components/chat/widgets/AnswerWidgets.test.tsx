@@ -200,6 +200,67 @@ describe('AnswerWidgets', () => {
     expect(within(steps).getAllByRole('listitem')).toHaveLength(3)
     expect(within(steps).getByRole('img', { name: 'Then back to step 1' })).toBeInTheDocument()
   })
+
+  it('draws a picture in our own lines and turns the part you pick gold', () => {
+    const takeOff: KeptWidget = {
+      n: 7,
+      spec: {
+        kind: 'picture',
+        title: 'How a plane takes off',
+        width: 640,
+        height: 320,
+        shapes: [
+          { d: 'M20 300L620 300', dashed: true },
+          { d: 'M60 280L140 280L150 274Z', part: 1, fill: 'light' },
+          { d: 'M80 284C80 286 82 288 84 288Z', part: 1, fill: 'dark' },
+          { d: 'M300 240L380 220Z', part: 2, fill: 'light' },
+          { d: '"/><script>alert(1)</script>', part: 2 },
+          // A shade the app doesn't know is a light one, never a class of its own.
+          { d: 'M10 10L20 20Z', fill: 'ghost' as unknown as 'light' },
+        ],
+        parts: [
+          { label: 'Speed up', text: 'The engines push it along.', at: [100, 250] },
+          { label: 'Climb', text: 'The nose rises.', at: [340, 200] },
+        ],
+      },
+    }
+    const { container } = render(<AnswerWidgets widgets={[takeOff]} onChange={keeper().onChange} />)
+    const picture = screen.getByRole('region', { name: 'How a plane takes off' })
+    const shapes = [...container.querySelectorAll('.wg-figure path')]
+    // Only what the daemon writes is drawn: moves, lines, curves.
+    expect(shapes.map((shape) => shape.getAttribute('d'))).toEqual(['M20 300L620 300', 'M60 280L140 280L150 274Z', 'M80 284C80 286 82 288 84 288Z', 'M300 240L380 220Z', 'M10 10L20 20Z'])
+    expect(shapes[4]).toHaveClass('loose', 'light')
+    expect(shapes[4]).not.toHaveClass('ghost')
+    expect(shapes[0]).toHaveClass('wg-shape', 'loose', 'dashed')
+    expect(shapes[2]).toHaveClass('dark')
+    const gold = () => shapes.filter((shape) => shape.classList.contains('on'))
+    expect(gold()).toEqual([shapes[1], shapes[2]])
+    expect(picture).toHaveTextContent('1 of 2 · Speed upThe engines push it along.')
+    // Its number stands where the part says, on the picture.
+    const climb = within(picture).getByRole('button', { name: 'Part 2: Climb' })
+    expect(climb.style.left).toBe('53.125%')
+    expect(climb.style.top).toBe('62.5%')
+    fireEvent.click(climb)
+    expect(gold()).toEqual([shapes[3]])
+    expect(climb).toHaveAttribute('aria-pressed', 'true')
+    expect(picture).toHaveTextContent('2 of 2 · ClimbThe nose rises.')
+    // A screen reader hears the part's words, not only its name.
+    expect(picture.querySelector('[aria-live]')).toHaveTextContent('2 of 2 · ClimbThe nose rises.')
+    // Next goes round to the first; before, back to the last.
+    fireEvent.click(within(picture).getByRole('button', { name: 'Next part' }))
+    expect(picture).toHaveTextContent('1 of 2 · Speed up')
+    fireEvent.click(within(picture).getByRole('button', { name: 'Part before' }))
+    expect(picture).toHaveTextContent('2 of 2 · Climb')
+  })
+
+  it('draws a picture with no parts as a picture alone', () => {
+    const plain: KeptWidget = { n: 8, spec: { kind: 'picture', title: 'A heron', width: 640, height: 480, shapes: [{ d: 'M0 0L10 10', part: undefined }] } }
+    const { container } = render(<AnswerWidgets widgets={[plain]} onChange={keeper().onChange} />)
+    const picture = screen.getByRole('region', { name: 'A heron' })
+    expect(container.querySelectorAll('.wg-figure path')).toHaveLength(1)
+    expect(within(picture).queryAllByRole('button')).toHaveLength(0)
+    expect(picture).not.toHaveTextContent('of')
+  })
 })
 
 const relevance: KeptWidget = {

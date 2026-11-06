@@ -895,7 +895,7 @@ fn every_kind_the_tool_offers_has_its_place_in_the_guide() {
         .iter()
         .map(|kind| kind.as_str().unwrap())
         .collect();
-    assert_eq!(kinds.len(), 9);
+    assert_eq!(kinds.len(), 10);
     let guide = SHOW_WIDGET.default_text();
     let habit = crate::agent::prompt::WIDGETS.default_text();
     let kind_line = SHOW_WIDGET_KIND.default_text();
@@ -918,5 +918,18 @@ fn every_kind_the_tool_offers_has_its_place_in_the_guide() {
         guide.contains("parts that sit side by side")
             && guide.contains("are shown with compare, not flow"),
         "the guide says a flow is not for parts side by side"
+    );
+    // ADR 0117: something to see is drawn. The picture is offered before the flow in the guide
+    // and the habit, and the flow is for what has nothing to see: a live model drew a plane's
+    // take-off as three boxes in a flow while the picture came after it.
+    let at = |text: &str, words: &str| text.find(words).unwrap_or(usize::MAX);
+    assert!(at(guide, ": picture") < at(guide, ": flow"), "{guide}");
+    assert!(
+        guide.contains("when there is nothing to see: flow"),
+        "{guide}"
+    );
+    assert!(
+        at(habit, "a picture for") < at(habit, "a flow for"),
+        "{habit}"
     );
 }

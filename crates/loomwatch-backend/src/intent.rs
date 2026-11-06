@@ -63,10 +63,11 @@ const PASS: &str = "PASS";
 const SHOW_IN_REPLY: &str = "Keep your words that short, and when one of the views your \
      instructions describe fits what you answer, show it with show_widget as well, picked by the \
      shape of what you tell: compare for two or three things side by side or two or three parts \
-     of one thing, a flow for how one thing leads to the next, steps for how to do something, a \
-     chart for figures to compare, a calculator for a sum or a split they may change, a checklist \
-     for things to do. Put its place line where it belongs, and let your sentences say what to \
-     notice.";
+     of one thing, a picture for something to see, such as how a thing works or moves, even in \
+     stages, drawn by you, a flow for how one thing leads to the next when there is nothing to \
+     see, steps for how to do something, a chart for figures to compare, a calculator for a sum \
+     or a split they may change, a checklist for things to do. Put its place line where it \
+     belongs, and let your sentences say what to notice.";
 
 /// Who a message was for.
 pub(crate) struct Addressed<'a> {
@@ -551,7 +552,11 @@ mod tests {
                 "compare for two or three things side by side or two or three parts of one thing",
                 "compare",
             ),
-            ("a flow for how one thing leads to the next", "flow"),
+            ("a picture for something to see", "picture"),
+            (
+                "a flow for how one thing leads to the next when there is nothing to see",
+                "flow",
+            ),
             ("steps for how to do something", "steps"),
             ("a chart for figures to compare", "chart"),
         ];
@@ -563,8 +568,15 @@ mod tests {
             );
         }
         assert!(
-            !SHOW_IN_REPLY.contains("how something works"),
-            "how something works is a flow, not steps"
+            !SHOW_IN_REPLY.contains("steps for how something works"),
+            "how something works is a picture or a flow, never steps"
+        );
+        // ADR 0117: something to see is drawn; the picture is offered before the flow, which is
+        // for what has nothing to see, so a process that can be seen isn't boxes in a flow.
+        assert!(
+            SHOW_IN_REPLY.find("a picture for").unwrap()
+                < SHOW_IN_REPLY.find("a flow for").unwrap(),
+            "the picture comes before the flow"
         );
     }
 

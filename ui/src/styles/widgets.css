@@ -1,6 +1,6 @@
 /* ===========================================================================
-   Widgets in an answer (ADR 0114): a comparison, a chart, a graph, a flow, steps, a calculator, a
-   checklist, marks, choices; each where the answer's words place it, the rest after them.
+   Widgets in an answer (ADR 0114): a comparison, a chart, a graph, a flow, steps, a picture, a
+   calculator, a checklist, marks, choices; each where the answer's words place it, the rest after them.
    components/chat/widgets/. Every rule is under a .wg- class; tokens only.
 
    The look ("Counted"): a card set into the bubble with a rim of light; its title in the serif;
@@ -268,6 +268,65 @@
 .wg-step-body { margin: 4px 0 0; font: 400 15px/22px var(--font-sans); color: var(--color-ink); }
 
 /* ---------------------------------------------------------------------------
+   Picture (ADR 0117): what the agent drew, in our own lines. Every shape outlined in ink at the
+   icon stroke's weight whatever the picture's size; what belongs to no part fainter and finer
+   (`loose`), so the parts stand out; a filled shape shaded, a dark one a softened ink. The part
+   picked is a gold line at the selection ring's weight on a gold tint, never a gold fill. Its
+   numbers are the steps' numbers, on the picture; its words show under it. The phone's
+   `PictureWidget` uses the same weights and shades.
+   --------------------------------------------------------------------------- */
+.wg-figure { position: relative; width: min(100%, var(--wg-picture-width, 100%)); margin-inline: auto; container-type: inline-size; }
+.wg-figure svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: hidden; }
+.wg-shape {
+  fill: none;
+  stroke: var(--color-ink-2);
+  stroke-width: 1.5px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+  transition: stroke var(--t-instant) var(--ease-out), fill var(--t-instant) var(--ease-out), stroke-width var(--t-instant) var(--ease-out);
+}
+.wg-shape.loose { stroke: var(--color-ink-3); stroke-width: 1.2px; }
+.wg-shape.light { fill: color-mix(in srgb, var(--color-ink) 6%, transparent); }
+.wg-shape.dark { fill: color-mix(in srgb, var(--color-ink-2) 60%, transparent); }
+.wg-shape.dashed { stroke-dasharray: 5 4; }
+.wg-shape.on { stroke: var(--color-accent); stroke-width: 2px; }
+.wg-shape.on.light { fill: color-mix(in srgb, var(--color-accent) 10%, transparent); }
+.wg-part-n {
+  position: absolute;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  transform: translate(-50%, -50%);
+  border: 0;
+  border-radius: var(--r-full);
+  box-shadow: inset 0 0 0 1.5px var(--color-accent);
+  background: var(--wg-surface);
+  color: var(--color-accent);
+  font: 600 13px/1 var(--font-sans);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.wg-part-n:hover { box-shadow: inset 0 0 0 2px var(--color-accent); }
+/* The part picked: its number ink on the accent's tint inside its ring, as a step picked. */
+.wg-part-n.on { color: var(--color-ink); background: var(--color-accent-tint); box-shadow: inset 0 0 0 2px var(--color-accent); }
+/* A small picture keeps its numbers from covering what they name. */
+@container (max-width: 320px) {
+  .wg-part-n { width: 22px; height: 22px; font-size: 11px; }
+}
+.wg-picture-head { display: flex; align-items: center; gap: var(--sp-2); }
+.wg-picture-head .wg-step-head { flex: 1; min-width: 0; }
+.wg-picture-head .wg-picture-by:first-child { margin-left: -6px; }
+.wg-picture-head .wg-picture-by:last-child { margin-right: -6px; }
+/* Small beside the words in a wide window; a narrow one keeps every icon button's 44 px. */
+@media (min-width: 768px) {
+  .wg-picture-head .wg-picture-by { width: 28px; height: 28px; }
+}
+
+/* ---------------------------------------------------------------------------
    Choices
    --------------------------------------------------------------------------- */
 .wg-options { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 150px), 1fr)); gap: var(--sp-2); }
@@ -525,9 +584,11 @@
 .wg-fresh .wg-bar-fill, .wg-fresh .wg-side-scale i { animation: wg-grow var(--t-settle) var(--ease-out) backwards; animation-delay: calc(var(--t-entrance) + var(--k, 0) * 60ms); }
 .wg-fresh .wg-dots i { animation: wg-dot var(--t-move) var(--ease-out) backwards; animation-delay: calc(var(--t-entrance) + var(--k, 0) * 60ms + min(var(--i) * 1.5ms, 700ms)); }
 .wg-fresh .wg-route.across .wg-rail { transform-origin: left; animation: wg-grow var(--t-settle) var(--ease-out) var(--t-entrance) backwards; }
+@keyframes wg-part-in { from { transform: translate(-50%, -50%) scale(0); } }
+.wg-fresh .wg-part-n { animation: wg-part-in var(--t-move) var(--ease-out) backwards; animation-delay: calc(var(--t-entrance) + var(--k, 0) * 80ms); }
 @media (prefers-reduced-motion: reduce) {
-  .wg-fresh .wg-bar-fill, .wg-fresh .wg-side-scale i, .wg-fresh .wg-dots i, .wg-fresh .wg-rail { animation: none; }
-  .wg-switch-track i, .wg-progress i, .wg-option { transition: none; }
+  .wg-fresh .wg-bar-fill, .wg-fresh .wg-side-scale i, .wg-fresh .wg-dots i, .wg-fresh .wg-rail, .wg-fresh .wg-part-n { animation: none; }
+  .wg-switch-track i, .wg-progress i, .wg-option, .wg-shape { transition: none; }
 }
 
 @media (pointer: coarse) {
@@ -536,4 +597,7 @@
   .wg-tick { padding: 12px 0; }
   .wg-field input { min-height: 44px; }
   .wg-step-by { min-width: 44px; min-height: 44px; }
+  .wg-picture-head .wg-picture-by { width: 44px; height: 44px; }
+  /* The number stays small on the picture; its hit area is 44 points around it. */
+  .wg-part-n::before { content: ''; position: absolute; inset: -8px; border-radius: var(--r-full); }
 }
