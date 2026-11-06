@@ -2,6 +2,7 @@ import type { WorkPhase } from '../library/figure'
 import { failedRead, isProviderCode, isWebSearch, outputText, searchWords, webPageOf } from '../story/webCalls'
 import { commandName, commandOf } from '../story/commands'
 import { skillName } from '../story/reads'
+import type { WidgetSpec } from '../widgets/types'
 import { eventText, type Evidence, type RunEvent } from './events'
 import { thoughtLine, workPhase } from './workPhase'
 
@@ -142,16 +143,18 @@ export function asUse(item: Evidence): Use | null {
   return make('tool', firstLine(item.name))
 }
 
-/** What each kind of widget is, in words. */
-const SHOWN: Record<string, string> = {
+/** What each kind of widget is, in words: one for every kind there is, so a new kind can't be
+    left reading as "something". */
+const SHOWN: Record<WidgetSpec['kind'], string> = {
   calculator: 'a calculator', checklist: 'a checklist', choices: 'choices', steps: 'steps',
-  chart: 'a chart', graph: 'a graph', marks: 'a yes-or-no row', flow: 'a diagram',
+  chart: 'a chart', graph: 'a graph', marks: 'a yes-or-no row', flow: 'a diagram', compare: 'a comparison',
 }
 
 /** "Show a calculator in the answer", from a `show_widget` call's input. */
 function shownIn(input: unknown): string {
   const kind = typeof input === 'object' && input !== null ? (input as { kind?: unknown }).kind : null
-  return `Show ${(typeof kind === 'string' && SHOWN[kind]) || 'something'} in the answer`
+  const shown: Record<string, string | undefined> = SHOWN
+  return `Show ${(typeof kind === 'string' && shown[kind]) || 'something'} in the answer`
 }
 
 /** An address as two answers' links compare: no scheme, no www, no trailing slash or #part. */
