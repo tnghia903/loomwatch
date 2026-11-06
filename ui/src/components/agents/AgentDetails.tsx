@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft } from '../ui/icon'
 
 import { guestsOf } from '../../lib/chat/guests'
 import { alwaysAllowGuest } from '../../lib/library/bringIn'
@@ -23,6 +22,8 @@ import { HandoverPanel } from '../run/HandoverPanel'
 import { ProvenancePanel } from '../run/ProvenancePanel'
 import { runAgentNodes, type RunAgentsInput } from '../workspace/runAgents'
 import { GuestNamesContext, TeamFiguresContext } from './figureContext'
+import { PaneHead } from './PaneHead'
+import { InlineMarkdown } from '../ui/Markdown'
 import { wordsOf } from '../../lib/widgets/place'
 
 export interface AgentDetailsProps {
@@ -141,7 +142,7 @@ export function AgentDetails({ asked, draft, model, chatId, figure, onClose, onA
     <TeamFiguresContext.Provider value={figures}>
     <GuestNamesContext.Provider value={guests.names}>
       <div className="agent-answer agent-details" onKeyDown={(event) => { if (event.key === 'Escape' && !event.defaultPrevented) { event.stopPropagation(); onClose() } }}>
-        <button ref={back} type="button" className="link agent-answer-back" onClick={onClose}><ArrowLeft size={14} aria-hidden="true" />Back to {name}</button>
+        <PaneHead title={record?.prompt ? <InlineMarkdown>{record.prompt.split('\n')[0] ?? ''}</InlineMarkdown> : undefined} closes="Close details" onClose={onClose} back={back} />
         <div className="agent-details-body" aria-label="Details of this piece of work" role="region">
           {session.loading ? <p className="tc-loading" role="status">Reading the run…</p> : (
             <DeliveryLane

@@ -4,13 +4,14 @@ import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import 'katex/dist/katex.min.css'
 
-import { createContext, useContext, useMemo, useState, type ComponentProps } from 'react'
+import { createContext, useContext, useMemo, useState, type ComponentProps, type ReactNode } from 'react'
 import { sourceSpans } from '../../lib/files/markdownEdits'
 import { BACKED, CLAIM_MARK } from '../../lib/chat/claims'
 import { withoutCitationMarks } from '../../lib/chat/citationMarks'
 import { withMathMarks } from '../../lib/chat/mathMarks'
 import { segments, useFoundWords, type FindTerm } from '../../lib/chat/findWords'
 import { filePathFrom, filePathFromLink } from '../../lib/files/fileRefs'
+import { SourceTitlesContext, sourceKey } from '../../lib/story/sourceTitles'
 import { FileChip } from './FileChip'
 import { MarkdownPictures } from './markdownPictures'
 import { SaidMention, type SaidMarks } from './saidMention'
@@ -163,8 +164,11 @@ const CLAIM_SAYS = {
   backed: 'The writer marked this as backed by a source',
   reasoned: 'The writer marked this as their own reasoning, not taken from a source',
 }
-// Between and after the links that close a claim: spaces and the punctuation that separates them.
-const BETWEEN_SOURCES = /^[\s.,;·|]*$/
+// Between and after the links that close a claim: spaces, the punctuation that separates them, and
+// the brackets they are put in.
+const BETWEEN_SOURCES = /^[\s.,;·|()[\]]*$/
+// The bracket a claim's sources open with, at the end of its words.
+const OPENS_SOURCES = /\s*[([]\s*$/
 
 function markClaimsAndSources(tree: { children: HastChild[] }) {
   const visit = (nodes: HastChild[]) => {
@@ -230,12 +234,56 @@ function markSources(block: HastElement) {
     if (!isWebLink && !(node.type === 'text' && BETWEEN_SOURCES.test(node.value))) break
     start -= 1
   }
+  // What comes before the first link is the claim's, its full stop too: "**…**. (" after bold words.
+  if (kids[start]?.type === 'text') start += 1
   const links = kids.slice(start).filter((node): node is HastElement => node.type === 'element')
   // Links alone (a list of references) stay links: a source is the one a claim cites.
-  const claim = kids.slice(0, start).some((node) => node.type !== 'text' || node.value.trim() !== '')
+  const claim = kids.slice(0, start).some((node) => node.type !== 'text' || !BETWEEN_SOURCES.test(node.value))
   if (links.length === 0 || !claim) return
+  // Sources in brackets, "… nhau. (usa.gov)", are chips without them. Brackets that hold more than
+  // the links, "(see the guide)", leave them as written.
+  const before = kids[start - 1]
+  const opens = before?.type === 'text' && OPENS_SOURCES.test(before.value)
+  const closes = kids.slice(start).some((node) => node.type === 'text' && /[)\]]/.test(node.value))
+  if (opens !== closes) return
+  if (opens && before.type === 'text') before.value = before.value.replace(OPENS_SOURCES, '')
+  // A full stop after the sources, "… branches (usa.gov).", ends the claim, before its chips.
+  const last = kids[kids.length - 1]
+  const stops = last?.type === 'text' && /\.\s*$/.test(last.value) && !(before?.type === 'text' && /[.!?…:;]\s*$/.test(before.value))
   for (const link of links) link.properties.className = ['md-source']
-  block.children = [...kids.slice(0, start), ...links.flatMap((link) => [{ type: 'text' as const, value: ' ' }, link])]
+  block.children = [...kids.slice(0, start), ...(stops ? [{ type: 'text' as const, value: '.' }] : []), ...links.flatMap((link) => [{ type: 'text' as const, value: ' ' }, link])]
+}
+
+/**
+ * A source a claim cites (ADR 0116): its site's own icon, which LoomWatch fetches once from the
+ * site's root and keeps (the page never loads anything from the link itself), then its page's title
+ * as the run's web search found it, else the link's own words; the title and site on hover. Without
+ * an icon it is its words and the arrow, as before.
+ */
+function SourceChip({ href, label }: { href: string | undefined; label: ReactNode }) {
+  const titles = useContext(SourceTitlesContext)
+  const [icon, setIcon] = useState(true)
+  const host = hostOf(href)
+  const site = siteOf(href)
+  const key = href ? sourceKey(href) : null
+  const title = key ? titles?.get(key) : undefined
+  return (
+    <a className="md-source" href={href} target="_blank" rel="noreferrer" title={title && host ? `${title} · ${host}` : host}>
+      {site && icon && <img className="md-source-icon" src={`/api/site-icon?host=${encodeURIComponent(site)}`} alt="" width={14} height={14} loading="lazy" decoding="async" onError={() => setIcon(false)} />}
+      <span className="md-source-label">{title ?? label}</span>
+      <svg width="9" height="9" viewBox="0 0 10 10" aria-hidden="true"><path d="M3 2h5v5M8 2 2.5 7.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
+    </a>
+  )
+}
+
+/** The site a web link is on, whose icon is asked for: `https` and `http` only. */
+function siteOf(href: string | undefined): string | undefined {
+  try {
+    const url = href ? new URL(href) : null
+    return url && (url.protocol === 'https:' || url.protocol === 'http:') ? url.hostname : undefined
+  } catch {
+    return undefined
+  }
 }
 
 function hostOf(href: string | undefined): string | undefined {
@@ -254,14 +302,7 @@ const COMPONENTS: Components = {
     const path = filePathFromLink(href)
     if (path) return <FileChip path={path} />
     if (href && !/^([a-z][a-z0-9+.-]*:|#)/i.test(href)) return <span className="md-unlinked">{label}</span>
-    if (className === 'md-source') {
-      return (
-        <a className="md-source" href={href} target="_blank" rel="noreferrer" title={hostOf(href)}>
-          <span className="md-source-label">{label}</span>
-          <svg width="9" height="9" viewBox="0 0 10 10" aria-hidden="true"><path d="M3 2h5v5M8 2 2.5 7.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
-        </a>
-      )
-    }
+    if (className === 'md-source') return <SourceChip href={href} label={label} />
     return <a href={href} target="_blank" rel="noreferrer">{label}</a>
   },
   code: ({ children: text, className }) => {

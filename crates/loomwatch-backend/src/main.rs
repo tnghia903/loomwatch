@@ -591,6 +591,11 @@ async fn main() -> Result<()> {
                 // The OpenRouter key and the model list. Like Notion's connection, only on this
                 // computer's own address.
                 app = app.merge(loomwatch_backend::ai::router(ai.clone()));
+                // ADR 0116: the icon of a site an answer cites, fetched once from the site's own
+                // root and kept, for LoomWatch's own page only.
+                app = app.merge(loomwatch_backend::site_icons::router(
+                    loomwatch_backend::site_icons::SiteIcons::open(&state_dir),
+                ));
                 // Connecting tools, and where their sites send a sign-in back.
                 app = app.merge(loomwatch_backend::connected_tools::router(
                     connected_tools.clone(),

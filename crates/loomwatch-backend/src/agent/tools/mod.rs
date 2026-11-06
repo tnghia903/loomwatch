@@ -8,7 +8,7 @@
 
 mod command;
 mod files;
-mod link;
+pub(crate) mod link;
 
 use std::path::{Component, Path, PathBuf};
 

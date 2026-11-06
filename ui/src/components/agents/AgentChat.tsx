@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft } from '../ui/icon'
 
 import { filesTouched, filesWritten } from '../../lib/files/fileRefs'
+import { sourceTitles } from '../../lib/story/sourceTitles'
 import { FileReaderContext } from '../../lib/files/reader'
 import type { BenchFile } from '../../lib/files/useBenchFile'
 import { joinUnderRoot } from '../../lib/files/paths'
@@ -23,6 +23,8 @@ import type { TeamView } from '../chat/WorkPiece'
 import { FileReader } from '../reader/FileReader'
 import { TeamReviewDialog } from '../run/TeamReviewDialog'
 import { GuestNamesContext, TeamFiguresContext } from './figureContext'
+import { PaneHead } from './PaneHead'
+import { InlineMarkdown } from '../ui/Markdown'
 import { wordsOf } from '../../lib/widgets/place'
 
 export interface AgentChatProps {
@@ -236,10 +238,11 @@ export function AgentAnswer({ runId, name, onClose }: { runId: string; name: str
   const text = wordsOf(record && isTerminalRun(record.status) ? record.reply ?? '' : responder?.reply ?? '')
   const touched = useMemo(() => filesTouched(session.projection.evidence), [session.projection.evidence])
   const written = useMemo(() => filesWritten(session.projection.evidence), [session.projection.evidence])
+  const sources = useMemo(() => sourceTitles(session.projection.evidence), [session.projection.evidence])
   return (
     <div className="agent-answer" onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); onClose() } }}>
-      <button type="button" className="link agent-answer-back" onClick={onClose}><ArrowLeft size={14} aria-hidden="true" />Back to {name}</button>
-      <AnswerDocument text={text} by={name} streaming={!session.terminal} touched={touched} folder={responder?.folder} written={written} />
+      <PaneHead title={record?.prompt ? <InlineMarkdown>{record.prompt.split('\n')[0] ?? ''}</InlineMarkdown> : undefined} closes="Close answer" onClose={onClose} />
+      <AnswerDocument text={text} by={name} streaming={!session.terminal} touched={touched} folder={responder?.folder} written={written} sources={sources} />
     </div>
   )
 }
@@ -253,7 +256,8 @@ export function AgentFile({ bench, chatId, name, figure }: { bench: BenchFile; c
   return (
     <TeamFiguresContext.Provider value={figures}>
       <div className="agent-answer agent-file" onKeyDown={(event) => { if (event.key === 'Escape' && !event.defaultPrevented) { event.stopPropagation(); bench.close() } }}>
-        <button type="button" className="link agent-answer-back" onClick={bench.close}><ArrowLeft size={14} aria-hidden="true" />Back to {name}</button>
+        {/* The reader's own bar names the file, so the head says nothing more, as a team's doesn't. */}
+        <PaneHead closes="Close file" onClose={bench.close} />
         <FileReader key={reading.path} file={{ ...reading, from: reading.from ?? agentId }} name={(id) => (id === agentId ? name : id)} hue={() => figureHue(figure)}
           onAsk={bench.askInChat} asked={bench.passages.asked} asking={bench.passages.asking} onShowAsked={bench.showAsked} teamPath={bench.teamPath} />
       </div>

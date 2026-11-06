@@ -112,6 +112,15 @@ export interface ByHandProps {
   onBuild?: () => void
   /** Laid over the bench while it is shown: an answer in the chat, read in full beside it. */
   cover?: ReactNode
+  /**
+   * On its own page: it fills the window under the header as a team's chat does, the blocks or the
+   * chat in a column on the left and the bench in a pane on the right, each scrolling on its own.
+   */
+  framed?: boolean
+  /** Heading the column, over the blocks or the chat: the way back to a team, what a save did. */
+  lead?: ReactNode
+  /** After the blocks, in Build: what its settings add up to, and how it looks. */
+  after?: ReactNode
   /** A new agent, not saved yet: its name and instructions start open, where it starts. */
   fresh?: boolean
   /** Whether an agent with no `widgets` setting may show widgets (ADR 0114): the daemon's default,
@@ -136,7 +145,7 @@ const BLOCKS: readonly { part: FigurePart; title: string }[] = [
 ]
 
 
-export function ByHand({ draft, set: write, skills, skillsLoading, roleField, figure, record, hideDoes = false, readOnly = false, reads: teamReads, teamOwn, onShowWorkflow, learned, suggestFor, following, chat, onBuild, cover, fresh = false, widgetsDefault = false }: ByHandProps) {
+export function ByHand({ draft, set: write, skills, skillsLoading, roleField, figure, record, hideDoes = false, readOnly = false, reads: teamReads, teamOwn, onShowWorkflow, learned, suggestFor, following, chat, onBuild, cover, framed = false, lead, after, fresh = false, widgetsDefault = false }: ByHandProps) {
   const chatting = chat !== undefined
   const set: ByHandProps['set'] = (key, value) => { if (!readOnly) write(key, value) }
   // The block you are working in: its thing on the bench is lit.
@@ -312,30 +321,14 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
   }
 
   return (
-    <div className={`byhand${chatting ? ' chatting' : ''}`}>
-      {!chatting && <p className="byhand-say" aria-live="polite">{sentence(draft, model, reads)}</p>}
+    <div className={`byhand${chatting ? ' chatting' : ''}${framed ? ' framed' : ''}`}>
       <div className="byhand-main">
-        <div className="byhand-stage">
-          {failed
-            ? <div className="bench-fallback"><p className="t-meta">The bench can’t be drawn in this browser ({failed}). Every setting is in the rows.</p></div>
-            : <Suspense fallback={<div className="bench-stage"><p className="bench-loading t-meta">Setting up the bench…</p></div>}>
-                <AgentFigure
-                  view={view}
-                  labels={labels}
-                  open={focus}
-                  onPart={goTo}
-                  onKey={(key, on) => { giveKey(key, on); focusAndOpen('keys') }}
-                  onSkillDrop={(skill) => { setDragging(null); addSkill(skill); focusAndOpen('skills') }}
-                  skillMime={SKILL_MIME}
-                  onFail={setFailed}
-                />
-              </Suspense>}
-          {cover && <div className="byhand-cover">{cover}</div>}
-        </div>
-        {chatting && <div className="byhand-chat">{chat}</div>}
+        {chatting && <div className="byhand-chat">{lead}{chat}</div>}
 
         {/* Kept while chatting, only hidden: what you were writing in a block is there when you come back. */}
         <div className="byhand-blocks" data-tour="agent-blocks" hidden={chatting}>
+          {!chatting && lead}
+          <p className="byhand-say" aria-live="polite">{sentence(draft, model, reads)}</p>
           {block('name', <div className="agent-field-row">
             {/* Labelled, and where it is, whether or not "What it does" is beside it, so the block reads the same everywhere. */}
             <label className="agent-field">Name<input value={draft.name} maxLength={80} onChange={(event) => set('name', event.target.value)} placeholder="e.g. Release notes writer" /></label>
@@ -458,6 +451,26 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
             </button>
           </>)}
           {learned && <LearnedBlock of={learned} name={draft.name.trim() || 'this agent'} readOnly={readOnly} />}
+          {after}
+        </div>
+
+        {/* The bench on the right in both tabs, the same size and in the same place, so switching tabs never moves or redraws it. */}
+        <div className="byhand-stage">
+          {failed
+            ? <div className="bench-fallback"><p className="t-meta">The bench can’t be drawn in this browser ({failed}). Every setting is in the rows.</p></div>
+            : <Suspense fallback={<div className="bench-stage"><p className="bench-loading t-meta">Setting up the bench…</p></div>}>
+                <AgentFigure
+                  view={view}
+                  labels={labels}
+                  open={focus}
+                  onPart={goTo}
+                  onKey={(key, on) => { giveKey(key, on); focusAndOpen('keys') }}
+                  onSkillDrop={(skill) => { setDragging(null); addSkill(skill); focusAndOpen('skills') }}
+                  skillMime={SKILL_MIME}
+                  onFail={setFailed}
+                />
+              </Suspense>}
+          {cover && <div className="byhand-cover">{cover}</div>}
         </div>
       </div>
       {market && <SkillsMarket agentName={draft.name.trim() || 'your new agent'} query={market.query} onClose={backFromMarket} />}

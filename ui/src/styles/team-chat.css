@@ -4,8 +4,9 @@
    the message box that says where a message goes before it is sent. */
 
 /* With Details open — the default on a wide screen — the chat is a narrow column on the left and the
-   record of the piece it follows takes the rest. */
-.lw-shell { --tc-chat-w: clamp(380px, 32vw, 480px); }
+   record of the piece it follows takes the rest. An agent's own page uses the same width for its
+   column (agents.css), so the two can't drift apart. */
+:root { --tc-chat-w: clamp(380px, 32vw, 480px); }
 
 .tc {
   position: absolute;

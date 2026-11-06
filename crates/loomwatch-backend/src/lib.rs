@@ -48,6 +48,7 @@ pub mod projects;
 pub mod prompt_blocks;
 pub mod runs;
 pub mod schedule;
+pub mod site_icons;
 pub mod skill_routing;
 pub mod skills_api;
 pub mod skills_store;
