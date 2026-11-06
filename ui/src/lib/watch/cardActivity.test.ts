@@ -126,7 +126,8 @@ describe('a widget in the answer', () => {
       ...call(1, 'w1', 'Team Bus: show_widget', 'other', { kind: 'calculator', title: 'Zoo trip' }, '{"shown":"a calculator"}'),
       ...call(3, 'w2', 'Team Bus: show_widget', 'other', { kind: 'flow', title: 'How it goes' }, '{"shown":"a flow"}'),
       ...call(5, 'w3', 'Team Bus: show_widget', 'other', { kind: 'gizmo', title: 'New' }, '{"shown":"?"}'),
+      ...call(7, 'w4', 'Team Bus: show_widget', 'other', { kind: 'compare', title: 'Two houses' }, '{"shown":"a comparison"}'),
     ]).evidence
-    expect(evidence.map(asUse).filter(Boolean).map((use) => use?.label)).toEqual(['Show a calculator in the answer', 'Show a diagram in the answer', 'Show something in the answer'])
+    expect(evidence.map(asUse).filter(Boolean).map((use) => use?.label)).toEqual(['Show a calculator in the answer', 'Show a diagram in the answer', 'Show something in the answer', 'Show a comparison in the answer'])
   })
 })
