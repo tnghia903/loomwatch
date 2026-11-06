@@ -75,7 +75,7 @@ describe('a team’s own agent’s chat', () => {
     expect(within(details).getByRole('region', { name: 'Run receipt' })).toBeInTheDocument()
     // Its settings are this page's Build tab: the record offers no second way to them.
     expect(within(details).queryByRole('button', { name: 'Agent details' })).toBeNull()
-    expect(screen.getByRole('button', { name: 'Back to Project scope' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Close details' })).toBeInTheDocument()
     expect(opened).not.toHaveBeenCalled()
   })
 })

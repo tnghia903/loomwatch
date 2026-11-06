@@ -51,7 +51,13 @@ that line, in the chat. The newest piece
 and any piece still working show them as they are said; older pieces hide them, and the line shows
 or hides them again. They read as the rest of the group chat does: each agent has its own colour
 and figure, and your messages sit on the right. An agent's own chat (My agents) shows its replies
-the same way. A review's **Approve** and **Send back** stand where your reply goes, under the
+the same way, and its page is laid out as a team's chat: on a wide window its chat (on Build, its
+settings) fills a column on the left, and its workbench the pane on the right, in the same place on
+both tabs. A long answer, a piece's Details or a file the chat opens takes that pane, under a head
+with the request's first line and an × that closes it. Its name's menu lists My agents, as a
+team's lists the other teams: a pick opens that agent on the tab on screen, and changes not saved
+are asked about first. Links that close a point, bare or in brackets ("… (usa.gov)"), show as
+small source chips. A review's **Approve** and **Send back** stand where your reply goes, under the
 handover they decide, and a permission's buttons under the message that asks; while the replies
 are hidden, each has a card of its own in the chat, so each is answered in one place. **Reply** on that handover quotes it above the message box; what you type there is
 still your review note. <kbd>Enter</kbd> sends the work back with it and never approves; a note

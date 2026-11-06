@@ -847,6 +847,8 @@ button.thread-node:hover svg, button.thread-node:focus-visible svg { color: var(
    A row's state words are coloured (gold waiting, red stopped), so its hover is a lighter mix than a
    menu row's, which keeps them at AA in both themes, and the open team is a gold line, not a fill. */
 .team-switch { border-bottom: 1px solid var(--color-hairline); }
+/* Last in an agent's menu (nothing to do to it yet), the menu's own edge is its line. */
+.agent-switch:last-child { border-bottom: 0; }
 .team-switch-list { max-height: min(360px, 50vh); }
 .team-switch-group + .team-switch-group { margin-top: var(--sp-2); }
 .team-switch-head { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3) 2px; color: var(--color-ink-3); }

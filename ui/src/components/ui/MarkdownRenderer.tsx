@@ -163,8 +163,11 @@ const CLAIM_SAYS = {
   backed: 'The writer marked this as backed by a source',
   reasoned: 'The writer marked this as their own reasoning, not taken from a source',
 }
-// Between and after the links that close a claim: spaces and the punctuation that separates them.
-const BETWEEN_SOURCES = /^[\s.,;·|]*$/
+// Between and after the links that close a claim: spaces, the punctuation that separates them, and
+// the brackets they are put in.
+const BETWEEN_SOURCES = /^[\s.,;·|()[\]]*$/
+// The bracket a claim's sources open with, at the end of its words.
+const OPENS_SOURCES = /\s*[([]\s*$/
 
 function markClaimsAndSources(tree: { children: HastChild[] }) {
   const visit = (nodes: HastChild[]) => {
@@ -230,12 +233,24 @@ function markSources(block: HastElement) {
     if (!isWebLink && !(node.type === 'text' && BETWEEN_SOURCES.test(node.value))) break
     start -= 1
   }
+  // What comes before the first link is the claim's, its full stop too: "**…**. (" after bold words.
+  if (kids[start]?.type === 'text') start += 1
   const links = kids.slice(start).filter((node): node is HastElement => node.type === 'element')
   // Links alone (a list of references) stay links: a source is the one a claim cites.
-  const claim = kids.slice(0, start).some((node) => node.type !== 'text' || node.value.trim() !== '')
+  const claim = kids.slice(0, start).some((node) => node.type !== 'text' || !BETWEEN_SOURCES.test(node.value))
   if (links.length === 0 || !claim) return
+  // Sources in brackets, "… nhau. (usa.gov)", are chips without them. Brackets that hold more than
+  // the links, "(see the guide)", leave them as written.
+  const before = kids[start - 1]
+  const opens = before?.type === 'text' && OPENS_SOURCES.test(before.value)
+  const closes = kids.slice(start).some((node) => node.type === 'text' && /[)\]]/.test(node.value))
+  if (opens !== closes) return
+  if (opens && before.type === 'text') before.value = before.value.replace(OPENS_SOURCES, '')
+  // A full stop after the sources, "… branches (usa.gov).", ends the claim, before its chips.
+  const last = kids[kids.length - 1]
+  const stops = last?.type === 'text' && /\.\s*$/.test(last.value) && !(before?.type === 'text' && /[.!?…:;]\s*$/.test(before.value))
   for (const link of links) link.properties.className = ['md-source']
-  block.children = [...kids.slice(0, start), ...links.flatMap((link) => [{ type: 'text' as const, value: ' ' }, link])]
+  block.children = [...kids.slice(0, start), ...(stops ? [{ type: 'text' as const, value: '.' }] : []), ...links.flatMap((link) => [{ type: 'text' as const, value: ' ' }, link])]
 }
 
 function hostOf(href: string | undefined): string | undefined {

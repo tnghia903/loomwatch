@@ -110,7 +110,7 @@ describe('a piece’s record, in an agent’s own chat', () => {
     fireEvent.click(inChat.getByRole('button', { name: 'Details' }))
     expect(screen.queryByRole('region', { name: 'Details of this piece of work' })).not.toBeInTheDocument()
     fireEvent.click(inChat.getByRole('button', { name: 'Details' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Back to Maya' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Close details' }))
     expect(screen.queryByRole('region', { name: 'Details of this piece of work' })).not.toBeInTheDocument()
     expect(opened).not.toHaveBeenCalled()
   }, 15_000)
@@ -136,13 +136,13 @@ describe('a piece’s record, in an agent’s own chat', () => {
     fireEvent.click(inChat.getByRole('button', { name: 'Details' }))
     const details = await screen.findByRole('region', { name: 'Details of this piece of work' })
     // Where the chat is below the bench, the way back is what comes into view.
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Back to Maya' })).toHaveFocus())
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Close details' })).toHaveFocus())
     fireEvent.click(within(details).getByRole('button', { name: /What was recorded/ }))
     const recorded = await screen.findByRole('complementary', { name: 'Provenance' })
     // Esc closes what is on top first: the records, then Details.
     fireEvent.keyDown(recorded, { key: 'Escape' })
     expect(screen.queryByRole('complementary', { name: 'Provenance' })).not.toBeInTheDocument()
-    fireEvent.keyDown(screen.getByRole('button', { name: 'Back to Maya' }), { key: 'Escape' })
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Close details' }), { key: 'Escape' })
     expect(screen.queryByRole('region', { name: 'Details of this piece of work' })).not.toBeInTheDocument()
   }, 15_000)
 

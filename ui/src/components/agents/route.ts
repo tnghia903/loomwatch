@@ -30,6 +30,11 @@ export function withView(view: AgentView, location: { pathname: string; search: 
   return `${location.pathname}${rest ? `?${rest}` : ''}`
 }
 
+/** The page of one of My agents, on the tab `view`. */
+export function agentHref(id: string, view: AgentView): string {
+  return `/agents/${encodeURIComponent(id)}${view === 'chat' ? '?view=chat' : ''}`
+}
+
 const CHANGED = 'loomwatch:agents-route'
 
 /** Move within Your agents without reloading the page; Back and Forward work as usual. */

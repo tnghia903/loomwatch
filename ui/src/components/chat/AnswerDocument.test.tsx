@@ -51,6 +51,40 @@ describe('a document answer, read beside the chat', () => {
     expect(screen.getByRole('link', { name: 'Reading list' })).not.toHaveClass('md-source')
   })
 
+  // The shape of a real answer (Coby, 6 November): each point closes on its source in brackets.
+  it('shows sources in brackets as chips without their brackets, and leaves brackets that hold more', async () => {
+    const { container } = render(<AnswerDocument by="Coby" streaming={false} text={[
+      'Cả hai nước đều có cơ quan làm luật, điều hành và xét xử. ([usa.gov](https://www.usa.gov/branches-of-government))',
+      '- **Làm luật:** Ở Mỹ, Hạ viện đại diện theo dân số. ([usa.gov](https://www.usa.gov/legislative-branch)).',
+      '- **Điều hành:** Ở Việt Nam, **Thủ tướng đứng đầu Chính phủ**. ([usa.gov](https://www.usa.gov/executive-branch))',
+      '- **Chính trị:** Mỹ có hệ thống đa đảng. ([xaydungchinhsach.chinhphu.vn](https://xaydungchinhsach.chinhphu.vn/a), [usa.gov](https://www.usa.gov/b))',
+      '',
+      'The US has three branches ([usa.gov](https://www.usa.gov/branches)).',
+      '',
+      'Read the rules first (see [the guide](https://example.com/guide)).',
+    ].join('\n')} />)
+    await screen.findByText(/Cả hai nước/)
+    const sources = [...container.querySelectorAll('a.md-source')]
+    expect(sources.map((link) => [link.textContent, link.getAttribute('title')])).toEqual([
+      ['usa.gov', 'usa.gov'],
+      ['usa.gov', 'usa.gov'],
+      ['usa.gov', 'usa.gov'],
+      ['xaydungchinhsach.chinhphu.vn', 'xaydungchinhsach.chinhphu.vn'],
+      ['usa.gov', 'usa.gov'],
+      ['usa.gov', 'usa.gov'],
+    ])
+    for (const source of sources) expect(source.parentElement?.textContent).not.toMatch(/[()[\]]/)
+    expect(screen.getByText(/Cả hai nước/).textContent).toBe('Cả hai nước đều có cơ quan làm luật, điều hành và xét xử. usa.gov')
+    // After bold words the full stop stays the claim's.
+    expect(screen.getByText(/Ở Việt Nam/).textContent).toBe('Điều hành: Ở Việt Nam, Thủ tướng đứng đầu Chính phủ. usa.gov')
+    // A full stop after the bracket ends the claim before its chip, and is never lost.
+    expect(screen.getByText(/three branches/).textContent).toBe('The US has three branches. usa.gov')
+    expect(screen.getByText('Làm luật:').closest('li')?.textContent).toBe('Làm luật: Ở Mỹ, Hạ viện đại diện theo dân số. usa.gov')
+    // Brackets with more than the links in them stay as written, the link a link.
+    expect(screen.getByRole('link', { name: 'the guide' })).not.toHaveClass('md-source')
+    expect(screen.getByText(/Read the rules first/).textContent).toBe('Read the rules first (see the guide).')
+  })
+
   it('opens a file the agent names from its own folder', async () => {
     // The shape of a real reply (run aace60a2): a link relative to the agent's folder, spaces as %20.
     const guide = '/Users/me/LoomWatch/teams/.loomwatch/bench-coby/coby/LLM Prefill Guide.html'

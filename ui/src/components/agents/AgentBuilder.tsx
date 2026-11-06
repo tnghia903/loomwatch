@@ -238,25 +238,15 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
   const badge = <AgentBadge markId={markId} figure={figure} draft={draft} modelName={modelName} effortName={effortName} usedIn={saved ? { teams: mine.length, scheduled: scheduledUses } : undefined} usesListed={Boolean(saved)} />
 
   const name = draft.name.trim() || 'New agent'
-  const saveButton = <button type="button" className="btn btn-primary" data-tour="save-agent" disabled={!changed || Boolean(problem) || save.kind === 'saving'} title={problem ?? undefined} onClick={() => void doSave()}>{save.kind === 'saving' ? 'Saving…' : saveLabel}</button>
+  // On Chat its Send keeps the screen's one gold fill: Save is a gold ring there, as a team's Save is.
+  const saveButton = <button type="button" className={`btn ${view === 'chat' ? 'btn-ring' : 'btn-primary'}`} data-tour="save-agent" disabled={!changed || Boolean(problem) || save.kind === 'saving'} title={problem ?? undefined} onClick={() => void doSave()}>{save.kind === 'saving' ? 'Saving…' : saveLabel}</button>
   const saveSaid = save.kind === 'saved' ? 'Saved.'
     : save.kind === 'error' ? <span className="agent-save-error">{save.message}</span> : null
   // Back to the team it came from, on its Team tab.
   const backToTeam = cameFrom && <a className="link agent-back" href={`/?path=${encodeURIComponent(cameFromUse?.teamPath ?? cameFrom)}`}>Back to {cameFromUse?.teamName ?? 'the team'}</a>
-  const bench = (
-    <ByHand
-      fresh={!id}
-      widgetsDefault={widgetsDefault}
-      draft={draft} set={set} skills={skills} skillsLoading={skillsLoading} roleField={roleField} figure={figure} record={benchRecord} reads={inTeam?.reads} onShowWorkflow={inTeam?.onShowWorkflow}
-      learned={saved ? { savedAgent: saved.id } : null}
-      chat={view === 'chat' ? <AgentChat draft={draft} model={draft.model} chatId={chatId} figure={figure} onAllow={(what) => (typeof what === 'string' ? set('allow', { ...draft.allow, [what]: true }) : set('toolAllow', withAllowed(draft.toolAllow, what.tool, what.call)))} onRecord={setBenchRecord} answerRunId={answerRun} onOpenAnswer={(runId) => { setAnswerRun(runId); if (runId) details.close() }} knowledge={inTeam?.knowledge} file={benchFile.chat}
-        detailsRunId={details.asked?.runId ?? null} onDetails={(asked) => { details.open(asked); setAnswerRun(null); benchFile.close() }} reveal={details.reveal} landAt={run} /> : undefined}
-      onBuild={() => showView('build')}
-      cover={view === 'chat' && benchFile.reading ? <AgentFile bench={benchFile} chatId={chatId} name={name} figure={figure} />
-        : view === 'chat' && details.asked ? <AgentDetails key={details.asked.at} asked={details.asked} draft={draft} model={draft.model} chatId={chatId} figure={figure} onClose={details.close} onAllow={(key) => set('allow', { ...draft.allow, [key]: true })} onRevealMessage={details.revealMessage} />
-        : view === 'chat' && answerRun ? <AgentAnswer runId={answerRun} name={name} onClose={() => setAnswerRun(null)} /> : undefined}
-    />
-  )
+  // The way back to a team, and what a save did. Always there, so a save is announced; on its own
+  // page it heads the column, so its coming and going never moves the bench.
+  const notices = <div className="agent-notices">{backToTeam}<span className={`agent-save-state t-meta${saveSaid === 'Saved.' ? ' quiet' : ''}`} role="status">{saveSaid ?? (changed && mine.length > 0 ? `Saving changes it in ${listNames(mine.map((use) => use.teamName))} too.` : pinSaid && (pinSaid.ok ? pinSaid.text : <span className="agent-save-error">{pinSaid.text}</span>))}</span></div>
   const side = view === 'build' && (
     <div className="agent-builder-grid">
       <aside className="agent-builder-side">
@@ -294,6 +284,23 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
     </div>
   )
 
+  const bench = (
+    <ByHand
+      fresh={!id}
+      widgetsDefault={widgetsDefault}
+      draft={draft} set={set} skills={skills} skillsLoading={skillsLoading} roleField={roleField} figure={figure} record={benchRecord} reads={inTeam?.reads} onShowWorkflow={inTeam?.onShowWorkflow}
+      learned={saved ? { savedAgent: saved.id } : null}
+      chat={view === 'chat' ? <AgentChat draft={draft} model={draft.model} chatId={chatId} figure={figure} onAllow={(what) => (typeof what === 'string' ? set('allow', { ...draft.allow, [what]: true }) : set('toolAllow', withAllowed(draft.toolAllow, what.tool, what.call)))} onRecord={setBenchRecord} answerRunId={answerRun} onOpenAnswer={(runId) => { setAnswerRun(runId); if (runId) details.close() }} knowledge={inTeam?.knowledge} file={benchFile.chat}
+        detailsRunId={details.asked?.runId ?? null} onDetails={(asked) => { details.open(asked); setAnswerRun(null); benchFile.close() }} reveal={details.reveal} landAt={run} /> : undefined}
+      onBuild={() => showView('build')}
+      framed={Boolean(bar)}
+      lead={bar ? notices : undefined}
+      after={bar ? side : undefined}
+      cover={view === 'chat' && benchFile.reading ? <AgentFile bench={benchFile} chatId={chatId} name={name} figure={figure} />
+        : view === 'chat' && details.asked ? <AgentDetails key={details.asked.at} asked={details.asked} draft={draft} model={draft.model} chatId={chatId} figure={figure} onClose={details.close} onAllow={(key) => set('allow', { ...draft.allow, [key]: true })} onRevealMessage={details.revealMessage} />
+        : view === 'chat' && answerRun ? <AgentAnswer runId={answerRun} name={name} onClose={() => setAnswerRun(null)} /> : undefined}
+    />
+  )
   // It comes off the teams it is in as it goes (ADR 0100).
   const removeDialog = removing && saved && <RemoveAgentDialog agent={saved} uses={uses === null ? null : mine} onRemoved={() => navigate('/agents')} onClose={() => setRemoving(false)} />
 
@@ -305,14 +312,13 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
     const pin = saved && isMac() ? { pinned: pinned.pinned === saved.id, notchShown: pinned.notchShown, onToggle: () => void togglePin(saved.id, name) } : undefined
     const detail = save.kind === 'saving' ? 'Saving…' : save.kind === 'error' ? 'Couldn’t save' : problem ?? (!saved ? 'Not saved yet' : changed ? 'Unsaved changes' : saved.savedAt ? `Saved ${relativeTime(new Date(saved.savedAt))}` : 'Saved')
     return (
-      <div className="agent-builder" data-tour="agent-builder" data-tour-saved={saved && !changed ? true : undefined}>
-        {bar.chip && createPortal(<AgentChip name={name} state={state} detail={detail} action={changed || save.kind === 'saving' ? saveButton : undefined} onRemove={saved ? () => setRemoving(true) : undefined} pin={pin} />, bar.chip)}
+      <div className="agent-builder framed" data-tour="agent-builder" data-tour-saved={saved && !changed ? true : undefined}>
+        {bar.chip && createPortal(<AgentChip name={name} state={state} detail={detail} action={changed || save.kind === 'saving' ? saveButton : undefined} onRemove={saved ? () => setRemoving(true) : undefined} pin={pin}
+          switcher={jobs.some((job) => job.id !== saved?.id) ? { open: saved?.id ?? null, view, leave: unsaved ? { name, save: doSave, problem } : null, saveError: save.kind === 'error' ? save.message : null, go: (href) => navigate(href) } : undefined} />, bar.chip)}
         {bar.tabs && createPortal(<AgentViewTabs view={view} onView={showView} tour inBar />, bar.tabs)}
         <h1 className="visually-hidden">{name}</h1>
-        {/* The way back to a team, and what a save did. Always there, so a save is announced. */}
-        <div className="agent-notices">{backToTeam}<span className={`agent-save-state t-meta${saveSaid === 'Saved.' ? ' quiet' : ''}`} role="status">{saveSaid ?? (changed && mine.length > 0 ? `Saving changes it in ${listNames(mine.map((use) => use.teamName))} too.` : pinSaid && (pinSaid.ok ? pinSaid.text : <span className="agent-save-error">{pinSaid.text}</span>))}</span></div>
+        {/* What its settings add up to is in the bench's column of blocks, so nothing sits under the bench. */}
         {bench}
-        {side}
         {removeDialog}
       </div>
     )
