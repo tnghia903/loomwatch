@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { AnswerDocument } from './AnswerDocument'
@@ -83,6 +83,28 @@ describe('a document answer, read beside the chat', () => {
     // Brackets with more than the links in them stay as written, the link a link.
     expect(screen.getByRole('link', { name: 'the guide' })).not.toHaveClass('md-source')
     expect(screen.getByText(/Read the rules first/).textContent).toBe('Read the rules first (see the guide).')
+  })
+
+  // ADR 0116: a source is named by its page, as the run's search found it, with its site's icon,
+  // which only LoomWatch fetches; without either it is its words, as before.
+  it('names a source by its page and shows its site’s icon from LoomWatch, else its own words', async () => {
+    const sources = new Map([['usa.gov/branches-of-government', 'Branches of the U.S. government | USAGov']])
+    const { container } = render(<AnswerDocument by="Coby" streaming={false} sources={sources} text={[
+      'Mỹ có ba nhánh quyền lực. ([usa.gov](https://www.usa.gov/branches-of-government/))',
+      '',
+      'Việt Nam có một Quốc hội. ([xaydungchinhsach.chinhphu.vn](https://xaydungchinhsach.chinhphu.vn/a))',
+    ].join('\n')} />)
+    await screen.findByText(/ba nhánh/)
+    const [named, plain] = [...container.querySelectorAll<HTMLAnchorElement>('a.md-source')]
+    expect(named).toHaveTextContent('Branches of the U.S. government | USAGov')
+    expect(named).toHaveAttribute('title', 'Branches of the U.S. government | USAGov · usa.gov')
+    expect(named).toHaveAttribute('href', 'https://www.usa.gov/branches-of-government/')
+    expect(named.querySelector('img')).toHaveAttribute('src', '/api/site-icon?host=www.usa.gov')
+    expect(plain).toHaveTextContent('xaydungchinhsach.chinhphu.vn')
+    // A site without an icon keeps its words and arrow.
+    fireEvent.error(plain.querySelector('img')!)
+    expect(plain.querySelector('img')).toBeNull()
+    expect(plain.querySelector('svg')).not.toBeNull()
   })
 
   it('opens a file the agent names from its own folder', async () => {

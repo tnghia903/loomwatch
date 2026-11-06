@@ -102,6 +102,7 @@ import { PromptNodeCard } from './run/StoryNodes'
 import { ChipDot } from './ui/glyphs'
 import { SegmentThumb } from './ui/SegmentThumb'
 import { InlineMarkdown } from './ui/Markdown'
+import { sourceTitles } from '../lib/story/sourceTitles'
 import { AttentionAlerts } from './workspace/AttentionAlerts'
 import { BuildHeading } from './workspace/BuildHeading'
 import { TeamAgents } from './workspace/TeamAgents'
@@ -488,6 +489,8 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   // what they wrote in plain words.
   const touchedFiles = useMemo(() => filesTouched(projection.evidence), [projection.evidence])
   const writtenFiles = useMemo(() => filesWritten(projection.evidence), [projection.evidence])
+  // The titles of the pages the run's searches found, naming the sources its answer cites (ADR 0116).
+  const answerSources = useMemo(() => sourceTitles(projection.evidence), [projection.evidence])
   const routine = useMemo(() => scheduleForPath(schedules.entries, doc.path), [schedules.entries, doc.path])
   // A routine's run starting and ending is when it has news, such as when it tries again: read the
   // routines then, not at the next minute.
@@ -2656,7 +2659,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
                     onAsk={composerState.kind === 'blocked' ? undefined : askInChat} asked={passages.asked} asking={passages.asking} faces={passages.faces} onShowAsked={showAsked} teamPath={doc.path} />
                 ) : shownTab === 'answer' ? (
                   <FileOriginContext.Provider value={answerOrigin}>
-                    <AnswerDocument text={responseText} by={nodeNames.get(record?.responder ?? '') ?? record?.responder ?? 'the team'} streaming={!session.terminal} touched={touchedFiles} folder={responderAgent?.folder} written={writtenFiles} />
+                    <AnswerDocument text={responseText} by={nodeNames.get(record?.responder ?? '') ?? record?.responder ?? 'the team'} streaming={!session.terminal} touched={touchedFiles} folder={responderAgent?.folder} written={writtenFiles} sources={answerSources} />
                   </FileOriginContext.Provider>
                 ) : session.loading ? (
                   // The record is shown once it is read whole, so it opens as it ended rather than replaying.

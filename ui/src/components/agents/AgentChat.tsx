@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { filesTouched, filesWritten } from '../../lib/files/fileRefs'
+import { sourceTitles } from '../../lib/story/sourceTitles'
 import { FileReaderContext } from '../../lib/files/reader'
 import type { BenchFile } from '../../lib/files/useBenchFile'
 import { joinUnderRoot } from '../../lib/files/paths'
@@ -237,10 +238,11 @@ export function AgentAnswer({ runId, name, onClose }: { runId: string; name: str
   const text = wordsOf(record && isTerminalRun(record.status) ? record.reply ?? '' : responder?.reply ?? '')
   const touched = useMemo(() => filesTouched(session.projection.evidence), [session.projection.evidence])
   const written = useMemo(() => filesWritten(session.projection.evidence), [session.projection.evidence])
+  const sources = useMemo(() => sourceTitles(session.projection.evidence), [session.projection.evidence])
   return (
     <div className="agent-answer" onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); onClose() } }}>
       <PaneHead title={record?.prompt ? <InlineMarkdown>{record.prompt.split('\n')[0] ?? ''}</InlineMarkdown> : undefined} closes="Close answer" onClose={onClose} />
-      <AnswerDocument text={text} by={name} streaming={!session.terminal} touched={touched} folder={responder?.folder} written={written} />
+      <AnswerDocument text={text} by={name} streaming={!session.terminal} touched={touched} folder={responder?.folder} written={written} sources={sources} />
     </div>
   )
 }

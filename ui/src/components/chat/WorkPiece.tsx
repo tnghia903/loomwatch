@@ -38,6 +38,7 @@ import { AnswerWidget } from './widgets/AnswerWidgets'
 import { partsOf } from '../../lib/widgets/place'
 import type { KeptWidget, WidgetState } from '../../lib/widgets/types'
 import { useAnswerWidgets } from '../../lib/widgets/useAnswerWidgets'
+import { SourceTitlesContext, sourceTitles } from '../../lib/story/sourceTitles'
 import { MessageDoneWhen } from './MessageDoneWhen'
 import { PermissionActions, PermissionPrompt } from '../run/PermissionPrompt'
 import { SpendStopCard } from '../run/SpendStopCard'
@@ -274,6 +275,8 @@ export function WorkPiece({ item, newest = false, approveFilled = true, fixFille
   const finishedAnswer = isTerminalRun(record.status)
   const touched = useMemo(() => filesTouched(session.projection.evidence), [session.projection.evidence])
   const written = useMemo(() => filesWritten(session.projection.evidence), [session.projection.evidence])
+  // The titles of the pages its web searches found: its answer names a source it cites by its page (ADR 0116).
+  const sources = useMemo(() => sourceTitles(session.projection.evidence), [session.projection.evidence])
   const folder = responder?.folder ?? null
   const answerFiles = useMemo(() => (finishedAnswer ? fileRefsIn(answer, touched, folder, written) : []), [finishedAnswer, answer, touched, folder, written])
   // A file the answer hands you that another agent wrote — the Writer's guide in the Lead's answer —
@@ -451,6 +454,7 @@ export function WorkPiece({ item, newest = false, approveFilled = true, fixFille
   )
 
   return (
+    <SourceTitlesContext.Provider value={sources}>
     <AppearContext.Provider value={news && painted}>
     <li ref={piece} className={`tc-piece${live ? ' live' : ''}${newest ? ' newest' : ''}${detailsOpen ? ' in-details' : ''}${appear ? ' tc-appear-soft' : ''}`} data-run={run.runId}>
       <Request run={run} request={request} flash={saidFlash?.id === `request:${run.runId}`} fixFill={fixFill} pieceFix={pieceFix} continuedFrom={continued ? name(run.startAt ?? '') : null} name={name} solo={team.solo} onShowReplied={onShowReplied} reactions={request?.handedBack
@@ -647,6 +651,7 @@ export function WorkPiece({ item, newest = false, approveFilled = true, fixFille
       {error && <p className="chat-failed" role="alert">{error}</p>}
     </li>
     </AppearContext.Provider>
+    </SourceTitlesContext.Provider>
   )
 }
 

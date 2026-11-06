@@ -95,7 +95,7 @@ fn among(asked: &str, links: &[String]) -> Option<url::Url> {
 }
 
 /// Whether `url` is on this computer or its own network.
-fn on_this_network(url: &url::Url) -> bool {
+pub(crate) fn on_this_network(url: &url::Url) -> bool {
     match url.host() {
         Some(url::Host::Domain(name)) => {
             // A host name, not a file's: lowercased first, so the comparisons ignore case.
@@ -110,7 +110,7 @@ fn on_this_network(url: &url::Url) -> bool {
     }
 }
 
-fn private(ip: IpAddr) -> bool {
+pub(crate) fn private(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(ip) => {
             ip.is_loopback()

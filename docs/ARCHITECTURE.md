@@ -636,6 +636,21 @@ out again; `earlier_work` includes them. A choice is sent as the person's messag
 answer, and keeps no state; nor do steps or a chart. A paired phone may keep ticks and values
 through the same call (`phone::ALLOWED`).
 
+### Sources in an answer
+
+A link that closes a claim is drawn as a source chip (`MarkdownRenderer.tsx`), named by its page's
+title and wearing its site's icon (ADR 0116). The title comes from what the run already holds: the
+output of its web searches, as each provider's route records it (`anthropic.rs` a page a line,
+`chatgpt.rs` a title over its address), read by `ui/src/lib/story/sourceTitles.ts`; OpenRouter's own
+search keeps no titles, and its sources say their site. The icon is the only thing LoomWatch
+fetches because of an answer's words. `site_icons.rs` serves `GET /api/site-icon?host=…`: it takes
+only a public name (the same home checks as `read_page`'s in `agent/tools/link.rs`), resolves it
+itself and never connects to an address on this computer or its network (`PublicOnly`, redirects
+included), asks only `https://<site>/favicon.ico`, else the icon the site's home page names (never
+an SVG), keeps only an ICO, PNG, GIF, JPEG or WebP of at most 512 KB, and keeps it in
+`<state dir>/site-icons/` for 30 days. Only `LoomWatch`'s own page on this computer's address can
+ask (`watch_api::local_evidence`).
+
 ### Permissions
 
 Any tool call that reaches past reading the agent's own folder is a permission request. One

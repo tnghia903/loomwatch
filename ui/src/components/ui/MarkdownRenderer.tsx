@@ -4,13 +4,14 @@ import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import 'katex/dist/katex.min.css'
 
-import { createContext, useContext, useMemo, useState, type ComponentProps } from 'react'
+import { createContext, useContext, useMemo, useState, type ComponentProps, type ReactNode } from 'react'
 import { sourceSpans } from '../../lib/files/markdownEdits'
 import { BACKED, CLAIM_MARK } from '../../lib/chat/claims'
 import { withoutCitationMarks } from '../../lib/chat/citationMarks'
 import { withMathMarks } from '../../lib/chat/mathMarks'
 import { segments, useFoundWords, type FindTerm } from '../../lib/chat/findWords'
 import { filePathFrom, filePathFromLink } from '../../lib/files/fileRefs'
+import { SourceTitlesContext, sourceKey } from '../../lib/story/sourceTitles'
 import { FileChip } from './FileChip'
 import { MarkdownPictures } from './markdownPictures'
 import { SaidMention, type SaidMarks } from './saidMention'
@@ -253,6 +254,38 @@ function markSources(block: HastElement) {
   block.children = [...kids.slice(0, start), ...(stops ? [{ type: 'text' as const, value: '.' }] : []), ...links.flatMap((link) => [{ type: 'text' as const, value: ' ' }, link])]
 }
 
+/**
+ * A source a claim cites (ADR 0116): its site's own icon, which LoomWatch fetches once from the
+ * site's root and keeps (the page never loads anything from the link itself), then its page's title
+ * as the run's web search found it, else the link's own words; the title and site on hover. Without
+ * an icon it is its words and the arrow, as before.
+ */
+function SourceChip({ href, label }: { href: string | undefined; label: ReactNode }) {
+  const titles = useContext(SourceTitlesContext)
+  const [icon, setIcon] = useState(true)
+  const host = hostOf(href)
+  const site = siteOf(href)
+  const key = href ? sourceKey(href) : null
+  const title = key ? titles?.get(key) : undefined
+  return (
+    <a className="md-source" href={href} target="_blank" rel="noreferrer" title={title && host ? `${title} · ${host}` : host}>
+      {site && icon && <img className="md-source-icon" src={`/api/site-icon?host=${encodeURIComponent(site)}`} alt="" width={14} height={14} loading="lazy" decoding="async" onError={() => setIcon(false)} />}
+      <span className="md-source-label">{title ?? label}</span>
+      <svg width="9" height="9" viewBox="0 0 10 10" aria-hidden="true"><path d="M3 2h5v5M8 2 2.5 7.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
+    </a>
+  )
+}
+
+/** The site a web link is on, whose icon is asked for: `https` and `http` only. */
+function siteOf(href: string | undefined): string | undefined {
+  try {
+    const url = href ? new URL(href) : null
+    return url && (url.protocol === 'https:' || url.protocol === 'http:') ? url.hostname : undefined
+  } catch {
+    return undefined
+  }
+}
+
 function hostOf(href: string | undefined): string | undefined {
   try {
     return href ? new URL(href).host.replace(/^www\./, '') : undefined
@@ -269,14 +302,7 @@ const COMPONENTS: Components = {
     const path = filePathFromLink(href)
     if (path) return <FileChip path={path} />
     if (href && !/^([a-z][a-z0-9+.-]*:|#)/i.test(href)) return <span className="md-unlinked">{label}</span>
-    if (className === 'md-source') {
-      return (
-        <a className="md-source" href={href} target="_blank" rel="noreferrer" title={hostOf(href)}>
-          <span className="md-source-label">{label}</span>
-          <svg width="9" height="9" viewBox="0 0 10 10" aria-hidden="true"><path d="M3 2h5v5M8 2 2.5 7.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
-        </a>
-      )
-    }
+    if (className === 'md-source') return <SourceChip href={href} label={label} />
     return <a href={href} target="_blank" rel="noreferrer">{label}</a>
   },
   code: ({ children: text, className }) => {

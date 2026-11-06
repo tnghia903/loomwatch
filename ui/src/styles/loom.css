@@ -790,7 +790,10 @@ span.story-schedule { cursor: default; }
   color: var(--color-ink-2); font: 500 0.8em/1.75 var(--font-sans); text-decoration: none; word-break: normal; white-space: nowrap;
   transition: border-color var(--t-quick) var(--ease-out), color var(--t-quick) var(--ease-out), background-color var(--t-quick) var(--ease-out);
 }
-.md-source-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.md-source-label { min-width: 0; max-width: 32ch; overflow: hidden; text-overflow: ellipsis; }
+/* The site's own icon (ADR 0116), kept small and square, before its page's title. */
+.md-source-icon { flex: none; width: 1.15em; height: 1.15em; border-radius: 3px; object-fit: contain; }
+.md-source:any-link:has(> .md-source-icon) { padding-left: 0.4em; }
 /* Inside a line already set small, a source keeps the type scale's smallest step. */
 .md-inline .md-source:any-link { font-size: max(11px, 0.8em); }
 .md-source svg { flex: none; color: var(--color-ink-3); transition: color var(--t-quick) var(--ease-out); }
