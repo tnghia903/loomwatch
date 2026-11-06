@@ -86,7 +86,8 @@ is the usual answer. It is also told not to learn:
 
 When the feedback is on an answer the agent gave you and its widgets switch is on (ADR 0114), the
 learner is told the agent shows comparisons, charts, graphs, calculators, checklists, steps,
-choices, marks and flows in the chat with `show_widget`, and what this answer showed. Feedback that asks for a chart
+pictures, choices, marks and flows in the chat with `show_widget`, and what this answer showed.
+Feedback that asks for a chart or a picture
 or says one is missing then teaches it to show one, never to make an image file, a page or text
 art. When the answer showed one and you say you can't see it, it learns nothing: that isn't about
 how the agent works. A check step reads the answer's words only, so what it teaches is unchanged.

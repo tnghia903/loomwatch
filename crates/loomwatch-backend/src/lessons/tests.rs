@@ -571,6 +571,15 @@ async fn a_lesson_about_a_missing_chart_says_to_show_one_with_a_widget() {
         with.contains("asks for a chart, a graph, a comparison"),
         "{with}"
     );
+    // ADR 0117: feedback asking for a picture teaches it to draw one there, not to make a file.
+    assert!(
+        with.contains("steps, a picture or another view like these"),
+        "{with}"
+    );
+    assert!(
+        with.contains("steps, a picture it draws, choices"),
+        "{with}"
+    );
     assert!(
         with.contains(&format!("> A very long digest.\n{drawn}\n")),
         "what it showed follows its words: {with}"

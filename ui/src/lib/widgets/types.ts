@@ -60,6 +60,14 @@ export interface WidgetRow { label: string; values: string[] }
 /** One series of a graph: a value for each of its labels. */
 export interface WidgetSeries { label: string; values: number[] }
 
+/** One shape of a picture (ADR 0117), in the picture's units: absolute moves, lines and cubic
+    curves only (`M10 20L30 40C…Z`), as the daemon redrew the agent's SVG. Its part from 1; a fill
+    is shaded, dark where the agent filled it dark. */
+export interface WidgetShape { d: string; part?: number; fill?: 'light' | 'dark'; dashed?: boolean }
+
+/** One numbered part of a picture: a word or two, a sentence or two, and where its number stands. */
+export interface WidgetPart { label: string; text: string; at: [number, number] }
+
 export type WidgetSpec =
   | { kind: 'choices'; title: string; options: WidgetChoice[] }
   | { kind: 'checklist'; title: string; items: WidgetItem[] }
@@ -70,6 +78,7 @@ export type WidgetSpec =
   | { kind: 'marks'; title: string; cells: WidgetCell[]; facts?: string[] }
   | { kind: 'flow'; title: string; boxes: WidgetBox[]; repeats?: boolean }
   | { kind: 'graph'; title: string; style: 'bar' | 'line'; labels: string[]; series: WidgetSeries[]; unit?: string; prefix?: string; decimals?: number }
+  | { kind: 'picture'; title: string; width: number; height: number; shapes: WidgetShape[]; parts?: WidgetPart[] }
 
 /** What you made of a widget: a checklist's ticks, or a calculator's values by input id. */
 export type WidgetState = { checked: boolean[] } | { values: Record<string, number | boolean> }

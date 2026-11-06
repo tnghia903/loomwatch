@@ -1191,7 +1191,7 @@ pub fn compose(learning: &Learning, source: LessonSource, lessons: &[Lesson]) ->
             text,
             "\n{agent} shows its answer with what LoomWatch draws in the chat, through its \
              show_widget tool: a comparison, a chart, a graph, a calculator, a checklist, steps, \
-             choices, marks or a flow."
+             a picture it draws, choices, marks or a flow."
         );
     }
     let work = learning.work.trim();
@@ -1264,10 +1264,10 @@ fn about_widgets(agent: &str, widgets: bool) -> String {
     }
     format!(
         "- When the feedback asks for a chart, a graph, a comparison, a calculator, a checklist, \
-         steps or another view like these, or says one is missing, a lesson says to show it with show_widget, never \
-         to make an image file, a page or text art for it. When the answer showed one and the \
-         person says they can't see it, that is not about how {agent} works: learn nothing from \
-         it.\n"
+         steps, a picture or another view like these, or says one is missing, a lesson says to \
+         show it with show_widget, never to make an image file, a page or text art for it. When \
+         the answer showed one and the person says they can't see it, that is not about how \
+         {agent} works: learn nothing from it.\n"
     )
 }
 
