@@ -471,8 +471,11 @@ iPhone or another computer connects to it and keeps nothing but a key of its own
   routes (`/phone/v0/*`) and the short list in `phone::ALLOWED`: see, answer, approve, start,
   stop, chat (with what you tick or change under an answer, `POST /api/chat/widgets`), Ask, and
   small changes to an agent or a team, never keys, sign-ins or settings
-  (`phone/`). A phone's request stops at 1 MB, except a file it sends into a team's chat or an
-  agent's own chat, such as the picture of a part circled in the reader: that goes to
+  (`phone/`). An answer's sources read on a phone as on the Mac (ADR 0116): a site's icon comes
+  from the Mac's kept icons (`GET /api/site-icon`), and the titles of the pages a run's web searches
+  found come from the door (`GET /phone/v0/runs/{id}/sources`, and `sources` on the run's talk),
+  read from the run's events by `phone/sources.rs`, the twin of `sourceTitles.ts`. A phone's
+  request stops at 1 MB, except a file it sends into a team's chat or an agent's own chat, such as the picture of a part circled in the reader: that goes to
   `PUT /api/chat/files` as raw bytes (`application/octet-stream`, anything else refused at the
   door), up to 25 MB, and its message names it in `files`, as the Mac's chat does (ADR 0082). An
   agent's own chat is written first when it has none yet, as its first message would write it, so
@@ -718,7 +721,8 @@ itself and never connects to an address on this computer or its network (`Public
 included), asks only `https://<site>/favicon.ico`, else the icon the site's home page names in
 its first 256 KB (never an SVG), keeps only an ICO, PNG, GIF, JPEG or WebP of at most 512 KB, and
 keeps it in `<state dir>/site-icons/` for 30 days. Only `LoomWatch`'s own page on this computer's address can
-ask (`watch_api::local_evidence`).
+ask (`watch_api::local_evidence`), and a paired iPhone through the door (`phone::ALLOWED`), which
+passes the call on as a local program's. The phone never asks the site itself.
 
 ### Permissions
 
