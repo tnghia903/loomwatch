@@ -242,7 +242,7 @@ export function AgentAnswer({ runId, name, onClose }: { runId: string; name: str
   return (
     <div className="agent-answer" onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); onClose() } }}>
       <PaneHead title={record?.prompt ? <InlineMarkdown>{record.prompt.split('\n')[0] ?? ''}</InlineMarkdown> : undefined} closes="Close answer" onClose={onClose} />
-      <AnswerDocument text={text} by={name} streaming={!session.terminal} touched={touched} folder={responder?.folder} written={written} sources={sources} />
+      <AnswerDocument text={text} runId={runId} by={name} streaming={!session.terminal} touched={touched} folder={responder?.folder} written={written} sources={sources} />
     </div>
   )
 }

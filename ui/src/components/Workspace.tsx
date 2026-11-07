@@ -2659,7 +2659,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
                     onAsk={composerState.kind === 'blocked' ? undefined : askInChat} asked={passages.asked} asking={passages.asking} faces={passages.faces} onShowAsked={showAsked} teamPath={doc.path} />
                 ) : shownTab === 'answer' ? (
                   <FileOriginContext.Provider value={answerOrigin}>
-                    <AnswerDocument text={responseText} by={nodeNames.get(record?.responder ?? '') ?? record?.responder ?? 'the team'} streaming={!session.terminal} touched={touchedFiles} folder={responderAgent?.folder} written={writtenFiles} sources={answerSources} />
+                    <AnswerDocument text={responseText} runId={activeRunId} by={nodeNames.get(record?.responder ?? '') ?? record?.responder ?? 'the team'} streaming={!session.terminal} touched={touchedFiles} folder={responderAgent?.folder} written={writtenFiles} sources={answerSources} />
                   </FileOriginContext.Provider>
                 ) : session.loading ? (
                   // The record is shown once it is read whole, so it opens as it ended rather than replaying.

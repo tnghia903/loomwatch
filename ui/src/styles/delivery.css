@@ -199,7 +199,9 @@
 .delivery-response {
   white-space: normal;
 }
-.delivery-response p {
+/* A long answer's widgets stand in its words (ADR 0114) and keep their own look: the rules for the
+   words below leave them alone, at the weight they had (:where(:not(.md-widget *))). */
+.delivery-response p:where(:not(.md-widget *)) {
   margin: 0 0 1.2em;
 }
 .delivery-response h1,
@@ -219,21 +221,21 @@
 .delivery-response h3 {
   font-size: 20px;
 }
-.delivery-response ul,
-.delivery-response ol {
+.delivery-response ul:where(:not(.md-widget *)),
+.delivery-response ol:where(:not(.md-widget *)) {
   padding-left: 1.5em;
   margin-block: 1em;
 }
-.delivery-response ul {
+.delivery-response ul:where(:not(.md-widget *)) {
   list-style: disc;
 }
-.delivery-response ol {
+.delivery-response ol:where(:not(.md-widget *)) {
   list-style: decimal;
 }
-.delivery-response li {
+.delivery-response li:where(:not(.md-widget *)) {
   margin-block: 0.4em;
 }
-.delivery-response a {
+.delivery-response a:where(:not(.md-widget *)) {
   color: var(--color-accent);
   text-decoration: underline;
   text-underline-offset: 3px;
@@ -244,15 +246,15 @@
   margin-block: 20px;
   color: var(--color-ink-2);
 }
-.delivery-response table {
+.delivery-response table:where(:not(.md-widget *)) {
   display: block;
   overflow: auto;
   border-collapse: collapse;
   font-size: 13px;
   margin-block: 20px;
 }
-.delivery-response th,
-.delivery-response td {
+.delivery-response th:where(:not(.md-widget *)),
+.delivery-response td:where(:not(.md-widget *)) {
   padding: 10px;
   border: 1px solid var(--color-hairline);
   min-width: 130px;

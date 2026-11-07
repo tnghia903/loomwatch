@@ -11,8 +11,10 @@ import { figureFor, figureHue, figureStill, freshFigure } from '../../lib/librar
 import type { RunRecord } from '../../lib/runs/client'
 import { FileReaderContext } from '../../lib/files/reader'
 import type { TeamMessage } from '../../lib/watch/messages'
+import { showInDocument } from '../../lib/widgets/documentWidgets'
 import { cascaded, goldFilled, heightOf, isGoldFill, PHONE } from '../../test/cascade'
 import { caretAt, typeInto, wordsIn } from '../../test/chipField'
+import { AnswerDocument } from './AnswerDocument'
 import { ChatComposer } from './ChatComposer'
 import { SaidText } from './SaidText'
 import { TeamChat } from './TeamChat'
@@ -3145,6 +3147,80 @@ describe('widgets under an answer', () => {
 
     fireEvent.click(within(choices).getByRole('button', { name: 'Book the bus' }))
     await waitFor(() => expect(posted.find((post) => post.url === '/api/chat/messages')).toMatchObject({ body: { teamPath: 'news.yaml', text: 'Book the bus', replyTo: { messageId: 'note:q-1', from: 'researcher', kind: 'answer' } } }))
+  })
+
+  // The owner's brief (7 November): two charts as cards under a document's card, far from the
+  // bullets they show. In the document they stand under those bullets; its choices stay in the chat.
+  it('stands a long answer’s widgets in the answer where it is read in full, and keeps only its choices under its card', async () => {
+    said.read = true
+    const reply = [
+      '# Morning Brief',
+      '',
+      '## World',
+      '- **US employers added 165,000 jobs in October.** Economists expected about 65,000, so a December rate rise looks likelier.',
+      '- **Brent settled at $97.97 and is set for its steepest weekly fall since Covid.** Sources disagree on the day’s move.',
+      '',
+      '## Vietnam',
+      '- **The VN-Index fell 0.88% to 1,725.36 on 6 November.** Selling was broad, and turnover rose 19%.',
+    ].join('\n')
+    const chart = { n: 2, line: 4, spec: { kind: 'chart' as const, title: 'US jobs added in October', unit: 'jobs', bars: [{ label: 'Expected', value: 65_000 }, { label: 'Actual', value: 165_000 }] } }
+    const placed = [widgets[0], chart, { ...widgets[1], n: 3 }]
+    page = [{ kind: 'work', run: run({ reply }), request: message({}), notes: [], widgets: placed }]
+    answer = () => new Response(JSON.stringify({ ...placed[2], state: { checked: [true, false] }, changedAt: '2026-11-07T01:00:00.000Z' }), { status: 200 })
+    const chat = renderChat()
+    // In the chat: the card, and under it the choices alone.
+    const card = await screen.findByRole('button', { name: /^Morning Brief/ })
+    const choices = await screen.findByRole('region', { name: 'Which theme?' })
+    expect(card.compareDocumentPosition(choices) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.queryByRole('region', { name: 'US jobs added in October' })).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Before Wednesday' })).toBeNull()
+    // Where it is read in full: the chart under the bullet it shows, the checklist at the end.
+    const reader = render(<AnswerDocument runId="run-1" by="Writer" streaming={false} text={reply} />)
+    const inReader = within(reader.container)
+    const jobs = await inReader.findByRole('region', { name: 'US jobs added in October' })
+    expect(jobs.closest('li')).toHaveTextContent(/^US employers added 165,000 jobs/)
+    expect(inReader.queryByRole('region', { name: 'Which theme?' })).toBeNull()
+    // A tick there is kept for this answer.
+    fireEvent.click(inReader.getByRole('checkbox', { name: /Print 32 copies/ }))
+    await waitFor(() => expect(posted.find((post) => post.url === '/api/chat/widgets')).toMatchObject({ body: { teamPath: 'news.yaml', runId: 'run-1', n: 3, state: { checked: [true, false] } } }))
+    // The chat reads an older page in its place: the answer open beside it keeps its widgets.
+    chat.unmount()
+    expect(inReader.getByRole('region', { name: 'US jobs added in October' })).toBeInTheDocument()
+    showInDocument('run-1', null)
+  })
+
+  // A widget shown as the words came in, in a bubble that then grows into a card, stays in sight.
+  it('keeps a long answer’s widgets under its card while it is written, until its reader shows it', async () => {
+    const event = (seq: number, kind: string, payload: Record<string, unknown>) => ({ id: `e-${seq}`, sessionId: 'run-1', agentId: 'writer', seq, ts: '2026-11-07T00:00:00.000Z', kind, payload })
+    const spec = { kind: 'chart', title: 'US jobs added in October', unit: 'jobs', bars: [{ label: 'Expected', value: 65_000 }, { label: 'Actual', value: 165_000 }] }
+    said.events = [
+      event(1, 'tool_call', { name: 'show_widget', callId: 'c-1', rawInput: spec }),
+      event(2, 'tool_update', { status: 'completed', callId: 'c-1', rawOutput: { place: '{{widget 1}}' } }),
+    ]
+    const words = [
+      '# Morning Brief',
+      '',
+      '## World',
+      '- **US employers added 165,000 jobs in October.** Economists expected about 65,000, so a December rate rise looks likelier.',
+      '{{widget 1}}',
+      '- **Brent settled at $97.97 and is set for its steepest weekly fall since Covid.** Sources disagree on the day’s move.',
+      '',
+      '## Vietnam',
+      '- **The VN-Index fell 0.88% to 1,725.36 on 6 November.** Selling was broad, and turnover rose 19%. More follows as',
+    ].join('\n')
+    said.agents = [{ id: 'writer', reply: words, taskState: 'STREAMING' }]
+    page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null, working: ['writer'], responder: 'writer' }), request: message({}), notes: [] }]
+    const chat = renderChat()
+    await screen.findByRole('button', { name: /^Morning Brief, being written/ })
+    expect((await screen.findByRole('region', { name: 'US jobs added in October' })).closest('.tc-answer')).not.toBeNull()
+    // Once the reader shows that answer, the widget stands there and not under the card.
+    chat.unmount()
+    renderChat({ answerRunId: 'run-1' })
+    const reader = render(<AnswerDocument runId="run-1" by="Writer" streaming text={words.replace('{{widget 1}}\n', '')} />)
+    const jobs = await within(reader.container).findByRole('region', { name: 'US jobs added in October' })
+    expect(jobs.closest('li')).toHaveTextContent(/^US employers added 165,000 jobs/)
+    expect(within(screen.getByRole('log')).queryByRole('region', { name: 'US jobs added in October' })).toBeNull()
+    showInDocument('run-1', null)
   })
 
   it('closes the newest answer’s choices while the chat can’t send', async () => {
