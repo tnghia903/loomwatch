@@ -59,4 +59,21 @@ describe('place', () => {
     expect(placedSoFar('Do these first:\n\n', shown)).toEqual({ words: 'Do these first:\n\n', widgets: [] })
     expect(placedSoFar('Do these first:\n\n{{widget 1}}\n\nThen', shown)).toEqual({ words: 'Do these first:\n\nThen', widgets: [{ n: 1, line: 2, spec: list }] })
   })
+
+  it('draws a picture as it writes from the shapes the daemon read out of its SVG', () => {
+    const event = (seq: number, kind: RunEvent['kind'], payload: Record<string, unknown>): RunEvent => ({ id: `e${seq}`, sessionId: 'run', agentId: 'writer', seq, ts: '2026-11-07T05:00:00Z', kind, payload })
+    const given = { kind: 'picture', title: 'A sail', drawing: '<svg viewBox="0 0 100 50"><path d="M0 0L100 0L100 50Z"/></svg>' }
+    const read: WidgetSpec = { kind: 'picture', title: 'A sail', width: 100, height: 50, shapes: [{ d: 'M0 0L100 0L100 50Z' }] }
+    const shown = shownSoFar([
+      event(1, 'tool_call', { callId: 'a', name: 'show_widget', rawInput: given }),
+      event(2, 'tool_update', { callId: 'a', status: 'completed', rawOutput: { place: '{{widget 1}}' }, widget: read }),
+      // Recorded without the daemon's reading: the agent's SVG alone can't be drawn.
+      event(3, 'tool_call', { callId: 'b', name: 'show_widget', rawInput: { ...given, title: 'Unread' } }),
+      event(4, 'tool_update', { callId: 'b', status: 'completed', rawOutput: { place: '{{widget 2}}' } }),
+      // A checklist the same way is drawn as the agent gave it.
+      event(5, 'tool_call', { callId: 'c', name: 'show_widget', rawInput: list }),
+      event(6, 'tool_update', { callId: 'c', status: 'completed', rawOutput: { place: '{{widget 3}}' } }),
+    ], 'writer')
+    expect([...shown.entries()]).toEqual([[1, read], [3, list]])
+  })
 })

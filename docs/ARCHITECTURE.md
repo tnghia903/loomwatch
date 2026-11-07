@@ -653,7 +653,11 @@ each widget in the `widgets` table with the line of the words it stands before (
 end), before the run reads as done. So the kept reply is words only, for Copy, Notion, search, the
 notch and the phone's notifications. The app places widgets the same way while the answer is
 streamed (`ui/src/lib/widgets/place.ts`, from the run's `show_widget` events), both reading
-`schemas/widget-place.cases.json`. The chat page's `work` items carry `widgets`.
+`schemas/widget-place.cases.json`. It draws each from the widget as the daemon read it, which the
+Team Bus records on the call's `tool_update` as `widget`, beside `rawOutput` so the agent isn't told
+it again: a picture arrives as the agent's SVG and is drawn from the shapes read out of it. The
+chat page's `work` items carry `widgets`. A widget the app can't draw says so in its place, and the
+rest of the screen goes on.
 
 A long answer, which the chat shows as a card and the pane beside it reads in full
 (`AnswerDocument.tsx`), has its widgets drawn there, all but its choices, which stay under the card

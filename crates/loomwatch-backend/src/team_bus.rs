@@ -1510,15 +1510,26 @@ impl TeamBus {
                 ("failed", raw, tool_error(&message))
             }
         };
+        let mut update = json!({
+            "callId": call_id,
+            "status": status,
+            "rawOutput": raw_output
+        });
+        // A widget shown, as LoomWatch read it (ADR 0114): what the app draws while the answer is
+        // still being written, so it is the one kept with the answer. A picture comes as the
+        // agent's SVG and is drawn from the shapes read out of it. Beside the output, not in it:
+        // the agent isn't told its widget again.
+        if status == "completed"
+            && name == crate::widgets::TOOL
+            && let Ok(widget) = crate::widgets::read(&arguments)
+        {
+            update["widget"] = json!(widget);
+        }
         event_log
             .append(
                 &session.agent_id,
                 EventKind::ToolUpdate,
-                json!({
-                    "callId": call_id,
-                    "status": status,
-                    "rawOutput": raw_output
-                }),
+                update,
                 Some(rpc_result(
                     request.get("id").unwrap_or(&Value::Null),
                     &result,
@@ -4512,6 +4523,43 @@ mod tests {
         // Each widget the session shows has a place line of its own; a refused one takes none.
         let second = lead.call(crate::widgets::TOOL, list.clone()).await;
         assert_eq!(second["structuredContent"]["place"], "{{widget 2}}");
+        // The live record of a widget shown holds it as LoomWatch read it, for the app to draw
+        // while the answer is written: a picture's SVG as the shapes read out of it. The agent
+        // isn't told its widget again, and a refused one has none.
+        let picture = json!({
+            "kind": "picture",
+            "title": "A sail",
+            "drawing": "<svg viewBox=\"0 0 100 50\"><path d=\"M10 10L60 10L60 40Z\"/></svg>"
+        });
+        let drawn = lead.call(crate::widgets::TOOL, picture).await;
+        assert_eq!(drawn["isError"], false, "{drawn}");
+        assert!(!drawn.to_string().contains("shapes"), "{drawn}");
+        let updates: Vec<_> = archive
+            .load_session("answering")
+            .await?
+            .into_iter()
+            .filter(|event| event.kind == EventKind::ToolUpdate)
+            .collect();
+        let live = updates.last().context("the picture's update")?;
+        assert_eq!(
+            live.payload["widget"]["kind"], "picture",
+            "{}",
+            live.payload
+        );
+        assert_eq!(live.payload["widget"]["title"], "A sail");
+        assert!(live.payload["widget"]["width"].is_number(), "framed");
+        let shapes = live.payload["widget"]["shapes"]
+            .as_array()
+            .context("shapes")?;
+        assert_eq!(shapes.len(), 1, "{shapes:?}");
+        assert!(live.payload["rawOutput"].get("widget").is_none());
+        let failed: Vec<_> = updates
+            .iter()
+            .filter(|event| event.payload["status"] == "failed")
+            .collect();
+        assert_eq!(failed.len(), 1, "the empty checklist");
+        assert!(failed[0].payload.get("widget").is_none());
+        assert_eq!(updates[0].payload["widget"]["kind"], "checklist");
 
         // The answering agent's other sessions write to a teammate, not to the person: answering a
         // teammate's question, or started by one with work of its own.

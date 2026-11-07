@@ -32,6 +32,8 @@
 /* Fraunces ships at 400 only: a heavier weight is a bold the browser fakes. */
 .wg-title { margin: 0; display: flex; align-items: baseline; gap: var(--sp-2); font: 400 18px/24px var(--font-serif); letter-spacing: -.005em; color: var(--color-ink); text-wrap: balance; }
 .wg-count { margin-left: auto; flex: none; font: 400 12px/16px var(--font-sans); color: var(--color-ink-2); font-variant-numeric: tabular-nums; }
+/* In the place of a widget the app couldn't draw. */
+.wg-unshown { margin: 0; font: 400 13px/18px var(--font-sans); color: var(--color-ink-2); }
 
 /* What one dot stands for, under a chart or a comparison of things counted. */
 .wg-key { margin: 0; display: flex; align-items: center; gap: 6px; font: 400 12px/16px var(--font-sans); color: var(--color-ink-2); font-variant-numeric: tabular-nums; }
