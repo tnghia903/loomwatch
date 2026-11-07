@@ -865,6 +865,35 @@ impl ChatStore {
         Ok(())
     }
 
+    /// Whether `agent` answered a team note itself after `answered_after`, among the notes sent
+    /// from `sent_after` up to `before`.
+    async fn answered_note_since(
+        &self,
+        team: &TeamRef,
+        agent: &str,
+        sent_after: &str,
+        answered_after: &str,
+        before: &str,
+    ) -> Result<bool, sqlx::Error> {
+        sqlx::query_scalar(
+            "SELECT EXISTS (
+                 SELECT 1 FROM chat_messages, json_each(chat_messages.answers, '$.said') AS said
+                 WHERE (team_key = $1 OR team_path = $2) AND route = 'team_note'
+                   AND created_at >= $3 AND created_at < $4
+                   AND json_extract(said.value, '$.from') = $5
+                   AND json_extract(said.value, '$.at') > $6
+             )",
+        )
+        .bind(&team.key)
+        .bind(&team.path)
+        .bind(sent_after)
+        .bind(before)
+        .bind(agent)
+        .bind(answered_after)
+        .fetch_one(self.db.reader())
+        .await
+    }
+
     /// Team notes before `before`, newest first.
     async fn team_notes(
         &self,
@@ -1350,6 +1379,39 @@ pub(crate) async fn conversation(
             None
         }
     }
+}
+
+/// Whether `agent` answered a message in the team's chat itself, without starting work (ADR
+/// 0076), after `work` gave its answer and before `record`, the run about to start, was created.
+///
+/// Then that answer, not `work`, is the newest thing the agent said to the person, as
+/// [`Answered::newest`] reads the person's next words. Only notes sent since `work` was created are
+/// read, which keeps the read to the chat since. With no chat to read, or a failed read, it says
+/// no, and the turn follows `work` as it always has.
+pub(crate) async fn answered_in_chat_since(
+    registry: &RunRegistry,
+    record: &RunRecord,
+    agent: &str,
+    work: &RunRecord,
+) -> bool {
+    let Some(store) = registry.chat_store() else {
+        return false;
+    };
+    let team = TeamRef {
+        key: record.team_key.clone(),
+        path: record.team_path.clone(),
+    };
+    let answered = work.finished_at.as_deref().unwrap_or(&work.created_at);
+    store
+        .answered_note_since(&team, agent, &work.created_at, answered, &record.created_at)
+        .await
+        .unwrap_or_else(|error| {
+            eprintln!(
+                "loomwatchd: could not read the team's chat before run {}: {error}",
+                record.run_id
+            );
+            false
+        })
 }
 
 /// What the conversation is made from, newest first.
@@ -6258,6 +6320,115 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    /// The owner's report, 2026-11-07: Coby answered "what is a black hole?" in the chat, was then
+    /// asked "more detail", and wrote more about the Senate, from a piece of work the day before.
+    /// That work was handed back as `## Your previous output`, the last thing before the task.
+    /// Once the agent has answered in the chat since its work, the turn carries on from the chat.
+    #[tokio::test]
+    async fn an_at_agent_after_its_answer_in_the_chat_carries_on_from_that_answer() {
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        write_news_desk(&dir, FirstTurn::Answered);
+        let rig = rig(pool, &dir);
+        let store = rig.registry.chat_store().unwrap();
+        let to_researcher = |text: &str| json!({"teamPath": "news.yaml", "text": text, "to": {"kind": "agent", "agent": "researcher"}});
+        let finished = async |sent: Value| {
+            let run_id = sent["run"]["runId"].as_str().unwrap().to_owned();
+            let run = wait_for(&rig.registry, &run_id, |run| run.status.is_terminal()).await;
+            assert_eq!(run.status, RunStatus::Succeeded, "{run:?}");
+            run
+        };
+        // An answer in the chat, given after the work before it, as `answer_together` keeps it.
+        let answered = async |text: &str, by: &str, said: &str, team: &RunRecord| {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+            let mut message = note(&now(), text, None);
+            message.team_key.clone_from(&team.team_key);
+            message.team_path.clone_from(&team.team_path);
+            message.agent_id = Some(by.to_owned());
+            message.answers = Some(NoteAnswers {
+                said: vec![NoteAnswer {
+                    from: by.to_owned(),
+                    text: said.to_owned(),
+                    at: now(),
+                }],
+                ..NoteAnswers::default()
+            });
+            store.insert(&message).await.unwrap();
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        };
+
+        let (_, sent) = send(&rig.app, to_researcher("the Senate, in depth")).await;
+        let senate = finished(sent).await;
+
+        // Writer answering something in the chat is not Researcher's own last word, nor is an
+        // answer Researcher gave before its work had finished: Researcher still carries on from
+        // its work.
+        answered("what day is it?", "writer", "Saturday.", &senate).await;
+        let mut during = note(&senate.created_at, "is it raining?", None);
+        during.id = "n-during".to_owned();
+        during.team_key.clone_from(&senate.team_key);
+        during.team_path.clone_from(&senate.team_path);
+        during.agent_id = Some("researcher".to_owned());
+        during.answers = Some(NoteAnswers {
+            said: vec![NoteAnswer {
+                from: "researcher".to_owned(),
+                text: "No.".to_owned(),
+                at: senate.created_at.clone(),
+            }],
+            ..NoteAnswers::default()
+        });
+        store.insert(&during).await.unwrap();
+        let (_, sent) = send(&rig.app, to_researcher("add a source")).await;
+        let sourced = finished(sent).await;
+        assert_eq!(
+            sourced.follows_run_id.as_deref(),
+            Some(senate.run_id.as_str())
+        );
+        let researcher = prompts(&rig.archive, &sourced.run_id, "researcher").await;
+        assert!(
+            researcher[0].contains("## Your previous output\n"),
+            "{}",
+            researcher[0]
+        );
+
+        // Researcher answers a quick question itself, then is asked for more detail.
+        answered(
+            "what is a black hole?",
+            "researcher",
+            "A black hole is where gravity keeps even light in.",
+            &sourced,
+        )
+        .await;
+        let (status, sent) = send(&rig.app, to_researcher("more detail")).await;
+        assert_eq!(status, StatusCode::ACCEPTED, "{sent}");
+        let detail = finished(sent).await;
+        assert_eq!(detail.only_agent.as_deref(), Some("researcher"));
+        assert_eq!(
+            detail.follows_run_id, None,
+            "the earlier work is not what this carries on"
+        );
+        let prompt = prompts(&rig.archive, &detail.run_id, "researcher")
+            .await
+            .remove(0);
+        assert!(!prompt.contains("Previous output"), "{prompt}");
+        // The quick answer is the last thing before the task, and the earlier work is still in
+        // the conversation, in full, where it happened.
+        let quick = prompt
+            .find("Researcher answered in the chat: A black hole is where gravity keeps even light in.")
+            .unwrap_or_else(|| panic!("the quick answer is in the conversation: {prompt}"));
+        let task = prompt.find("## Task\nmore detail").expect("the task");
+        assert!(quick < task, "{prompt}");
+        assert!(
+            !prompt[quick..task].contains("researcher work"),
+            "no earlier work comes between the quick answer and the task: {prompt}"
+        );
+        let earlier = format!("answered (work {}):", short_id(&sourced.run_id));
+        let at = prompt
+            .find(&earlier)
+            .unwrap_or_else(|| panic!("the earlier work is in the conversation: {prompt}"));
+        assert!(at < quick, "{prompt}");
     }
 
     #[tokio::test]

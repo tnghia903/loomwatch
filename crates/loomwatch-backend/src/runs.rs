@@ -2983,6 +2983,12 @@ pub(crate) const APPROVAL_TEXT: &str = "Approved. Continue as planned.";
 ///
 /// Nothing found is not a refusal: an agent that has never worked here still gets the conversation
 /// and the operator's message, which is what a first @mention means.
+///
+/// Nor is that work followed when the agent has since answered a message in the chat itself
+/// ([`crate::chat::answered_in_chat_since`]). That answer is the last thing it said to the person,
+/// and it is in the conversation. Handing the older work back as `## Your previous output`, the
+/// last thing before the task, made "more detail" redo yesterday's work instead of the answer just
+/// given.
 async fn resolve_one_agent(
     registry: &RunRegistry,
     prepared: &mut PreparedRun,
@@ -3006,7 +3012,16 @@ async fn resolve_one_agent(
         lineage.start_at = Some(only.to_owned());
         prepared.record.start_at = Some(only.to_owned());
     }
-    if let Some(source) = latest_work_of(registry, &prepared.record, only, &prepared.order) {
+    let source = match latest_work_of(registry, &prepared.record, only, &prepared.order) {
+        Some(work)
+            if crate::chat::answered_in_chat_since(registry, &prepared.record, only, &work)
+                .await =>
+        {
+            None
+        }
+        work => work,
+    };
+    if let Some(source) = source {
         lineage.previous_output =
             own_output(&prepared.archive, &source, only, &prepared.predecessors).await?;
         lineage.own_output = lineage.previous_output.is_some();
