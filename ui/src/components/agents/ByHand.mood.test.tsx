@@ -82,3 +82,36 @@ describe('the figure at the bench, while its run works', () => {
     expect(shown.view?.phase).toBe('thinking')
   })
 })
+
+// The owner (2026-11-07): asked a question it answered in the chat itself, the chat showed it
+// writing while its figure sat still. Such an answer starts no run, so the bench is told apart.
+describe('the figure at the bench, while it answers in its chat itself', () => {
+  const writing = (record: RunRecord | null, on: boolean) => (
+    <ByHand draft={{ ...BLANK_DRAFT, name: 'Reader', instructions: 'Check it.' }} set={vi.fn()} skills={[]} skillsLoading={false} roleField={createRef()} figure={{ kind: 'yarn', color: 'sage' }} record={record} writing={on} />
+  )
+
+  it('types until the answer is in, then rests as it did before', async () => {
+    const page = render(writing(null, true))
+    await waitFor(() => expect(shown.view?.mood).toBe('working'))
+    // No run's events to act out: it types, as the chat's dots say, however long the answer takes.
+    expect(shown.view?.phase).toBeUndefined()
+    expect(stream.asked.every((sessionId) => sessionId === '')).toBe(true)
+    act(() => { vi.advanceTimersByTime(10_000) })
+    expect(shown.view?.mood).toBe('working')
+
+    page.rerender(writing(null, false))
+    expect(shown.view?.mood).toBe('still')
+    // After work it finished, it is done again once the answer is in.
+    page.rerender(writing(run('succeeded', 12), true))
+    expect(shown.view?.mood).toBe('working')
+    page.rerender(writing(run('succeeded', 12), false))
+    expect(shown.view?.mood).toBe('done')
+  })
+
+  it('acts out a live run as the run says, even while the chat says it writes', async () => {
+    stream.count = 3
+    const asking: RunRecord = { ...run('running'), permissionRequests: [{ id: 'p', agent: 'reader', name: 'Reader', title: 'Web search', kind: 'fetch', switch: 'web', since: '2026-10-16T09:00:01.000Z', expiresAt: '2026-10-16T09:10:01.000Z' }] }
+    render(writing(asking, true))
+    await waitFor(() => expect(shown.view?.mood).toBe('asking'))
+  })
+})

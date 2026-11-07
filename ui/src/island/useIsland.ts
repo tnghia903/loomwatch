@@ -94,6 +94,8 @@ export interface Island {
   suggest: (text: string) => void
   /** Its newest run in its chat, which its workbench acts out while it works. */
   boxRecord: RunRecord | null
+  /** It is answering a message in that chat itself, which starts no run: its workbench works meanwhile. */
+  boxWriting: boolean
   /** Its workbench, open under the box, or folded away; opened from the pill, the box opens too. */
   bench: boolean
   setBench: (on: boolean) => void
@@ -529,6 +531,7 @@ export function useIsland(): Island {
   const { notch, menuBar } = state.app
   const boxPath = box?.chatPath ?? null
   const boxRecord = useMemo(() => newestIn(state.records, boxPath), [state.records, boxPath])
+  const boxWriting = Boolean(boxPath) && state.notes.some((note) => note.teamPath === boxPath && note.answers.waiting.length > 0)
 
   // What to suggest asking it next: read only while the box is open, and again as an answer comes
   // in, so next steps are written for an answer only when the person reaches for the box after it.
@@ -592,6 +595,7 @@ export function useIsland(): Island {
     suggestions: suggested,
     suggest,
     boxRecord,
+    boxWriting,
     bench: state.bench,
     setBench: useCallback((on: boolean) => dispatch({ type: 'bench', on }), []),
     openBench: useCallback(() => {

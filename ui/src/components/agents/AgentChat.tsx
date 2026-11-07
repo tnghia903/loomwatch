@@ -42,6 +42,8 @@ export interface AgentChatProps {
   onAllow: (what: AlwaysAllowed) => void
   /** The work the figure shows: the newest piece while it runs, and how it ended if you watched. */
   onRecord: (record: RunRecord | null) => void
+  /** Whether it is answering a message in the chat itself, which no run shows: the figure works meanwhile. */
+  onWriting?: (writing: boolean) => void
   /** The piece whose long answer is read in full over the bench, and opening or closing one. */
   answerRunId: string | null
   onOpenAnswer: (runId: string | null) => void
@@ -76,7 +78,7 @@ const message = (failed: unknown) => (failed instanceof Error ? failed.message :
  * A piece's Details, and the record a finding of its review points at, open over the bench
  * (`AgentDetails`), so working with one agent never takes you to a team's screen.
  */
-export function AgentChat({ draft, model, chatId, figure, onAllow, onRecord, answerRunId, onOpenAnswer, knowledge, file, detailsRunId, onDetails, reveal = null, landAt = null }: AgentChatProps) {
+export function AgentChat({ draft, model, chatId, figure, onAllow, onRecord, onWriting, answerRunId, onOpenAnswer, knowledge, file, detailsRunId, onDetails, reveal = null, landAt = null }: AgentChatProps) {
   const agentId = chatAgentId(chatId)
   const name = draft.name.trim() || 'New agent'
   // A new agent's chat is kept under its name, so one with no name yet has nowhere to keep it.
@@ -157,6 +159,9 @@ export function AgentChat({ draft, model, chatId, figure, onAllow, onRecord, ans
     onRecord(run && watched.current.has(run.runId) ? run : null)
   }, [onRecord])
   useEffect(() => () => onRecord(null), [onRecord])
+  // And while it answers a message in the chat itself, which starts no run.
+  const writing = useCallback((agents: readonly string[]) => onWriting?.(agents.includes(agentId)), [onWriting, agentId])
+  useEffect(() => () => onWriting?.(false), [onWriting])
 
   // The newer of what the file reader and Details ask the chat to show.
   const fromFile = file?.reveal ?? null
@@ -214,6 +219,7 @@ export function AgentChat({ draft, model, chatId, figure, onAllow, onRecord, ans
         announce={announce}
         onOpenFinding={(runId, line) => onDetails({ runId, evidenceId: line.evidenceId, agentId: line.agentId })}
         onNewestRun={follow}
+        onWriting={writing}
         reveal={shownMessage}
         landAt={landAt}
         ask={file?.ask ?? null}

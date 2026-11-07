@@ -97,8 +97,11 @@ function switchName(key: AllowSwitch): string {
  * agent is at (reading, thinking, using a tool or typing), what it is thinking about, and what on
  * its bench it just used (a skill, a folder, a tool) for its figure to go and get, from those events. The record counts its
  * events only once the run is over, so while it runs they are counted as they arrive.
+ *
+ * `writing`: it is answering a message in its chat itself, which starts no run and has no events
+ * to follow, so the figure types at its laptop until the answer is in, as the chat's dots say.
  */
-export function useFigureMood(record: RunRecord | null, kit: BenchKit) {
+export function useFigureMood(record: RunRecord | null, kit: BenchKit, writing = false) {
   const live = record?.status === 'running'
   const now = useNow(live)
   const followed = useSessionEvents(live ? record.sessionId : '').events
@@ -121,7 +124,8 @@ export function useFigureMood(record: RunRecord | null, kit: BenchKit) {
       .filter((helper) => helper.state === 'working' || now - Date.parse(helper.finishedAt ?? '') < HELPER_LINGER_MS)
       .map((helper) => ({ id: helper.id, state: helper.state === 'stopped' ? 'failed' as const : helper.state, phase: helper.state === 'working' ? workPhase(followed, helper.id, now) : null }))
     : []
-  return { mood: figureMood(record, moved && moved.run === run ? moved.at : null, now), events, phase, thought, uses, helpers }
+  const mood = writing && !live ? 'working' : figureMood(record, moved && moved.run === run ? moved.at : null, now)
+  return { mood, events, phase, thought, uses, helpers }
 }
 
 /** How long a helper that finished stays at the bench, handing its part back, before it goes. */
@@ -129,9 +133,10 @@ const HELPER_LINGER_MS = 3500
 
 /**
  * One of My agents at its workbench, to look at (the island's box): as it is saved, at rest, or
- * acting out `record`, its newest run in its own chat, while that runs.
+ * acting out `record`, its newest run in its own chat, while that runs, and at work while it is
+ * `writing` an answer in that chat itself.
  */
-export function useSavedBench(job: SavedJob, record: RunRecord | null): { view: BenchView; labels: BenchLabel[] } {
+export function useSavedBench(job: SavedJob, record: RunRecord | null, writing = false): { view: BenchView; labels: BenchLabel[] } {
   const draft = useMemo(() => draftFromJob(job), [job])
   const figure = useMemo(() => figureFor(job.id, job.figure), [job.id, job.figure])
   const { catalog } = useModels()
@@ -145,7 +150,7 @@ export function useSavedBench(job: SavedJob, record: RunRecord | null): { view: 
   const tools = useMemo(() => draft.tools.map((name) => ({ name, icon: (ready && toolNamed(ready, name)?.icon) || null })), [draft.tools, ready])
   const reads = useMemo(() => readsOf({ capabilities: knowledgeOf(draft.reads) }), [draft.reads])
   const kit = useMemo<BenchKit>(() => ({ skills: draft.skills, reads, tools: draft.tools }), [draft.skills, reads, draft.tools])
-  const { mood, events, phase, thought, uses, helpers } = useFigureMood(record, kit)
+  const { mood, events, phase, thought, uses, helpers } = useFigureMood(record, kit, writing)
   const asked = askedKey(record)
   const view = useMemo<BenchView>(() => ({
     look: { name: draft.name, instructions: draft.instructions, app: draft.model, model: `${draft.model}|${draft.effort}`, skills: draft.skills, allow: draft.allow },

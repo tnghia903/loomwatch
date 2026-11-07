@@ -12,9 +12,10 @@ import { draftFromJob } from '../../lib/library/draft'
 import { AgentChat } from './AgentChat'
 import { AgentsPage } from './AgentsPage'
 
-// The bench is drawn with WebGL, which jsdom has none of: here it is only its labels.
+// The bench is drawn with WebGL, which jsdom has none of: here it is only its labels, and the
+// mood its figure is told to act out.
 vi.mock('./AgentFigure', () => ({
-  default: ({ labels }: AgentFigureProps) => <div>{labels.map((tag) => <button key={tag.anchor} type="button" aria-label={tag.label}>{tag.text}</button>)}</div>,
+  default: ({ labels, view }: AgentFigureProps) => <div data-bench-mood={view.mood}>{labels.map((tag) => <button key={tag.anchor} type="button" aria-label={tag.label}>{tag.text}</button>)}</div>,
 }))
 
 // The chat itself is the team chat's (TeamChat.test.tsx); here it is only the ways it asks for a
@@ -210,5 +211,24 @@ describe('a link to a piece of an agent’s own chat', () => {
     } finally {
       Object.defineProperty(window, 'location', { configurable: true, value: real })
     }
+  }, 15_000)
+})
+
+// The owner (2026-11-07): asked a question it answered in its chat itself, its figure sat still
+// while the chat showed it writing. That answer starts no run, so the chat says who writes.
+describe('its figure, while it answers in its chat itself', () => {
+  it('works while it writes, not while another agent in the chat does, and rests once it answered', async () => {
+    await openChat()
+    const bench = () => document.querySelector('[data-bench-mood]')
+    await waitFor(() => expect(bench()).not.toBeNull())
+    const resting = bench()!.getAttribute('data-bench-mood')
+    expect(resting).not.toBe('working')
+    // One of your other agents it added to this chat (ADR 0092) writing is not this figure's work.
+    act(() => chat.props!.onWriting!(['writer']))
+    expect(bench()).toHaveAttribute('data-bench-mood', resting)
+    act(() => chat.props!.onWriting!(['maya']))
+    expect(bench()).toHaveAttribute('data-bench-mood', 'working')
+    act(() => chat.props!.onWriting!([]))
+    expect(bench()).toHaveAttribute('data-bench-mood', resting)
   }, 15_000)
 })

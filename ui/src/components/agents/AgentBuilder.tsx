@@ -95,6 +95,7 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
   const [removing, setRemoving] = useState(false)
   const roleField = useRef<HTMLTextAreaElement>(null)
   const [benchRecord, setBenchRecord] = useState<RunRecord | null>(null)
+  const [benchWriting, setBenchWriting] = useState(false)
   // A long answer from the chat, read in full over the bench.
   const [answerRun, setAnswerRun] = useState<string | null>(null)
   // A file its answers name, read over the bench too (ADR 0077).
@@ -288,9 +289,9 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
     <ByHand
       fresh={!id}
       widgetsDefault={widgetsDefault}
-      draft={draft} set={set} skills={skills} skillsLoading={skillsLoading} roleField={roleField} figure={figure} record={benchRecord} reads={inTeam?.reads} onShowWorkflow={inTeam?.onShowWorkflow}
+      draft={draft} set={set} skills={skills} skillsLoading={skillsLoading} roleField={roleField} figure={figure} record={benchRecord} writing={benchWriting} reads={inTeam?.reads} onShowWorkflow={inTeam?.onShowWorkflow}
       learned={saved ? { savedAgent: saved.id } : null}
-      chat={view === 'chat' ? <AgentChat draft={draft} model={draft.model} chatId={chatId} figure={figure} onAllow={(what) => (typeof what === 'string' ? set('allow', { ...draft.allow, [what]: true }) : set('toolAllow', withAllowed(draft.toolAllow, what.tool, what.call)))} onRecord={setBenchRecord} answerRunId={answerRun} onOpenAnswer={(runId) => { setAnswerRun(runId); if (runId) details.close() }} knowledge={inTeam?.knowledge} file={benchFile.chat}
+      chat={view === 'chat' ? <AgentChat draft={draft} model={draft.model} chatId={chatId} figure={figure} onAllow={(what) => (typeof what === 'string' ? set('allow', { ...draft.allow, [what]: true }) : set('toolAllow', withAllowed(draft.toolAllow, what.tool, what.call)))} onRecord={setBenchRecord} onWriting={setBenchWriting} answerRunId={answerRun} onOpenAnswer={(runId) => { setAnswerRun(runId); if (runId) details.close() }} knowledge={inTeam?.knowledge} file={benchFile.chat}
         detailsRunId={details.asked?.runId ?? null} onDetails={(asked) => { details.open(asked); setAnswerRun(null); benchFile.close() }} reveal={details.reveal} landAt={run} /> : undefined}
       onBuild={() => showView('build')}
       framed={Boolean(bar)}
