@@ -603,8 +603,8 @@ LoomWatch's numbers, and tells it to write the answer now (words written beside 
 part of the reply). A chart (2 to 12 bars, one `unit`, `prefix` and `decimals` for all) takes the
 agent's figures as they are; the call answers with them written as the person reads them (`bars`),
 and the app draws every bar from one zero (`ui/src/lib/widgets/chart.ts`), a figure below zero to
-its left. A graph (2 to 24 labels, 1 to 3 series) is drawn to round ticks (`ui/src/lib/widgets/
-graph.ts`), its series in `--color-series-1..3`. A comparison has 2 or 3 `sides` (three at most, so
+its left. A graph (2 to 24 labels, 1 to 3 series) is drawn to round ticks, the top one at or above its
+largest value (`ui/src/lib/widgets/graph.ts`), its series in `--color-series-1..3`. A comparison has 2 or 3 `sides` (three at most, so
 each keeps a readable column on a phone), an optional `whole` they are parts of, a figure on every
 side or on none (in one `unit`), and up to 6 `rows` of facts with one value per side; the call
 answers with its figures (`figures`), and the app draws each from one zero. A chart or comparison

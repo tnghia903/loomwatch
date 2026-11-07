@@ -11,12 +11,20 @@ export function barPath(left: number, width: number, from: number, to: number): 
 
 /** Round ticks from at most `low` to at least `high`, three to six of them. */
 export function niceTicks(low: number, high: number): number[] {
+  // Figures so far apart that their distance isn't a number get a plain 0 to 1, as before, rather
+  // than a step that is not a number and a loop that never ends.
+  if (!Number.isFinite(high - low)) return [0, 1]
   if (low === high) return [low, low + 1]
   const rough = (high - low) / 4
   const magnitude = 10 ** Math.floor(Math.log10(rough))
   const step = [1, 2, 2.5, 5, 10].map((times) => times * magnitude).find((candidate) => candidate >= rough) ?? 10 * magnitude
   const first = Math.floor(low / step) * step
+  // On up to the first tick at or above the largest value, so nothing drawn rises past the top line.
   const ticks: number[] = []
-  for (let tick = first; tick < high + step / 2; tick += step) ticks.push(Number(tick.toPrecision(12)))
+  for (let tick = first; ticks.length < 12; tick += step) {
+    const round = Number(tick.toPrecision(12))
+    ticks.push(round)
+    if (round >= high) break
+  }
   return ticks
 }
