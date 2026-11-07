@@ -4510,8 +4510,23 @@ async fn get_run(
             .map(str::to_owned)
             .collect()
     };
+    let succeeded = record.status == RunStatus::Succeeded;
     let mut value = serde_json::to_value(record).expect("run records are JSON values");
     value["replyableAgents"] = json!(replyable);
+    // ADR 0114: a succeeded answer comes with its widgets and what the person made of them, as
+    // the chat sends a piece of work, so a view of this run alone draws its answer whole. Widgets
+    // are kept only once a run succeeds, so a run still at work costs no read.
+    if succeeded && let Some(db) = state.registry.db() {
+        match crate::widgets::store::of_runs(&db, std::slice::from_ref(&run_id)).await {
+            Ok(mut kept) => {
+                if let Some(widgets) = kept.remove(&run_id) {
+                    value["widgets"] = json!(widgets);
+                }
+            }
+            // The run reads without them rather than not at all.
+            Err(error) => eprintln!("warning: could not read the widgets of run {run_id}: {error}"),
+        }
+    }
     Ok(Json(value))
 }
 
@@ -8668,6 +8683,83 @@ pub(crate) mod tests {
             Some(vec!["Before Wednesday"]),
             "{kept:?}"
         );
+    }
+
+    /// ADR 0114: a succeeded run read on its own carries its answer's widgets, each at the line its
+    /// words put it, exactly as the chat sends them, so a view of the work alone (the phone's, from
+    /// Home) draws the answer whole. A run that showed none carries no list.
+    #[tokio::test]
+    async fn a_run_read_alone_carries_its_answers_widgets() {
+        use crate::agent::ToolCall;
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        // The first run shows a sketch and places it under its first paragraph; the second answers
+        // in words alone.
+        let model = demo_model(Demo::responder(move |_| {
+            Some(match calls.fetch_add(1, Ordering::SeqCst) {
+                0 => Completion::calls(
+                    "",
+                    vec![ToolCall {
+                        id: "call-0".into(),
+                        name: crate::widgets::TOOL.into(),
+                        arguments: r#"{"kind":"checklist","title":"Before Wednesday","items":[{"text":"Print 32 copies"}]}"#.into(),
+                    }],
+                ),
+                1 => Completion::text(&format!(
+                    "Here is the plan.\n\n{}\n\nPrint them first.",
+                    crate::widgets::place_line(1)
+                )),
+                _ => Completion::text("Done."),
+            })
+        }));
+        fs::write(
+            dir.0.join("spool.yaml"),
+            format!(
+                "schemaVersion: 1\nid: spool\nname: Spool\nentrypoint: solo\nagents:\n  - id: solo\n    name: Solo\n    role: answer\n    model: {model}\n    widgets: true\n"
+            ),
+        )
+        .expect("write team file");
+        let archive = EventArchive::new(pool);
+        let registry = RunRegistry::durable(archive.run_store());
+        let app = router(Some(archive.clone()), dir.0.clone(), registry.clone());
+        let read = |run_id: String| {
+            let app = app.clone();
+            async move {
+                json_body(
+                    app.oneshot(get_local(&format!("/api/runs/{run_id}")))
+                        .await
+                        .unwrap(),
+                )
+                .await
+            }
+        };
+
+        let run = start(&app, "spool.yaml").await;
+        let done = wait_for(&registry, &run.run_id, |r| r.status.is_terminal()).await;
+        assert_eq!(done.status, RunStatus::Succeeded, "{done:?}");
+        let fetched = read(run.run_id.clone()).await;
+        assert_eq!(
+            fetched["widgets"],
+            json!([{
+                "n": 1,
+                "line": 2,
+                "spec": {"kind": "checklist", "title": "Before Wednesday", "items": [{"text": "Print 32 copies"}]},
+            }]),
+            "{fetched}"
+        );
+        assert_eq!(fetched["reply"], "Here is the plan.\n\nPrint them first.");
+        // The same list the chat sends under this piece of work.
+        let kept = crate::widgets::store::of_runs(archive.db(), std::slice::from_ref(&run.run_id))
+            .await
+            .unwrap();
+        assert_eq!(fetched["widgets"], json!(kept[&run.run_id]));
+
+        let plain = start(&app, "spool.yaml").await;
+        let done = wait_for(&registry, &plain.run_id, |r| r.status.is_terminal()).await;
+        assert_eq!(done.status, RunStatus::Succeeded, "{done:?}");
+        let fetched = read(plain.run_id).await;
+        assert!(fetched.get("widgets").is_none(), "{fetched}");
     }
 
     /// "Finish with what it has" when no agent has written a word yet: there is nothing to finish
