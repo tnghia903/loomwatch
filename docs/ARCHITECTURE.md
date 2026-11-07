@@ -69,7 +69,9 @@ instructions and tools.
   (`agent/tools/link.rs`) is fetched by the daemon and goes ahead without asking for a link the
   operator wrote, which the engine hands each session from the run's message and the operator's
   notes (`ProcessSpec::links`, the Team Bus for teammates), never from anything an agent read or
-  wrote. Tools the daemon serves itself,
+  wrote. The daemon's HTTP client never asks for packed pages, but some sites pack every page
+  anyway, so `read_page` and the site icons below unpack `gzip` and `deflate` themselves
+  (`link::unpacked`, which stops at each reader's own size limit). Tools the daemon serves itself,
   such as the Team Bus and Ask's tools, come in through the `HostTools` trait. Calls a provider
   runs on its own side are recorded as finished tool calls named by what they were
   (`session.rs` `server_tool_title`): code Claude's web tools run is "Run code: <first line>"
@@ -658,9 +660,9 @@ search keeps no titles, and its sources say their site. The icon is the only thi
 fetches because of an answer's words. `site_icons.rs` serves `GET /api/site-icon?host=…`: it takes
 only a public name (the same home checks as `read_page`'s in `agent/tools/link.rs`), resolves it
 itself and never connects to an address on this computer or its network (`PublicOnly`, redirects
-included), asks only `https://<site>/favicon.ico`, else the icon the site's home page names (never
-an SVG), keeps only an ICO, PNG, GIF, JPEG or WebP of at most 512 KB, and keeps it in
-`<state dir>/site-icons/` for 30 days. Only `LoomWatch`'s own page on this computer's address can
+included), asks only `https://<site>/favicon.ico`, else the icon the site's home page names in
+its first 256 KB (never an SVG), keeps only an ICO, PNG, GIF, JPEG or WebP of at most 512 KB, and
+keeps it in `<state dir>/site-icons/` for 30 days. Only `LoomWatch`'s own page on this computer's address can
 ask (`watch_api::local_evidence`).
 
 ### Permissions

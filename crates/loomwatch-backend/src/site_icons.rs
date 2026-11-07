@@ -7,7 +7,10 @@
 //! - never a site on this computer or its network, by its name and by every address the name
 //!   resolves to when connecting, redirects included;
 //! - only a picture, by its first bytes (ICO, PNG, GIF, JPEG or WebP, never SVG, which can carry a
-//!   script), of at most [`MAX_BYTES`].
+//!   script), of at most [`MAX_BYTES`];
+//! - of a home page, only its first [`PAGE_BYTES`], where its head names its icon;
+//! - what a site packed (`gzip` or `deflate`) though nothing asked it to is unpacked first, within
+//!   the same limits.
 //!
 //! Each is kept in `site-icons/` in the state folder for [`KEEP`], and a site without one is
 //! remembered for [`KEEP_MISSING`], so reading answers again asks nothing. Only `LoomWatch`'s own
@@ -31,7 +34,8 @@ use crate::agent::tools::link;
 /// The most an icon may be, in bytes: a site's icon file can hold several sizes (one government
 /// site's is 370 KB).
 const MAX_BYTES: usize = 512 * 1024;
-/// The most of a home page read for the icon it names: its head comes first.
+/// The most of a home page read for the icon it names: its head comes first, so a longer page is
+/// read only this far.
 const PAGE_BYTES: usize = 256 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(3);
 /// How long an icon is kept before it is fetched again.
@@ -97,7 +101,9 @@ impl SiteIcons {
         }
         // A site with none at its root names its icon in its home page, as usa.gov does.
         let home = url::Url::parse(&format!("{root}/")).ok()?;
-        let page = self.read(home.as_str(), PAGE_BYTES).await?;
+        let page = self
+            .read(home.as_str(), PAGE_BYTES, Longer::KeepStart)
+            .await?;
         for named in named_icons(&String::from_utf8_lossy(&page)) {
             let Ok(icon) = home.join(&named) else {
                 continue;
@@ -114,30 +120,55 @@ impl SiteIcons {
 
     /// The picture at `url`, if it is one `LoomWatch` shows.
     async fn picture_at(&self, url: &str) -> Option<(Vec<u8>, &'static str)> {
-        let bytes = self.read(url, MAX_BYTES).await?;
+        let bytes = self.read(url, MAX_BYTES, Longer::Refuse).await?;
         let kind = picture(&bytes)?;
         Some((bytes, kind))
     }
 
-    /// What `url` gives, when it answers well within `limit` bytes.
-    async fn read(&self, url: &str, limit: usize) -> Option<Vec<u8>> {
+    /// What `url` gives when it answers well, unpacked when the site packed it (as some do though
+    /// nothing asks them to), in at most `limit` bytes; `longer` says what happens past them.
+    async fn read(&self, url: &str, limit: usize, longer: Longer) -> Option<Vec<u8>> {
         let mut response = self.client.as_ref()?.get(url).send().await.ok()?;
+        let keep_start = matches!(longer, Longer::KeepStart);
         if !response.status().is_success()
-            || response
-                .content_length()
-                .is_some_and(|length| length > limit as u64)
+            || (!keep_start
+                && response
+                    .content_length()
+                    .is_some_and(|length| length > limit as u64))
         {
             return None;
         }
+        let packing = link::packing(&response);
         let mut bytes = Vec::new();
         while let Some(chunk) = response.chunk().await.ok()? {
             bytes.extend_from_slice(&chunk);
             if bytes.len() > limit {
+                if keep_start {
+                    break;
+                }
                 return None;
             }
         }
+        // A packed page read only so far still unpacks past `limit`: HTML packs to a fraction.
+        let mut bytes = link::unpacked(packing.as_deref(), bytes, limit).ok()?;
+        if bytes.len() > limit {
+            if !keep_start {
+                return None;
+            }
+            bytes.truncate(limit);
+        }
         Some(bytes)
     }
+}
+
+/// What [`SiteIcons::read`] does with a file longer than its limit.
+#[derive(Clone, Copy)]
+enum Longer {
+    /// Leaves it: a picture cut short is no picture.
+    Refuse,
+    /// Keeps its start: a home page names its icon in its head, at the top, and a news site's home
+    /// page can run to megabytes.
+    KeepStart,
 }
 
 static LINK_TAG: LazyLock<Regex> =
@@ -373,7 +404,9 @@ mod tests {
 
     /// Sites standing in for the web on this computer: `/<site>/<path>` answers with what `serve`
     /// gives for that site and path (`""` for its home page), and every ask is counted.
-    async fn sites(serve: fn(&str, &str) -> (StatusCode, Vec<u8>)) -> (Origin, Arc<AtomicUsize>) {
+    async fn sites<R: IntoResponse + Send + 'static>(
+        serve: fn(&str, &str) -> R,
+    ) -> (Origin, Arc<AtomicUsize>) {
         let asked = Arc::new(AtomicUsize::new(0));
         let (home, file) = (asked.clone(), asked.clone());
         let app = Router::new()
@@ -569,6 +602,95 @@ mod tests {
         assert_eq!(response.headers()[header::CONTENT_TYPE], "image/png");
         // Its root icon, its home page and the PNG it names: never the SVG.
         assert_eq!(asked.load(Ordering::SeqCst), 3);
+    }
+
+    fn gzip(bytes: &[u8]) -> Vec<u8> {
+        use std::io::Write as _;
+        let mut packer = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        packer.write_all(bytes).expect("packed");
+        packer.finish().expect("packed")
+    }
+
+    /// What a site sends packed though nothing asked it to, as several news sites send every page.
+    fn packed(status: StatusCode, bytes: &[u8]) -> Response {
+        (status, [(header::CONTENT_ENCODING, "gzip")], gzip(bytes)).into_response()
+    }
+
+    #[tokio::test]
+    async fn a_site_that_packs_every_page_unasked_gives_its_icon() {
+        let folder = Folder::new();
+        let (origin, asked) = sites(|_, path| match path {
+            "" => packed(
+                StatusCode::OK,
+                br#"<html><head><link rel="shortcut icon" href="assets/img/favicon.ico" type="image/x-icon" /></head></html>"#,
+            ),
+            "assets/img/favicon.ico" => packed(StatusCode::OK, PNG),
+            // Its "not found" page is packed too, and its root has no icon.
+            _ => packed(StatusCode::NOT_FOUND, b"<!doctype html><title>Not found</title>"),
+        })
+        .await;
+        let app = router(icons(&folder, origin));
+        let response = app
+            .oneshot(ask("en.vietnamplus.vn", Some("same-origin")))
+            .await
+            .expect("answer");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()[header::CONTENT_TYPE], "image/png");
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        assert_eq!(bytes.as_ref(), PNG, "kept and served unpacked");
+        assert_eq!(asked.load(Ordering::SeqCst), 3);
+    }
+
+    /// Letters that don't pack small, so a packed page of them is long too.
+    fn scattered_letters(count: usize) -> Vec<u8> {
+        let mut seed = 0x2545_F491_4F6C_DD1D_u64;
+        (0..count)
+            .map(|_| {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                b'a' + u8::try_from(seed % 26).unwrap_or(0)
+            })
+            .collect()
+    }
+
+    /// A news site's home page: its icon named in its head, then megabytes of stories.
+    fn long_page() -> Vec<u8> {
+        [
+            br#"<html><head><link rel="icon" type="image/x-icon" href="pf/favicon.png?d=1171"/></head><body>"#.as_slice(),
+            &scattered_letters(PAGE_BYTES * 4),
+        ]
+        .concat()
+    }
+
+    #[tokio::test]
+    async fn a_home_page_longer_than_is_read_still_names_its_icon_in_its_head() {
+        assert!(
+            gzip(&long_page()).len() > PAGE_BYTES,
+            "packed, it is long too"
+        );
+        let folder = Folder::new();
+        let (origin, asked) = sites(|site, path| match (site, path) {
+            (_, "pf/favicon.png") => (StatusCode::OK, PNG.to_vec()).into_response(),
+            ("long.example", "") => (StatusCode::OK, long_page()).into_response(),
+            ("packed-long.example", "") => packed(StatusCode::OK, &long_page()),
+            _ => (StatusCode::NOT_FOUND, Vec::new()).into_response(),
+        })
+        .await;
+        let app = router(icons(&folder, origin));
+        for site in ["long.example", "packed-long.example"] {
+            let response = app
+                .clone()
+                .oneshot(ask(site, Some("same-origin")))
+                .await
+                .expect("answer");
+            assert_eq!(response.status(), StatusCode::OK, "{site}");
+            assert_eq!(response.headers()[header::CONTENT_TYPE], "image/png");
+        }
+        // Each one's root icon, its home page and the icon it names.
+        assert_eq!(asked.load(Ordering::SeqCst), 6);
     }
 
     #[test]
