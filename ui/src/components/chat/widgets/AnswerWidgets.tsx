@@ -1,3 +1,5 @@
+import { Component, type ReactNode } from 'react'
+
 import { useAppear } from '../../../lib/chat/appear'
 import type { KeptWidget, WidgetState } from '../../../lib/widgets/types'
 import { useFirstSight } from '../../../lib/widgets/useFirstSight'
@@ -48,9 +50,49 @@ export function AnswerWidgets(props: AnswerWidgetsProps) {
  */
 export function AnswerWidget(props: Omit<AnswerWidgetsProps, 'widgets'> & { kept: KeptWidget }) {
   const news = useAppear()
-  const first = useFirstSight(JSON.stringify(props.kept.spec))
+  const drawing = JSON.stringify(props.kept.spec)
+  const first = useFirstSight(drawing)
   const fresh = news && first
-  return <div className={`wg-shell${fresh ? ' wg-fresh' : ''}`}>{drawn(props, fresh)}</div>
+  return (
+    <div className={`wg-shell${fresh ? ' wg-fresh' : ''}`}>
+      <WidgetGuard drawing={drawing} title={props.kept.spec.title}>{drawn(props, fresh)}</WidgetGuard>
+    </div>
+  )
+}
+
+interface GuardState { broken: boolean; drawing: string }
+
+/**
+ * A widget the app can't draw says so in its place, under its title, and the rest of the screen
+ * goes on: an agent's widget is its own data, and one drawn wrongly must never take the chat with
+ * it. A widget that changes (the kept one taking the place of the one drawn while the answer was
+ * written) is tried again.
+ */
+class WidgetGuard extends Component<{ drawing: string; title: unknown; children: ReactNode }, GuardState> {
+  state: GuardState = { broken: false, drawing: this.props.drawing }
+
+  static getDerivedStateFromProps(props: { drawing: string }, state: GuardState): Partial<GuardState> | null {
+    return props.drawing === state.drawing ? null : { broken: false, drawing: props.drawing }
+  }
+
+  static getDerivedStateFromError(): Partial<GuardState> {
+    return { broken: true }
+  }
+
+  componentDidCatch(error: Error) {
+    console.error('LoomWatch could not draw a widget', error)
+  }
+
+  render() {
+    if (!this.state.broken) return this.props.children
+    const title = typeof this.props.title === 'string' && this.props.title.trim() ? this.props.title : null
+    return (
+      <section className="wg" aria-label={title ?? 'Part of this answer'}>
+        {title && <p className="wg-title">{title}</p>}
+        <p className="wg-unshown">{title ? 'LoomWatch couldn’t show this.' : 'LoomWatch couldn’t show part of this answer.'}</p>
+      </section>
+    )
+  }
 }
 
 function drawn({ kept, onChange, onChoose, chosen = null, live = false }: Omit<AnswerWidgetsProps, 'widgets'> & { kept: KeptWidget }, fresh: boolean) {

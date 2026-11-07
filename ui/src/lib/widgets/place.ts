@@ -129,8 +129,11 @@ export function partsOf(words: string, widgets: readonly KeptWidget[]): { parts:
 
 /**
  * The widgets `responder` has shown so far in work still going, by place number: each
- * `show_widget` call the bus answered with a place line, as the agent gave it. The daemon checked
- * them before answering; they are kept, from the archive, once the work is done.
+ * `show_widget` call the bus answered with a place line, as the daemon read it (the update's
+ * `widget`), so it is drawn as it will be kept: a picture comes as the agent's SVG and is drawn from
+ * the shapes the daemon read out of it. A call recorded before the daemon gave its reading is
+ * drawn as the agent gave it, except a picture, which can't be. They are kept, from the archive,
+ * once the work is done.
  */
 export function shownSoFar(events: readonly RunEvent[], responder: string | null | undefined): Map<number, WidgetSpec> {
   const shown = new Map<number, WidgetSpec>()
@@ -142,10 +145,11 @@ export function shownSoFar(events: readonly RunEvent[], responder: string | null
     if (event.kind === 'tool_call' && payload.name === 'show_widget' && typeof payload.callId === 'string' && isSpec(payload.rawInput)) {
       asked.set(payload.callId, payload.rawInput)
     } else if (event.kind === 'tool_update' && payload.status === 'completed' && typeof payload.callId === 'string') {
-      const spec = asked.get(payload.callId)
+      const given = asked.get(payload.callId)
+      const spec = given && isSpec(payload.widget) ? payload.widget : given
       const output = payload.rawOutput
       const line = output && typeof output === 'object' && 'place' in output && typeof output.place === 'string' ? placeOf(output.place) : null
-      if (spec && line !== null) shown.set(line, spec)
+      if (spec && drawable(spec) && line !== null) shown.set(line, spec)
     }
   }
   return shown
@@ -153,6 +157,11 @@ export function shownSoFar(events: readonly RunEvent[], responder: string | null
 
 function isSpec(value: unknown): value is WidgetSpec {
   return typeof value === 'object' && value !== null && typeof (value as { kind?: unknown }).kind === 'string' && typeof (value as { title?: unknown }).title === 'string'
+}
+
+/** A picture is drawn from its shapes, which only the daemon's reading has. */
+function drawable(spec: WidgetSpec): boolean {
+  return spec.kind !== 'picture' || Array.isArray((spec as { shapes?: unknown }).shapes)
 }
 
 /**

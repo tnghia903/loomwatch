@@ -265,6 +265,24 @@ describe('AnswerWidgets', () => {
     expect(within(picture).queryAllByRole('button')).toHaveLength(0)
     expect(picture).not.toHaveTextContent('of')
   })
+
+  it('says a widget it can’t draw couldn’t be shown, keeps the others, and draws it once it can', () => {
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      // A picture as an agent sends it: its SVG, not yet read into shapes.
+      const unread = { n: 9, spec: { kind: 'picture', title: 'A sail', drawing: '<svg/>' } } as unknown as KeptWidget
+      const { rerender } = render(<AnswerWidgets widgets={[unread, checklist]} onChange={keeper().onChange} />)
+      expect(screen.getByRole('region', { name: 'A sail' })).toHaveTextContent('LoomWatch couldn’t show this.')
+      expect(screen.getByRole('checkbox', { name: /Print 32 copies/ })).toBeInTheDocument()
+      const read: KeptWidget = { n: 9, spec: { kind: 'picture', title: 'A sail', width: 100, height: 50, shapes: [{ d: 'M0 0L100 0L100 50Z' }] } }
+      rerender(<AnswerWidgets widgets={[read, checklist]} onChange={keeper().onChange} />)
+      const sail = screen.getByRole('region', { name: 'A sail' })
+      expect(sail).not.toHaveTextContent('couldn’t show')
+      expect(sail.querySelectorAll('.wg-figure path')).toHaveLength(1)
+    } finally {
+      quiet.mockRestore()
+    }
+  })
 })
 
 const relevance: KeptWidget = {
