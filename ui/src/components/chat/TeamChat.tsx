@@ -95,6 +95,11 @@ interface TeamChatProps {
   onOpenFinding: (runId: string, line: ReceiptLine) => void
   /** The newest piece's run as it changes, or null for none: an agent's chat shows its figure at work by it. */
   onNewestRun?: (run: RunRecord | null) => void
+  /**
+   * The agents answering a message in the chat themselves, whenever that changes: no run has them,
+   * so an agent's chat shows its figure at work by this while it writes.
+   */
+  onWriting?: (agents: readonly string[]) => void
   /** Run team brought you here: the box starts with @team, so what you write starts the team. */
   startTeam?: boolean
   /** The box has taken `startTeam`, so coming back to the chat later does not take it again. */
@@ -140,7 +145,7 @@ const ROSTER_KEY = 'loomwatch.chatRoster'
  * With `team.solo` it is one agent's own chat (its Chat tab): everything you write goes to that
  * agent, starting its work when it is free and joining its turn while it works, so there is no @.
  */
-export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, routine, detailsRunId, answerRunId = null, recordRunId, onHandOver, onOpenAnswer, blocked, prepare, onDetails, onTeamReview, onStale, onAlwaysAllow, announce, onNewest, onStarted, reveal = null, landAt = null, onOpenFinding, onNewestRun, startTeam = false, onStartTeamTaken, ask = null, onPassages, onConnectFolder, permissionMode }: TeamChatProps) {
+export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, routine, detailsRunId, answerRunId = null, recordRunId, onHandOver, onOpenAnswer, blocked, prepare, onDetails, onTeamReview, onStale, onAlwaysAllow, announce, onNewest, onStarted, reveal = null, landAt = null, onOpenFinding, onNewestRun, onWriting, startTeam = false, onStartTeamTaken, ask = null, onPassages, onConnectFolder, permissionMode }: TeamChatProps) {
   const chat = useTeamChat(teamPath)
   // Pictures and files pasted or dropped in, kept as they are added (ADR 0082).
   const attachments = useChatAttachments(teamPath)
@@ -239,8 +244,12 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
   const fixFill = useMemo(() => filledFix(shownItems, decision), [shownItems, decision])
 
   // ---- scrolling -------------------------------------------------------------------------
+  // What is news at the foot of the chat: a new item, the newest work moving on, and an answer to
+  // a message arriving under it. Each brings the foot into view here, before the browser paints:
+  // waiting for the size watcher below is too late in Safari, which nudges the list up as the dots
+  // give way to the answer, and that scroll reads as you leaving the foot.
   const newest = chat.items.at(-1)
-  const lastKey = `${chat.items.length}:${newest ? JSON.stringify([newest.kind === 'work' ? [newest.run.status, newest.run.reply?.length, newest.notes.length, newest.run.waitingOn?.since] : newest.message.id]) : ''}:${chat.pending.length}`
+  const lastKey = `${chat.items.length}:${newest ? JSON.stringify([newest.kind === 'work' ? [newest.run.status, newest.run.reply?.length, newest.notes.length, newest.run.waitingOn?.since] : answersKey(newest.message)]) : ''}:${chat.pending.length}`
   useLayoutEffect(() => {
     const element = scroller.current
     if (!element) return
@@ -507,7 +516,11 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
   }))
   // Only the newest answer's choices can be tapped, and only while nothing is at work.
   const choose = (label: string, reply: ReplyTo) => send(label, soloAgent ? { kind: 'agent', agent: soloAgent.id } : null, false, undefined, replyOf(reply))
-  const workingNow = new Set(live.flatMap((run) => run.working ?? []))
+  // At work: in a live piece, or answering a message in the chat themselves.
+  const writing = writingNow(chat.items)
+  const writingKey = writing.join('\n')
+  useEffect(() => { onWriting?.(writingKey ? writingKey.split('\n') : []) }, [writingKey, onWriting])
+  const workingNow = new Set([...live.flatMap((run) => run.working ?? []), ...writing])
   const waitingFor = decision?.from
   const unreachable = chat.error && /reach the LoomWatch server/i.test(chat.error)
   // An agent that asked you something, or asked your permission, is still in its turn, but it is
@@ -1000,6 +1013,17 @@ function SewnMark() {
 // by an error. Each face glows its state's colour (team-chat.css).
 const STATE_WORDS = { working: WORDS.working, waiting: WORDS.waiting, idle: WORDS.ready, failed: WORDS.failed, away: 'offline' } as const
 type Presence = keyof typeof STATE_WORDS
+
+/** A message as the foot of the chat sees it: changed when one of its agents' answers comes in. */
+function answersKey(message: ChatMessage): unknown[] {
+  const answers = message.answers
+  return [message.id, answers?.waiting.length ?? 0, answers?.said.map((said) => said.text.length) ?? [], answers?.failed?.length ?? 0]
+}
+
+/** The agents answering a message in the chat themselves: no run has them, yet they are at work. */
+function writingNow(items: readonly ChatItem[]): string[] {
+  return [...new Set(items.flatMap((item) => (item.kind === 'note' ? stillAnswering(item.message) : [])))].sort()
+}
 
 /** The agents whose newest piece of work stopped at them with an error, until they work again. */
 function failedNow(runs: Iterable<RunRecord>): Set<string> {

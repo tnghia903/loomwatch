@@ -53,7 +53,9 @@ or hides them again. They read as the rest of the group chat does: each agent ha
 and figure, and your messages sit on the right. An agent's own chat (My agents) shows its replies
 the same way, and its page is laid out as a team's chat: on a wide window its chat (on Build, its
 settings) fills a column on the left, and its workbench the pane on the right, in the same place on
-both tabs. A long answer, a piece's Details or a file the chat opens takes that pane, under a head
+both tabs. While it answers a message in the chat itself, which starts no work, its name says
+**working** and its figure types at the bench (the island's workbench too), as it does at work. A
+long answer, a piece's Details or a file the chat opens takes that pane, under a head
 with the request's first line and an × that closes it. Its name's menu lists My agents, as a
 team's lists the other teams: a pick opens that agent on the tab on screen, and changes not saved
 are asked about first. Links that close a point, bare or in brackets ("… (usa.gov)"), show as

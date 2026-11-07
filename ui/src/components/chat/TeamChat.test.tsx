@@ -896,6 +896,74 @@ describe('the team’s chat', () => {
     expect(screen.queryByRole('button', { name: 'Start the team on this' })).not.toBeInTheDocument()
   })
 
+  // The owner (2026-11-07): an agent answering in its own chat said "ready" over the dots of its
+  // answer, and its figure sat still. Writing an answer is work, though no run has it.
+  it('an agent writing its answer is working, says who writes to its figure, and is ready once it answered', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const asked = message({ id: 'q-1', text: 'how do graph networks rank?', route: 'team_note', runId: null, agentId: 'writer', createdAt: new Date().toISOString(), answers: { waiting: ['writer'], said: [] } })
+      page = [{ kind: 'note', message: asked }]
+      const onWriting = vi.fn()
+      renderChat({ team: { ...team, solo: 'writer' }, onWriting })
+      expect(await screen.findByRole('status', { name: 'Writer is writing' })).toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: 'Writer, working' })).toBeInTheDocument()
+      await waitFor(() => expect(onWriting).toHaveBeenLastCalledWith(['writer']))
+
+      page = [{ kind: 'note', message: { ...asked, answers: { waiting: [], said: [{ from: 'writer', text: 'Each node learns from its neighbours.', at: new Date().toISOString() }] } } }]
+      await act(async () => { await vi.advanceTimersByTimeAsync(9000) })
+      expect(screen.getByText('Each node learns from its neighbours.')).toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: 'Writer, ready' })).toBeInTheDocument()
+      expect(onWriting).toHaveBeenLastCalledWith([])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // The owner (2026-11-07): the answer came in under the dots and the chat stayed where it was. In
+  // Safari the list moves up by the dots' height as the answer takes their place, and that scroll,
+  // handled before the size watcher, read as the person scrolling up: the chat stopped following.
+  it('brings an answer to a message into view as it comes in, though the browser nudges the list as the dots go', async () => {
+    const watching: { sizes: ResizeObserverCallback; targets: Element[] }[] = []
+    vi.stubGlobal('ResizeObserver', class {
+      targets: Element[] = []
+      sizes: ResizeObserverCallback
+      constructor(sizes: ResizeObserverCallback) { this.sizes = sizes; watching.push(this) }
+      observe(target: Element) { this.targets.push(target) }
+      unobserve() {}
+      disconnect() { this.targets = [] }
+    })
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const answerText = 'Each node learns from its neighbours, layer by layer.'
+      const asked = message({ id: 'q-2', text: 'how do graph networks rank?', route: 'team_note', runId: null, agentId: 'writer', createdAt: new Date().toISOString(), answers: { waiting: ['writer'], said: [] } })
+      page = [{ kind: 'note', message: asked }]
+      renderChat({ team: { ...team, solo: 'writer' } })
+      await screen.findByRole('status', { name: 'Writer is writing' })
+      const scroller = document.querySelector('.tc-scroll') as HTMLElement
+      // The answer is 1100 px taller than the dots it replaces; the chat has 400 px of room.
+      Object.defineProperty(scroller, 'scrollHeight', { configurable: true, get: () => (scroller.textContent?.includes(answerText) ? 2000 : 900) })
+      Object.defineProperty(scroller, 'clientHeight', { configurable: true, get: () => 400 })
+      const observer = watching.find((one) => one.targets.includes(scroller))!
+      const resized = () => act(() => observer.sizes([], observer as unknown as ResizeObserver))
+      resized()
+      // Reading at the foot of the chat, the dots in view.
+      scroller.scrollTop = 500
+      fireEvent.scroll(scroller)
+
+      page = [{ kind: 'note', message: { ...asked, answers: { waiting: [], said: [{ from: 'writer', text: answerText, at: new Date().toISOString() }] } } }]
+      await act(async () => { await vi.advanceTimersByTimeAsync(9000) })
+      expect(screen.getByText(answerText)).toBeInTheDocument()
+      // What Safari does next: the list moves up by the dots' 55 px, its scroll is handled, and then
+      // the size watcher hears the chat grew.
+      scroller.scrollTop -= 55
+      fireEvent.scroll(scroller)
+      resized()
+      expect(scroller.scrollTop).toBe(2000)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('an answer that stopped long ago is not shown as still writing', async () => {
     page = [{
       kind: 'note',

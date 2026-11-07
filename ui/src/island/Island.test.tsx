@@ -1477,6 +1477,30 @@ describe('the box: any of My agents, and its workbench', () => {
     expect(await within(container).findByTestId('bench', undefined, { timeout: ISLAND_WAITS.benchSetUp + 3_000 })).toBeTruthy()
   }, 15_000)
 
+  // The owner (2026-11-07): an agent answering a message in its chat itself starts no run, and its
+  // figure sat still while the chat showed it writing.
+  it('shows the pinned agent at work on its workbench while it answers in its chat itself', async () => {
+    await import('./BenchCard')
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    const { container } = render(<Island />)
+    place()
+    const bench = () => within(container).getByTestId('bench')
+    await within(container).findByTestId('bench', undefined, { timeout: ISLAND_WAITS.benchSetUp + 3_000 })
+    expect(bench()).not.toHaveAttribute('data-mood', 'working')
+    const asked = { teamPath: '.jobs/.bench/maya.yaml', teamName: 'Maya · chat', agentNames: { maya: 'Maya' } }
+    // Another team's agent answering is not hers.
+    notes = [answering('m0')]
+    await waitFor(() => expect(noteReads).toBeGreaterThan(1), { timeout: ISLAND_WAITS.poll + 2_000 })
+    const reads = noteReads
+    await waitFor(() => expect(noteReads).toBeGreaterThan(reads), { timeout: ISLAND_WAITS.poll + 2_000 })
+    expect(bench()).not.toHaveAttribute('data-mood', 'working')
+    notes = [answering('m1', { ...asked, answers: { waiting: ['maya'], said: [] } })]
+    await waitFor(() => expect(bench()).toHaveAttribute('data-mood', 'working'), { timeout: ISLAND_WAITS.poll + 2_000 })
+    notes = [answering('m1', { ...asked, answers: { waiting: [], said: [said('Your calendar is free.', 'maya')] }, finishedAt: new Date().toISOString() })]
+    await waitFor(() => expect(bench()).not.toHaveAttribute('data-mood', 'working'), { timeout: ISLAND_WAITS.poll + 2_000 })
+  }, 20_000)
+
   it('without a notch, opens as a box from the menu bar, shows its agent at its workbench once sent, then tucks it into a pill at its desk, open again while pointed at', async () => {
     pinnedAgent = 'maya'
     jobs = [maya]

@@ -58,7 +58,8 @@ import { benchRows } from './benchRows'
  * the keys on the hooks what it may do without
  * asking (the ones in your dish ask you first), and the tray what it hands back. Clicking anything
  * on the bench takes you to its block, and working in a block lights its thing on the bench. While
- * it works in its chat, the figure works as the run record and its events say.
+ * it works in its chat, the figure works as the run record and its events say, and while it writes
+ * an answer there itself, it types.
  */
 
 const SKILL_MIME = 'application/x-loomwatch-skill'
@@ -73,6 +74,8 @@ export interface ByHandProps {
   figure: FigureChoice
   /** The run in its chat, if one is on screen: the figure works as its record and events say. */
   record: RunRecord | null
+  /** It is answering a message in its chat itself, which starts no run: the figure works meanwhile. */
+  writing?: boolean
   /**
    * A team's own agent has no "What it does" line: it is the line under an agent's name in My
    * agents and in the list a team adds agents from, where a team's own agent never is, and the team
@@ -145,7 +148,7 @@ const BLOCKS: readonly { part: FigurePart; title: string }[] = [
 ]
 
 
-export function ByHand({ draft, set: write, skills, skillsLoading, roleField, figure, record, hideDoes = false, readOnly = false, reads: teamReads, teamOwn, onShowWorkflow, learned, suggestFor, following, chat, onBuild, cover, framed = false, lead, after, fresh = false, widgetsDefault = false }: ByHandProps) {
+export function ByHand({ draft, set: write, skills, skillsLoading, roleField, figure, record, writing = false, hideDoes = false, readOnly = false, reads: teamReads, teamOwn, onShowWorkflow, learned, suggestFor, following, chat, onBuild, cover, framed = false, lead, after, fresh = false, widgetsDefault = false }: ByHandProps) {
   const chatting = chat !== undefined
   const set: ByHandProps['set'] = (key, value) => { if (!readOnly) write(key, value) }
   // The block you are working in: its thing on the bench is lit.
@@ -230,7 +233,7 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
   }
 
   const kit = useMemo<BenchKit>(() => ({ skills: draft.skills, reads, tools: draft.tools }), [draft.skills, reads, draft.tools])
-  const { mood, events, phase, thought, uses, helpers } = useFigureMood(record, kit)
+  const { mood, events, phase, thought, uses, helpers } = useFigureMood(record, kit, writing)
 
   const view = useMemo<BenchView>(() => ({
     look: { name: draft.name, instructions: draft.instructions, app: draft.model, model: `${draft.model}|${draft.effort}`, skills: draft.skills, allow: draft.allow },

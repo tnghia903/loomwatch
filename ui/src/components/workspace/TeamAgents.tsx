@@ -164,6 +164,7 @@ function OwnAgent({ agent, team, teamPath, editable, skills, skillsLoading, onEd
   const chatDraft = useMemo(() => ({ ...draft, reads: [] }), [draft])
   const roleField = useRef<HTMLTextAreaElement>(null)
   const [record, setRecord] = useState<RunRecord | null>(null)
+  const [writing, setWriting] = useState(false)
   // Its chat is named for this team and agent, so talking to one never touches another's. It is the
   // name its test bench had, so what was tried there before is in its chat.
   const chatId = `team-${(teamPath ?? 'new').replace(/^.*\//, '').replace(/\.ya?ml$/, '').toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${agent.id}`.slice(0, 80)
@@ -185,9 +186,9 @@ function OwnAgent({ agent, team, teamPath, editable, skills, skillsLoading, onEd
         view={view} onView={setView}
       />
       <ByHand
-        draft={draft} set={(key, value) => onEdit(agent.id, key, value)} skills={skills} skillsLoading={skillsLoading} roleField={roleField} figure={figure} record={record} hideDoes readOnly={!editable} teamOwn={{ teamPath }} onShowWorkflow={onShowWorkflow} suggestFor={{ agent, team }} following={following}
+        draft={draft} set={(key, value) => onEdit(agent.id, key, value)} skills={skills} skillsLoading={skillsLoading} roleField={roleField} figure={figure} record={record} writing={writing} hideDoes readOnly={!editable} teamOwn={{ teamPath }} onShowWorkflow={onShowWorkflow} suggestFor={{ agent, team }} following={following}
         learned={teamPath ? { teamPath, agent: agent.id } : null}
-        chat={view === 'chat' ? <AgentChat draft={chatDraft} model={draft.model} chatId={chatId} figure={figure} onAllow={(what) => (typeof what === 'string' ? onEdit(agent.id, 'allow', { ...draft.allow, [what]: true }) : onEdit(agent.id, 'toolAllow', withAllowed(draft.toolAllow, what.tool, what.call)))} onRecord={setRecord} answerRunId={answerRun} onOpenAnswer={(runId) => { setAnswerRun(runId); if (runId) details.close() }} knowledge={knowledge} file={benchFile.chat}
+        chat={view === 'chat' ? <AgentChat draft={chatDraft} model={draft.model} chatId={chatId} figure={figure} onAllow={(what) => (typeof what === 'string' ? onEdit(agent.id, 'allow', { ...draft.allow, [what]: true }) : onEdit(agent.id, 'toolAllow', withAllowed(draft.toolAllow, what.tool, what.call)))} onRecord={setRecord} onWriting={setWriting} answerRunId={answerRun} onOpenAnswer={(runId) => { setAnswerRun(runId); if (runId) details.close() }} knowledge={knowledge} file={benchFile.chat}
           detailsRunId={details.asked?.runId ?? null} onDetails={(asked) => { details.open(asked); setAnswerRun(null); benchFile.close() }} reveal={details.reveal} /> : undefined}
         onBuild={() => setView('build')}
         cover={view === 'chat' && benchFile.reading ? <AgentFile bench={benchFile} chatId={chatId} name={name} figure={figure} />
