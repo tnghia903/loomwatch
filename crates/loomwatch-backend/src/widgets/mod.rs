@@ -110,6 +110,8 @@ pub(crate) mod limits {
     pub(crate) const GUESS_CHARS: usize = 160;
     pub(crate) const GUESS_CHOICES: (usize, usize) = (2, 3);
     pub(crate) const GUESS_CHOICE_CHARS: usize = 40;
+    /// The name of what a picture's dial turns: a word or two.
+    pub(crate) const DIAL_CHARS: usize = 24;
 }
 
 /// One widget, as the agent asked for it and `LoomWatch` checked it.
@@ -202,6 +204,10 @@ pub(crate) enum Widget {
         moves: Vec<picture::Move>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         guess: Option<picture::Guess>,
+        /// What the picture's stages are values of, when they aren't moments in time: the cause
+        /// the person turns, such as "Speed". Each part's label is then its value.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dial: Option<String>,
     },
     /// A graph: bars or a line over labelled points, up to three series. To look at; tapping a
     /// point reads its values.
@@ -1236,8 +1242,9 @@ pub(crate) const SHOW_WIDGET: Block = Block::new(
      across: compare\n\
      - figures to compare, one for each thing: chart\n\
      - figures that change over time, or several series: graph\n\
-     - something to see: how a machine, a body or nature works, where a thing's parts are, or how \
-     it moves, even in stages, drawn by you: picture\n\
+     - something to see, drawn by you: how a machine, a body or nature works, where a thing's \
+     parts are, what happens in steps or rounds, such as how it moves or a message passing \
+     through a network, or how one thing changes another, which play: picture\n\
      - one thing leading to the next, in order, when there is nothing to see: flow\n\
      - a process the person follows, one step at a time: steps\n\
      - a sum, a split or a cost they may change: calculator\n\
@@ -1247,8 +1254,9 @@ pub(crate) const SHOW_WIDGET: Block = Block::new(
      A flow's line says that one thing leads to the next, so two or three parts that sit side by \
      side, such as a shop's sales and support teams, are shown with compare, not flow. When what \
      you explain can be seen, such as how an engine or a lung works or how a tide moves, draw it \
-     in a picture with its stages or parts numbered, not boxes in a flow: a flow only names what \
-     a picture shows. When \
+     in a picture, not boxes in a flow: a flow only names what a picture shows. When it happens \
+     in steps or rounds, the picture plays its steps (drawing says how) rather than numbering \
+     them with arrows; a picture of parts numbers its parts. When \
      figures count whole things, such as seats or people, set counted. Prefer one of these to a \
      table, a list or bars written in text, or a page written for it. Show up to 4 when the answer has more than one of these. Words alone \
      are for an answer with none of them, such as a short fact. Call it before you write your \
@@ -1268,30 +1276,56 @@ pub(crate) const SHOW_WIDGET_KIND: Block = Block::new(
 pub(crate) const SHOW_WIDGET_DRAWING: Block = Block::new(
     "bus.show_widget.drawing",
     "picture: the picture as SVG, such as <svg viewBox=\"0 0 640 360\">…</svg>, with path, \
-     circle, ellipse, rect, line, polyline, polygon, text and g, transforms too. Draw a real \
+     circle, ellipse, rect, line, polyline, polygon, text and g, transforms too. Draw the place \
+     where the answer happens, at the size it happens, big enough to fill the picture: the wing \
+     and the air around it to say why a plane flies, a node and its neighbours to say how a \
+     network passes messages, a valve to say how the heart keeps blood going one way; add the \
+     whole thing small in a corner only when it helps to know where that place is. Draw a real \
      example in clear, simple outlines and in proportion, as a good textbook figure does: people \
      with names rather than dots, a plane with its wings and engines. Draw what happens too: the \
-     arrows, the forces, what changes. Name what the person needs to know with <text>, a few \
-     words each in their language, beside what it names; LoomWatch sets the words in its own \
-     type. No background, sky or colours: LoomWatch draws every line in its own ink. A shape with \
-     a fill is shaded, dark when the fill is dark, and fill=\"none\" leaves it an outline; \
-     stroke-dasharray dashes a line, and marker-end puts an arrowhead at its end, with no defs \
-     needed. Put data-part=\"N\" on the shapes, or the g, that show part N. When something moves \
-     or changes in stages, draw it again in each stage's part, the same shapes and labels in the \
-     same order, each copy in a g with the same data-moves name, such as <g data-part=\"2\" \
-     data-moves=\"plane\" transform=\"…\">: the picture plays, moving it from stage to stage. A \
-     force or a flow that grows is drawn the same way, at its size in each stage. Something with \
-     nothing moving, such as the parts of a flower, stays still.",
+     forces, what changes. Name what the person needs to know with <text>, a few words each in \
+     their language, beside what it names and not squeezed inside a small shape; LoomWatch sets \
+     the words in its own type. No background, sky or colours: LoomWatch draws every line in its \
+     own ink. A shape with a fill is shaded, dark when the fill is dark, and fill=\"none\" leaves \
+     it an outline; stroke-dasharray dashes a line, and marker-end puts an arrowhead at its end, \
+     with no defs needed. Put data-part=\"N\" on the shapes, or the g, that show part N. When \
+     the answer is how something happens in steps or rounds, such as a plane taking off, the \
+     moon going round the Earth, blood through the heart or a message passed from node to node \
+     in a network, make the picture play instead of drawing arrows for the order: make each step \
+     a part, and draw what moves or changes again in each step's part, where it is at that \
+     step, the same shapes and words in the same order, each copy in a g with the same \
+     data-moves name. A message going from A through B to C: <g data-part=\"1\" \
+     data-moves=\"msg\" transform=\"translate(80 120)\"><circle r=\"8\"/><text \
+     x=\"14\">message</text></g>, then that g again with data-part=\"2\" at B and \
+     data-part=\"3\" at C. LoomWatch moves it from step to step and dots in where it was. A \
+     force or a flow that grows is drawn the same way, at its size in each step. Most answers to \
+     a why are one thing changing another: why a ball thrown faster goes further, why a swing \
+     pushed harder goes higher, why ice melts in warm air. Draw those with a dial: the steps are \
+     3 to 5 values of the cause, from least to most, in numbers when it has them, and what \
+     follows from each drawn at that value; set dial to the cause's name. A picture of parts, \
+     such as the parts of a flower, stays still.",
 );
 
 /// A picture's `parts` (ADR 0117).
 pub(crate) const SHOW_WIDGET_PARTS: Block = Block::new(
     "bus.show_widget.parts",
-    "picture: up to 8 parts in the order to read them, such as the stages of what moves or the \
-     parts to know, each a short label and a sentence or two. The person taps a part's number on \
+    "picture: up to 8 parts in the order to read them: the steps of a picture that plays, the \
+     values of its dial, or the parts to know, each a short label and a sentence or two. The person taps a part's number on \
      the picture, or steps through them, and its shapes turn gold. at is [x, y] in the drawing's \
      units where its number stands, on empty ground beside what it names; without it, the \
      number stands above its shapes.",
+);
+
+/// A picture's `dial` (ADR 0117, amended 7 November).
+pub(crate) const SHOW_WIDGET_DIAL: Block = Block::new(
+    "bus.show_widget.dial",
+    "picture that plays, when what it shows is how one thing changes another, as the answer to \
+     a why usually is, such as how far a ball goes with how fast it is thrown: the name of the \
+     cause in a word or two, such as \"Speed\". Its parts are then 3 to 5 values of the cause, \
+     from least to most, each part's label its value, in numbers when it has them, such as \
+     \"10 m/s\", \"20 m/s\" and \"30 m/s\", and its text what that value does. The person \
+     turns the dial and watches what follows from it. Leave dial out when the parts are steps \
+     in time.",
 );
 
 /// A picture's `guess` (ADR 0117, amended 7 November).
@@ -1504,6 +1538,7 @@ pub(crate) fn tool_definition() -> Value {
                 },
                 "repeats": {"type": "boolean", "description": "steps or flow: true when the last leads back to the first, as in a cycle"},
                 "drawing": {"type": "string", "description": SHOW_WIDGET_DRAWING.text(), "minLength": 1},
+                "dial": {"type": "string", "description": SHOW_WIDGET_DIAL.text(), "minLength": 1},
                 "guess": {
                     "type": "object",
                     "description": SHOW_WIDGET_GUESS.text(),

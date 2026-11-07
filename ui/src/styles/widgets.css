@@ -402,8 +402,8 @@
   flex: none;
   display: grid;
   place-items: center;
-  width: 36px;
-  height: 36px;
+  width: var(--wg-play, 36px);
+  height: var(--wg-play, 36px);
   padding: 0;
   border: 0;
   border-radius: var(--r-full);
@@ -455,6 +455,14 @@
 }
 .wg-scrub:active .wg-scrub-knob { cursor: grabbing; }
 .wg-scrub:focus-visible .wg-scrub-knob { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+/* A dial (ADR 0117, amended 7 November): the line turns a cause, so its stops are marks, not step
+   numbers, and its ends say the least and most it goes to. */
+.wg-scrub.dial .wg-scrub-stop { width: 10px; height: 10px; margin: -5px 0 0 -5px; }
+.wg-scrub.dial .wg-scrub-knob { width: 24px; height: 24px; margin: -12px 0 0 -12px; }
+.wg-dial-ends { display: flex; justify-content: space-between; gap: var(--sp-3); margin-top: -6px; margin-inline-start: calc(var(--wg-play, 36px) + var(--sp-3)); padding-inline: 4px; font: 500 12px/16px var(--font-sans); color: var(--color-ink-2); font-variant-numeric: tabular-nums; }
+/* A long value wraps inside its own end, the last one kept to the line's end. */
+.wg-dial-ends > span { min-width: 0; overflow-wrap: anywhere; }
+.wg-dial-ends > :last-child { text-align: end; }
 .wg-picture-note { margin: 4px 0 0; font: 500 13px/18px var(--font-sans); color: var(--color-ink); }
 
 /* The question asked before a surprising step: the agent's words, its choices, and Skip. */
@@ -748,6 +756,7 @@
   .wg-picture-head .wg-picture-by { width: 44px; height: 44px; }
   .wg-play { width: 44px; height: 44px; }
   .wg-scrub { height: 44px; }
+  .wg-picture { --wg-play: 44px; }
   .wg-ask-choice, .wg-ask-skip { min-height: 44px; }
   .wg-ask-skip { min-width: 44px; }
   /* The number stays small on the picture; its hit area is 44 points around it. */

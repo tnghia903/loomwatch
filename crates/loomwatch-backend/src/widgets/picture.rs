@@ -111,7 +111,7 @@ pub(crate) struct Guess {
     pub(crate) answer: u8,
 }
 
-/// A picture, read from the agent's `drawing`, `parts` and `guess` and checked.
+/// A picture, read from the agent's `drawing`, `parts`, `guess` and `dial` and checked.
 pub(crate) fn read(arguments: &Value, title: String) -> Result<Widget, String> {
     let parts = match arguments.get("parts") {
         None | Some(Value::Null) => Vec::new(),
@@ -186,6 +186,7 @@ pub(crate) fn read(arguments: &Value, title: String) -> Result<Widget, String> {
                 .to_owned(),
         );
     }
+    let dial = dialled(arguments, moves.is_empty())?;
     let labels = words
         .iter()
         .map(|(label, at)| label.placed(crop.matrix.apply(*at)))
@@ -204,7 +205,25 @@ pub(crate) fn read(arguments: &Value, title: String) -> Result<Widget, String> {
         labels,
         moves,
         guess,
+        dial,
     })
+}
+
+/// The cause a picture's dial turns, when its stages are values of one: only for a picture that
+/// plays, since a dial turns what changes.
+fn dialled(arguments: &Value, still: bool) -> Result<Option<String>, String> {
+    let dial = match arguments.get("dial") {
+        None | Some(Value::Null) => return Ok(None),
+        Some(_) => text(arguments, "dial", 1, limits::DIAL_CHARS)?,
+    };
+    if still {
+        return Err(
+            "dial is for a picture that plays: draw what changes again at each value's part with \
+             data-moves, or leave dial out"
+                .to_owned(),
+        );
+    }
+    Ok(Some(dial))
 }
 
 /// Each thing drawn again at each stage, its copies in the order of their parts, checked to be drawn

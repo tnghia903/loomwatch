@@ -90,7 +90,7 @@ export type WidgetSpec =
   | { kind: 'marks'; title: string; cells: WidgetCell[]; facts?: string[] }
   | { kind: 'flow'; title: string; boxes: WidgetBox[]; repeats?: boolean }
   | { kind: 'graph'; title: string; style: 'bar' | 'line'; labels: string[]; series: WidgetSeries[]; unit?: string; prefix?: string; decimals?: number }
-  | { kind: 'picture'; title: string; width: number; height: number; shapes: WidgetShape[]; parts?: WidgetPart[]; labels?: WidgetLabel[]; moves?: WidgetMove[]; guess?: WidgetGuess }
+  | { kind: 'picture'; title: string; width: number; height: number; shapes: WidgetShape[]; parts?: WidgetPart[]; labels?: WidgetLabel[]; moves?: WidgetMove[]; guess?: WidgetGuess; dial?: string }
 
 /** What you made of a widget: a checklist's ticks, or a calculator's values by input id. */
 export type WidgetState = { checked: boolean[] } | { values: Record<string, number | boolean> }

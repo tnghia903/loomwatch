@@ -728,6 +728,44 @@ describe('AnswerWidgets, pictures that name and play', () => {
     }
   })
 
+  it('turns a dial when the steps are values of a cause, reading the value between them', () => {
+    const speeds = ball({
+      title: 'What makes a plane lift off',
+      dial: 'Speed',
+      parts: [
+        { label: '0 km/h', text: 'No speed, no lift.', at: [100, 180] },
+        { label: '150 km/h', text: 'Some lift, less than the weight.', at: [300, 80] },
+        { label: '250 km/h', text: 'Lift beats weight: it lifts off.', at: [500, 30] },
+      ],
+    })
+    render(<AnswerWidgets widgets={[{ ...speeds, n: 39 }]} onChange={keeper().onChange} />)
+    const picture = screen.getByRole('region', { name: 'What makes a plane lift off' })
+    // The line is a dial named for its cause; its stops are marks, not step numbers.
+    const dial = within(picture).getByRole('slider', { name: 'Speed' })
+    expect(within(picture).queryByRole('slider', { name: 'Step' })).toBeNull()
+    expect([...picture.querySelectorAll('.wg-scrub-stop, .wg-scrub-knob')].map((stop) => stop.textContent)).toEqual(['', '', '', ''])
+    // Its ends say how far it goes, and its words read the value and what it does.
+    expect(picture.querySelector('.wg-dial-ends')?.textContent).toBe('0 km/h250 km/h')
+    expect(dial).toHaveAttribute('aria-valuetext', 'Speed: 250 km/h')
+    fireEvent.keyDown(dial, { key: 'ArrowLeft' })
+    expect(dial).toHaveAttribute('aria-valuetext', 'Speed: 150 km/h')
+    expect(picture).toHaveTextContent('Speed · 150 km/hSome lift, less than the weight.')
+    expect(picture).not.toHaveTextContent('2 of 3')
+    // Dragged between two values, it reads the value in between, as the drawing is.
+    dial.getBoundingClientRect = () => ({ left: 0, width: 224, top: 0, height: 36, right: 224, bottom: 36, x: 0, y: 0, toJSON: () => ({}) })
+    fireEvent.pointerDown(dial, { clientX: 162, pointerId: 1 })
+    expect(dial).toHaveAttribute('aria-valuetext', 'Speed: 200 km/h')
+    // The moving reading is seen, not read out on every frame: a screen reader hears the step.
+    const head = picture.querySelector('.wg-step-head')!
+    expect(head.querySelector('[aria-hidden="true"]')?.textContent).toBe('Speed · 200 km/h')
+    expect(head.querySelector('.visually-hidden')?.textContent).toMatch(/^Speed · (150|250) km\/h$/)
+    fireEvent.pointerUp(dial, { clientX: 162, pointerId: 1 })
+    // Steps in time keep their numbers.
+    cleanup()
+    render(<AnswerWidgets widgets={[{ ...ball(), n: 40 }]} onChange={keeper().onChange} />)
+    expect(within(screen.getByRole('region', { name: 'A ball rolls' })).getByRole('slider', { name: 'Step' })).toHaveAttribute('aria-valuetext', '3 of 3: Goal')
+  })
+
   it('takes you to a step by dragging along the line of steps, or with the keys', () => {
     render(<AnswerWidgets widgets={[{ ...ball(), n: 34 }]} onChange={keeper().onChange} />)
     const picture = screen.getByRole('region', { name: 'A ball rolls' })

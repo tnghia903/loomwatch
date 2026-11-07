@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type RefObject } from 'react'
 
-import { between, parsed, plays, stretches, whereIn, type Play as Played } from '../../../lib/widgets/picturePlay'
+import { between, dialReading, parsed, plays, stretches, whereIn, type Play as Played } from '../../../lib/widgets/picturePlay'
 import type { WidgetLabel, WidgetShape, WidgetSpec } from '../../../lib/widgets/types'
 import { ChevronLeft, ChevronRight, Pause, Play } from '../../ui/icon'
 
@@ -373,6 +373,10 @@ function PlayingPicture({ spec, fresh }: { spec: Picture; fresh: boolean }) {
   // The handle says the step whose words show.
   const step = resting ? count - 1 : shown
   const part = parts[shown]
+  // A dial (ADR 0117, amended 7 November): the steps are values of a cause the person turns, read
+  // between them as the drawing moves.
+  const dial = spec.dial
+  const reading = dial ? dialReading(parts, at) : null
 
   return (
     <section className={`wg wg-picture plays${resting ? ' resting' : ''}`} aria-label={spec.title}>
@@ -412,14 +416,14 @@ function PlayingPicture({ spec, fresh }: { spec: Picture; fresh: boolean }) {
         </button>
         <div
           ref={track}
-          className="wg-scrub"
+          className={`wg-scrub${dial ? ' dial' : ''}`}
           role="slider"
           tabIndex={0}
-          aria-label="Step"
+          aria-label={dial ?? 'Step'}
           aria-valuemin={1}
           aria-valuemax={count}
           aria-valuenow={step + 1}
-          aria-valuetext={`${step + 1} of ${count}: ${parts[step].label}`}
+          aria-valuetext={dial ? `${dial}: ${reading}` : `${step + 1} of ${count}: ${parts[step].label}`}
           style={{ '--run': at / (count - 1) } as CSSProperties}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
@@ -430,11 +434,14 @@ function PlayingPicture({ spec, fresh }: { spec: Picture; fresh: boolean }) {
           <span className="wg-scrub-line" />
           <span className="wg-scrub-run" />
           {parts.map((_, which) => (
-            <span key={which} className={`wg-scrub-stop${!resting && at >= which - 1e-6 ? ' done' : ''}`} style={{ '--at': which / (count - 1) } as CSSProperties} aria-hidden="true">{which + 1}</span>
+            <span key={which} className={`wg-scrub-stop${!resting && at >= which - 1e-6 ? ' done' : ''}`} style={{ '--at': which / (count - 1) } as CSSProperties} aria-hidden="true">{dial ? null : which + 1}</span>
           ))}
-          <span className="wg-scrub-knob" aria-hidden="true">{step + 1}</span>
+          <span className="wg-scrub-knob" aria-hidden="true">{dial ? null : step + 1}</span>
         </div>
       </div>
+      {dial && (
+        <div className="wg-dial-ends" aria-hidden="true"><span>{parts[0].label}</span><span>{parts[count - 1].label}</span></div>
+      )}
       {/* One place a screen reader hears: the step's words, or the question waiting on you. */}
       <div aria-live="polite">
         {asking && guess && (
@@ -450,7 +457,8 @@ function PlayingPicture({ spec, fresh }: { spec: Picture; fresh: boolean }) {
         )}
         {!asking && part && (
           <div className="wg-step-text wg-picture-part">
-            <p className="wg-step-head">{shown + 1} of {count} · {part.label}</p>
+            {/* A dial's reading moves with every frame: seen, but a screen reader hears the step it settles on. */}
+            <p className="wg-step-head">{dial ? <><span aria-hidden="true">{dial} · {reading}</span><span className="visually-hidden">{dial} · {part.label}</span></> : `${shown + 1} of ${count} · ${part.label}`}</p>
             {note && guess && shown === guess.before - 1 && <p className="wg-picture-note">{note}</p>}
             <p className="wg-step-body">{part.text}</p>
           </div>

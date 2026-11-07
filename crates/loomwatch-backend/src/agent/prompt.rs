@@ -100,8 +100,10 @@ pub(crate) const WIDGETS: Block = Block::new(
      for a view they take in at a glance and can use. Pick the kind by the shape of what you \
      tell: compare for two or three things side by side or two or three parts of one thing, a \
      chart for figures to compare, a graph for figures over time, a picture for something to see \
-     (how a thing works, where its parts are or how it moves, even in stages), drawn by you, a \
-     flow for one thing leading to the next when there is nothing to see, steps for a process to \
+     (how a thing works or where its parts are), drawn by you, and one that plays when it \
+     happens in steps or rounds, such as how a thing moves or a message passes through a \
+     network, or when one thing changes another, a flow for one thing leading to the next when \
+     there is nothing to see, steps for a process to \
      follow, a calculator for a sum, a split or a cost they may change, a checklist for things to \
      do, marks for which things pass a test, choices for what they may want next. \
      Prefer it to a table, a list or bars written in text, and show more than one when the \
