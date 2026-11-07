@@ -60,11 +60,11 @@ export function WidgetGraph({ spec }: { spec: Graph }) {
   // inside the plot.
   const room = Math.max(24, Math.max(...spec.labels.map((label) => label.length)) * CHAR + 10)
   const every = Math.max(1, Math.ceil(points / Math.max(1, Math.floor(plot / room))))
-  const labelX = (index: number) => {
-    const half = ((spec.labels[index]?.length ?? 0) * CHAR) / 2
-    return Math.min(Math.max(x(index), left + half), left + plot - half)
-  }
+  const half = (index: number) => ((spec.labels[index]?.length ?? 0) * CHAR) / 2
+  const labelX = (index: number) => Math.min(Math.max(x(index), left + half(index)), left + plot - half(index))
   const selected = Math.min(Math.max(at, 0), points - 1)
+  // The picked point's label is always drawn; one of the others that would sit on it gives way.
+  const clear = (index: number) => Math.abs(labelX(index) - labelX(selected)) >= half(index) + half(selected) + 4
   const move = (event: KeyboardEvent) => {
     if (event.key === 'ArrowRight') setAt((current) => Math.min(points - 1, current + 1))
     else if (event.key === 'ArrowLeft') setAt((current) => Math.max(0, current - 1))
@@ -110,7 +110,7 @@ export function WidgetGraph({ spec }: { spec: Graph }) {
               <text className="wg-axis" x={left - 6} y={y(tick)} dy="0.32em" textAnchor="end">{tickText[which]}</text>
             </g>
           ))}
-          {spec.labels.map((label, index) => (index % every === 0 || index === selected) && (
+          {spec.labels.map((label, index) => (index === selected || (index % every === 0 && clear(index))) && (
             <text key={index} className={`wg-axis wg-axis-label${index === selected ? ' on' : ''}`} x={labelX(index)} y={HEIGHT + 17} textAnchor="middle">{label}</text>
           ))}
           <line className="wg-at" x1={x(selected)} x2={x(selected)} y1={0} y2={HEIGHT} />
@@ -136,15 +136,19 @@ export function WidgetGraph({ spec }: { spec: Graph }) {
               ))}
         </svg>
       </div>
-      <table className="visually-hidden">
-        <caption>{spec.title}</caption>
-        <thead><tr><td />{spec.series.map((series, which) => <th key={which} scope="col">{series.label}</th>)}</tr></thead>
-        <tbody>
-          {spec.labels.map((label, index) => (
-            <tr key={index}><th scope="row">{label}</th>{spec.series.map((series, which) => <td key={which}>{written(series.values[index] ?? 0)}</td>)}</tr>
-          ))}
-        </tbody>
-      </table>
+      {/* Hidden in a box: a table takes no notice of a 1px width, so on its own it would stay as
+          wide as its words and widen the page. */}
+      <div className="visually-hidden">
+        <table>
+          <caption>{spec.title}</caption>
+          <thead><tr><td />{spec.series.map((series, which) => <th key={which} scope="col">{series.label}</th>)}</tr></thead>
+          <tbody>
+            {spec.labels.map((label, index) => (
+              <tr key={index}><th scope="row">{label}</th>{spec.series.map((series, which) => <td key={which}>{written(series.values[index] ?? 0)}</td>)}</tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </section>
   )
 }

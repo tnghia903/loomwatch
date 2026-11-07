@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -739,5 +742,72 @@ describe('AnswerWidgets, pictures that name and play', () => {
     fireEvent.pointerDown(slider, { clientX: 12, clientY: 10, pointerId: 3, pointerType: 'touch' })
     fireEvent.pointerUp(slider, { clientX: 13, clientY: 11, pointerId: 3, pointerType: 'touch' })
     expect(slider).toHaveAttribute('aria-valuenow', '1')
+  })
+})
+
+describe('AnswerWidgets, read right at any width', () => {
+  const weeks: KeptWidget = { n: 30, spec: { kind: 'graph', title: 'Weekly sales', style: 'bar', labels: Array.from({ length: 12 }, (_, at) => `Week ${at + 1}`), series: [{ label: 'Sales', values: [3, 4, 5, 4, 6, 7, 6, 8, 7, 9, 8, 10] }] } }
+  const branches: KeptWidget = { n: 31, spec: { kind: 'compare', title: 'Three branches', sides: [{ label: 'Legislative' }, { label: 'Executive' }, { label: 'Judicial' }], rows: [{ label: 'Main job', values: ['Makes laws', 'Carries out laws', 'Interprets laws'] }] } }
+  // How wide the graph reckons a label's letters, as it lays them out.
+  const CHAR = 7.5
+  const drawnLabels = (plot: HTMLElement) => [...plot.querySelectorAll('text.wg-axis-label')]
+    .map((text) => ({ x: Number(text.getAttribute('x')), text: text.textContent ?? '' }))
+    .sort((a, b) => a.x - b.x)
+
+  it('never draws one of a graph’s labels on another, and always draws the picked point’s', () => {
+    render(<AnswerWidgets widgets={[weeks]} onChange={keeper().onChange} />)
+    const plot = screen.getByRole('region', { name: 'Weekly sales' })
+    const apart = () => {
+      const labels = drawnLabels(plot)
+      for (let at = 1; at < labels.length; at++) {
+        expect(labels[at].x - labels[at - 1].x, `${labels[at - 1].text} and ${labels[at].text}`).toBeGreaterThanOrEqual(((labels[at].text.length + labels[at - 1].text.length) * CHAR) / 2)
+      }
+      return labels.map((label) => label.text)
+    }
+    // Every other week fits; the last is picked first, and its neighbour gives way to it.
+    expect(apart()).toContain('Week 12')
+    fireEvent.keyDown(within(plot).getByRole('group'), { key: 'ArrowLeft' })
+    expect(plot).toHaveTextContent('Week 11: 8')
+    expect(apart()).toContain('Week 11')
+  })
+
+  it('keeps the table a screen reader reads in a hidden box, so it never makes the page wider', () => {
+    render(<AnswerWidgets widgets={[weeks, branches]} onChange={keeper().onChange} />)
+    // A table takes no notice of the hidden style's 1px width, so a hidden table stays as wide as
+    // its words and an answer's pane could scroll sideways into nothing.
+    const tables = screen.getAllByRole('table')
+    expect(tables).toHaveLength(2)
+    for (const table of tables) {
+      expect(table).not.toHaveClass('visually-hidden')
+      expect(table.parentElement).toHaveClass('visually-hidden')
+      expect(table.parentElement?.tagName).toBe('DIV')
+    }
+  })
+
+  it('moves a comparison’s words to the next line whole, and sets the sides’ names smaller on a narrow card', () => {
+    const css = readFileSync(resolve(process.cwd(), 'src/styles', 'widgets.css'), 'utf8')
+    expect(css.length).toBeGreaterThan(1000)
+    const rule = (selector: string) => css.match(new RegExp(`^${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\{([^}]*)\\}`, 'm'))?.[1] ?? ''
+    for (const selector of ['.wg-whole b', '.wg-whole span', '.wg-side-name', '.wg-side-note', '.wg-row-value']) {
+      expect(rule(selector), selector).not.toBe('')
+      // A word moves to the next line whole, and only one wider than its whole column is split:
+      // hyphens cut words that would have fitted the next line ("gen-erally", "or-dinary").
+      expect(rule(selector), selector).not.toContain('overflow-wrap: anywhere')
+      expect(rule(selector), selector).toContain('overflow-wrap: break-word')
+      expect(rule(selector), selector).not.toContain('hyphens')
+    }
+    // The name sits in a row beside its mark: its words must be free to shrink, or a long one runs
+    // into the next side's.
+    expect(rule('.wg-side-name > span')).toContain('min-width: 0')
+    // A note or the whole's label sizes to its words in a centred column: without a cap, a word
+    // wider than the column ("Representatives") would widen it past the card.
+    for (const selector of ['.wg-whole b', '.wg-whole span', '.wg-side-note']) expect(rule(selector), selector).toContain('max-width: 100%')
+    render(<AnswerWidgets widgets={[branches]} onChange={keeper().onChange} />)
+    const names = [...within(screen.getByRole('region', { name: 'Three branches' })).getByTestId('wg-compare').querySelectorAll('.wg-side-name')]
+    expect(names.map((name) => name.querySelector(':scope > span')?.textContent)).toEqual(['Legislative', 'Executive', 'Judicial'])
+    expect(css).toMatch(/\.wg-compare \{[^}]*container: wg-compare \/ inline-size/)
+    // Three sides come down in two steps: a narrow desktop pane first, then a phone.
+    expect(css).toMatch(/@container wg-compare \(max-width: 440px\) \{[^@]*\.wg-cmp\.n3 \.wg-side\.named \.wg-side-name \{[^}]*font-size: 18px/)
+    for (const sides of ['n2', 'n3']) expect(css).toMatch(new RegExp(`@container wg-compare \\(max-width: \\d+px\\) \\{[^@]*\\.wg-cmp\\.${sides} \\.wg-side\\.named \\.wg-side-name \\{[^}]*font-size`))
   })
 })

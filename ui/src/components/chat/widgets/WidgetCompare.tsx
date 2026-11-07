@@ -52,7 +52,7 @@ export function WidgetCompare({ spec }: { spec: Compare }) {
         )}
         {spec.sides.map((side, at) => (
           <div key={at} className={`wg-side s${SERIES[at] ?? 1}${toScale ? ' drawn' : ''}${figures ? '' : ' named'}`}>
-            <span className="wg-side-name">{side.label}</span>
+            <span className="wg-side-name"><span>{side.label}</span></span>
             {figures && side.value !== undefined && (
               <span className="wg-side-figure">{number(side.value)}{spec.unit && <small> {spec.unit}</small>}</span>
             )}
@@ -75,35 +75,39 @@ export function WidgetCompare({ spec }: { spec: Compare }) {
           </div>
         ))}
       </div>
-      <table className="visually-hidden">
-        <caption>{spec.whole ? `${spec.title}: ${spec.whole.label}${spec.whole.note ? `, ${spec.whole.note}` : ''}` : spec.title}</caption>
-        <thead>
-          <tr>
-            <td />
-            {spec.sides.map((side, at) => <th key={at} scope="col">{side.label}</th>)}
-          </tr>
-        </thead>
-        <tbody>
-          {figures && (
+      {/* Hidden in a box: a table takes no notice of a 1px width, so on its own it would stay as
+          wide as its words and widen the page. */}
+      <div className="visually-hidden">
+        <table>
+          <caption>{spec.whole ? `${spec.title}: ${spec.whole.label}${spec.whole.note ? `, ${spec.whole.note}` : ''}` : spec.title}</caption>
+          <thead>
             <tr>
-              <th scope="row">{spec.unit ?? 'Number'}</th>
-              {spec.sides.map((side, at) => <td key={at}>{side.value === undefined ? '' : figureOf(side.value, spec)}</td>)}
+              <td />
+              {spec.sides.map((side, at) => <th key={at} scope="col">{side.label}</th>)}
             </tr>
-          )}
-          {spec.sides.some((side) => side.note) && (
-            <tr>
-              <th scope="row">Note</th>
-              {spec.sides.map((side, at) => <td key={at}>{side.note ?? ''}</td>)}
-            </tr>
-          )}
-          {rows.map((row, at) => (
-            <tr key={at}>
-              <th scope="row">{row.label}</th>
-              {row.values.map((value, side) => <td key={side}>{value}</td>)}
-            </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {figures && (
+              <tr>
+                <th scope="row">{spec.unit ?? 'Number'}</th>
+                {spec.sides.map((side, at) => <td key={at}>{side.value === undefined ? '' : figureOf(side.value, spec)}</td>)}
+              </tr>
+            )}
+            {spec.sides.some((side) => side.note) && (
+              <tr>
+                <th scope="row">Note</th>
+                {spec.sides.map((side, at) => <td key={at}>{side.note ?? ''}</td>)}
+              </tr>
+            )}
+            {rows.map((row, at) => (
+              <tr key={at}>
+                <th scope="row">{row.label}</th>
+                {row.values.map((value, side) => <td key={side}>{value}</td>)}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </section>
   )
 }

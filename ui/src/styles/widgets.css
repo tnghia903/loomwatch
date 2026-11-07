@@ -58,10 +58,27 @@
    words and its mark to scale; then facts read across, labelled once. Sides share one grid with
    the facts, so a value sits under its side.
    --------------------------------------------------------------------------- */
+/* Words move to the next line whole; only a word wider than its whole column is split, and a
+   box that sizes to its words never grows past its column. On a narrow card the sides' names
+   come down a size (three sides in two steps) and the facts give up some padding, so a name like
+   "Legislative" or "Traditional" and a word like "contributions" keep whole. */
+.wg-compare { container: wg-compare / inline-size; }
 .wg-cmp { display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); }
+@container wg-compare (max-width: 440px) {
+  .wg-cmp.n3 .wg-side { padding-inline: 6px; }
+  .wg-cmp.n3 .wg-side.named .wg-side-name { font-size: 18px; line-height: 24px; }
+}
+@container wg-compare (max-width: 360px) {
+  .wg-cmp .wg-row-value { padding-inline: 6px; }
+  .wg-cmp.n2 .wg-side.named .wg-side-name { font-size: 18px; line-height: 24px; }
+  .wg-cmp.n3 .wg-side { padding-inline: 2px; }
+  .wg-cmp.n3 .wg-side.named .wg-side-name { font-size: 13px; line-height: 18px; }
+  /* At one size with the names, the facts give up some weight so the serif names still lead. */
+  .wg-cmp.n3 .wg-row-value { padding-inline: 2px; font-size: 13px; line-height: 18px; font-weight: 400; }
+}
 .wg-whole { grid-column: 1 / -1; justify-self: center; display: flex; flex-direction: column; align-items: center; max-width: 100%; text-align: center; }
-.wg-whole b { font: 600 14px/20px var(--font-sans); color: var(--color-ink); overflow-wrap: anywhere; }
-.wg-whole span { font: 400 12px/16px var(--font-sans); color: var(--color-ink-2); overflow-wrap: anywhere; }
+.wg-whole b { max-width: 100%; font: 600 14px/20px var(--font-sans); color: var(--color-ink); overflow-wrap: break-word; }
+.wg-whole span { max-width: 100%; font: 400 12px/16px var(--font-sans); color: var(--color-ink-2); overflow-wrap: break-word; }
 /* The joint: a stem down from the whole, then a bar to each side's middle, with a drop to each. */
 .wg-tree { grid-column: 1 / -1; position: relative; height: 24px; }
 .wg-tree::before { content: ''; position: absolute; left: 50%; top: 2px; height: 11px; border-left: 1px solid var(--color-warp); }
@@ -82,13 +99,15 @@
 .wg-side + .wg-side { box-shadow: inset 1px 0 0 var(--color-hairline); }
 .wg-side.s2 { --wg-mark: var(--color-series-2); }
 .wg-side.s3 { --wg-mark: var(--color-series-3); }
-.wg-side-name { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; font: 500 13px/18px var(--font-sans); color: var(--color-ink-2); overflow-wrap: anywhere; }
+.wg-side-name { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; font: 500 13px/18px var(--font-sans); color: var(--color-ink-2); overflow-wrap: break-word; }
+/* The name's words in a box of their own that may shrink, so a long word breaks inside the column. */
+.wg-side-name > span { min-width: 0; }
 /* Each side's own mark beside its name, when its figure is drawn. */
 .wg-side.drawn .wg-side-name::before { content: ''; flex: none; width: 8px; height: 8px; border-radius: var(--r-full); background: var(--wg-mark); }
 .wg-side.named .wg-side-name { font: 400 22px/28px var(--font-serif); letter-spacing: -.01em; color: var(--color-ink); }
 .wg-side-figure { font: 400 40px/1.1 var(--font-serif); letter-spacing: -.02em; color: var(--color-ink); font-variant-numeric: lining-nums tabular-nums; overflow-wrap: anywhere; }
 .wg-side-figure small { font: 400 13px/1 var(--font-sans); letter-spacing: 0; color: var(--color-ink-2); }
-.wg-side-note { font: 400 12px/16px var(--font-sans); color: var(--color-ink-2); overflow-wrap: anywhere; }
+.wg-side-note { max-width: 100%; font: 400 12px/16px var(--font-sans); color: var(--color-ink-2); overflow-wrap: break-word; }
 .wg-side .wg-dots { margin-top: var(--sp-2); }
 .wg-side-scale { display: block; width: 100%; max-width: 180px; height: 4px; margin-top: var(--sp-2); border-radius: var(--r-full); background: color-mix(in srgb, var(--color-ink) 8%, transparent); }
 .wg-side-scale i { display: block; height: 100%; min-width: 2px; border-radius: inherit; background: var(--wg-mark); transform-origin: left; }
@@ -107,7 +126,7 @@
   text-transform: uppercase;
   color: var(--color-ink-2);
 }
-.wg-row-value { min-width: 0; padding: 2px 10px 9px; text-align: center; font: 500 14px/19px var(--font-sans); color: var(--color-ink); overflow-wrap: anywhere; }
+.wg-row-value { min-width: 0; padding: 2px 10px 9px; text-align: center; font: 500 14px/19px var(--font-sans); color: var(--color-ink); overflow-wrap: break-word; }
 .wg-row-value + .wg-row-value { box-shadow: inset 1px 0 0 var(--color-hairline); }
 /* A fact under the pointer is tinted across, where there is a pointer to hover with. */
 @media (hover: hover) { .wg-row:hover > * { background: color-mix(in srgb, var(--color-ink) 4%, transparent); } }
