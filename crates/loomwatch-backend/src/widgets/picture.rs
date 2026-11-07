@@ -3,11 +3,17 @@
 //!
 //! The agent writes its drawing as SVG, which models draw well, and `LoomWatch` keeps only the
 //! shapes of it: `path`, `circle`, `ellipse`, `rect`, `line`, `polyline` and `polygon`, in `svg`
-//! and `g` with their transforms. Words, colours, gradients, pictures, links, styles and scripts
-//! are left out, and nothing the agent wrote is ever shown as markup. Each shape is redrawn as
-//! absolute moves, lines and cubic curves in a frame [`WIDTH`] wide, so the apps draw it in a few
-//! lines of their own, in `LoomWatch`'s ink: every shape outlined, a filled one shaded (dark when
-//! its fill is dark), a dashed one dashed, and an arrowhead where a marker was.
+//! and `g` with their transforms, and the words of its `text` as plain labels where it placed them.
+//! Colours, gradients, pictures, links, styles and scripts are left out, and nothing the agent
+//! wrote is ever shown as markup. Each shape is redrawn as absolute moves, lines and cubic curves
+//! in a frame [`WIDTH`] wide, so the apps draw it in a few lines of their own, in `LoomWatch`'s
+//! ink: every shape outlined, a filled one shaded (dark when its fill is dark), a dashed one
+//! dashed, and an arrowhead where a marker was. Its labels are set in `LoomWatch`'s own type.
+//!
+//! A picture plays when the agent draws one thing again at each stage (`data-moves`): the apps move
+//! it from one stage's drawing to the next. It may ask one question first, before the step whose
+//! outcome surprises ([`Guess`]). ADR 0117's amendment of 7 November says why, from learning
+//! research on pictures that move.
 
 use std::fmt::Write as _;
 
@@ -53,7 +59,59 @@ pub(crate) struct Part {
     pub(crate) at: [f64; 2],
 }
 
-/// A picture, read from the agent's `drawing` and `parts` and checked.
+/// Words the agent put on its picture, set in `LoomWatch`'s type where it placed them: plain text,
+/// never markup.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct Label {
+    pub(crate) text: String,
+    /// Where it stands, in the picture's units: its middle across `anchor`'s edge, and its middle
+    /// down.
+    pub(crate) at: [f64; 2],
+    pub(crate) anchor: Anchor,
+    /// The part it names, from 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) part: Option<u8>,
+}
+
+/// Which of a label's edges stands at its point, as SVG's `text-anchor` says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum Anchor {
+    #[default]
+    Start,
+    Middle,
+    End,
+}
+
+/// One thing the agent drew again at each stage, so the apps move it from stage to stage: at each,
+/// its shapes and labels (indexes into the picture's), drawn the same way in the same order.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct Move {
+    pub(crate) stages: Vec<Stage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct Stage {
+    /// The part that is this stage, from 1.
+    pub(crate) part: u8,
+    pub(crate) shapes: Vec<usize>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) labels: Vec<usize>,
+}
+
+/// A question asked once, as a picture first plays, before the step whose outcome surprises: a
+/// guess before a surprise is remembered best.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct Guess {
+    /// The part it comes before, from 2.
+    pub(crate) before: u8,
+    pub(crate) question: String,
+    pub(crate) choices: Vec<String>,
+    /// The right choice, from 0.
+    pub(crate) answer: u8,
+}
+
+/// A picture, read from the agent's `drawing`, `parts` and `guess` and checked.
 pub(crate) fn read(arguments: &Value, title: String) -> Result<Widget, String> {
     let parts = match arguments.get("parts") {
         None | Some(Value::Null) => Vec::new(),
@@ -76,35 +134,13 @@ pub(crate) fn read(arguments: &Value, title: String) -> Result<Widget, String> {
         ));
     }
     let reading = Reading::of(drawing)?;
-    if let Some(part) = reading.shapes.iter().filter_map(|shape| shape.part).max()
-        && usize::from(part) > parts.len()
-    {
-        return Err(match parts.len() {
-            0 => format!("a shape has data-part=\"{part}\", but there are no parts: give parts"),
-            count => format!(
-                "a shape has data-part=\"{part}\", but there are {count} parts: number them from \
-                 1 to {count}"
-            ),
-        });
-    }
+    reading.in_parts(parts.len())?;
+    let guess = match arguments.get("guess") {
+        None | Some(Value::Null) => None,
+        Some(guess) => Some(guessed(guess, parts.len())?),
+    };
     let frame = reading.frame()?;
-    // Each shape in the frame's units, a sky or a backdrop left out: the picture stands on the
-    // chat's own ground.
-    let drawn: Vec<(&Raw, Vec<Segment>)> = reading
-        .shapes
-        .iter()
-        .filter_map(|raw| {
-            let segments: Vec<Segment> = raw
-                .segments
-                .iter()
-                .map(|segment| segment.mapped(&frame.matrix))
-                .collect();
-            let backdrop = raw.part.is_none()
-                && raw.fill.is_some()
-                && Bounds::of(&segments).area() >= BACKGROUND * WIDTH * frame.height;
-            (!backdrop).then_some((raw, segments))
-        })
-        .collect();
+    let drawn = reading.framed(&frame);
     if drawn.is_empty() {
         return Err(
             "drawing has nothing to draw: draw the thing itself with path, circle, ellipse, rect, \
@@ -116,18 +152,25 @@ pub(crate) fn read(arguments: &Value, title: String) -> Result<Widget, String> {
         .iter()
         .map(|(_, _, at)| at.map(|at| frame.matrix.apply(at)))
         .collect();
-    let crop = cropped(&drawn, &given, frame.height);
+    let words: Vec<(&RawLabel, P)> = reading
+        .labels
+        .iter()
+        .map(|label| (label, frame.matrix.apply(label.at)))
+        .collect();
+    // A picture that plays shows its parts' numbers on its line of steps, not on it: no room is
+    // kept for them, and nothing joins them to their parts.
+    let plays = !reading.copies.is_empty();
+    let crop = cropped(
+        &drawn,
+        if plays { &[] } else { &given },
+        &words,
+        frame.height,
+    );
     let drawn: Vec<(&Raw, Vec<Segment>)> = drawn
         .into_iter()
-        .map(|(raw, segments)| {
-            let segments = segments
-                .iter()
-                .map(|segment| segment.mapped(&crop.matrix))
-                .collect();
-            (raw, segments)
-        })
+        .map(|(raw, segments)| (raw, mapped(&segments, &crop.matrix)))
         .collect();
-    let mut shapes = outlined(&drawn);
+    let (mut shapes, owners) = outlined(&drawn);
     if shapes.len() > limits::SHAPES {
         return Err(format!(
             "drawing has {} shapes; keep it to {}: draw fewer, simpler shapes",
@@ -135,22 +178,223 @@ pub(crate) fn read(arguments: &Value, title: String) -> Result<Widget, String> {
             limits::SHAPES
         ));
     }
+    let moves = moving(&reading.copies, &drawn, &owners, &shapes, &words)?;
+    if guess.is_some() && moves.is_empty() {
+        return Err(
+            "guess is for a picture that plays: draw what moves again in each stage's part with \
+             data-moves, or leave guess out"
+                .to_owned(),
+        );
+    }
+    let labels = words
+        .iter()
+        .map(|(label, at)| label.placed(crop.matrix.apply(*at)))
+        .collect();
+    let drawn_shapes = shapes.len();
     let placed = numbered(parts, &given, &drawn, &crop, &mut shapes)?;
+    if plays {
+        shapes.truncate(drawn_shapes);
+    }
     Ok(Widget::Picture {
         title,
         width: WIDTH,
         height: rounded(crop.height),
         shapes,
         parts: placed,
+        labels,
+        moves,
+        guess,
+    })
+}
+
+/// Each thing drawn again at each stage, its copies in the order of their parts, checked to be drawn
+/// the same way so every point has one to move to.
+fn moving(
+    copies: &[Copied],
+    drawn: &[(&Raw, Vec<Segment>)],
+    owners: &[usize],
+    shapes: &[Shape],
+    words: &[(&RawLabel, P)],
+) -> Result<Vec<Move>, String> {
+    let mut names: Vec<&str> = Vec::new();
+    for copy in copies {
+        if !names.contains(&copy.name.as_str()) {
+            names.push(&copy.name);
+        }
+    }
+    if names.len() > limits::MOVES {
+        return Err(format!(
+            "{} things move; keep it to {}: move only what the person should watch",
+            names.len(),
+            limits::MOVES
+        ));
+    }
+    let mut moves = Vec::new();
+    for name in names {
+        let mut stages: Vec<Stage> = Vec::new();
+        for (at, copy) in copies
+            .iter()
+            .enumerate()
+            .filter(|(_, copy)| copy.name == name)
+        {
+            let Some(part) = copy.part else {
+                return Err(format!(
+                    "data-moves=\"{name}\" needs its stage: put data-part=\"N\" on the same g"
+                ));
+            };
+            let own_shapes: Vec<usize> = owners
+                .iter()
+                .enumerate()
+                .filter(|(_, owner)| drawn[**owner].0.copy == Some(at))
+                .map(|(index, _)| index)
+                .collect();
+            let own_labels: Vec<usize> = words
+                .iter()
+                .enumerate()
+                .filter(|(_, (label, _))| label.copy == Some(at))
+                .map(|(index, _)| index)
+                .collect();
+            if own_shapes
+                .iter()
+                .any(|index| shapes[*index].part != Some(part))
+                || own_labels
+                    .iter()
+                    .any(|index| words[*index].0.part != Some(part))
+            {
+                return Err(format!(
+                    "everything in a copy of \"{name}\" belongs to its stage, part {part}: take \
+                     data-part off what is inside it"
+                ));
+            }
+            if own_shapes.is_empty() && own_labels.is_empty() {
+                return Err(format!(
+                    "the copy of \"{name}\" in part {part} has nothing in it"
+                ));
+            }
+            if stages.iter().any(|stage| stage.part == part) {
+                return Err(format!(
+                    "\"{name}\" is drawn twice in part {part}: draw it once in each stage"
+                ));
+            }
+            stages.push(Stage {
+                part,
+                shapes: own_shapes,
+                labels: own_labels,
+            });
+        }
+        if stages.len() < 2 {
+            return Err(format!(
+                "\"{name}\" is drawn in one part only: draw it again in each part where it has \
+                 moved, or leave data-moves off"
+            ));
+        }
+        stages.sort_by_key(|stage| stage.part);
+        alike(name, &stages, shapes)?;
+        moves.push(Move { stages });
+    }
+    Ok(moves)
+}
+
+/// Each stage of `name` drawn as the one before it: the same shapes with the same commands, and as
+/// many labels, so every point and word has one to move to.
+fn alike(name: &str, stages: &[Stage], shapes: &[Shape]) -> Result<(), String> {
+    for pair in stages.windows(2) {
+        let (from, to) = (&pair[0], &pair[1]);
+        let alike = from.shapes.len() == to.shapes.len()
+            && from
+                .shapes
+                .iter()
+                .zip(&to.shapes)
+                .all(|(a, b)| commands(&shapes[*a].d) == commands(&shapes[*b].d));
+        if !alike {
+            return Err(format!(
+                "\"{name}\" isn't drawn the same way in parts {} and {}: draw each copy with \
+                 the same shapes in the same order, changing only where it is, its size or its \
+                 turn",
+                from.part, to.part
+            ));
+        }
+        if from.labels.len() != to.labels.len() {
+            return Err(format!(
+                "\"{name}\" has {} labels in part {} and {} in part {}: give each copy the \
+                 same labels",
+                from.labels.len(),
+                from.part,
+                to.labels.len(),
+                to.part
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// An outline moved by `matrix`.
+fn mapped(segments: &[Segment], matrix: &Matrix) -> Vec<Segment> {
+    segments
+        .iter()
+        .map(|segment| segment.mapped(matrix))
+        .collect()
+}
+
+/// A shape's commands without their points: two shapes alike in these can move into each other.
+fn commands(d: &str) -> String {
+    d.chars().filter(char::is_ascii_alphabetic).collect()
+}
+
+/// The question to ask before a step, checked against the parts it names.
+fn guessed(value: &Value, parts: usize) -> Result<Guess, String> {
+    if parts < 2 {
+        return Err("guess needs a picture in stages: give its stages as parts".to_owned());
+    }
+    let before = value
+        .get("before")
+        .and_then(Value::as_u64)
+        .and_then(|before| u8::try_from(before).ok())
+        .filter(|before| (2..=parts).contains(&usize::from(*before)))
+        .ok_or_else(|| {
+            format!("guess.before is the part the question comes before, from 2 to {parts}")
+        })?;
+    let question = text(value, "question", 1, limits::GUESS_CHARS)
+        .map_err(|error| format!("guess.{error}"))?;
+    let choices = list(value, "choices", limits::GUESS_CHOICES, |choice| {
+        choice
+            .as_str()
+            .map(str::trim)
+            .filter(|choice| {
+                !choice.is_empty() && choice.chars().count() <= limits::GUESS_CHOICE_CHARS
+            })
+            .map(str::to_owned)
+            .ok_or_else(|| {
+                format!(
+                    "each choice is a few words, {} characters at most",
+                    limits::GUESS_CHOICE_CHARS
+                )
+            })
+    })
+    .map_err(|error| format!("guess.{error}"))?;
+    let answer = value
+        .get("answer")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .and_then(|answer| choices.iter().position(|choice| choice == answer))
+        .and_then(|answer| u8::try_from(answer).ok())
+        .ok_or_else(|| "guess.answer is the right choice, written as in choices".to_owned())?;
+    Ok(Guess {
+        before,
+        question,
+        choices,
+        answer,
     })
 }
 
 /// Each shape as the apps draw it, with a head on each open stroke of an arrowed path: a model
 /// writes several arrows as one path with one marker, meaning each, where SVG would mark only its
-/// last point.
-fn outlined(drawn: &[(&Raw, Vec<Segment>)]) -> Vec<Shape> {
+/// last point. Beside them, which of `drawn` each came from.
+fn outlined(drawn: &[(&Raw, Vec<Segment>)]) -> (Vec<Shape>, Vec<usize>) {
     let mut shapes = Vec::new();
-    for (raw, segments) in drawn {
+    let mut owners = Vec::new();
+    for (owner, (raw, segments)) in drawn.iter().enumerate() {
+        owners.push(owner);
         shapes.push(Shape {
             d: path_data(segments),
             part: raw.part,
@@ -165,6 +409,7 @@ fn outlined(drawn: &[(&Raw, Vec<Segment>)]) -> Vec<Shape> {
             .into_iter()
             .flatten()
             {
+                owners.push(owner);
                 shapes.push(Shape {
                     d: arrowhead(tip, from),
                     part: raw.part,
@@ -174,7 +419,7 @@ fn outlined(drawn: &[(&Raw, Vec<Segment>)]) -> Vec<Shape> {
             }
         }
     }
-    shapes
+    (shapes, owners)
 }
 
 /// Each part where its number stands: where the agent put it, or above its shapes; with a line
@@ -235,7 +480,12 @@ fn numbered(
 /// The frame cut down to what is drawn, with room around it and for the parts' numbers, and
 /// scaled back to [`WIDTH`]: a drawing that leaves half its frame empty still fills its picture.
 /// Within the shapes' limits of wide and tall; the whole frame when that is near all of it.
-fn cropped(drawn: &[(&Raw, Vec<Segment>)], given: &[Option<P>], height: f64) -> Frame {
+fn cropped(
+    drawn: &[(&Raw, Vec<Segment>)],
+    given: &[Option<P>],
+    words: &[(&RawLabel, P)],
+    height: f64,
+) -> Frame {
     let all: Vec<Segment> = drawn
         .iter()
         .flat_map(|(_, segments)| segments.iter().copied())
@@ -243,6 +493,24 @@ fn cropped(drawn: &[(&Raw, Vec<Segment>)], given: &[Option<P>], height: f64) -> 
     let mut bounds = Bounds::of(&all);
     for p in given.iter().flatten() {
         bounds.include(*p);
+    }
+    // A label keeps its room: about as wide as the app sets its words, from the edge it stands on.
+    for (label, at) in words {
+        #[allow(clippy::cast_precision_loss)]
+        let wide = label.text.chars().count() as f64 * WORD_CHAR;
+        let left = match label.anchor {
+            Anchor::Start => at.x,
+            Anchor::Middle => at.x - wide / 2.0,
+            Anchor::End => at.x - wide,
+        };
+        bounds.include(P {
+            x: left,
+            y: at.y - WORD_HALF,
+        });
+        bounds.include(P {
+            x: left + wide,
+            y: at.y + WORD_HALF,
+        });
     }
     if given.iter().any(Option::is_none) {
         // A number of its own stands above its part's shapes.
@@ -290,6 +558,10 @@ const MARK_GAP: f64 = 20.0;
 /// a phone; and how short of the part the line stops.
 const LEADER_FROM: f64 = 48.0;
 const LEADER_GAP: f64 = 6.0;
+/// How wide a label's character, and half its height, stand in the picture's units, about as the
+/// apps set them in a chat: room kept for it when a picture is cut.
+const WORD_CHAR: f64 = 8.0;
+const WORD_HALF: f64 = 10.0;
 /// An arrowhead's sides, and their angle either side of the line.
 const HEAD_LENGTH: f64 = 14.0;
 const HEAD_ANGLE: f64 = 0.45;
@@ -680,12 +952,10 @@ fn number(value: f64) -> String {
 // Reading the SVG
 // ---------------------------------------------------------------------------------------------
 
-/// Elements whose content is never drawn: words, definitions, paint, pictures and code.
+/// Elements whose content is never drawn: definitions, paint, pictures and code, and words that
+/// aren't on the picture (a title, a description).
 const LEFT_OUT: &[&str] = &[
     "defs",
-    "text",
-    "tspan",
-    "textpath",
     "title",
     "desc",
     "metadata",
@@ -718,6 +988,10 @@ struct Style {
     arrow_start: bool,
     part: Option<u8>,
     matrix: Matrix,
+    anchor: Anchor,
+    font_size: f64,
+    /// The copy of a moving thing it is in, an index into [`Reading::copies`].
+    copy: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -737,6 +1011,42 @@ struct Raw {
     dashed: bool,
     arrow_end: bool,
     arrow_start: bool,
+    copy: Option<usize>,
+}
+
+/// One label as written, its middle in the drawing's units.
+#[derive(Debug)]
+struct RawLabel {
+    text: String,
+    at: P,
+    anchor: Anchor,
+    part: Option<u8>,
+    copy: Option<usize>,
+}
+
+impl RawLabel {
+    /// As the apps read it, its middle at `at` in the picture's units.
+    fn placed(&self, at: P) -> Label {
+        Label {
+            text: self.text.clone(),
+            at: [rounded(at.x), rounded(at.y)],
+            anchor: self.anchor,
+            part: self.part,
+        }
+    }
+}
+
+/// One copy of a moving thing: what it is called, and the stage (part) it is drawn in.
+#[derive(Debug)]
+struct Copied {
+    name: String,
+    part: Option<u8>,
+}
+
+/// A `text` being read: where it stands and what it says so far, and how deep in its `tspan`s.
+struct Words {
+    label: RawLabel,
+    depth: usize,
 }
 
 /// Where the drawing's units go: scaled to [`WIDTH`], and the height that gives.
@@ -750,6 +1060,8 @@ struct Frame {
 struct Reading {
     view_box: Option<(f64, f64, f64, f64)>,
     shapes: Vec<Raw>,
+    labels: Vec<RawLabel>,
+    copies: Vec<Copied>,
     segments: usize,
 }
 
@@ -766,14 +1078,46 @@ impl Reading {
             arrow_start: false,
             part: None,
             matrix: Matrix::IDENTITY,
+            anchor: Anchor::Start,
+            font_size: DEFAULT_FONT,
+            copy: None,
         }];
         let mut skipping = 0_usize;
+        let mut words: Option<Words> = None;
         let mut elements = 0_usize;
         let mut seen_svg = false;
         loop {
             let event = reader.read_event().map_err(|error| {
                 format!("the drawing isn't SVG LoomWatch can read ({error}): write it as SVG")
             })?;
+            if let Some(reading_words) = words.as_mut() {
+                match event {
+                    Event::Text(text) => reading_words.label.text.push_str(&text.xml10_content()),
+                    Event::CData(text) => reading_words.label.text.push_str(&text.xml10_content()),
+                    Event::GeneralRef(reference) => {
+                        if let Some(written) = referred(&reference) {
+                            reading_words.label.text.push_str(&written);
+                        }
+                    }
+                    Event::Start(_) => {
+                        elements += 1;
+                        reading_words.depth += 1;
+                        reading_words.label.text.push(' ');
+                    }
+                    Event::End(_) if reading_words.depth > 0 => {
+                        reading_words.depth -= 1;
+                        reading_words.label.text.push(' ');
+                    }
+                    Event::End(_) => {
+                        if let Some(done) = words.take() {
+                            reading.keep(done.label)?;
+                        }
+                    }
+                    Event::Eof => break,
+                    _ => {}
+                }
+                continue;
+            }
             let (tag, opens) = match event {
                 Event::Eof => break,
                 Event::Start(tag) => (tag, true),
@@ -819,10 +1163,43 @@ impl Reading {
                 .last()
                 .cloned()
                 .unwrap_or_else(|| unreachable!("the drawing's own style stays at the bottom"));
-            let style = styled(&parent, &tag, &name)?;
+            let mut style = styled(&parent, &tag, &name)?;
             if name == "svg" && !seen_svg {
                 seen_svg = true;
                 reading.view_box = frame_of(&tag)?;
+            }
+            if let Some(moves) = attribute(&tag, "data-moves") {
+                if parent.copy.is_some() {
+                    return Err(format!(
+                        "<{name}> has data-moves inside another data-moves: give it to the outer \
+                         g only"
+                    ));
+                }
+                if moves.is_empty() || moves.chars().count() > limits::ID_CHARS {
+                    return Err(format!(
+                        "data-moves=\"{moves}\" names what moves in a word or two"
+                    ));
+                }
+                reading.copies.push(Copied {
+                    name: moves,
+                    part: style.part,
+                });
+                style.copy = Some(reading.copies.len() - 1);
+            }
+            if name == "text" {
+                if opens {
+                    words = Some(Words {
+                        label: RawLabel {
+                            text: String::new(),
+                            at: style.matrix.apply(placed(&tag, &style)?),
+                            anchor: style.anchor,
+                            part: style.part,
+                            copy: style.copy,
+                        },
+                        depth: 0,
+                    });
+                }
+                continue;
             }
             if let Some(segments) = outline(&name, &tag)? {
                 let segments: Vec<Segment> = segments
@@ -850,6 +1227,7 @@ impl Reading {
                         dashed: style.dashed,
                         arrow_end: style.arrow_end,
                         arrow_start: style.arrow_start,
+                        copy: style.copy,
                     });
                 }
             }
@@ -864,6 +1242,76 @@ impl Reading {
             }
         }
         Ok(reading)
+    }
+
+    /// Each shape in the frame's units, a sky or a backdrop left out: the picture stands on the
+    /// chat's own ground.
+    fn framed(&self, frame: &Frame) -> Vec<(&Raw, Vec<Segment>)> {
+        self.shapes
+            .iter()
+            .filter_map(|raw| {
+                let segments = mapped(&raw.segments, &frame.matrix);
+                let backdrop = raw.part.is_none()
+                    && raw.fill.is_some()
+                    && Bounds::of(&segments).area() >= BACKGROUND * WIDTH * frame.height;
+                (!backdrop).then_some((raw, segments))
+            })
+            .collect()
+    }
+
+    /// Every shape and label is in a part there is.
+    fn in_parts(&self, count: usize) -> Result<(), String> {
+        for (what, part) in [
+            (
+                "shape",
+                self.shapes.iter().filter_map(|shape| shape.part).max(),
+            ),
+            (
+                "label",
+                self.labels.iter().filter_map(|label| label.part).max(),
+            ),
+        ] {
+            if let Some(part) = part
+                && usize::from(part) > count
+            {
+                return Err(match count {
+                    0 => format!(
+                        "a {what} has data-part=\"{part}\", but there are no parts: give parts"
+                    ),
+                    count => format!(
+                        "a {what} has data-part=\"{part}\", but there are {count} parts: number \
+                         them from 1 to {count}"
+                    ),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// A label read whole: its words in one line, kept when they say something, refused when they
+    /// say too much.
+    fn keep(&mut self, mut label: RawLabel) -> Result<(), String> {
+        label.text = label.text.split_whitespace().collect::<Vec<_>>().join(" ");
+        if label.text.is_empty() {
+            return Ok(());
+        }
+        let length = label.text.chars().count();
+        if length > limits::LABEL_WORDS_CHARS {
+            let start: String = label.text.chars().take(24).collect();
+            return Err(format!(
+                "a label says \"{start}…\" in {length} characters: keep each label to a few \
+                 words, {} at most, and say the rest in the parts",
+                limits::LABEL_WORDS_CHARS
+            ));
+        }
+        if self.labels.len() == limits::LABELS {
+            return Err(format!(
+                "the drawing has more than {} labels: name only what the person needs to know",
+                limits::LABELS
+            ));
+        }
+        self.labels.push(label);
+        Ok(())
     }
 
     /// The outer `svg`'s `viewBox`, else the box around every shape with a little room.
@@ -966,6 +1414,18 @@ fn styled(parent: &Style, tag: &BytesStart<'_>, name: &str) -> Result<Style, Str
     if let Some(on) = marker("marker-start") {
         style.arrow_start = on;
     }
+    match property(tag, "text-anchor").as_deref() {
+        Some("middle") => style.anchor = Anchor::Middle,
+        Some("end") => style.anchor = Anchor::End,
+        Some("start") => style.anchor = Anchor::Start,
+        _ => {}
+    }
+    if let Some(size) = property(tag, "font-size")
+        .and_then(|size| size.trim_end_matches("px").trim().parse::<f64>().ok())
+        .filter(|size| size.is_finite() && *size > 0.0)
+    {
+        style.font_size = size;
+    }
     if let Some(part) = attribute(tag, "data-part") {
         let number = part
             .parse::<u8>()
@@ -981,6 +1441,49 @@ fn styled(parent: &Style, tag: &BytesStart<'_>, name: &str) -> Result<Style, Str
         style.matrix = style.matrix.then(&own);
     }
     Ok(style)
+}
+
+/// SVG's size for words when none is said.
+const DEFAULT_FONT: f64 = 16.0;
+
+/// The middle of a `text`'s words, in its own units: its `x` (the first, when it lists several) and
+/// its baseline raised to the middle of its letters, as its `dominant-baseline` says.
+fn placed(tag: &BytesStart<'_>, style: &Style) -> Result<P, String> {
+    let first = |key: &str| -> Result<f64, String> {
+        let Some(written) = attribute(tag, key) else {
+            return Ok(0.0);
+        };
+        let bare = written.replace("px", "");
+        Lexer::new(&bare)
+            .numbers()
+            .ok()
+            .and_then(|numbers| numbers.first().copied())
+            .filter(|value| value.is_finite())
+            .ok_or_else(|| {
+                format!("<text> {key}=\"{written}\" isn't a number: give it in the drawing's units")
+            })
+    };
+    let raise = match property(tag, "dominant-baseline").as_deref() {
+        Some("middle" | "central") => 0.0,
+        Some("hanging" | "text-before-edge") => 0.4 * style.font_size,
+        _ => -0.35 * style.font_size,
+    };
+    Ok(P {
+        x: first("x")?,
+        y: first("y")? + raise,
+    })
+}
+
+/// What `&amp;` or `&#233;` in a label stands for.
+fn referred(reference: &quick_xml::events::BytesRef<'_>) -> Option<String> {
+    if reference.is_char_ref() {
+        return reference
+            .resolve_char_ref()
+            .ok()
+            .flatten()
+            .map(String::from);
+    }
+    quick_xml::escape::resolve_predefined_entity(&reference.xml10_content()).map(str::to_owned)
 }
 
 /// How a fill colour is drawn: none, a light shade, or a dark one for a dark colour.

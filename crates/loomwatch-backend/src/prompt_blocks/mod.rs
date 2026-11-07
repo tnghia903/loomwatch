@@ -201,6 +201,7 @@ const ALL: &[Block] = {
         widgets::SHOW_WIDGET_KIND,
         widgets::SHOW_WIDGET_DRAWING,
         widgets::SHOW_WIDGET_PARTS,
+        widgets::SHOW_WIDGET_GUESS,
         widgets::SHOW_WIDGET_OPTIONS,
         widgets::SHOW_WIDGET_FORMULA,
         widgets::SHOW_WIDGET_BARS,

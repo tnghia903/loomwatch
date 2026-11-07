@@ -101,8 +101,14 @@ side by side (or the parts of one thing, joined to the whole above them) with fa
 chart whose bars LoomWatch draws to scale from the agent's figures, a graph of bars or a line, a row
 of things marked yes or no, a flow of numbered stops along a line, or a picture the agent draws of
 what it explains (a plane at each stage of take-off, the parts of a flower), its parts numbered on
-it to tap or step through (ADR 0117). LoomWatch keeps only the drawing's shapes and draws them in
-its own lines: no words, colours or backdrop of the agent's, the part you pick in gold. Figures that count whole
+it to tap or step through (ADR 0117). LoomWatch keeps only the drawing's shapes and its words, and
+draws them in its own lines and lettering: no colours or backdrop of the agent's, the part you pick
+in gold. A picture of something that moves plays once when it arrives while you watch, one step at a
+time: the moving thing where it is now with that step's words, gold while it moves, and a dotted
+outline where it just was, ending on its last step. Tap a step's number under it, or drag the
+handle, to go back and forth; the round button plays it again. When it arrives while you watch, it
+may stop before a surprising step and ask you to guess what happens. Pick an answer or Skip; that
+step then says what you guessed. Figures that count whole
 things, such as seats or people, can be drawn as dots, one for each or for a round number of them,
 with a key saying which. The agent that answers shows one whenever its answer has things to set
 side by side, figures to compare, a sum to change, things to do, a process, something to see or a

@@ -50,10 +50,10 @@ export function AnswerWidget(props: Omit<AnswerWidgetsProps, 'widgets'> & { kept
   const news = useAppear()
   const first = useFirstSight(JSON.stringify(props.kept.spec))
   const fresh = news && first
-  return <div className={`wg-shell${fresh ? ' wg-fresh' : ''}`}>{drawn(props)}</div>
+  return <div className={`wg-shell${fresh ? ' wg-fresh' : ''}`}>{drawn(props, fresh)}</div>
 }
 
-function drawn({ kept, onChange, onChoose, chosen = null, live = false }: Omit<AnswerWidgetsProps, 'widgets'> & { kept: KeptWidget }) {
+function drawn({ kept, onChange, onChoose, chosen = null, live = false }: Omit<AnswerWidgetsProps, 'widgets'> & { kept: KeptWidget }, fresh: boolean) {
   switch (kept.spec.kind) {
     case 'choices': return <WidgetChoices spec={kept.spec} onChoose={live ? undefined : onChoose} chosen={chosen} live={live} />
     case 'checklist': return <HeldChecklist kept={kept} onChange={onChange} live={live} />
@@ -64,7 +64,7 @@ function drawn({ kept, onChange, onChoose, chosen = null, live = false }: Omit<A
     case 'compare': return <WidgetCompare spec={kept.spec} />
     case 'chart': return <WidgetChart spec={kept.spec} />
     case 'graph': return <WidgetGraph spec={kept.spec} />
-    case 'picture': return <WidgetPicture spec={kept.spec} />
+    case 'picture': return <WidgetPicture spec={kept.spec} fresh={fresh} />
   }
   return null
 }

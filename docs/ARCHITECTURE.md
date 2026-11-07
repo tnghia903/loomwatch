@@ -615,13 +615,34 @@ with a key saying which (`ui/src/lib/widgets/dots.ts`).
 A picture (ADR 0117) is the one kind the agent draws: its `drawing` is SVG, read by
 `widgets/picture.rs`, which keeps only shapes (`path`, `circle`, `ellipse`, `rect`, `line`,
 `polyline`, `polygon` in `svg` and `g`, with their transforms) and redraws each as absolute moves,
-lines and cubic curves in a frame 640 wide, cut to what is drawn. Words, colours, gradients,
-pictures, links, styles, scripts, hidden things and a backdrop are left out; `use` is refused with
-what to do instead. A shape keeps three things of its look: shaded (dark when its fill is dark),
-dashed, and an arrowhead on each open stroke of an arrowed path. Its `parts` (up to 8) are
-numbered where the agent says, or above their shapes, and a number set away from its part is
-joined to it by a line. The app draws only that path data (`WidgetPicture.tsx`), in its own ink;
-the part picked is gold.
+lines and cubic curves in a frame 640 wide, cut to what is drawn, and the words of each `text` as a
+plain label (`labels`: its words, where its middle stands, the edge it stands on, its part; up to
+24, 40 characters each). Colours, gradients, pictures, links, styles, scripts, hidden things, a
+title and a backdrop are left out; `use` is refused with what to do instead. A shape keeps three
+things of its look: shaded (dark when its fill is dark), dashed, and an arrowhead on each open
+stroke of an arrowed path. Its `parts` (up to 8) are numbered where the agent says, or above their
+shapes, and a number set away from its part is joined to it by a line. The app draws only that
+path data (`WidgetPicture.tsx`), in its own ink, and sets the labels in its own type as text, never
+markup; the part picked is gold.
+
+A picture plays when the agent draws one thing again in each stage's part, each copy in a `g` with
+the same `data-moves` name (ADR 0117, amended 7 November). The daemon checks that each copy is drawn
+the same way (the same shapes, with the same commands, and as many labels, in the same order) and
+returns `moves`: for each thing, its stages in the order of their parts, each the indexes of its
+shapes and labels. Such a picture keeps no room for its parts' numbers and draws no line to them:
+the app shows them on its line of steps. The app moves the thing from one stage's drawing to the
+next, point by point (`ui/src/lib/widgets/picturePlay.ts`). It plays once when the answer arrives as
+news and its controls come into view, never with reduced motion. It draws only the step it is on:
+a moving thing where it is now, the stage it just left as a dotted outline with no words, and
+nothing still to come; what builds up (a part with no copies) stays once drawn. It rests on each
+step as long as its words take to read and moves one change at a time, the moving thing gold while
+it moves; at rest it is the last step and the one before. A handle on the line of
+steps drags it back and forth. The play is held by the picture (`plays`), so the kept picture that
+replaces the one drawn while the answer was written goes on where that one was. A `guess` (a
+question, 2 or 3 choices and the right one) stops the first play before the part it names, for a
+picture that plays only. Words that would cross the picture's edge are moved inside it once laid
+out. ADR 0117's amendment says why each rule and timing is so,
+from learning research on pictures that move.
 
 The call also answers with a place line, `{{widget N}}`, `N` counting the widgets the session has
 shown. The agent writes it on a line of its own where the widget belongs. When the run succeeds,

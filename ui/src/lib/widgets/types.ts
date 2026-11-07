@@ -68,6 +68,18 @@ export interface WidgetShape { d: string; part?: number; fill?: 'light' | 'dark'
 /** One numbered part of a picture: a word or two, a sentence or two, and where its number stands. */
 export interface WidgetPart { label: string; text: string; at: [number, number] }
 
+/** Words the agent put on its picture (ADR 0117, amended 7 November), set in our type: plain text at
+    `at` (its middle down, and across the edge `anchor` names), in a part from 1. */
+export interface WidgetLabel { text: string; at: [number, number]; anchor?: 'start' | 'middle' | 'end'; part?: number }
+
+/** One thing the agent drew again at each stage, so the picture plays: at each stage (a part, from
+    1), its shapes and labels as indexes into the picture's, drawn the same way in the same order. */
+export interface WidgetMove { stages: { part: number; shapes: number[]; labels?: number[] }[] }
+
+/** The one question a picture asks as it first plays, before part `before`; `answer` is the right
+    choice's place, from 0. */
+export interface WidgetGuess { before: number; question: string; choices: string[]; answer: number }
+
 export type WidgetSpec =
   | { kind: 'choices'; title: string; options: WidgetChoice[] }
   | { kind: 'checklist'; title: string; items: WidgetItem[] }
@@ -78,7 +90,7 @@ export type WidgetSpec =
   | { kind: 'marks'; title: string; cells: WidgetCell[]; facts?: string[] }
   | { kind: 'flow'; title: string; boxes: WidgetBox[]; repeats?: boolean }
   | { kind: 'graph'; title: string; style: 'bar' | 'line'; labels: string[]; series: WidgetSeries[]; unit?: string; prefix?: string; decimals?: number }
-  | { kind: 'picture'; title: string; width: number; height: number; shapes: WidgetShape[]; parts?: WidgetPart[] }
+  | { kind: 'picture'; title: string; width: number; height: number; shapes: WidgetShape[]; parts?: WidgetPart[]; labels?: WidgetLabel[]; moves?: WidgetMove[]; guess?: WidgetGuess }
 
 /** What you made of a widget: a checklist's ticks, or a calculator's values by input id. */
 export type WidgetState = { checked: boolean[] } | { values: Record<string, number | boolean> }
