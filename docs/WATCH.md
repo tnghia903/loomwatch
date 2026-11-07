@@ -108,7 +108,9 @@ time: the moving thing where it is now with that step's words, gold while it mov
 outline where it just was, ending on its last step. Tap a step's number under it, or drag the
 handle, to go back and forth; the round button plays it again. When it arrives while you watch, it
 may stop before a surprising step and ask you to guess what happens. Pick an answer or Skip; that
-step then says what you guessed. Figures that count whole
+step then says what you guessed. A picture of how one thing changes another, such as how speed
+changes a wing's lift, has a dial instead of numbered steps: it is named for the cause (Speed), its
+ends say how far it goes, and as you drag it the words read the value and what it does. Figures that count whole
 things, such as seats or people, can be drawn as dots, one for each or for a round number of them,
 with a key saying which. The agent that answers shows one whenever its answer has things to set
 side by side, figures to compare, a sum to change, things to do, a process, something to see or a

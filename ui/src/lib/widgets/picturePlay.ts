@@ -5,13 +5,17 @@ import type { WidgetGuess, WidgetPart } from './types'
  * that move: slow enough to see each change, a pause on every step long enough to read its words,
  * the first longer so the parts are named before anything moves, and the step a guess comes before
  * longer still, so what was guessed can be read with it.
+ *
+ * Its words are read at an adult's average silent reading pace, about 238 words a minute (Brysbaert
+ * 2019), some 45 ms a character, with half a second to look at what changed: a fixed 2 s on every
+ * step and 1.8 s moves had a three-step picture of short steps take 18 s, and people waited on it.
  */
-export const MOVE_MS = 1800
-const REST_LEAST_MS = 2300
-const REST_BASE_MS = 2000
+export const MOVE_MS = 1200
+const REST_LEAST_MS = 1500
+const REST_BASE_MS = 500
 const REST_PER_CHAR_MS = 45
-const REST_MOST_MS = 9000
-const NAMES_FIRST_MS = 600
+const REST_MOST_MS = 8000
+const NAMES_FIRST_MS = 500
 const GUESSED_MS = 1500
 
 /** One stretch of a play: resting on a step (`from` equals `to`) or moving to the next, from
@@ -85,3 +89,31 @@ export interface Play {
   done: boolean
 }
 export const plays = new Map<string, Play>()
+
+/** A dial's values (ADR 0117, amended 7 November): when every step's label is a number with the
+    same words around it ("0 km/h", "Round 3", "Day 15"), the number and those words. */
+export interface DialScale { values: number[]; before: string; after: string; decimals: number }
+export function dialScale(parts: readonly WidgetPart[]): DialScale | null {
+  const read = parts.map((part) => part.label.match(/^(\D*?)(-?\d+(?:\.\d+)?)(\D*)$/))
+  if (read.length < 2 || read.some((one) => !one)) return null
+  const [first] = read as RegExpMatchArray[]
+  if ((read as RegExpMatchArray[]).some((one) => one[1] !== first[1] || one[3] !== first[3])) return null
+  return {
+    values: (read as RegExpMatchArray[]).map((one) => Number(one[2])),
+    before: first[1],
+    after: first[3],
+    decimals: Math.max(...(read as RegExpMatchArray[]).map((one) => one[2].split('.')[1]?.length ?? 0)),
+  }
+}
+
+/** What the dial reads at `t` steps: the value between two steps' values as the drawing is between
+    them, when the labels are numbers; otherwise the nearest step's label. */
+export function dialReading(parts: readonly WidgetPart[], t: number): string {
+  const scale = dialScale(parts)
+  const at = Math.min(Math.max(t, 0), parts.length - 1)
+  if (!scale) return parts[Math.round(at)]?.label ?? ''
+  const from = Math.min(Math.floor(at), parts.length - 2)
+  const value = scale.values[from] + (scale.values[from + 1] - scale.values[from]) * ease(at - from)
+  const written = value.toFixed(scale.decimals).replace(/^-0(\.0+)?$/, '0$1')
+  return `${scale.before}${written}${scale.after}`
+}

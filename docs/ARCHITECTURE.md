@@ -626,7 +626,15 @@ path data (`WidgetPicture.tsx`), in its own ink, and sets the labels in its own 
 markup; the part picked is gold.
 
 A picture plays when the agent draws one thing again in each stage's part, each copy in a `g` with
-the same `data-moves` name (ADR 0117, amended 7 November). The daemon checks that each copy is drawn
+the same `data-moves` name (ADR 0117, amended 7 November). The agent's instructions ask for one
+whenever the answer is how something happens in steps or rounds, a process in a network as much as
+a thing that moves, and show a small example the daemon is tested to accept. They also ask the agent
+to draw the place where the answer happens, at its own size (the wing and its air, not the plane on
+a runway). When the answer is how one thing changes another, the stages are values of that cause
+and the picture names it as its `dial` ("Speed"), each part's label its value ("150 km/h"); the
+daemon keeps a dial only on a picture that plays. The app then draws the line of steps as that dial:
+plain marks, its least and most values at its ends, and the value read between stops as the drawing
+moves (`dialReading`, eased as the drawing is), in the step's words and to a screen reader. The daemon checks that each copy is drawn
 the same way (the same shapes, with the same commands, and as many labels, in the same order) and
 returns `moves`: for each thing, its stages in the order of their parts, each the indexes of its
 shapes and labels. Such a picture keeps no room for its parts' numbers and draws no line to them:
@@ -635,8 +643,8 @@ next, point by point (`ui/src/lib/widgets/picturePlay.ts`). It plays once when t
 news and its controls come into view, never with reduced motion. It draws only the step it is on:
 a moving thing where it is now, the stage it just left as a dotted outline with no words, and
 nothing still to come; what builds up (a part with no copies) stays once drawn. It rests on each
-step as long as its words take to read and moves one change at a time, the moving thing gold while
-it moves; at rest it is the last step and the one before. A handle on the line of
+step as long as its words take to read at an average adult's pace (45 ms a character and half a
+second to look) and moves one change at a time in 1.2 s, the moving thing gold while it moves; at rest it is the last step and the one before. A handle on the line of
 steps drags it back and forth. The play is held by the picture (`plays`), so the kept picture that
 replaces the one drawn while the answer was written goes on where that one was. A `guess` (a
 question, 2 or 3 choices and the right one) stops the first play before the part it names, for a

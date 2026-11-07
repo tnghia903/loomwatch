@@ -717,6 +717,98 @@ fn a_thing_drawn_at_each_stage_moves_from_one_to_the_next() {
     assert!(written.get("guess").is_none());
 }
 
+/// The example the agent is shown for a picture that plays is one the daemon reads as one: the same
+/// g at three steps comes back as one thing moving through parts 1, 2 and 3, its word with it.
+#[test]
+fn the_instructions_example_of_a_picture_that_plays_plays() {
+    let told = crate::widgets::SHOW_WIDGET_DRAWING.text();
+    let start = told
+        .find("<g data-part=\"1\" data-moves=")
+        .expect("the instructions show a g that moves");
+    let end = start + told[start..].find("</g>").expect("the example g closes") + "</g>".len();
+    let step = &told[start..end];
+    assert!(step.contains("translate(80 120)"), "{step}");
+    let at = |part: u8, x: u16| {
+        step.replace("data-part=\"1\"", &format!("data-part=\"{part}\""))
+            .replace("translate(80 120)", &format!("translate({x} 120)"))
+    };
+    let svg = format!(
+        "<svg viewBox=\"0 0 640 360\"><path d=\"M0 0L640 360\" fill=\"none\"/>{}{}{}</svg>",
+        at(1, 80),
+        at(2, 320),
+        at(3, 560)
+    );
+    let Ok(Widget::Picture { moves, .. }) = kept(&svg, 3, None) else {
+        panic!("the example reads as a picture: {svg}");
+    };
+    assert_eq!(moves.len(), 1, "{moves:#?}");
+    assert_eq!(
+        moves[0]
+            .stages
+            .iter()
+            .map(|stage| stage.part)
+            .collect::<Vec<_>>(),
+        [1, 2, 3]
+    );
+    for stage in &moves[0].stages {
+        assert_eq!(
+            (stage.shapes.len(), stage.labels.len()),
+            (1, 1),
+            "{stage:?}"
+        );
+    }
+}
+
+/// ADR 0117, amended 7 November: a picture whose stages are values of a cause names it, and its
+/// parts' labels are the values; a dial turns what changes, so a still picture can't have one.
+#[test]
+fn a_picture_that_plays_can_be_a_dial_its_parts_the_values() {
+    let values: Vec<Value> = ["0 km/h", "150 km/h", "250 km/h"]
+        .iter()
+        .map(|value| json!({"label": value, "text": "What this speed does.", "at": [600, 20]}))
+        .collect();
+    let dialled = |svg: &str, dial: Value| {
+        read_widget(&json!({
+            "kind": "picture", "title": "What makes a plane lift off", "drawing": svg, "dial": dial,
+            "parts": values,
+        }))
+    };
+    let widget = dialled(BALL, json!("Speed")).unwrap();
+    let Widget::Picture { dial, parts, .. } = &widget else {
+        panic!("a picture");
+    };
+    assert_eq!(dial.as_deref(), Some("Speed"));
+    assert_eq!(
+        parts
+            .iter()
+            .map(|part| part.label.as_str())
+            .collect::<Vec<_>>(),
+        ["0 km/h", "150 km/h", "250 km/h"]
+    );
+    assert_eq!(serde_json::to_value(&widget).unwrap()["dial"], "Speed");
+    // Nothing moves: there is nothing for a dial to turn, and the agent is told what to draw.
+    let still = "<svg viewBox=\"0 0 640 360\"><circle data-part=\"1\" cx=\"100\" cy=\"100\" r=\"9\"/><circle data-part=\"2\" cx=\"300\" cy=\"100\" r=\"9\"/><circle data-part=\"3\" cx=\"500\" cy=\"300\" r=\"9\"/></svg>";
+    let error = dialled(still, json!("Speed")).unwrap_err();
+    assert!(
+        error.contains("dial is for a picture that plays") && error.contains("data-moves"),
+        "{error}"
+    );
+    // A word or two, not a sentence.
+    let error = dialled(BALL, json!("The speed of the plane along the runway")).unwrap_err();
+    assert!(error.contains("dial"), "{error}");
+    // Steps in time have no dial.
+    let Ok(Widget::Picture { dial, .. }) = kept(BALL, 3, None) else {
+        panic!("a picture");
+    };
+    assert_eq!(dial, None);
+    assert!(
+        serde_json::to_value(kept(BALL, 3, None).unwrap())
+            .unwrap()
+            .get("dial")
+            .is_none()
+    );
+}
+
 /// What the agent is told when what it means to move can't, so it can draw it again.
 #[test]
 fn a_thing_that_cant_move_says_what_to_change() {
