@@ -9,6 +9,9 @@ import { isWebSearch, outputText } from './webCalls'
  * it, never by asking the page: a Claude model's search lists each page as `title url` on a line, a
  * ChatGPT plan's as its title, then its address, then a few words from it. A search that kept no
  * titles (OpenRouter's own) names nothing, and its sources say their site as before.
+ *
+ * The daemon reads them the same way for the phone (`crates/loomwatch-backend/src/devices/phone/
+ * sources.rs`), with these tests' cases: change both.
  */
 export function sourceTitles(evidence: readonly Pick<Evidence, 'name' | 'relation' | 'toolKind' | 'rawInput' | 'kind' | 'content' | 'rawOutput'>[]): Map<string, string> {
   const titles = new Map<string, string>()

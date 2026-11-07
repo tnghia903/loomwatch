@@ -11,6 +11,7 @@ mod daemon;
 mod doing;
 pub(super) mod home;
 pub(super) mod pinned;
+mod sources;
 mod studio;
 mod talk;
 mod teams;
@@ -45,6 +46,9 @@ pub const ALLOWED: &[(&str, &str)] = &[
     ("GET", "/api/files/raw"),
     ("GET", "/api/files/read"),
     ("GET", "/api/files/stat"),
+    // The icon of a site an answer cites, for its source chip (ADR 0116): the Mac fetches it from the
+    // site's own root and keeps it, so the phone never asks the site itself.
+    ("GET", "/api/site-icon"),
     // Skills and Quests, read inside Agents: your skills, and what your runs have earned.
     ("GET", "/api/skills"),
     ("GET", "/api/wardrobe"),
@@ -108,6 +112,7 @@ pub fn router(helper: Arc<Phone>) -> Router {
         .route("/phone/v0/pinned", get(pinned_view).post(pin))
         .route("/phone/v0/pinned/messages", post(pinned_message))
         .route("/phone/v0/runs/{id}/talk", get(run_talk))
+        .route("/phone/v0/runs/{id}/sources", get(run_sources))
         .route("/phone/v0/runs/{id}/doing", get(run_doing))
         .route("/phone/v0/ask/{id}", get(ask_view))
         .route("/phone/v0/agents", get(agents_list))
@@ -394,21 +399,49 @@ async fn ask_view(
     Json(json!({"status": status, "lines": talk::talk(&events)})).into_response()
 }
 
-/// One run's record and what was said in it ([`talk::talk`]), its events read page by page.
+/// One run's record and what was said in it ([`talk::talk`]); and, when its web searches found
+/// pages with titles, those ([`sources::titles`]), so its answer's sources are named by their page.
 async fn run_talk(
     State(helper): State<Arc<Phone>>,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> Response {
-    const PAGE: usize = 500;
-    const MOST: usize = 20;
     if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
         return problem(StatusCode::NOT_FOUND, "No such work.");
     }
     let Ok(run) = helper.daemon.get_json(&format!("/api/runs/{id}")).await else {
         return not_running();
     };
+    let events = run_events(&helper, &id).await.unwrap_or_default();
+    let mut body = json!({"run": run, "lines": talk::talk(&events)});
+    let sources = sources::titles(&events);
+    if !sources.is_empty() {
+        body["sources"] = json!(sources);
+    }
+    Json(body).into_response()
+}
+
+/// The titles of the pages one run's web searches found ([`sources::titles`]), by the key the Mac
+/// matches a source's address with, for the source chips of an answer shown in a chat (ADR 0116).
+/// A finished run's never change.
+async fn run_sources(
+    State(helper): State<Arc<Phone>>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Response {
+    if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return problem(StatusCode::NOT_FOUND, "No such work.");
+    }
+    let Some(events) = run_events(&helper, &id).await else {
+        return not_running();
+    };
+    Json(json!({"sources": sources::titles(&events)})).into_response()
+}
+
+/// One run's events, read page by page; `None` when not even the first page could be read.
+async fn run_events(helper: &Phone, id: &str) -> Option<Vec<serde_json::Value>> {
+    const PAGE: usize = 500;
+    const MOST: usize = 20;
     let mut events: Vec<serde_json::Value> = Vec::new();
-    for _ in 0..MOST {
+    for read in 0..MOST {
         let after = events
             .last()
             .and_then(|event| event.get("seq"))
@@ -421,6 +454,9 @@ async fn run_talk(
             ))
             .await
         else {
+            if read == 0 {
+                return None;
+            }
             break;
         };
         let page = page.as_array().cloned().unwrap_or_default();
@@ -430,7 +466,7 @@ async fn run_talk(
             break;
         }
     }
-    Json(json!({"run": run, "lines": talk::talk(&events)})).into_response()
+    Some(events)
 }
 
 /// What one agent of a live run is doing now ([`doing::doing`]): `?agent=<id>`, or the whole run's
@@ -603,6 +639,7 @@ mod tests {
         assert!(allowed(&Method::GET, "/api/skills"));
         assert!(allowed(&Method::GET, "/api/wardrobe"));
         assert!(allowed(&Method::PUT, "/api/chat/files"));
+        assert!(allowed(&Method::GET, "/api/site-icon"));
 
         // Not on the list: settings, keys, team edits, other methods.
         assert!(!allowed(&Method::PUT, "/api/team"));

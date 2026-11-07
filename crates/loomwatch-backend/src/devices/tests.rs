@@ -1001,3 +1001,129 @@ async fn a_photo_can_go_in_the_first_message_to_an_agent() {
     assert_eq!(reply.status(), 200);
     assert_eq!(writes.lock().unwrap().len(), 1);
 }
+
+/// A source an answer cites wears its site's icon on the phone too (ADR 0116): the phone asks the
+/// door, and the Mac answers from the icons it keeps, as it answers its own page. The phone never
+/// asks the site.
+#[tokio::test]
+async fn a_phone_gets_a_sources_site_icon_from_the_mac() {
+    const PNG: &[u8] = &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 1];
+    let state = crate::runs::tests::TeamsDir::new();
+    std::fs::create_dir_all(state.0.join("site-icons")).unwrap();
+    std::fs::write(state.0.join("site-icons").join("usa.gov.icon"), PNG).unwrap();
+    let mac = serve(crate::site_icons::router(
+        crate::site_icons::SiteIcons::open(&state.0),
+    ))
+    .await;
+    let door = phone_door(&mac).await;
+
+    let reply = client()
+        .get(format!("{door}/api/site-icon?host=usa.gov"))
+        .bearer_auth(KEY)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(reply.status(), 200, "the door turned the icon away");
+    assert_eq!(reply.headers()["content-type"], "image/png");
+    assert_eq!(reply.bytes().await.unwrap().as_ref(), PNG);
+
+    // Only a connected phone: without its key the Mac is never asked.
+    let stranger = client()
+        .get(format!("{door}/api/site-icon?host=usa.gov"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(stranger.status(), 401);
+}
+
+/// An answer's sources are named by their page on the phone too (ADR 0116): the door reads the
+/// run's web searches for the titles of the pages they found, with the run's talk, and on their own
+/// for an answer in a chat. A run that searched nothing names none.
+#[tokio::test]
+async fn a_phone_gets_the_titles_of_the_pages_a_runs_searches_found() {
+    async fn read(door: &str, path: &str) -> Value {
+        let reply = client()
+            .get(format!("{door}{path}"))
+            .bearer_auth(KEY)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(reply.status(), 200, "{path}");
+        reply.json::<Value>().await.unwrap()
+    }
+    let searched = json!([
+        {"seq": 1, "kind": "tool_call", "agentId": "coby",
+         "payload": {"callId": "s1", "title": "Search the web: backpropagation", "toolKind": "fetch",
+                     "rawInput": {"query": "backpropagation"}, "status": "pending"}},
+        {"seq": 2, "kind": "tool_update", "agentId": "coby",
+         "payload": {"callId": "s1", "status": "completed",
+                     "content": [{"type": "content", "content": {"type": "text", "text":
+                         "Backpropagation - Wikipedia https://en.wikipedia.org/wiki/Backpropagation"}}]}}
+    ]);
+    let asked: Arc<Mutex<Vec<String>>> = Arc::default();
+    let heard = asked.clone();
+    let app = Router::new()
+        .route(
+            "/api/runs/{id}",
+            get(|| async { Json(json!({"runId": "r1", "status": "succeeded"})) }),
+        )
+        .route(
+            "/api/session/events",
+            get(move |request: Request| {
+                let searched = searched.clone();
+                let heard = heard.clone();
+                async move {
+                    let query = request.uri().query().unwrap_or_default().to_owned();
+                    heard.lock().unwrap().push(query.clone());
+                    Json(if query.contains("session=r1&") {
+                        searched
+                    } else {
+                        json!([])
+                    })
+                }
+            }),
+        );
+    let door = phone_door(&serve(app).await).await;
+    let wikipedia = json!({"en.wikipedia.org/wiki/Backpropagation": "Backpropagation - Wikipedia"});
+
+    assert_eq!(
+        read(&door, "/phone/v0/runs/r1/sources").await,
+        json!({"sources": wikipedia})
+    );
+    let talk = read(&door, "/phone/v0/runs/r1/talk").await;
+    assert_eq!(talk["sources"], wikipedia, "{talk}");
+    assert_eq!(talk["run"]["runId"], "r1");
+
+    assert_eq!(
+        read(&door, "/phone/v0/runs/r2/sources").await,
+        json!({"sources": {}})
+    );
+    let talk = read(&door, "/phone/v0/runs/r2/talk").await;
+    assert!(talk.get("sources").is_none(), "{talk}");
+
+    // A run is named by its id alone: nothing more rides along to the Mac's events.
+    for route in ["sources", "talk"] {
+        let reply = client()
+            .get(format!("{door}/phone/v0/runs/r1%26afterSeq=99/{route}"))
+            .bearer_auth(KEY)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(reply.status(), 404, "{route}");
+    }
+    let asked = asked.lock().unwrap().clone();
+    assert!(
+        !asked.iter().any(|query| query.contains("afterSeq=99")),
+        "{asked:?}"
+    );
+
+    // With LoomWatch closed it says so, rather than that the run found nothing.
+    let closed = phone_door("http://127.0.0.1:1").await;
+    let reply = client()
+        .get(format!("{closed}/phone/v0/runs/r1/sources"))
+        .bearer_auth(KEY)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(reply.status(), 503);
+}
