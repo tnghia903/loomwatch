@@ -74,14 +74,26 @@ fn only_shape(svg: &str) -> Shape {
     }
 }
 
-/// ADR 0117: the agent's drawing comes back as shapes only. The backdrop, the words, the gradient
-/// and the marker's own definition are gone; the plane is drawn three times where the transforms
-/// put it, each in its part; the arrow has its head, in its part.
+/// ADR 0117: the agent's drawing comes back as shapes and labels only. The backdrop, the title,
+/// the gradient and the marker's own definition are gone; the plane is drawn three times where the
+/// transforms put it, each in its part; the arrow has its head, in its part; its one word is a
+/// label, never a shape.
 #[test]
 fn a_drawing_keeps_its_shapes_in_their_parts_and_nothing_else() {
     let (height, shapes, parts) = picture(&take_off());
-    // Cut to what is drawn: nothing was drawn near the top of its frame.
-    assert!(height < 300.0, "{height}");
+    // Its word at the top left keeps its room, so the frame stays whole (amended 7 November: before
+    // words were kept, this picture was cut to what is drawn).
+    assert_eq!(height, 360.0);
+    let Ok(Widget::Picture { labels, .. }) = read_widget(&take_off()) else {
+        panic!("a picture");
+    };
+    assert_eq!(
+        labels
+            .iter()
+            .map(|label| label.text.as_str())
+            .collect::<Vec<_>>(),
+        ["Runway"]
+    );
     let in_part = |part| {
         shapes
             .iter()
@@ -552,4 +564,271 @@ fn drawings_a_model_wrote_read_as_it_meant_them() {
         joined >= 2,
         "the stamens' and the pistil's numbers are joined to them: {parts:#?}"
     );
+}
+
+/// A picture of `svg` with `parts` parts, as the daemon keeps it.
+fn kept(svg: &str, parts: usize, guess: Option<Value>) -> Result<Widget, String> {
+    let mut arguments = json!({
+        "kind": "picture", "title": "x", "drawing": svg,
+        "parts": (1..=parts).map(|n| json!({"label": format!("Stage {n}"), "text": "What happens.", "at": [600, 20]})).collect::<Vec<_>>(),
+    });
+    if let Some(guess) = guess {
+        arguments["guess"] = guess;
+    }
+    read_widget(&arguments)
+}
+
+/// ADR 0117, amended 7 November: the drawing's words come back as plain labels where the agent
+/// put them, in their part, with the edge they stand on; words that aren't on the picture (a title,
+/// something hidden, nothing but spaces) don't.
+#[test]
+fn a_drawings_words_are_kept_as_labels_where_it_put_them() {
+    let Ok(Widget::Picture { labels, .. }) = kept(
+        concat!(
+            "<svg viewBox=\"0 0 640 360\">",
+            // Corner to corner, so the picture keeps its whole frame.
+            "<path d=\"M0 0L640 360\" fill=\"none\"/>",
+            "<g data-part=\"1\" text-anchor=\"middle\">",
+            "<rect x=\"100\" y=\"100\" width=\"200\" height=\"100\"/>",
+            "<text x=\"200\" y=\"90\" font-size=\"20\">wing &amp;\n <tspan>flap</tspan></text>",
+            "</g>",
+            "<text x=\"400 410\" y=\"300\" dominant-baseline=\"middle\" transform=\"translate(10 0)\">runway</text>",
+            "<title>Not on the picture</title>",
+            "<text x=\"10\" y=\"10\" display=\"none\">hidden</text>",
+            "<defs><text>in a definition</text></defs>",
+            "<text x=\"5\" y=\"5\">   </text>",
+            "<text x=\"620\" y=\"350\" text-anchor=\"end\">&#233;t&#xE9;</text>",
+            "</svg>"
+        ),
+        1,
+        None,
+    ) else {
+        panic!("a picture");
+    };
+    assert_eq!(
+        labels,
+        [
+            Label {
+                text: "wing & flap".to_owned(),
+                // Its baseline at 90, raised to the middle of 20-unit letters.
+                at: [200.0, 83.0],
+                anchor: Anchor::Middle,
+                part: Some(1),
+            },
+            Label {
+                text: "runway".to_owned(),
+                at: [410.0, 300.0],
+                anchor: Anchor::Start,
+                part: None,
+            },
+            Label {
+                text: "été".to_owned(),
+                at: [620.0, 344.4],
+                anchor: Anchor::End,
+                part: None,
+            },
+        ]
+    );
+}
+
+/// A label is a few words; a picture names only what the person needs.
+#[test]
+fn labels_that_say_too_much_say_what_to_change() {
+    let long = format!(
+        "<svg viewBox=\"0 0 640 360\"><circle cx=\"9\" cy=\"9\" r=\"4\"/><text>{}</text></svg>",
+        "word ".repeat(12)
+    );
+    let error = kept(&long, 0, None).unwrap_err();
+    assert!(
+        error.contains("keep each label to a few words, 40 at most"),
+        "{error}"
+    );
+    let many = format!(
+        "<svg viewBox=\"0 0 640 360\"><circle cx=\"9\" cy=\"9\" r=\"4\"/>{}</svg>",
+        "<text x=\"9\" y=\"9\">one</text>".repeat(25)
+    );
+    let error = kept(&many, 0, None).unwrap_err();
+    assert!(error.contains("more than 24 labels"), "{error}");
+    let error = kept(
+        "<svg viewBox=\"0 0 640 360\"><circle cx=\"9\" cy=\"9\" r=\"4\"/><text data-part=\"2\">x</text></svg>",
+        1,
+        None,
+    )
+    .unwrap_err();
+    assert!(error.contains("a label has data-part=\"2\""), "{error}");
+}
+
+/// The same ball drawn at two stages, its words with it: written in either order, it comes back as
+/// one thing that moves from part 1 to part 2, each stage's shapes alike so every point has one to
+/// move to.
+const BALL: &str = concat!(
+    "<svg viewBox=\"0 0 640 360\">",
+    "<path d=\"M0 0L640 360\" fill=\"none\"/>",
+    "<g data-part=\"2\" data-moves=\"ball\" transform=\"translate(300 200) scale(2)\">",
+    "<circle r=\"10\"/><path d=\"M0 0h20\" marker-end=\"url(#a)\"/><text y=\"-20\">ball</text></g>",
+    "<g data-part=\"1\" data-moves=\"ball\" transform=\"translate(100 100)\">",
+    "<circle r=\"10\"/><path d=\"M0 0h20\" marker-end=\"url(#a)\"/><text y=\"-20\">ball</text></g>",
+    "<circle data-part=\"3\" cx=\"500\" cy=\"300\" r=\"5\"/>",
+    "</svg>"
+);
+
+#[test]
+fn a_thing_drawn_at_each_stage_moves_from_one_to_the_next() {
+    let widget = kept(BALL, 3, None).unwrap();
+    let Widget::Picture {
+        shapes,
+        labels,
+        moves,
+        ..
+    } = &widget
+    else {
+        panic!("a picture");
+    };
+    assert_eq!(moves.len(), 1, "{moves:#?}");
+    let stages = &moves[0].stages;
+    assert_eq!(
+        stages.iter().map(|stage| stage.part).collect::<Vec<_>>(),
+        [1, 2],
+        "in the order of their parts, not the drawing's"
+    );
+    // The ball, its line and the line's head; its word.
+    for stage in stages {
+        assert_eq!(stage.shapes.len(), 3, "{stage:?}");
+        assert_eq!(stage.labels.len(), 1, "{stage:?}");
+        assert!(
+            stage
+                .shapes
+                .iter()
+                .all(|at| shapes[*at].part == Some(stage.part))
+        );
+    }
+    for (from, to) in stages[0].shapes.iter().zip(&stages[1].shapes) {
+        assert_eq!(commands(&shapes[*from].d), commands(&shapes[*to].d));
+        assert_ne!(shapes[*from].d, shapes[*to].d, "it has moved");
+    }
+    assert_eq!(labels[stages[0].labels[0]].at, [100.0, 74.4]);
+    assert_eq!(labels[stages[1].labels[0]].at, [300.0, 148.8]);
+    // Its parts' numbers stand on the line of steps, not on it: nothing joins them, however far
+    // the agent put them (the drawing has 8 shapes; a leader would be a 9th).
+    assert_eq!(shapes.len(), 8, "{shapes:#?}");
+    // What the apps read.
+    let written = serde_json::to_value(&widget).unwrap();
+    assert_eq!(written["moves"][0]["stages"][1]["part"], 2);
+    assert!(written.get("guess").is_none());
+}
+
+/// What the agent is told when what it means to move can't, so it can draw it again.
+#[test]
+fn a_thing_that_cant_move_says_what_to_change() {
+    let refused = |svg: &str| kept(svg, 2, None).unwrap_err();
+    let svg = |inside: &str| {
+        format!("<svg viewBox=\"0 0 640 360\"><circle cx=\"9\" cy=\"9\" r=\"4\"/>{inside}</svg>")
+    };
+    let cases = [
+        (
+            "<g data-part=\"1\" data-moves=\"cart\"><circle r=\"5\"/></g>",
+            "\"cart\" is drawn in one part only",
+        ),
+        (
+            "<g data-moves=\"cart\"><circle r=\"5\"/></g><g data-part=\"2\" data-moves=\"cart\"><circle r=\"5\"/></g>",
+            "data-moves=\"cart\" needs its stage",
+        ),
+        (
+            "<g data-part=\"1\" data-moves=\"cart\"><circle r=\"5\"/></g><g data-part=\"1\" data-moves=\"cart\"><circle r=\"5\"/></g>",
+            "\"cart\" is drawn twice in part 1",
+        ),
+        (
+            "<g data-part=\"1\" data-moves=\"cart\"><circle r=\"5\"/></g><g data-part=\"2\" data-moves=\"cart\"><rect width=\"5\" height=\"5\"/></g>",
+            "\"cart\" isn't drawn the same way in parts 1 and 2",
+        ),
+        (
+            "<g data-part=\"1\" data-moves=\"cart\"><circle r=\"5\"/><text>cart</text></g><g data-part=\"2\" data-moves=\"cart\"><circle r=\"5\"/></g>",
+            "\"cart\" has 1 labels in part 1 and 0 in part 2",
+        ),
+        (
+            "<g data-part=\"1\" data-moves=\"cart\"><g data-moves=\"wheel\"><circle r=\"5\"/></g></g>",
+            "has data-moves inside another data-moves",
+        ),
+        (
+            "<g data-part=\"1\" data-moves=\"cart\"><circle r=\"5\" data-part=\"2\"/></g><g data-part=\"2\" data-moves=\"cart\"><circle r=\"5\"/></g>",
+            "everything in a copy of \"cart\" belongs to its stage, part 1",
+        ),
+    ];
+    for (inside, says) in cases {
+        let error = refused(&svg(inside));
+        assert!(error.contains(says), "{inside}: {error}");
+    }
+}
+
+/// The one question a picture may ask before a surprising step: kept with its right choice's
+/// place, and refused for a picture that doesn't play or a guess that doesn't add up.
+#[test]
+fn a_guess_is_kept_for_a_picture_that_plays_and_checked() {
+    let guess = json!({
+        "before": 2,
+        "question": "Which way does the ball go?",
+        "choices": ["Up", " Down and right "],
+        "answer": "Down and right"
+    });
+    let Ok(Widget::Picture {
+        guess: Some(kept_guess),
+        ..
+    }) = kept(BALL, 3, Some(guess.clone()))
+    else {
+        panic!("a picture with its guess");
+    };
+    assert_eq!(
+        kept_guess,
+        Guess {
+            before: 2,
+            question: "Which way does the ball go?".to_owned(),
+            choices: vec!["Up".to_owned(), "Down and right".to_owned()],
+            answer: 1,
+        }
+    );
+    let still =
+        "<svg viewBox=\"0 0 640 360\"><circle data-part=\"1\" cx=\"9\" cy=\"9\" r=\"4\"/></svg>";
+    let error = kept(still, 2, Some(guess.clone())).unwrap_err();
+    assert!(
+        error.contains("guess is for a picture that plays"),
+        "{error}"
+    );
+    let mut wrong = guess.clone();
+    wrong["answer"] = json!("Sideways");
+    let error = kept(BALL, 3, Some(wrong)).unwrap_err();
+    assert!(
+        error.contains("guess.answer is the right choice"),
+        "{error}"
+    );
+    let mut first = guess.clone();
+    first["before"] = json!(1);
+    let error = kept(BALL, 3, Some(first)).unwrap_err();
+    assert!(
+        error.contains("guess.before is the part the question comes before, from 2 to 3"),
+        "{error}"
+    );
+    let mut four = guess;
+    four["choices"] = json!(["a", "b", "c", "Down and right"]);
+    let error = kept(BALL, 3, Some(four)).unwrap_err();
+    assert!(error.contains("guess.choices has 4"), "{error}");
+}
+
+/// Words after a `tspan` stay in their label, and the `text`'s end doesn't end the group around
+/// it: what follows keeps the group's part.
+#[test]
+fn words_after_a_nested_tspan_stay_in_their_label() {
+    let Ok(Widget::Picture { labels, shapes, .. }) = kept(
+        concat!(
+            "<svg viewBox=\"0 0 640 360\"><path d=\"M0 0L640 360\" fill=\"none\"/>",
+            "<g data-part=\"1\"><text x=\"10\" y=\"10\">wing <tspan>flap</tspan> up</text>",
+            "<circle cx=\"50\" cy=\"50\" r=\"5\"/></g></svg>"
+        ),
+        1,
+        None,
+    ) else {
+        panic!("a picture");
+    };
+    assert_eq!(labels[0].text, "wing flap up");
+    assert!(shapes[1].d.contains('C'), "the circle: {:?}", shapes[1]);
+    assert_eq!(shapes[1].part, Some(1));
 }

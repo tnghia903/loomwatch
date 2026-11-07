@@ -284,7 +284,7 @@
   stroke-linecap: round;
   stroke-linejoin: round;
   vector-effect: non-scaling-stroke;
-  transition: stroke var(--t-instant) var(--ease-out), fill var(--t-instant) var(--ease-out), stroke-width var(--t-instant) var(--ease-out);
+  transition: stroke var(--t-instant) var(--ease-out), fill var(--t-instant) var(--ease-out), stroke-width var(--t-instant) var(--ease-out), opacity var(--t-quick) var(--ease-out);
 }
 .wg-shape.loose { stroke: var(--color-ink-3); stroke-width: 1.2px; }
 .wg-shape.light { fill: color-mix(in srgb, var(--color-ink) 6%, transparent); }
@@ -325,6 +325,124 @@
 @media (min-width: 768px) {
   .wg-picture-head .wg-picture-by { width: 28px; height: 28px; }
 }
+
+/* The agent's words on its picture (amended 7 November): plain text in our type where it put them,
+   in ink-2, with a halo of the card so lines pass behind them. A part's first word carries its
+   number in the steps' gold ring when the picture plays. */
+.wg-label {
+  position: absolute;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translate(0, -50%);
+  font: 400 12px/16px var(--font-sans);
+  color: var(--color-ink);
+  text-shadow: 0 0 2px var(--wg-surface), 0 0 3px var(--wg-surface), 0 0 4px var(--wg-surface), 0 0 5px var(--wg-surface);
+  transition: color var(--t-instant) var(--ease-out), opacity var(--t-instant) var(--ease-out);
+}
+.wg-label.middle { transform: translate(-50%, -50%); }
+.wg-label.end { transform: translate(-100%, -50%); }
+.wg-label.on { font-weight: 600; }
+/* A narrow picture sets its words smaller; one that would cross the picture's edge is moved in
+   (`useWordsInside`). */
+@container (max-width: 400px) {
+  .wg-label { font-size: 11px; line-height: 14px; }
+}
+.wg-label-n {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--r-full);
+  box-shadow: inset 0 0 0 1.25px var(--color-accent);
+  background: var(--wg-surface);
+  color: var(--color-accent);
+  font: 600 11px/1 var(--font-sans);
+  font-variant-numeric: tabular-nums;
+  text-shadow: none;
+}
+.wg-label.on .wg-label-n { color: var(--color-ink); background: var(--color-accent-tint); box-shadow: inset 0 0 0 2px var(--color-accent); }
+
+/* A picture that plays shows the step it is on: the stage a moving thing just left is a dotted
+   outline, what is still to come isn't drawn, and a word leaves at once while one arriving fades
+   in. */
+.wg-shape.trace { opacity: .55; stroke-dasharray: 1 3.5; }
+.wg-shape.gone { display: none; }
+.wg-label.gone { visibility: hidden; opacity: 0; }
+
+/* Play, and the steps as numbered stops along one line with a handle: drag it and the picture
+   follows; the gold line runs as far as it has played. At rest the line is plain. */
+.wg-player { display: flex; align-items: center; gap: var(--sp-3); }
+.wg-play {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-full);
+  background: var(--wg-surface);
+  box-shadow: inset 0 0 0 1.5px var(--color-accent);
+  color: var(--color-accent);
+  cursor: pointer;
+}
+.wg-play:hover { box-shadow: inset 0 0 0 2px var(--color-accent); }
+.wg-scrub { position: relative; flex: 1; min-width: 0; height: 36px; cursor: pointer; touch-action: pan-y; outline: none; }
+.wg-scrub-line, .wg-scrub-run { position: absolute; left: 12px; top: 50%; height: 2px; margin-top: -1px; border-radius: 1px; }
+.wg-scrub-line { right: 12px; background: var(--color-warp); }
+.wg-scrub-run { width: calc((100% - 24px) * var(--run, 0)); background: var(--color-accent); }
+.wg-picture.resting .wg-scrub-run { background: transparent; }
+.wg-scrub-stop {
+  position: absolute;
+  top: 50%;
+  left: calc(12px + (100% - 24px) * var(--at, 0));
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
+  border-radius: var(--r-full);
+  background: var(--wg-surface);
+  box-shadow: inset 0 0 0 1.25px var(--color-ink-3);
+  color: var(--color-ink-2);
+  font: 600 11px/1 var(--font-sans);
+  font-variant-numeric: tabular-nums;
+}
+.wg-scrub-stop.done { box-shadow: inset 0 0 0 1.5px var(--color-accent); color: var(--color-accent); }
+.wg-scrub-knob {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  left: calc(12px + (100% - 24px) * var(--run, 0));
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  margin: -15px 0 0 -15px;
+  border-radius: var(--r-full);
+  background: var(--color-accent-tint);
+  box-shadow: inset 0 0 0 2px var(--color-accent);
+  color: var(--color-ink);
+  font: 600 12px/1 var(--font-sans);
+  font-variant-numeric: tabular-nums;
+  cursor: grab;
+}
+.wg-scrub:active .wg-scrub-knob { cursor: grabbing; }
+.wg-scrub:focus-visible .wg-scrub-knob { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.wg-picture-note { margin: 4px 0 0; font: 500 13px/18px var(--font-sans); color: var(--color-ink); }
+
+/* The question asked before a surprising step: the agent's words, its choices, and Skip. */
+.wg-ask { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3); border-radius: var(--r-md); background: var(--color-accent-tint); box-shadow: inset 0 0 0 1.5px var(--color-accent); }
+.wg-ask-question { margin: 0; font: 500 15px/22px var(--font-sans); color: var(--color-ink); }
+.wg-ask-choices { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.wg-ask-choice { padding: 7px 14px; border: 1px solid var(--color-hairline); border-radius: var(--r-full); background: var(--wg-surface); color: var(--color-ink); font: 500 14px/20px var(--font-sans); cursor: pointer; }
+.wg-ask-choice:hover { border-color: transparent; box-shadow: inset 0 0 0 1.5px var(--color-accent); }
+.wg-ask-skip { margin-left: auto; padding: 7px 4px; border: 0; background: none; color: var(--color-ink); font: 500 13px/18px var(--font-sans); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 
 /* ---------------------------------------------------------------------------
    Choices
@@ -597,7 +715,7 @@
 .wg-fresh .wg-part-n { animation: wg-part-in var(--t-move) var(--ease-out) backwards; animation-delay: calc(var(--t-entrance) + var(--k, 0) * 80ms); }
 @media (prefers-reduced-motion: reduce) {
   .wg-fresh .wg-bar-fill, .wg-fresh .wg-side-scale i, .wg-fresh .wg-dots i, .wg-fresh .wg-rail, .wg-fresh .wg-part-n { animation: none; }
-  .wg-switch-track i, .wg-progress i, .wg-option, .wg-shape { transition: none; }
+  .wg-switch-track i, .wg-progress i, .wg-option, .wg-shape, .wg-label { transition: none; }
 }
 
 @media (pointer: coarse) {
@@ -607,6 +725,10 @@
   .wg-field input { min-height: 44px; }
   .wg-step-by { min-width: 44px; min-height: 44px; }
   .wg-picture-head .wg-picture-by { width: 44px; height: 44px; }
+  .wg-play { width: 44px; height: 44px; }
+  .wg-scrub { height: 44px; }
+  .wg-ask-choice, .wg-ask-skip { min-height: 44px; }
+  .wg-ask-skip { min-width: 44px; }
   /* The number stays small on the picture; its hit area is 44 points around it. */
   .wg-part-n::before { content: ''; position: absolute; inset: -8px; border-radius: var(--r-full); }
 }

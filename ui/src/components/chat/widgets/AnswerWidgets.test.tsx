@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { AppearContext } from '../../../lib/chat/appear'
+import { MOVE_MS, plays, stretches } from '../../../lib/widgets/picturePlay'
 import type { KeptWidget, WidgetState } from '../../../lib/widgets/types'
 import { AnswerWidgets } from './AnswerWidgets'
 
@@ -466,5 +467,277 @@ describe('AnswerWidgets, compare and counted', () => {
     const table = within(screen.getByRole('region', { name: 'Two lines' })).getByRole('table')
     expect([...within(table).getAllByRole('row')[1].children].map((cell) => cell.textContent)).toEqual(['Number', '4', '12'])
     expect(screen.getByRole('img', { name: 'Then back to step 1' })).toHaveTextContent('Evaporation')
+  })
+})
+
+describe('AnswerWidgets, pictures that name and play', () => {
+  afterEach(() => { vi.useRealTimers(); cleanup(); plays.clear() })
+
+  const numbers = (d: string | null) => (d ?? '').match(/-?\d+(\.\d+)?/g)!.map(Number)
+  /** A ball that rolls from step 1 to step 2, then a goal at step 3. */
+  const ball = (extra: Partial<Extract<KeptWidget['spec'], { kind: 'picture' }>> = {}): KeptWidget => ({
+    n: 30,
+    spec: {
+      kind: 'picture',
+      title: 'A ball rolls',
+      width: 640,
+      height: 320,
+      shapes: [
+        { d: 'M0 300L640 300' },
+        { d: 'M100 200L120 200', part: 1 },
+        { d: 'M300 100L320 100', part: 2 },
+        { d: 'M500 50L520 50', part: 3 },
+      ],
+      parts: [
+        { label: 'Roll', text: 'It starts to roll.', at: [100, 180] },
+        { label: 'Bounce', text: 'It bounces up.', at: [300, 80] },
+        { label: 'Goal', text: 'It reaches the goal.', at: [500, 30] },
+      ],
+      labels: [
+        { text: 'ball', at: [110, 220], anchor: 'middle', part: 1 },
+        { text: 'ball', at: [310, 120], anchor: 'middle', part: 2 },
+        { text: 'goal', at: [510, 70], part: 3 },
+      ],
+      moves: [{ stages: [{ part: 1, shapes: [1], labels: [0] }, { part: 2, shapes: [2], labels: [1] }] }],
+      ...extra,
+    },
+  })
+  const timing = (spec: KeptWidget['spec']) => spec.kind === 'picture' ? stretches(spec.parts ?? [], spec.guess) : []
+  const playFake = () => vi.useFakeTimers({ toFake: ['requestAnimationFrame', 'cancelAnimationFrame', 'performance', 'setTimeout', 'clearTimeout'] })
+  const after = (ms: number) => act(() => { vi.advanceTimersByTime(ms) })
+
+  it('sets the agent’s words on its picture as plain text where it put them, its part’s words in ink', () => {
+    const named: KeptWidget = {
+      n: 31,
+      spec: {
+        kind: 'picture', title: 'A wing', width: 640, height: 320,
+        shapes: [{ d: 'M100 200L300 200', part: 1 }, { d: 'M100 100L300 100', part: 2 }],
+        parts: [{ label: 'Wing', text: 'It lifts.', at: [200, 180] }, { label: 'Air', text: 'It flows.', at: [200, 80] }],
+        labels: [{ text: '<b>lift</b>', at: [320, 160], anchor: 'end', part: 1 }, { text: 'air', at: [64, 80] }],
+      },
+    }
+    render(<AnswerWidgets widgets={[named]} onChange={keeper().onChange} />)
+    const picture = screen.getByRole('region', { name: 'A wing' })
+    const lift = within(picture).getByText('<b>lift</b>')
+    // Words, never markup.
+    expect(picture.querySelector('b')).toBeNull()
+    expect(lift).toHaveClass('wg-label', 'end', 'on')
+    expect(lift.style.left).toBe('50%')
+    expect(lift.style.top).toBe('50%')
+    const air = within(picture).getByText('air')
+    expect(air).toHaveClass('wg-label', 'start')
+    expect(air).not.toHaveClass('on')
+    fireEvent.click(within(picture).getByRole('button', { name: 'Part 2: Air' }))
+    expect(lift).not.toHaveClass('on')
+  })
+
+  it('plays a picture drawn in stages once as it arrives, one step at a time, then rests on its last step', () => {
+    playFake()
+    const { container } = render(<AppearContext.Provider value={true}><AnswerWidgets widgets={[ball()]} onChange={keeper().onChange} /></AppearContext.Provider>)
+    const picture = screen.getByRole('region', { name: 'A ball rolls' })
+    const paths = () => [...container.querySelectorAll('.wg-figure path')]
+    // A part's first word carries its number: "3goal" is "goal".
+    const shown = (word: string) => [...picture.querySelectorAll('.wg-label')].filter((label) => label.textContent?.replace(/^\d+/, '') === word && !label.classList.contains('gone'))
+    after(100)
+    // Step 1 alone: the ball where it is, named; its copies and what is still to come not drawn.
+    expect(picture).toHaveTextContent('1 of 3 · RollIt starts to roll.')
+    expect(paths()).toHaveLength(5)
+    expect(paths()[4].getAttribute('d')).toBe('M100 200L120 200')
+    expect(paths()[1]).toHaveClass('gone')
+    expect(paths()[2]).toHaveClass('gone')
+    expect(paths()[3]).toHaveClass('gone')
+    expect(within(picture).getByText('goal')).toHaveClass('gone')
+    expect(shown('ball')).toHaveLength(1)
+    expect(within(picture).getByRole('button', { name: 'Pause' })).toBeInTheDocument()
+    // Half way to step 2, the ball is half way between its two drawings, gold while it moves.
+    const plan = timing(ball().spec)
+    after(plan[0].ms + MOVE_MS / 2 - 100)
+    const live = paths()[4]
+    const [x1, y1, x2, y2] = numbers(live.getAttribute('d'))
+    // Between its drawing at step 1 (100, 200) and at step 2 (300, 100), on the line between them,
+    // the same length.
+    expect(x1).toBeGreaterThan(160)
+    expect(x1).toBeLessThan(240)
+    expect(y1).toBeCloseTo(200 - (x1 - 100) / 2, 0)
+    expect(x2 - x1).toBeCloseTo(20, 0)
+    expect(y2).toBeCloseTo(y1, 5)
+    expect(live).toHaveClass('on')
+    expect(picture).toHaveTextContent('2 of 3 · Bounce')
+    // Where it was is a dotted trace; step 3 still isn't drawn.
+    expect(paths()[1]).toHaveClass('trace')
+    expect(paths()[3]).toHaveClass('gone')
+    // Done: its last step and the one before, no step's words, nothing gold, and it can play again.
+    after(40000)
+    expect(picture.querySelector('.wg-step-text')).toBeNull()
+    expect(paths()).toHaveLength(5)
+    expect(paths()[4].getAttribute('d')).toBe('M300 100L320 100')
+    expect(paths()[4]).not.toHaveClass('on')
+    expect(paths()[1]).toHaveClass('trace')
+    expect(paths()[2]).toHaveClass('gone')
+    expect(paths()[3].getAttribute('class')).toBe('wg-shape')
+    expect(shown('ball')).toHaveLength(1)
+    expect(shown('goal')).toHaveLength(1)
+    expect(within(picture).getByRole('button', { name: 'Play again' })).toBeInTheDocument()
+  })
+
+  it('rests on its last step when read back, or when motion is reduced', () => {
+    playFake()
+    render(<AppearContext.Provider value={false}><AnswerWidgets widgets={[ball()]} onChange={keeper().onChange} /></AppearContext.Provider>)
+    after(5000)
+    const picture = screen.getByRole('region', { name: 'A ball rolls' })
+    expect(picture.querySelector('.wg-step-text')).toBeNull()
+    expect(within(picture).getByRole('button', { name: 'Play' })).toBeInTheDocument()
+    cleanup()
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(prefers-reduced-motion: reduce)' }))
+    try {
+      render(<AppearContext.Provider value={true}><AnswerWidgets widgets={[{ ...ball(), n: 32 }]} onChange={keeper().onChange} /></AppearContext.Provider>)
+      after(5000)
+      const still = screen.getByRole('region', { name: 'A ball rolls' })
+      expect(still.querySelector('.wg-step-text')).toBeNull()
+      // Its button goes a step at a time, with no motion, says so, and goes round to the first.
+      fireEvent.click(within(still).getByRole('button', { name: 'Next step' }))
+      expect(still).toHaveTextContent('1 of 3 · Roll')
+      fireEvent.click(within(still).getByRole('button', { name: 'Next step' }))
+      expect(still).toHaveTextContent('2 of 3 · Bounce')
+      fireEvent.click(within(still).getByRole('button', { name: 'Next step' }))
+      expect(still).toHaveTextContent('3 of 3 · Goal')
+      fireEvent.click(within(still).getByRole('button', { name: 'Back to step 1' }))
+      expect(still).toHaveTextContent('1 of 3 · Roll')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('asks the agent’s question once, before the step it surprises, and plays on with what you guessed', () => {
+    playFake()
+    const guess = { before: 2, question: 'Where does the ball go?', choices: ['Up', 'Down'], answer: 1 }
+    render(<AppearContext.Provider value={true}><AnswerWidgets widgets={[{ ...ball({ guess }), n: 33 }]} onChange={keeper().onChange} /></AppearContext.Provider>)
+    const picture = screen.getByRole('region', { name: 'A ball rolls' })
+    const first = timing(ball({ guess }).spec)[0].ms
+    after(first + 100)
+    const question = within(picture).getByRole('group', { name: 'Where does the ball go?' })
+    // It waits on step 1, and leaves your focus where it was.
+    expect(picture.querySelector('.wg-step-text')).toBeNull()
+    expect(within(picture).getByRole('slider')).toHaveAttribute('aria-valuenow', '1')
+    expect(document.activeElement?.closest('.wg-ask')).toBeNull()
+    after(5000)
+    expect(within(picture).getByRole('group', { name: 'Where does the ball go?' })).toBe(question)
+    fireEvent.click(within(question).getByRole('button', { name: 'Up' }))
+    after(MOVE_MS + 100)
+    expect(within(picture).queryByRole('group')).toBeNull()
+    // What you guessed, and what it is: the question is asked once.
+    expect(picture).toHaveTextContent('2 of 3 · BounceYou guessed “Up”. It’s “Down”.It bounces up.')
+    after(40000)
+    // Played again, it doesn't ask again.
+    fireEvent.click(within(picture).getByRole('button', { name: 'Play again' }))
+    after(first + 100)
+    expect(within(picture).queryByRole('group')).toBeNull()
+    expect(picture).toHaveTextContent('2 of 3 · Bounce')
+    expect(picture).not.toHaveTextContent('You guessed')
+  })
+
+  it('carries on where it was when the kept picture takes the place of the one drawn as the answer was written', () => {
+    playFake()
+    const guess = { before: 3, question: 'Does it reach the goal?', choices: ['Yes', 'No'], answer: 0 }
+    const rolling = { ...ball({ guess }), n: 35 }
+    const plan = timing(rolling.spec)
+    const live = render(<AppearContext.Provider value={true}><AnswerWidgets widgets={[rolling]} onChange={keeper().onChange} live /></AppearContext.Provider>)
+    // It plays while the answer is still written.
+    after(plan[0].ms + plan[1].ms + 200)
+    expect(screen.getByRole('region', { name: 'A ball rolls' })).toHaveTextContent('2 of 3 · Bounce')
+    live.unmount()
+    // The kept picture is drawn again, not as news: it goes on from step 2, not from the start.
+    render(<AppearContext.Provider value={true}><AnswerWidgets widgets={[rolling]} onChange={keeper().onChange} /></AppearContext.Provider>)
+    const kept = screen.getByRole('region', { name: 'A ball rolls' })
+    after(100)
+    expect(kept).toHaveTextContent('2 of 3 · Bounce')
+    // And it asks its question, once, when it gets there.
+    after(plan[2].ms)
+    expect(within(kept).getByRole('group', { name: 'Does it reach the goal?' })).toBeInTheDocument()
+  })
+
+  it('keeps its question waiting when the kept picture takes the place of the one drawn as the answer was written', () => {
+    playFake()
+    const guess = { before: 2, question: 'Which way does it bounce?', choices: ['Up', 'Down'], answer: 1 }
+    const rolling = { ...ball({ guess }), n: 37 }
+    const live = render(<AppearContext.Provider value={true}><AnswerWidgets widgets={[rolling]} onChange={keeper().onChange} live /></AppearContext.Provider>)
+    after(timing(rolling.spec)[0].ms + 100)
+    expect(screen.getByRole('group', { name: 'Which way does it bounce?' })).toBeInTheDocument()
+    live.unmount()
+    render(<AppearContext.Provider value={true}><AnswerWidgets widgets={[rolling]} onChange={keeper().onChange} /></AppearContext.Provider>)
+    after(5000)
+    const kept = screen.getByRole('region', { name: 'A ball rolls' })
+    // Still waiting on your answer, on step 1: it doesn't play past the question.
+    expect(within(kept).getByRole('group', { name: 'Which way does it bounce?' })).toBeInTheDocument()
+    expect(within(kept).getByRole('slider')).toHaveAttribute('aria-valuenow', '1')
+  })
+
+  it('moves a word that would cross the picture’s edge back inside it', () => {
+    const boxes = new Map<string, Partial<DOMRect>>([
+      ['wg-figure', { left: 0, right: 200, top: 0, bottom: 100, width: 200, height: 100 }],
+      ['far right', { left: 180, right: 240, top: 10, bottom: 26, width: 60, height: 16 }],
+      ['far left', { left: -30, right: 20, top: 40, bottom: 56, width: 50, height: 16 }],
+      ['inside', { left: 50, right: 90, top: 60, bottom: 76, width: 40, height: 16 }],
+    ])
+    const measure = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const key = this.classList.contains('wg-figure') ? 'wg-figure' : this.textContent ?? ''
+      return { x: 0, y: 0, toJSON: () => ({}), left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0, ...boxes.get(key) } as DOMRect
+    })
+    try {
+      const edge: KeptWidget = {
+        n: 36,
+        spec: {
+          kind: 'picture', title: 'Edges', width: 640, height: 320, shapes: [{ d: 'M0 0L640 320' }],
+          labels: [{ text: 'far right', at: [600, 40] }, { text: 'far left', at: [10, 140], anchor: 'middle' }, { text: 'inside', at: [200, 200] }],
+        },
+      }
+      render(<AnswerWidgets widgets={[edge]} onChange={keeper().onChange} />)
+      const picture = screen.getByRole('region', { name: 'Edges' })
+      expect(within(picture).getByText('far right').style.translate).toBe('-40px 0')
+      expect(within(picture).getByText('far left').style.translate).toBe('30px 0')
+      expect(within(picture).getByText('inside').style.translate).toBe('')
+      // A picture that plays too.
+      const rolling = ball()
+      if (rolling.spec.kind !== 'picture') throw new Error('a picture')
+      render(<AnswerWidgets widgets={[{ ...rolling, n: 38, spec: { ...rolling.spec, labels: [...rolling.spec.labels ?? [], { text: 'far right', at: [600, 40] }] } }]} onChange={keeper().onChange} />)
+      const plays = screen.getByRole('region', { name: 'A ball rolls' })
+      expect(within(plays).getByText('far right').style.translate).toBe('-40px 0')
+    } finally {
+      measure.mockRestore()
+    }
+  })
+
+  it('takes you to a step by dragging along the line of steps, or with the keys', () => {
+    render(<AnswerWidgets widgets={[{ ...ball(), n: 34 }]} onChange={keeper().onChange} />)
+    const picture = screen.getByRole('region', { name: 'A ball rolls' })
+    const slider = within(picture).getByRole('slider', { name: 'Step' })
+    expect(slider).toHaveAttribute('aria-valuemax', '3')
+    fireEvent.keyDown(slider, { key: 'ArrowLeft' })
+    expect(slider).toHaveAttribute('aria-valuetext', '2 of 3: Bounce')
+    expect(picture).toHaveTextContent('2 of 3 · Bounce')
+    fireEvent.keyDown(slider, { key: 'Home' })
+    expect(picture).toHaveTextContent('1 of 3 · Roll')
+    slider.getBoundingClientRect = () => ({ left: 0, width: 224, top: 0, height: 36, right: 224, bottom: 36, x: 0, y: 0, toJSON: () => ({}) })
+    // 12 px in, the line runs 200 px across two moves: 112 px is step 2.
+    fireEvent.pointerDown(slider, { clientX: 112, pointerId: 1 })
+    expect(slider).toHaveAttribute('aria-valuenow', '2')
+    fireEvent.pointerMove(slider, { clientX: 212, pointerId: 1 })
+    expect(picture).toHaveTextContent('3 of 3 · Goal')
+    fireEvent.pointerUp(slider, { clientX: 212, pointerId: 1 })
+    fireEvent.pointerMove(slider, { clientX: 12, pointerId: 1 })
+    expect(picture).toHaveTextContent('3 of 3 · Goal')
+    // Let go between two steps and it settles on the nearer.
+    fireEvent.pointerDown(slider, { clientX: 150, pointerId: 1 })
+    fireEvent.pointerUp(slider, { clientX: 150, pointerId: 1 })
+    expect(slider).toHaveAttribute('aria-valuenow', '2')
+    expect(slider.style.getPropertyValue('--run')).toBe('0.5')
+    // A finger swiping up or down scrolls the chat and leaves the picture where it is; a tap moves it.
+    fireEvent.pointerDown(slider, { clientX: 12, clientY: 10, pointerId: 2, pointerType: 'touch' })
+    fireEvent.pointerMove(slider, { clientX: 15, clientY: 60, pointerId: 2, pointerType: 'touch' })
+    fireEvent.pointerUp(slider, { clientX: 15, clientY: 60, pointerId: 2, pointerType: 'touch' })
+    expect(slider).toHaveAttribute('aria-valuenow', '2')
+    fireEvent.pointerDown(slider, { clientX: 12, clientY: 10, pointerId: 3, pointerType: 'touch' })
+    fireEvent.pointerUp(slider, { clientX: 13, clientY: 11, pointerId: 3, pointerType: 'touch' })
+    expect(slider).toHaveAttribute('aria-valuenow', '1')
   })
 })

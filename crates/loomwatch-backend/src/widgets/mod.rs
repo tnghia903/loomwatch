@@ -101,6 +101,15 @@ pub(crate) mod limits {
     pub(crate) const PARTS: (usize, usize) = (0, 8);
     pub(crate) const PART_LABEL_CHARS: usize = 40;
     pub(crate) const PART_TEXT_CHARS: usize = 320;
+    /// A picture's words: a few each, enough to name what a textbook figure names.
+    pub(crate) const LABELS: usize = 24;
+    pub(crate) const LABEL_WORDS_CHARS: usize = 40;
+    /// Things that move from stage to stage in one picture.
+    pub(crate) const MOVES: usize = 12;
+    /// The one question a picture may ask before a step, and its choices.
+    pub(crate) const GUESS_CHARS: usize = 160;
+    pub(crate) const GUESS_CHOICES: (usize, usize) = (2, 3);
+    pub(crate) const GUESS_CHOICE_CHARS: usize = 40;
 }
 
 /// One widget, as the agent asked for it and `LoomWatch` checked it.
@@ -177,8 +186,9 @@ pub(crate) enum Widget {
         repeats: bool,
     },
     /// A picture the agent drew, redrawn in `LoomWatch`'s own lines (ADR 0117): outlines in the
-    /// picture's units, [`picture::WIDTH`] wide, and up to 8 numbered parts the person taps or steps
-    /// through, whose shapes turn gold. To look at.
+    /// picture's units, [`picture::WIDTH`] wide, its words as labels, and up to 8 numbered parts the
+    /// person taps or steps through, whose shapes turn gold. When the agent drew something again at
+    /// each stage it plays, and it may ask one question first. To look at.
     Picture {
         title: String,
         width: f64,
@@ -186,6 +196,12 @@ pub(crate) enum Widget {
         shapes: Vec<picture::Shape>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         parts: Vec<picture::Part>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        labels: Vec<picture::Label>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        moves: Vec<picture::Move>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        guess: Option<picture::Guess>,
     },
     /// A graph: bars or a line over labelled points, up to three series. To look at; tapping a
     /// point reads its values.
@@ -1252,13 +1268,20 @@ pub(crate) const SHOW_WIDGET_KIND: Block = Block::new(
 pub(crate) const SHOW_WIDGET_DRAWING: Block = Block::new(
     "bus.show_widget.drawing",
     "picture: the picture as SVG, such as <svg viewBox=\"0 0 640 360\">…</svg>, with path, \
-     circle, ellipse, rect, line, polyline, polygon and g, transforms too. Draw the real thing in \
-     clear, simple outlines and in proportion, as a good textbook figure does; to show it moving, \
-     draw it again at each stage. No background, sky, words or colours: LoomWatch draws every \
-     line in its own ink and leaves words out. A shape with a fill is shaded, dark when the fill \
-     is dark, and fill=\"none\" leaves it an outline; stroke-dasharray dashes a line, and \
-     marker-end puts an arrowhead at its end, with no defs needed. Put data-part=\"N\" on the \
-     shapes, or the g, that show part N.",
+     circle, ellipse, rect, line, polyline, polygon, text and g, transforms too. Draw a real \
+     example in clear, simple outlines and in proportion, as a good textbook figure does: people \
+     with names rather than dots, a plane with its wings and engines. Draw what happens too: the \
+     arrows, the forces, what changes. Name what the person needs to know with <text>, a few \
+     words each in their language, beside what it names; LoomWatch sets the words in its own \
+     type. No background, sky or colours: LoomWatch draws every line in its own ink. A shape with \
+     a fill is shaded, dark when the fill is dark, and fill=\"none\" leaves it an outline; \
+     stroke-dasharray dashes a line, and marker-end puts an arrowhead at its end, with no defs \
+     needed. Put data-part=\"N\" on the shapes, or the g, that show part N. When something moves \
+     or changes in stages, draw it again in each stage's part, the same shapes and labels in the \
+     same order, each copy in a g with the same data-moves name, such as <g data-part=\"2\" \
+     data-moves=\"plane\" transform=\"…\">: the picture plays, moving it from stage to stage. A \
+     force or a flow that grows is drawn the same way, at its size in each stage. Something with \
+     nothing moving, such as the parts of a flower, stays still.",
 );
 
 /// A picture's `parts` (ADR 0117).
@@ -1269,6 +1292,17 @@ pub(crate) const SHOW_WIDGET_PARTS: Block = Block::new(
      the picture, or steps through them, and its shapes turn gold. at is [x, y] in the drawing's \
      units where its number stands, on empty ground beside what it names; without it, the \
      number stands above its shapes.",
+);
+
+/// A picture's `guess` (ADR 0117, amended 7 November).
+pub(crate) const SHOW_WIDGET_GUESS: Block = Block::new(
+    "bus.show_widget.guess",
+    "picture that plays: one question to ask before the step whose outcome would surprise the \
+     person, only when it really would, such as which force is bigger as a plane leaves the \
+     ground: before is that step's part number, question is the question in the person's \
+     language, choices are 2 or 3 short answers, and answer is the right one, written as in \
+     choices. The picture stops before that step the first time it plays; the person answers or \
+     skips, then watches.",
 );
 
 /// A comparison's `sides`.
@@ -1470,6 +1504,18 @@ pub(crate) fn tool_definition() -> Value {
                 },
                 "repeats": {"type": "boolean", "description": "steps or flow: true when the last leads back to the first, as in a cycle"},
                 "drawing": {"type": "string", "description": SHOW_WIDGET_DRAWING.text(), "minLength": 1},
+                "guess": {
+                    "type": "object",
+                    "description": SHOW_WIDGET_GUESS.text(),
+                    "properties": {
+                        "before": {"type": "integer", "description": "The part the question comes before, from 2"},
+                        "question": {"type": "string", "minLength": 1},
+                        "choices": {"type": "array", "description": "2 or 3 short answers", "items": {"type": "string"}, "maxItems": limits::GUESS_CHOICES.1},
+                        "answer": {"type": "string", "description": "The right choice, as written in choices"}
+                    },
+                    "required": ["before", "question", "choices", "answer"],
+                    "additionalProperties": false
+                },
                 "parts": {
                     "type": "array",
                     "description": SHOW_WIDGET_PARTS.text(),

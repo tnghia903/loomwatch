@@ -1235,7 +1235,7 @@ Tell the person in a few words when the message comes, then end your turn.
         "type": "integer"
       },
       "drawing": {
-        "description": "picture: the picture as SVG, such as <svg viewBox=\"0 0 640 360\">…</svg>, with path, circle, ellipse, rect, line, polyline, polygon and g, transforms too. Draw the real thing in clear, simple outlines and in proportion, as a good textbook figure does; to show it moving, draw it again at each stage. No background, sky, words or colours: LoomWatch draws every line in its own ink and leaves words out. A shape with a fill is shaded, dark when the fill is dark, and fill=\"none\" leaves it an outline; stroke-dasharray dashes a line, and marker-end puts an arrowhead at its end, with no defs needed. Put data-part=\"N\" on the shapes, or the g, that show part N.",
+        "description": "picture: the picture as SVG, such as <svg viewBox=\"0 0 640 360\">…</svg>, with path, circle, ellipse, rect, line, polyline, polygon, text and g, transforms too. Draw a real example in clear, simple outlines and in proportion, as a good textbook figure does: people with names rather than dots, a plane with its wings and engines. Draw what happens too: the arrows, the forces, what changes. Name what the person needs to know with <text>, a few words each in their language, beside what it names; LoomWatch sets the words in its own type. No background, sky or colours: LoomWatch draws every line in its own ink. A shape with a fill is shaded, dark when the fill is dark, and fill=\"none\" leaves it an outline; stroke-dasharray dashes a line, and marker-end puts an arrowhead at its end, with no defs needed. Put data-part=\"N\" on the shapes, or the g, that show part N. When something moves or changes in stages, draw it again in each stage's part, the same shapes and labels in the same order, each copy in a g with the same data-moves name, such as <g data-part=\"2\" data-moves=\"plane\" transform=\"…\">: the picture plays, moving it from stage to stage. A force or a flow that grows is drawn the same way, at its size in each stage. Something with nothing moving, such as the parts of a flower, stays still.",
         "minLength": 1,
         "type": "string"
       },
@@ -1246,6 +1246,39 @@ Tell the person in a few words when the message comes, then end your turn.
         },
         "maxItems": 3,
         "type": "array"
+      },
+      "guess": {
+        "additionalProperties": false,
+        "description": "picture that plays: one question to ask before the step whose outcome would surprise the person, only when it really would, such as which force is bigger as a plane leaves the ground: before is that step's part number, question is the question in the person's language, choices are 2 or 3 short answers, and answer is the right one, written as in choices. The picture stops before that step the first time it plays; the person answers or skips, then watches.",
+        "properties": {
+          "answer": {
+            "description": "The right choice, as written in choices",
+            "type": "string"
+          },
+          "before": {
+            "description": "The part the question comes before, from 2",
+            "type": "integer"
+          },
+          "choices": {
+            "description": "2 or 3 short answers",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 3,
+            "type": "array"
+          },
+          "question": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "before",
+          "question",
+          "choices",
+          "answer"
+        ],
+        "type": "object"
       },
       "inputs": {
         "description": "calculator: up to 12 values the person can change. A number has start, and may have unit, prefix, min, max and step; a switch has on instead",
