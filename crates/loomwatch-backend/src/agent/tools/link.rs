@@ -10,6 +10,8 @@
 //!   network.
 //! - A page is read up to [`MAX_BYTES`], and its text up to [`MAX_TEXT_CHARS`]. A long text is set
 //!   aside by the session like any long tool output, to be read in parts.
+//! - A page a site sent packed (`gzip` or `deflate`), though nothing asked it to, is unpacked
+//!   first, to at most [`MAX_BYTES`] as well.
 use std::fmt::Write as _;
 use std::net::IpAddr;
 use std::sync::LazyLock;
@@ -241,7 +243,7 @@ async fn read(url: url::Url) -> Output {
     let Some(client) = CLIENT.as_ref() else {
         return Output::failed("LoomWatch couldn't set up its page reader.");
     };
-    let mut response = match client.get(url.clone()).send().await {
+    let response = match client.get(url.clone()).send().await {
         Ok(response) => response,
         Err(error) if error.is_timeout() => {
             return Output::failed(format!(
@@ -270,24 +272,10 @@ async fn read(url: url::Url) -> Output {
         .and_then(|value| value.to_str().ok())
         .unwrap_or_default()
         .to_owned();
-    let mut bytes = Vec::new();
-    loop {
-        match response.chunk().await {
-            Ok(Some(chunk)) => {
-                if bytes.len() + chunk.len() > MAX_BYTES {
-                    return Output::failed(format!(
-                        "{url} is more than the {} MB read_page reads.",
-                        MAX_BYTES / 1024 / 1024
-                    ));
-                }
-                bytes.extend_from_slice(&chunk);
-            }
-            Ok(None) => break,
-            Err(error) => {
-                return Output::failed(format!("{url} stopped part way: {}", why(&error)));
-            }
-        }
-    }
+    let bytes = match page_bytes(&url, response).await {
+        Ok(bytes) => bytes,
+        Err(failed) => return failed,
+    };
     let Some(page) = Page::of(&content_type, &bytes) else {
         return Output::failed(format!(
             "{url} is {}, which read_page doesn't read: it reads web pages, PDFs and text.",
@@ -330,6 +318,96 @@ async fn read(url: url::Url) -> Output {
         None => out.push_str(text),
     }
     Output::ok(out)
+}
+
+/// The page `response` carries, unpacked, in at most [`MAX_BYTES`]; else what `read_page` says.
+async fn page_bytes(url: &url::Url, mut response: reqwest::Response) -> Result<Vec<u8>, Output> {
+    let packed = packing(&response);
+    let too_big = || {
+        Output::failed(format!(
+            "{url} is more than the {} MB read_page reads.",
+            MAX_BYTES / 1024 / 1024
+        ))
+    };
+    let mut bytes = Vec::new();
+    loop {
+        match response.chunk().await {
+            Ok(Some(chunk)) => {
+                if bytes.len() + chunk.len() > MAX_BYTES {
+                    return Err(too_big());
+                }
+                bytes.extend_from_slice(&chunk);
+            }
+            Ok(None) => break,
+            Err(error) => {
+                return Err(Output::failed(format!(
+                    "{url} stopped part way: {}",
+                    why(&error)
+                )));
+            }
+        }
+    }
+    match unpacked(packed.as_deref(), bytes, MAX_BYTES) {
+        Ok(bytes) if bytes.len() > MAX_BYTES => Err(too_big()),
+        Ok(bytes) => Ok(bytes),
+        Err(Unpacking::Unknown(packing)) => Err(Output::failed(format!(
+            "{url} sent its page packed as {packing}, which read_page can't unpack."
+        ))),
+        Err(Unpacking::BreaksOff) => Err(Output::failed(format!(
+            "{url} sent its page packed, and the packing breaks off part way, so it wasn't read."
+        ))),
+    }
+}
+
+/// How a site packed what it sent, by its `Content-Encoding`, lowercased; `None` when it didn't.
+/// The reader never asks for a packed page, but some sites pack every page anyway: several of
+/// Vietnam's national news sites do, their home pages and "not found" pages too.
+pub(crate) fn packing(response: &reqwest::Response) -> Option<String> {
+    let said = response
+        .headers()
+        .get(reqwest::header::CONTENT_ENCODING)?
+        .to_str()
+        .unwrap_or("unreadable")
+        .trim()
+        .to_ascii_lowercase();
+    (!said.is_empty() && said != "identity").then_some(said)
+}
+
+/// Why what a site sent didn't unpack.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Unpacking {
+    /// A packing this reader can't unpack, by the name the site gave it.
+    Unknown(String),
+    /// The packing breaks off part way, or is broken.
+    BreaksOff,
+}
+
+/// `body` as the site meant it: unpacked by its `packing` (`gzip` or `deflate`), as it is when
+/// `None`. At most `limit + 1` bytes come out, so a few packed bytes can't fill the memory, and more
+/// than `limit` says it is longer.
+pub(crate) fn unpacked(
+    packing: Option<&str>,
+    mut body: Vec<u8>,
+    limit: usize,
+) -> Result<Vec<u8>, Unpacking> {
+    use std::io::Read as _;
+    let most = limit as u64 + 1;
+    let mut out = Vec::new();
+    let read = match packing {
+        None => {
+            body.truncate(limit + 1);
+            return Ok(body);
+        }
+        Some("gzip" | "x-gzip") => flate2::read::MultiGzDecoder::new(body.as_slice())
+            .take(most)
+            .read_to_end(&mut out),
+        // HTTP's `deflate` is zlib's wrapping around it.
+        Some("deflate") => flate2::read::ZlibDecoder::new(body.as_slice())
+            .take(most)
+            .read_to_end(&mut out),
+        Some(other) => return Err(Unpacking::Unknown(other.to_owned())),
+    };
+    read.map(|_| out).map_err(|_| Unpacking::BreaksOff)
 }
 
 /// What went wrong, down to its cause: "error sending request" alone says nothing. The address is

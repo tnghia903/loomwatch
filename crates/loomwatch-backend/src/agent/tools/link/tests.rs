@@ -53,11 +53,75 @@ async fn site() -> String {
         .route(
             "/abs",
             get(|| async { Redirect::temporary("/html/2609.03874v1") }),
+        )
+        // Packed though the reader never asked, as some news sites send every page.
+        .route(
+            "/packed",
+            get(|| async {
+                (
+                    [
+                        (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+                        (header::CONTENT_ENCODING, "gzip"),
+                    ],
+                    gzip(PAPER.as_bytes()),
+                )
+            }),
+        )
+        .route(
+            "/deflated",
+            get(|| async {
+                (
+                    [
+                        (header::CONTENT_TYPE, "text/plain"),
+                        (header::CONTENT_ENCODING, "deflate"),
+                    ],
+                    zlib(b"plain words"),
+                )
+            }),
+        )
+        .route(
+            "/brotli",
+            get(|| async {
+                (
+                    [
+                        (header::CONTENT_TYPE, "text/html"),
+                        (header::CONTENT_ENCODING, "br"),
+                    ],
+                    vec![0x1b, 0x03, 0x00, 0xf8],
+                )
+            }),
+        )
+        .route(
+            "/cut-short",
+            get(|| async {
+                let packed = gzip(PAPER.as_bytes());
+                (
+                    [
+                        (header::CONTENT_TYPE, "text/html"),
+                        (header::CONTENT_ENCODING, "gzip"),
+                    ],
+                    packed[..packed.len() / 2].to_vec(),
+                )
+            }),
         );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     tokio::spawn(async move { axum::serve(listener, app).await });
     format!("http://{address}")
+}
+
+fn gzip(bytes: &[u8]) -> Vec<u8> {
+    use std::io::Write as _;
+    let mut packer = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    packer.write_all(bytes).unwrap();
+    packer.finish().unwrap()
+}
+
+fn zlib(bytes: &[u8]) -> Vec<u8> {
+    use std::io::Write as _;
+    let mut packer = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+    packer.write_all(bytes).unwrap();
+    packer.finish().unwrap()
 }
 
 /// `read_page` of `url`, by an agent the person wrote `links` to, which may use the web or not.
@@ -274,5 +338,86 @@ async fn a_link_the_person_wrote_is_read_as_words_and_any_other_is_refused() {
         not_web.text.contains("isn't a web address"),
         "{}",
         not_web.text
+    );
+}
+
+#[tokio::test]
+async fn a_page_the_site_packed_unasked_is_read_as_its_words() {
+    let site = site().await;
+    let [packed, deflated, brotli, cut] =
+        ["packed", "deflated", "brotli", "cut-short"].map(|path| format!("{site}/{path}"));
+    let links = written_in(&format!("{packed} {deflated} {brotli} {cut}"));
+
+    let read = read_link(&packed, &links).await;
+    assert!(!read.failed, "{}", read.text);
+    assert!(
+        read.text.starts_with(&format!(
+            "Read from {packed}\nTitle: STAIR: Structure-Aware Retrieval & Reading\n\n# STAIR\n"
+        )),
+        "{}",
+        read.text
+    );
+    assert!(read.text.contains("- Exact-match 71.2%"), "{}", read.text);
+
+    let text = read_link(&deflated, &links).await;
+    assert_eq!(text.text, format!("Read from {deflated}\n\nplain words"));
+
+    // A packing it can't unpack is named, never read out as the packed bytes.
+    let other = read_link(&brotli, &links).await;
+    assert!(other.failed);
+    assert!(
+        other
+            .text
+            .contains("packed as br, which read_page can't unpack"),
+        "{}",
+        other.text
+    );
+
+    let broken = read_link(&cut, &links).await;
+    assert!(broken.failed);
+    assert!(
+        broken.text.contains("the packing breaks off part way"),
+        "{}",
+        broken.text
+    );
+}
+
+#[test]
+fn a_packed_body_unpacks_to_at_most_one_byte_past_its_limit() {
+    let words = b"plain words".repeat(100);
+    assert_eq!(unpacked(None, words.clone(), 5_000), Ok(words.clone()));
+    assert_eq!(
+        unpacked(Some("gzip"), gzip(&words), 5_000),
+        Ok(words.clone())
+    );
+    assert_eq!(
+        unpacked(Some("x-gzip"), gzip(&words), 5_000),
+        Ok(words.clone())
+    );
+    assert_eq!(
+        unpacked(Some("deflate"), zlib(&words), 5_000),
+        Ok(words.clone())
+    );
+
+    // A few packed bytes that unpack to a lot stop one byte past the limit.
+    let zeros = gzip(&vec![0; 1_000_000]);
+    assert!(zeros.len() < 2_000, "{}", zeros.len());
+    assert_eq!(
+        unpacked(Some("gzip"), zeros, 100).map(|out| out.len()),
+        Ok(101)
+    );
+    assert_eq!(
+        unpacked(None, words.clone(), 10).map(|out| out.len()),
+        Ok(11)
+    );
+
+    assert_eq!(
+        unpacked(Some("br"), words.clone(), 5_000),
+        Err(Unpacking::Unknown("br".into()))
+    );
+    let packed = gzip(&words);
+    assert_eq!(
+        unpacked(Some("gzip"), packed[..packed.len() / 2].to_vec(), 5_000),
+        Err(Unpacking::BreaksOff)
     );
 }
