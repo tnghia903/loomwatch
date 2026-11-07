@@ -653,8 +653,11 @@ the tool it says in the same breath to show a widget with them where one fits
 words only. Its answer is placed the same way and kept in the `widgets` table under
 `note:<message id>:<agent>`, and the chat page's answered `note` items carry `widgets` by agent. `POST /api/chat/widgets` takes `note: {messageId, agent}` in place of `runId`, for a
 message of this team that agent answered. The next run's conversation names what each such answer
-showed and what the person changed, as for a run's answer. What the person ticks or
-changes is kept by `POST /api/chat/widgets` (`state`, `changedAt`), and the next run's
+showed and what the person changed, as for a run's answer. A message to one agent after it answered
+in the chat this way carries on from that answer: the turn doesn't follow the agent's earlier work
+or get it as `## Your previous output` (`chat::answered_in_chat_since`, ADR 0051), so the answer
+stays the last thing before the task and the earlier work keeps its place in the conversation. What
+the person ticks or changes is kept by `POST /api/chat/widgets` (`state`, `changedAt`), and the next run's
 `## Conversation so far` names what each answer showed and what changed, with the results worked
 out again; `earlier_work` includes them. A choice is sent as the person's message, replying to the
 answer, and keeps no state; nor do steps or a chart. A paired phone may keep ticks and values
