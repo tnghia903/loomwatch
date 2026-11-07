@@ -152,8 +152,15 @@ fn a_drawing_keeps_its_shapes_in_their_parts_and_nothing_else() {
             .collect::<Vec<_>>(),
         ["Speed up", "Lift", "Climb"]
     );
-    // Its number stands where the agent put it: 70 above the runway.
-    assert_eq!(parts[1].at, [330.0, ground - 70.0]);
+    // Its number stands where the agent put it, 70 above the runway, moved just clear of the plane
+    // it would sit on.
+    let put = [330.0, ground - 70.0];
+    let moved = (parts[1].at[0] - put[0]).hypot(parts[1].at[1] - put[1]);
+    assert!(
+        moved > 0.0 && moved <= 16.0,
+        "{:?} from {put:?}",
+        parts[1].at
+    );
 }
 
 /// Without `at`, a part's number stands above its shapes, centred; below them when they reach the
@@ -165,7 +172,7 @@ fn a_parts_number_stands_beside_its_shapes() {
         "title": "x",
         "drawing": concat!(
             "<svg viewBox=\"0 0 640 360\">",
-            "<line x1=\"0\" y1=\"0\" x2=\"640\" y2=\"360\"/>",
+            "<path d=\"M0 360L0 0L640 0\" fill=\"none\"/>",
             "<rect data-part=\"1\" x=\"100\" y=\"200\" width=\"100\" height=\"50\"/>",
             "<rect data-part=\"2\" x=\"300\" y=\"4\" width=\"100\" height=\"50\"/>",
             "<rect data-part=\"3\" x=\"600\" y=\"300\" width=\"80\" height=\"80\"/>",
@@ -177,9 +184,9 @@ fn a_parts_number_stands_beside_its_shapes() {
             {"label": "c", "text": "c"}
         ]
     }));
-    assert_eq!(parts[0].at, [150.0, 180.0]);
-    assert_eq!(parts[1].at, [350.0, 74.0]);
-    assert_eq!(parts[2].at, [624.0, 280.0]);
+    assert_eq!(parts[0].at, [150.0, 176.0]);
+    assert_eq!(parts[1].at, [350.0, 78.0]);
+    assert_eq!(parts[2].at, [624.0, 276.0]);
 }
 
 /// Several arrows written as one path with one marker each get their head, as the model meant;
@@ -210,14 +217,14 @@ fn a_number_away_from_its_part_is_joined_to_it() {
         "kind": "picture", "title": "x",
         "drawing": concat!(
             "<svg viewBox=\"0 0 640 360\">",
-            "<line x1=\"0\" y1=\"0\" x2=\"640\" y2=\"360\"/>",
+            "<path d=\"M0 360L0 0L640 0\" fill=\"none\"/>",
             "<rect data-part=\"1\" x=\"100\" y=\"200\" width=\"100\" height=\"50\"/>",
             "<rect data-part=\"2\" x=\"400\" y=\"200\" width=\"100\" height=\"50\"/>",
             "</svg>"
         ),
         "parts": [
             {"label": "far", "text": "a", "at": [150, 60]},
-            {"label": "near", "text": "b", "at": [450, 180]}
+            {"label": "near", "text": "b", "at": [450, 176]}
         ]
     }));
     assert_eq!(parts[0].at, [150.0, 60.0]);
@@ -586,8 +593,8 @@ fn a_drawings_words_are_kept_as_labels_where_it_put_them() {
     let Ok(Widget::Picture { labels, .. }) = kept(
         concat!(
             "<svg viewBox=\"0 0 640 360\">",
-            // Corner to corner, so the picture keeps its whole frame.
-            "<path d=\"M0 0L640 360\" fill=\"none\"/>",
+            // Along two edges, so the picture keeps its whole frame and no line crosses a word.
+            "<path d=\"M0 360L0 0L640 0\" fill=\"none\"/>",
             "<g data-part=\"1\" text-anchor=\"middle\">",
             "<rect x=\"100\" y=\"100\" width=\"200\" height=\"100\"/>",
             "<text x=\"200\" y=\"90\" font-size=\"20\">wing &amp;\n <tspan>flap</tspan></text>",
@@ -663,7 +670,7 @@ fn labels_that_say_too_much_say_what_to_change() {
 /// move to.
 const BALL: &str = concat!(
     "<svg viewBox=\"0 0 640 360\">",
-    "<path d=\"M0 0L640 360\" fill=\"none\"/>",
+    "<path d=\"M0 360L0 0L640 0\" fill=\"none\"/>",
     "<g data-part=\"2\" data-moves=\"ball\" transform=\"translate(300 200) scale(2)\">",
     "<circle r=\"10\"/><path d=\"M0 0h20\" marker-end=\"url(#a)\"/><text y=\"-20\">ball</text></g>",
     "<g data-part=\"1\" data-moves=\"ball\" transform=\"translate(100 100)\">",
@@ -923,4 +930,184 @@ fn words_after_a_nested_tspan_stay_in_their_label() {
     assert_eq!(labels[0].text, "wing flap up");
     assert!(shapes[1].d.contains('C'), "the circle: {:?}", shapes[1]);
     assert_eq!(shapes[1].part, Some(1));
+}
+
+/// ADR 0117, amended 7 November: a number the agent put on a line, on a word or on another number
+/// moves to the nearest clear ground, near what it names; a word a line runs through moves just
+/// above or below it. On the drawings agents made on 7 November, numbers on a line went from 82
+/// of 273 to none on the drawing's own lines.
+#[test]
+fn numbers_and_words_keep_clear_of_the_lines() {
+    // Clear of every line but the number's own joining line, which starts at it.
+    let clear_of = |at: [f64; 2], shapes: &[Shape]| {
+        let here = super::P { x: at[0], y: at[1] };
+        shapes.iter().all(|shape| {
+            let outline = super::segments_of(&shape.d);
+            if outline.first() == Some(&super::Segment::Move(here)) {
+                return true;
+            }
+            let near = super::nearest(&outline, here).unwrap();
+            // A number's mark as a phone draws it, the room the daemon keeps (CLEAR_MARK).
+            near.minus(here).length() >= 22.0 - 1e-6
+        })
+    };
+    // A long line and an arrow with a head; part 1's number on the line, part 2's clear of the
+    // arrow's shaft but on the head LoomWatch draws at its tip, part 3's on part 1's.
+    let drawing = concat!(
+        "<svg viewBox=\"0 0 640 360\">",
+        "<path d=\"M0 360L0 0L640 0\" fill=\"none\"/>",
+        "<line data-part=\"1\" x1=\"40\" y1=\"200\" x2=\"600\" y2=\"200\"/>",
+        "<line data-part=\"2\" x1=\"300\" y1=\"300\" x2=\"300\" y2=\"240\" marker-end=\"url(#a)\"/>",
+        "<circle data-part=\"3\" cx=\"500\" cy=\"100\" r=\"30\"/>",
+        "</svg>"
+    );
+    let widget = read_widget(&json!({
+        "kind": "picture", "title": "x", "drawing": drawing,
+        "parts": [
+            {"label": "Line", "text": "A line.", "at": [200, 200]},
+            {"label": "Arrow", "text": "An arrow.", "at": [323, 250]},
+            {"label": "Ball", "text": "A ball.", "at": [200, 200]},
+        ],
+    }))
+    .unwrap();
+    let Widget::Picture { parts, shapes, .. } = &widget else {
+        panic!("a picture");
+    };
+    for part in parts {
+        assert!(
+            clear_of(part.at, shapes),
+            "{} at {:?} is on a line",
+            part.label,
+            part.at
+        );
+    }
+    // Near where the agent put it, and apart from each other.
+    let gap = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).hypot(a[1] - b[1]);
+    assert!(
+        gap(parts[0].at, [200.0, 200.0]) <= 32.0,
+        "{:?}",
+        parts[0].at
+    );
+    assert!(
+        gap(parts[0].at, parts[2].at) >= 32.0,
+        "{:?} {:?}",
+        parts[0].at,
+        parts[2].at
+    );
+    // A number with clear ground where it was put stays there.
+    let still = read_widget(&json!({
+        "kind": "picture", "title": "x", "drawing": drawing,
+        "parts": [{"label": "Line", "text": "A line.", "at": [200, 150]}, {"label": "Arrow", "text": "An arrow.", "at": [360, 270]}, {"label": "Ball", "text": "A ball.", "at": [500, 160]}],
+    }))
+    .unwrap();
+    let Widget::Picture { parts, .. } = &still else {
+        panic!("a picture");
+    };
+    assert_eq!(parts[0].at, [200.0, 150.0]);
+
+    // A word the line runs through moves just above or below it; one with no clear room stays.
+    let worded = |extra: &str| {
+        read_widget(&json!({
+            "kind": "picture", "title": "x", "drawing": format!(
+                "<svg viewBox=\"0 0 640 360\"><path d=\"M0 360L0 0L640 0\" fill=\"none\"/><line x1=\"40\" y1=\"200\" x2=\"600\" y2=\"200\"/>{extra}</svg>"),
+        }))
+        .unwrap()
+    };
+    let Widget::Picture { labels, .. } = worded("<text x=\"100\" y=\"206\">Thrust</text>") else {
+        panic!("a picture");
+    };
+    assert_eq!(labels[0].at[0], 100.0);
+    assert!(
+        (labels[0].at[1] - 200.0).abs() >= 10.0 && (labels[0].at[1] - 200.0).abs() <= 50.0,
+        "{:?}",
+        labels[0].at
+    );
+    let boxed = concat!(
+        "<line x1=\"40\" y1=\"178\" x2=\"600\" y2=\"178\"/><line x1=\"40\" y1=\"222\" x2=\"600\" y2=\"222\"/>",
+        "<line x1=\"40\" y1=\"156\" x2=\"600\" y2=\"156\"/><line x1=\"40\" y1=\"244\" x2=\"600\" y2=\"244\"/>",
+        "<text x=\"100\" y=\"206\">Thrust</text>"
+    );
+    let Widget::Picture { labels, .. } = worded(boxed) else {
+        panic!("a picture");
+    };
+    assert_eq!(labels[0].at[0], 100.0);
+    assert!(
+        (labels[0].at[1] - 200.0).abs() < 1.0,
+        "no clear room: it stays, {:?}",
+        labels[0].at
+    );
+}
+
+/// A number never covers a word or another number as a phone draws them: its mark there is 22 px on
+/// a picture about 300 px wide, some 24 units from its middle, and Inter's 11 px letters take about
+/// 13 units a character for nine words in ten.
+#[test]
+fn a_number_never_covers_a_word_or_a_number_as_a_phone_draws_them() {
+    // How far a number's middle is from a word's letters, the word from `left` to `right`.
+    let from_word = |at: [f64; 2], left: f64, right: f64, middle: f64| {
+        let dx = (left - at[0]).max(0.0).max(at[0] - right);
+        let dy = (middle - 12.0 - at[1]).max(0.0).max(at[1] - middle - 12.0);
+        dx.hypot(dy)
+    };
+    let picture = |words: &str, parts: Value| {
+        read_widget(&json!({
+            "kind": "picture", "title": "x", "parts": parts,
+            "drawing": format!("<svg viewBox=\"0 0 640 360\"><path d=\"M0 360L0 0L640 0\" fill=\"none\"/>{words}</svg>"),
+        }))
+        .unwrap()
+    };
+    // A number put just after its word, as agents often do.
+    let Widget::Picture { parts, .. } = picture(
+        "<text x=\"100\" y=\"100\">Sepals</text>",
+        json!([{"label": "Sepals", "text": "They guard the bud.", "at": [200, 100]}]),
+    ) else {
+        panic!("a picture");
+    };
+    let word_ends = 100.0 + 6.0 * 13.0;
+    assert!(
+        from_word(parts[0].at, 100.0, word_ends, 100.0) >= 24.0,
+        "the number covers the end of its word: {:?}",
+        parts[0].at
+    );
+    // A word that would cross the picture's side is drawn inside it, so its room is there too.
+    let Widget::Picture { parts, .. } = picture(
+        "<text x=\"600\" y=\"100\">Petals</text>",
+        json!([{"label": "Petals", "text": "They draw the bees.", "at": [550, 100]}]),
+    ) else {
+        panic!("a picture");
+    };
+    assert!(
+        from_word(parts[0].at, 640.0 - 6.0 * 13.0, 640.0, 100.0) >= 24.0,
+        "the number covers its word where the app moves it in: {:?}",
+        parts[0].at
+    );
+    // Two numbers put side by side stand a mark's width apart.
+    let Widget::Picture { parts, .. } = picture(
+        "",
+        json!([
+            {"label": "One", "text": "One.", "at": [200, 300]},
+            {"label": "Two", "text": "Two.", "at": [246, 300]},
+        ]),
+    ) else {
+        panic!("a picture");
+    };
+    let apart = (parts[0].at[0] - parts[1].at[0]).hypot(parts[0].at[1] - parts[1].at[1]);
+    assert!(
+        apart >= 47.0,
+        "the numbers touch: {:?} {:?}",
+        parts[0].at,
+        parts[1].at
+    );
+}
+
+/// The kept path data reads back as the outline it was written from.
+#[test]
+fn kept_path_data_reads_back() {
+    for d in [
+        "M10 20L30 40",
+        "M0 0C10 0 20 10 20 20Z",
+        "M-5.5 3L640 360M1 1L2 2Z",
+    ] {
+        assert_eq!(super::path_data(&super::segments_of(d)), d);
+    }
 }

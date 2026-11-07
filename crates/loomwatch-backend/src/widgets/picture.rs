@@ -187,12 +187,18 @@ pub(crate) fn read(arguments: &Value, title: String) -> Result<Widget, String> {
         );
     }
     let dial = dialled(arguments, moves.is_empty())?;
-    let labels = words
-        .iter()
-        .map(|(label, at)| label.placed(crop.matrix.apply(*at)))
-        .collect();
+    let ink = inked(shapes.iter().map(|shape| segments_of(&shape.d)));
+    let labels = set_down(&words, &crop, &ink);
+    let rooms: Vec<Room> = labels.iter().map(Room::of).collect();
     let drawn_shapes = shapes.len();
-    let placed = numbered(parts, &given, &drawn, &crop, &mut shapes)?;
+    let placed = numbered(
+        parts,
+        &given,
+        &drawn,
+        &crop,
+        &mut Clear { ink, words: &rooms },
+        &mut shapes,
+    )?;
     if plays {
         shapes.truncate(drawn_shapes);
     }
@@ -441,16 +447,19 @@ fn outlined(drawn: &[(&Raw, Vec<Segment>)]) -> (Vec<Shape>, Vec<usize>) {
     (shapes, owners)
 }
 
-/// Each part where its number stands: where the agent put it, or above its shapes; with a line
-/// to its part when the agent put it away from it, added to `shapes`.
+/// Each part where its number stands: where the agent put it, or above its shapes, moved to the
+/// nearest clear ground when that is on a line, a word or another number; with a line to its part
+/// when it stands away from it, added to `shapes`.
 fn numbered(
     parts: Vec<(String, String, Option<P>)>,
     given: &[Option<P>],
     drawn: &[(&Raw, Vec<Segment>)],
     crop: &Frame,
+    clear: &mut Clear,
     shapes: &mut Vec<Shape>,
 ) -> Result<Vec<Part>, String> {
     let mut placed = Vec::new();
+    let mut marks: Vec<P> = Vec::new();
     for (at, ((label, words, _), given)) in parts.into_iter().zip(given.iter().copied()).enumerate()
     {
         let number = u8::try_from(at + 1).unwrap_or(u8::MAX);
@@ -473,6 +482,8 @@ fn numbered(
             x: at.x.clamp(MARK, WIDTH - MARK),
             y: at.y.clamp(MARK, crop.height - MARK),
         };
+        let at = clear.spot(at, &marks, crop.height);
+        marks.push(at);
         // A number the agent put away from what it names is joined to it, as a textbook figure
         // joins a label to its part: often the only free ground is beyond something larger.
         if let Some(near) = nearest(&own, at)
@@ -480,6 +491,10 @@ fn numbered(
         {
             let back = at.minus(near);
             let end = near.plus(back.times(LEADER_GAP / back.length()));
+            // The line is drawn now: later numbers keep clear of it too.
+            clear.ink.extend(inked(
+                [vec![Segment::Move(at), Segment::Line(end)]].into_iter(),
+            ));
             shapes.push(Shape {
                 d: path_data(&[Segment::Move(at), Segment::Line(end)]),
                 part: Some(number),
@@ -494,6 +509,236 @@ fn numbered(
         });
     }
     Ok(placed)
+}
+
+/// The drawing's words where the agent put them, in the cut picture's units, each a line runs
+/// through or that lies on a word before it moved clear (`clear_of_lines`).
+fn set_down(words: &[(&RawLabel, P)], crop: &Frame, ink: &[P]) -> Vec<Label> {
+    let mut labels: Vec<Label> = words
+        .iter()
+        .map(|(label, at)| label.placed(crop.matrix.apply(*at)))
+        .collect();
+    clear_of_lines(&mut labels, ink, crop.height);
+    labels
+}
+
+/// Points along every line and curve drawn, a few units apart: what a number or a word keeps clear
+/// of. Close enough that nothing as wide as a number's mark fits between two of them. From the
+/// shapes as kept, so the arrowheads `LoomWatch` draws for `marker-end` count too.
+// A curve's handles and its parameter, as the formula names them.
+#[allow(clippy::many_single_char_names)]
+fn inked(outlines: impl Iterator<Item = Vec<Segment>>) -> Vec<P> {
+    let mut ink = Vec::new();
+    for segments in outlines {
+        let mut current = None;
+        let mut start = None;
+        for segment in &segments {
+            match *segment {
+                Segment::Move(p) => {
+                    current = Some(p);
+                    start = Some(p);
+                    ink.push(p);
+                }
+                Segment::Line(_) | Segment::Close => {
+                    let Some(from) = current else { continue };
+                    let to = match *segment {
+                        Segment::Line(p) => p,
+                        _ => start.unwrap_or(from),
+                    };
+                    let steps = steps_along(to.minus(from).length());
+                    for step in 1..=steps {
+                        ink.push(
+                            from.plus(to.minus(from).times(f64::from(step) / f64::from(steps))),
+                        );
+                    }
+                    current = Some(to);
+                }
+                Segment::Cubic(a, b, c) => {
+                    let from = current.unwrap_or(a);
+                    let reach = a.minus(from).length() + b.minus(a).length() + c.minus(b).length();
+                    let steps = steps_along(reach);
+                    for step in 1..=steps {
+                        let t = f64::from(step) / f64::from(steps);
+                        let u = 1.0 - t;
+                        ink.push(
+                            from.times(u * u * u)
+                                .plus(a.times(3.0 * u * u * t))
+                                .plus(b.times(3.0 * u * t * t))
+                                .plus(c.times(t * t * t)),
+                        );
+                    }
+                    current = Some(c);
+                }
+            }
+        }
+    }
+    ink
+}
+
+/// How many points along a line this long keep [`INK_STEP`] apart, from 1 to 400.
+fn steps_along(length: f64) -> u32 {
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let steps = (length / INK_STEP).ceil().clamp(1.0, 400.0) as u32;
+    steps
+}
+
+/// The room a word takes as a phone sets it, the narrowest a picture is drawn: [`CLEAR_CHAR`] a
+/// character wide, from the edge it stands on, and [`CLEAR_HALF`] above and below its middle. A
+/// word that would cross the picture's side stands inside it, as the apps move it.
+#[derive(Debug, Clone, Copy)]
+struct Room {
+    left: f64,
+    top: f64,
+    right: f64,
+    bottom: f64,
+}
+
+impl Room {
+    fn of(label: &Label) -> Self {
+        #[allow(clippy::cast_precision_loss)]
+        let wide = label.text.chars().count() as f64 * CLEAR_CHAR;
+        let stated = match label.anchor {
+            Anchor::Start => label.at[0],
+            Anchor::Middle => label.at[0] - wide / 2.0,
+            Anchor::End => label.at[0] - wide,
+        };
+        let left = if stated + wide > WIDTH {
+            (WIDTH - wide).max(0.0)
+        } else {
+            stated.max(0.0)
+        };
+        Self {
+            left,
+            top: label.at[1] - CLEAR_HALF,
+            right: left + wide,
+            bottom: label.at[1] + CLEAR_HALF,
+        }
+    }
+
+    fn holds(&self, p: P, around: f64) -> bool {
+        p.x >= self.left - around
+            && p.x <= self.right + around
+            && p.y >= self.top - around
+            && p.y <= self.bottom + around
+    }
+
+    /// A line runs through the word: through its letters, not only past a corner.
+    fn crossed(&self, ink: &[P]) -> bool {
+        let inner = Self {
+            left: self.left + 2.0,
+            top: self.top + 4.0,
+            right: self.right - 2.0,
+            bottom: self.bottom - 4.0,
+        };
+        ink.iter().any(|p| inner.holds(*p, 0.0))
+    }
+
+    fn overlaps(&self, other: &Self) -> bool {
+        self.left < other.right
+            && other.left < self.right
+            && self.top < other.bottom
+            && other.top < self.bottom
+    }
+
+    fn within(&self, height: f64) -> bool {
+        self.left >= 0.0 && self.right <= WIDTH && self.top >= 0.0 && self.bottom <= height
+    }
+}
+
+/// Where a word a line runs through may move to, nearest first: a line's height up or down, a
+/// little either side, or both, never further than [`MOVE_WORD`].
+fn word_nudges() -> Vec<(f64, f64)> {
+    let line = 2.0 * CLEAR_HALF + 2.0;
+    let mut nudges: Vec<(f64, f64)> = [-2.0, -1.0, 0.0, 1.0, 2.0]
+        .iter()
+        .flat_map(|across| {
+            [-2.0, -1.0, 0.0, 1.0, 2.0].map(|down| (across * WORD_SIDE, down * line))
+        })
+        .filter(|(across, down)| {
+            (*across != 0.0 || *down != 0.0) && across.hypot(*down) <= MOVE_WORD
+        })
+        .collect();
+    nudges.sort_by(|a, b| a.0.hypot(a.1).total_cmp(&b.0.hypot(b.1)));
+    nudges
+}
+
+/// Each word a line runs through, or that lies on a word before it, moved to the nearest place
+/// nearby that is clear of lines and other words and still in the picture; a word with no such
+/// room stays where the agent put it.
+fn clear_of_lines(labels: &mut [Label], ink: &[P], height: f64) {
+    for at in 0..labels.len() {
+        let room = Room::of(&labels[at]);
+        let others: Vec<Room> = labels
+            .iter()
+            .enumerate()
+            .filter(|(other, _)| *other != at)
+            .map(|(_, label)| Room::of(label))
+            .collect();
+        let before: Vec<Room> = labels[..at].iter().map(Room::of).collect();
+        if !room.crossed(ink) && !before.iter().any(|other| other.overlaps(&room)) {
+            continue;
+        }
+        for (across, down) in word_nudges() {
+            let mut moved = labels[at].clone();
+            moved.at[0] = rounded(moved.at[0] + across);
+            moved.at[1] = rounded(moved.at[1] + down);
+            let room = Room::of(&moved);
+            if room.within(height)
+                && !room.crossed(ink)
+                && !others.iter().any(|other| other.overlaps(&room))
+            {
+                labels[at] = moved;
+                break;
+            }
+        }
+    }
+}
+
+/// What a part's number keeps clear of: the drawing's lines, the lines drawn to numbers already
+/// placed, and its words.
+struct Clear<'a> {
+    ink: Vec<P>,
+    words: &'a [Room],
+}
+
+impl Clear<'_> {
+    /// `at` when it is clear of lines, words and the numbers already placed; otherwise the nearest
+    /// clear point within [`MOVE_MARK`] of it, rings outward; `at` when there is none.
+    fn spot(&self, at: P, marks: &[P], height: f64) -> P {
+        let free = |p: P| {
+            p.x >= MARK
+                && p.x <= WIDTH - MARK
+                && p.y >= MARK
+                && p.y <= height - MARK
+                && self.ink.iter().all(|q| q.minus(p).length() >= CLEAR_MARK)
+                && marks
+                    .iter()
+                    .all(|q| q.minus(p).length() >= 2.0 * CLEAR_WORD)
+                && !self.words.iter().any(|room| room.holds(p, CLEAR_WORD))
+        };
+        if free(at) {
+            return at;
+        }
+        let rings = (MOVE_MARK / RING).round();
+        let mut ring = 1.0;
+        while ring <= rings {
+            for turn in 0..16 {
+                let angle = f64::from(turn) * std::f64::consts::PI / 8.0;
+                let p = at.plus(
+                    P {
+                        x: angle.cos(),
+                        y: angle.sin(),
+                    }
+                    .times(ring * RING),
+                );
+                if free(p) {
+                    return p;
+                }
+            }
+            ring += 1.0;
+        }
+        at
+    }
 }
 
 /// The frame cut down to what is drawn, with room around it and for the parts' numbers, and
@@ -571,8 +816,8 @@ const KEEP_WHOLE: f64 = 0.9;
 const BACKGROUND: f64 = 0.9;
 /// Half a part's number mark, in the picture's units: the least room it needs from an edge.
 const MARK: f64 = 16.0;
-/// How far a part's number stands from its shapes.
-const MARK_GAP: f64 = 20.0;
+/// How far a part's number stands from its shapes: clear of them, as [`CLEAR_MARK`] asks.
+const MARK_GAP: f64 = 24.0;
 /// How far a number may stand from its part before a line joins them, about a number's width on
 /// a phone; and how short of the part the line stops.
 const LEADER_FROM: f64 = 48.0;
@@ -581,6 +826,25 @@ const LEADER_GAP: f64 = 6.0;
 /// apps set them in a chat: room kept for it when a picture is cut.
 const WORD_CHAR: f64 = 8.0;
 const WORD_HALF: f64 = 10.0;
+/// How far apart the points along a line are, when a number or a word keeps clear of it.
+const INK_STEP: f64 = 4.0;
+/// How much room a number and a word take where they are drawn smallest against the picture, on a
+/// phone (11 px letters and 22 px marks on a picture about 300 px wide): a number's middle 22 units
+/// from a line, a word 13 units a character, as Inter sets nine words in ten, and 12 either side of
+/// its middle.
+const CLEAR_MARK: f64 = 22.0;
+const CLEAR_CHAR: f64 = 13.0;
+const CLEAR_HALF: f64 = 12.0;
+/// How far a number's middle stands from a word's letters, and half how far from another number:
+/// its mark's half on a phone, about 24 units, and a little air, so a number set after its word
+/// never covers the word's last letter.
+const CLEAR_WORD: f64 = 26.0;
+/// How far a word may move to clear a line, and its steps sideways.
+const MOVE_WORD: f64 = 50.0;
+const WORD_SIDE: f64 = 16.0;
+/// How far a number may move to find clear ground, in rings this far apart.
+const MOVE_MARK: f64 = 96.0;
+const RING: f64 = 8.0;
 /// An arrowhead's sides, and their angle either side of the line.
 const HEAD_LENGTH: f64 = 14.0;
 const HEAD_ANGLE: f64 = 0.45;
@@ -929,6 +1193,44 @@ fn arrowhead(tip: P, from: P) -> String {
 }
 
 /// `M10 20L30.5 40C…Z`: absolute, to a tenth of a unit.
+/// A kept shape's outline again, from the path data [`path_data`] writes.
+fn segments_of(d: &str) -> Vec<Segment> {
+    let mut segments = Vec::new();
+    let mut letter = None;
+    let mut numbers: Vec<f64> = Vec::new();
+    let mut flush = |letter: Option<char>, numbers: &mut Vec<f64>| {
+        let p = |at: usize| P {
+            x: numbers[at],
+            y: numbers[at + 1],
+        };
+        match (letter, numbers.len()) {
+            (Some('M'), 2) => segments.push(Segment::Move(p(0))),
+            (Some('L'), 2) => segments.push(Segment::Line(p(0))),
+            (Some('C'), 6) => segments.push(Segment::Cubic(p(0), p(2), p(4))),
+            (Some('Z'), _) => segments.push(Segment::Close),
+            _ => {}
+        }
+        numbers.clear();
+    };
+    let mut word = String::new();
+    for c in d.chars().chain([' ']) {
+        if matches!(c, 'M' | 'L' | 'C' | 'Z') || c.is_whitespace() {
+            if let Ok(value) = word.parse::<f64>() {
+                numbers.push(value);
+            }
+            word.clear();
+            if !c.is_whitespace() {
+                flush(letter, &mut numbers);
+                letter = Some(c);
+            }
+        } else {
+            word.push(c);
+        }
+    }
+    flush(letter, &mut numbers);
+    segments
+}
+
 fn path_data(segments: &[Segment]) -> String {
     let mut out = String::new();
     for segment in segments {

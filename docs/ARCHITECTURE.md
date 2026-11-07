@@ -621,7 +621,14 @@ plain label (`labels`: its words, where its middle stands, the edge it stands on
 title and a backdrop are left out; `use` is refused with what to do instead. A shape keeps three
 things of its look: shaded (dark when its fill is dark), dashed, and an arrowhead on each open
 stroke of an arrowed path. Its `parts` (up to 8) are numbered where the agent says, or above their
-shapes, and a number set away from its part is joined to it by a line. The app draws only that
+shapes, and a number set away from its part is joined to it by a line. Nothing the daemon sets down
+covers the drawing: a number that would sit on a line (an arrowhead or another number's joining
+line included), a word or another number moves to the nearest clear ground within 96 units, and a
+word a line runs through, or that lies on a word before it, moves to the nearest clear place within
+50 units, up or down and a little either side; one with no such room stays where the agent put it.
+Room is reckoned as a phone draws the picture, the narrowest it is shown, with a word that would
+cross the picture's side counted where the app moves it in (`CLEAR_MARK`, `CLEAR_CHAR`,
+`CLEAR_HALF`, `CLEAR_WORD` in `widgets/picture.rs`). The app draws only that
 path data (`WidgetPicture.tsx`), in its own ink, and sets the labels in its own type as text, never
 markup; the part picked is gold.
 
