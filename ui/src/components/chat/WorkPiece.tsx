@@ -37,6 +37,7 @@ import { ChatFiles } from './ChatFiles'
 import { AnswerWidget } from './widgets/AnswerWidgets'
 import { partsOf } from '../../lib/widgets/place'
 import type { KeptWidget, WidgetState } from '../../lib/widgets/types'
+import { inDocument, showInDocument } from '../../lib/widgets/documentWidgets'
 import { useAnswerWidgets } from '../../lib/widgets/useAnswerWidgets'
 import { SourceTitlesContext, sourceTitles } from '../../lib/story/sourceTitles'
 import { MessageDoneWhen } from './MessageDoneWhen'
@@ -259,6 +260,20 @@ export function WorkPiece({ item, newest = false, approveFilled = true, fixFille
   // ADR 0114: the widgets in the answer, kept with it once it is done; while it is written, the
   // ones its agent has shown, standing where its words place them.
   const inAnswer = useAnswerWidgets({ answer, finished: isTerminalRun(record.status), kept: record.status === 'succeeded' ? item.widgets ?? [] : null, events: session.events, responder: run.responder })
+  // A long answer is read in full beside the chat: its widgets stand in it there, by the words they
+  // go with, and only its choices stay under its card, where you write your next message.
+  // While it is written, the reader may be showing something else: its widgets stay under its card
+  // until it is done or the reader shows it, so one shown as the words came in never vanishes.
+  const readInFull = useMemo(() => isDocument(inAnswer.words), [inAnswer.words])
+  const inReader = readInFull && (!inAnswer.live || answerOpen)
+  const underAnswer = inReader ? inAnswer.widgets.filter((kept) => !inDocument(kept)) : inAnswer.widgets
+  // The reader keeps the last it was given when this piece leaves the chat (an older page read in
+  // its place), so an answer open beside the chat never loses its widgets.
+  const runId = run.runId
+  useEffect(() => {
+    const placed = readInFull && onWidgetChange ? inAnswer.widgets.filter(inDocument) : []
+    showInDocument(runId, placed.length > 0 && onWidgetChange ? { widgets: placed, live: inAnswer.live, onChange: (n, state) => onWidgetChange(runId, n, state) } : null)
+  })
   // Whoever is writing now (lib/watch/workPhase.ts), its figure typing at the bench, is typing in
   // the chat too: its face and a bubble of dots under the work. Not twice: the answer coming in, or
   // a reply the talk shows it owes, already says so.
@@ -611,8 +626,8 @@ export function WorkPiece({ item, newest = false, approveFilled = true, fixFille
         </Handed>
       ))}
       <FileOriginContext.Provider value={fileOrigin}>
-      <Outcome widgets={inAnswer.widgets.length > 0 && onWidgetChange ? {
-        kept: inAnswer.widgets,
+      <Outcome widgets={underAnswer.length > 0 && onWidgetChange ? {
+        kept: underAnswer,
         render: (kept) => (
           <AnswerWidget
             kept={kept}
@@ -959,7 +974,8 @@ interface AnswerProps {
   /** The answer with its reactions under it. */
   reactions: (said: ReactNode) => ReactNode
   /** The widgets in it (ADR 0114): each where its words placed it, the rest after its words and
-      before its tools. */
+      before its tools. A long answer's are its choices alone: the rest stand in it where it is
+      read in full (AnswerDocument). */
   widgets?: { kept: readonly KeptWidget[]; render: (kept: KeptWidget) => ReactNode }
   children: ReactNode
 }
@@ -1032,7 +1048,7 @@ function Answer({ tour, run, answer, touched, folder, written, streaming, name, 
   // files in the sentence too; copy and save keep the agent's words.
   const shown = useMemo(() => withFolderPaths(answer, touched, folder, written), [answer, touched, folder, written])
   const facts = useMemo(() => (isDocument(answer) ? describeDocument(answer) : null), [answer])
-  // The words cut where its widgets stand; a document's widgets follow its card.
+  // The words cut where its widgets stand; a document's choices follow its card.
   const placed = useMemo(() => (widgets && !facts ? partsOf(shown, widgets.kept) : null), [widgets, facts, shown])
   const responder = run.responder
   return (

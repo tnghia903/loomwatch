@@ -564,6 +564,15 @@
 .wg-here:first-child { margin-top: 2px; }
 .wg-here:last-child { margin-bottom: 2px; }
 .wg-here .wg { --wg-surface: color-mix(in srgb, var(--color-ink) 3%, var(--color-panel-solid)); }
+/* In a long answer read in full: by the words it goes with (under a list's item, inside it), as it
+   is in the chat: the page's own size, line height and ink, words that wrap whole, and nothing to
+   select when a finger drags across a graph. As wide as the words. */
+.tc-document-page .md-widget { width: 100%; margin: var(--sp-5) 0; font-size: 1rem; line-height: 1.5; color: var(--color-ink); overflow-wrap: normal; -webkit-user-select: none; user-select: none; }
+.tc-document-page li > .md-widget { margin: var(--sp-3) 0 var(--sp-4); }
+/* Under a heading, as close as its words would be. */
+.tc-document-page :is(h2, h3, h4) + .md-widget { margin-top: 0; }
+/* Over an agent's bench the page is a card's own colour: the widget is set in, as in a bubble. */
+.agent-answer .md-widget .wg { --wg-surface: color-mix(in srgb, var(--color-ink) 3%, var(--color-panel-solid)); }
 /* On a narrow phone the card gives its contents a little more room, so five boxes still fit. */
 @media (max-width: 400px) {
   .wg { padding: var(--sp-3); }

@@ -112,7 +112,10 @@ none of these. When a widget arrives while you watch, its bars grow, its dots co
 line draws across, once; opening the chat or reading back older answers draws them still, as does
 reduced motion. A quick question the agents answer in the chat, without starting
 work, can have them too. Each stands where the agent put it in its words; one it didn't place
-comes after them. They appear as the answer is written and work once it is done.
+comes after them. They appear as the answer is written and work once it is done. A long answer is
+a card in the chat with only its choices under it; the rest stand by their words when it is read in
+full beside the chat, one between two bullets under the bullet above. While it is still written and
+not open, they wait under its card.
 
 A choice goes as your message, replying to the answer, and only the newest answer's choices can be
 tapped while nothing is at work; the one sent stays marked. A calculator shows its results first,
@@ -365,6 +368,8 @@ agent is offered: `MOCK-TOOL: <tool> <json>` in a message makes it call that too
 JSON on one line, then reply. For example, to see a widget in an answer (an agent without
 `widgets: false`): `MOCK-TOOL: show_widget {"kind":"checklist","title":"Before Wednesday","items":[{"text":"Print 32 copies"}]}`.
 The stand-in writes the place line between two short paragraphs, so the widget stands between them.
+`MOCK-BRIEF` in a message makes it show two charts, a checklist and choices at once, then answer
+with a long brief that places the charts between its bullets and the checklist under a heading.
 A message ending in "?" is read as a question and answered without work, so no tool is called.
 
 ## Evidence transport

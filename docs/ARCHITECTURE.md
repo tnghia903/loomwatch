@@ -632,6 +632,18 @@ notch and the phone's notifications. The app places widgets the same way while t
 streamed (`ui/src/lib/widgets/place.ts`, from the run's `show_widget` events), both reading
 `schemas/widget-place.cases.json`. The chat page's `work` items carry `widgets`.
 
+A long answer, which the chat shows as a card and the pane beside it reads in full
+(`AnswerDocument.tsx`), has its widgets drawn there, all but its choices, which stay under the card
+because a tap sends the person's next message. While it is still written, and the pane shows
+something else, they stay under the card too. `WorkPiece` hands them to the reader by run
+(`ui/src/lib/widgets/documentWidgets.ts`), so the reader draws the chat's copy and a tick made there
+is kept as one made in the chat. The reader has them only once the chat has drawn that piece, and
+keeps the last it was given after the piece leaves; a run the chat doesn't hold shows none. The
+reader reads the words as one Markdown document and puts each widget in before the first block at
+or after its line, at the end of the list item above when it falls between two items
+(`ui/src/lib/widgets/inMarkdown.ts`): lists keep counting, and footnotes and links written further
+down still resolve. The document's text styles stop at `.md-widget`.
+
 A quick question the agents answer in the chat without starting work (`chat::answer_instead`,
 `intent::reply`, one turn with no Team Bus) can have widgets too. The turn is served `show_widget`
 as one of the daemon's own tools (`widgets::host::WidgetTools`) when the agent's switch is on, and

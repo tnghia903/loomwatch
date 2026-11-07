@@ -950,7 +950,7 @@ a mark.tc-find-hit { box-shadow: none; }
 /* The pane is the page: the answer sits on it, not in a box inside it (.delivery-response draws
    one for the run view). The measure stays near 75 characters a line. */
 .tc-document .tc-document-page { max-width: 720px; margin: 0 auto; padding: 10px 40px 88px; border: 0; border-radius: 0; background: none; font-size: 16px; line-height: 1.72; color: color-mix(in srgb, var(--color-ink) 88%, var(--color-ground)); }
-.tc-document .tc-document-page p { margin: 0 0 1.15em; text-wrap: pretty; }
+.tc-document .tc-document-page p:where(:not(.md-widget *)) { margin: 0 0 1.15em; text-wrap: pretty; }
 .tc-document .tc-document-page :is(h1, h2, h3) { color: var(--color-ink); font-family: var(--font-serif); font-weight: 400; text-wrap: balance; }
 .tc-document .tc-document-page h1 { margin: 0 0 32px; padding-bottom: 26px; border-bottom: 1px solid var(--color-hairline); font-size: 38px; line-height: 1.12; letter-spacing: -0.02em; }
 .tc-document .tc-document-page h2 { margin: 48px 0 14px; font-size: 25px; line-height: 1.25; letter-spacing: -0.01em; }

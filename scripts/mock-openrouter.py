@@ -13,6 +13,9 @@ Replies are scripted from what the request says, so a run exercises real tool ca
 - "MOCK-TOOL: <call> <json>" in the task -> a call of any offered tool whose name is <call> or ends
   in "__<call>" (a connected tool's, such as deepwiki__ask_question), then a summary; after
   show_widget, words with its place line on a line of their own between them
+- "MOCK-BRIEF" in the task           -> four show_widget calls at once (two charts, a checklist,
+  choices), then a long brief that places the charts between its bullets and the checklist under a
+  heading, and leaves the choices to the end (ADR 0114: a long answer's widgets stand in it)
 - "MOCK-FAIL-402" in the task         -> a 402 out-of-credits answer
 - the chat's read of an @ message     -> TALK for a greeting, thanks or a question ("hi", "thanks",
                                          "Explain …", "… ?"), so the agents answer it in the chat;
@@ -130,6 +133,54 @@ def find_tool(names, suffix):
     return None
 
 
+# The widgets a "MOCK-BRIEF" run shows, and the brief that places them (ADR 0114).
+BRIEF_WIDGETS = [
+    {"kind": "chart", "title": "US jobs added in October: expected vs actual", "unit": "jobs",
+     "bars": [{"label": "Expected", "value": 65000}, {"label": "Actual", "value": 165000, "note": "unemployment 4.1%"}]},
+    {"kind": "chart", "title": "Kokuyo's stake in Thien Long (%)", "unit": "%",
+     "bars": [{"label": "Bought on 6 Nov", "value": 46.82}, {"label": "After tender offer (planned)", "value": 65.01, "note": "+18.19 points"}]},
+    {"kind": "checklist", "title": "Worth a look before Monday",
+     "items": [{"text": "October CPI, due 12 Nov"}, {"text": "The Thien Long tender offer terms"}, {"text": "Brent's weekly close"}]},
+    {"kind": "choices", "title": "What next?", "options": [{"label": "Go deeper on the Fed"}, {"label": "More on Vietnam's markets"}]},
+]
+
+
+def brief_with(places):
+    """A long brief, the charts' place lines between its bullets, the checklist's under a heading."""
+    place = (places + ["", "", "", ""])[:4]
+    return "\n".join([
+        "# Morning Brief: Saturday 7 November 2026",
+        "",
+        "*This covers news from about 08:00 Fri 6 Nov to 08:00 Sat 7 Nov. Markets are closed on Saturday.*",
+        "",
+        "**The main story:** US jobs came in far above forecasts. That raised the chance of a Fed rate rise in December, and gold fell.",
+        "",
+        "## World",
+        "",
+        "### Finance and markets",
+        "- **US employers added 165,000 jobs in October, against about 65,000 expected.** Unemployment fell to 4.1%. [Example News](https://example.com/jobs)",
+        place[0],
+        "- **The chance of a Fed rise at the 8-9 Dec meeting is put at 74.8%.** The 2-year Treasury yield rose about 6bp to 4.53%. [Example Wire](https://example.com/fed)",
+        "- **Brent settled at $97.97, set for its steepest weekly fall since 2020.** Sources disagree on the day's move. [Example Markets](https://example.com/oil)",
+        "",
+        "## Vietnam",
+        "",
+        "### Business",
+        "- **Japan's Kokuyo bought 46.82% of pen maker Thien Long.** A tender offer for another 18.19% would take it to 65.01%. [Example Business](https://example.com/kokuyo)",
+        "",
+        place[1],
+        "",
+        "- **Most small firms can't meet foreign investors' standards.** Investors want audited accounts and clear governance. [Example Daily](https://example.com/smes)",
+        "- **Banks took about 68% of the foreign loans raised this year.** [Example Daily](https://example.com/loans)",
+        "",
+        "## Before Monday",
+        "",
+        place[2],
+        "",
+        "That's the brief. Tell me what to follow up on.",
+    ])
+
+
 def latest_task(messages):
     """The text after the last "## Task" in the newest user message: what this turn was asked."""
     users = [text_of(m.get("content")) for m in messages if m.get("role") == "user"]
@@ -188,6 +239,17 @@ def plan(body):
         if call_name.endswith("dispatch"):
             # Both dispatches answered with "accepted": end this turn; the results come back later.
             return ("text", "I handed the two parts of the question to the Researcher. Their findings come back next.")
+        if call_name.endswith("show_widget") and "MOCK-BRIEF" in latest_task(messages):
+            # Every widget shown this turn answered with its place line, in the order shown.
+            places = []
+            for message in reversed(messages):
+                if message.get("role") != "tool":
+                    break
+                try:
+                    places.insert(0, json.loads(text_of(message.get("content"))).get("place", ""))
+                except (ValueError, AttributeError):
+                    places.insert(0, "")
+            return ("text", brief_with(places))
         if call_name.endswith("show_widget"):
             # ADR 0114: write the place line on a line of its own, between words that lead to the
             # widget and words that say what to try, as the tool asks.
@@ -288,6 +350,8 @@ def plan(body):
         path = task.rsplit("MOCK-READ:", 1)[1].strip().split()[0]
         return ("calls", [(find_tool(names, "read_file") or "read_file", {"path": path})])
 
+    if "MOCK-BRIEF" in task and find_tool(names, "show_widget"):
+        return ("calls", [(find_tool(names, "show_widget"), spec) for spec in BRIEF_WIDGETS])
     if "MOCK-TOOL:" in task:
         line = task.rsplit("MOCK-TOOL:", 1)[1].strip().splitlines()[0]
         call, _, arguments = line.partition(" ")

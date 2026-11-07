@@ -12,8 +12,10 @@ import { withMathMarks } from '../../lib/chat/mathMarks'
 import { segments, useFoundWords, type FindTerm } from '../../lib/chat/findWords'
 import { filePathFrom, filePathFromLink } from '../../lib/files/fileRefs'
 import { SourceTitlesContext, sourceKey } from '../../lib/story/sourceTitles'
+import { lineAfter, placeWidgets, WIDGET_PLACE } from '../../lib/widgets/inMarkdown'
 import { FileChip } from './FileChip'
 import { MarkdownPictures } from './markdownPictures'
+import { MarkdownWidgetDraw, MarkdownWidgetPlaces } from './markdownWidgets'
 import { SaidMention, type SaidMarks } from './saidMention'
 
 /**
@@ -48,19 +50,28 @@ import { SaidMention, type SaidMarks } from './saidMention'
  * `said` is for words a person typed in the chat: a line they broke stays broken, as they see it in
  * the box they typed in, and each @mention `said.find` names in the words is drawn by the
  * [`SaidMention`] around it (the agent's chip).
+ *
+ * A long answer's widgets ([`MarkdownWidgetPlaces`], ADR 0114) are put in at the lines its words
+ * placed them, once its sources are marked, and drawn by [`MarkdownWidgetDraw`].
  */
 export default function MarkdownRenderer({ children, inline = false, clickable = true, said = null }: { children: string; inline?: boolean; clickable?: boolean; said?: SaidMarks | null }) {
   // The words a chat search found, while the chat shows where one was said (ADR 0081).
   const found = useFoundWords()
+  const widgets = useContext(MarkdownWidgetPlaces)
   const rehype = useMemo(() => {
     const plugins = [...(inline ? REHYPE_PLUGINS : REHYPE_MATH_PLUGINS)]
     if (said) plugins.push(() => (tree: { children: HastChild[] }) => markSaid(tree, said))
     if (found) plugins.push(() => (tree: { children: HastChild[] }) => markFound(tree, found))
+    if (widgets && widgets.length > 0 && !inline) {
+      // Each widget's line as the renderer reads the words, counted from 1 as the Markdown is.
+      const places = widgets.map(({ n, line }) => ({ n, line: line === undefined ? null : lineAfter(children, line, readWords) + 1 }))
+      plugins.push(() => (tree: { children: HastChild[] }) => placeWidgets(tree, places))
+    }
     return plugins
-  }, [found, inline, said])
+  }, [found, inline, said, widgets, children])
   return (
     <ReactMarkdown remarkPlugins={inline ? REMARK_PLUGINS : REMARK_MATH_PLUGINS} rehypePlugins={rehype} skipHtml urlTransform={urlTransform} components={clickable ? COMPONENTS : WORDS_ONLY} allowedElements={inline ? (clickable ? INLINE_ELEMENTS : INLINE_WORDS) : undefined} unwrapDisallowed={inline}>
-      {inline ? numbersAsWords(withoutCitationMarks(children)) : withMathMarks(withoutCitationMarks(children))}
+      {inline ? numbersAsWords(withoutCitationMarks(children)) : readWords(children)}
     </ReactMarkdown>
   )
 }
@@ -102,6 +113,19 @@ function markSaid(tree: { children: HastChild[] }, said: SaidMarks) {
     })
   }
   visit(tree)
+}
+
+/** The words as a block of Markdown is read: math in its usual spellings, no private citation marks. */
+function readWords(text: string): string {
+  return withMathMarks(withoutCitationMarks(text))
+}
+
+/** A block, or a long answer's widget where its words placed it ([`placeWidgets`]). */
+function Block({ children, node, ...rest }: ComponentProps<'div'> & ExtraProps) {
+  const draw = useContext(MarkdownWidgetDraw)
+  const n = node?.properties[WIDGET_PLACE]
+  if (n !== undefined) return draw ? <div className="md-widget">{draw(Number(n))}</div> : null
+  return <div {...rest}>{children}</div>
 }
 
 /**
@@ -311,6 +335,7 @@ const COMPONENTS: Components = {
     const path = inline ? filePathFrom(text) : null
     return path ? <FileChip path={path} /> : <code className={className}>{text}</code>
   },
+  div: Block,
   img: Picture,
   span: Span,
 }

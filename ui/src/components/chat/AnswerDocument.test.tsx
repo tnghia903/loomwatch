@@ -1,6 +1,8 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { showInDocument } from '../../lib/widgets/documentWidgets'
+import type { KeptWidget } from '../../lib/widgets/types'
 import { AnswerDocument } from './AnswerDocument'
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
@@ -152,5 +154,117 @@ describe('a document answer, read beside the chat', () => {
     render(<AnswerDocument by="Writer" streaming text="# Draft" />)
     expect(screen.getByText('Writer is writing this')).toBeInTheDocument()
     expect(screen.getByLabelText('Being written')).toBeInTheDocument()
+  })
+})
+
+// ADR 0114: a long answer's widgets stand in it where its words placed them, not under its card.
+describe('a document answer’s widgets', () => {
+  const jobs: KeptWidget = { n: 1, line: 12, spec: { kind: 'chart', title: 'US jobs added in October', unit: 'jobs', bars: [{ label: 'Expected', value: 65_000 }, { label: 'Actual', value: 165_000 }] } }
+  const stake: KeptWidget = { n: 2, line: 7, spec: { kind: 'chart', title: 'Kokuyo’s stake in Thien Long', unit: '%', bars: [{ label: 'Bought on 6 Nov', value: 46.82 }, { label: 'After the offer', value: 65.01 }] } }
+  const todo: KeptWidget = { n: 3, spec: { kind: 'checklist', title: 'Read before Monday', items: [{ text: 'The jobs report' }, { text: 'The tender offer' }] } }
+  // The shape of the owner's brief (7 November): bullets, a loose list, each closing on its source.
+  const brief = [
+    '# Morning Brief',
+    '',
+    '## Vietnam',
+    '',
+    '### Business',
+    '- **Kokuyo bought 46.82% of Thien Long.** A tender offer would take it to 65.01%. [VnExpress](https://vnexpress.net/a)',
+    '',
+    '- **Most small firms can’t meet foreign investors’ standards.** [Bao Tin tuc](https://baotintuc.vn/b)',
+    '',
+    '## World',
+    '',
+    '- **US employers added 165,000 jobs in October.** [Yahoo Finance](https://finance.yahoo.com/c)',
+    '- **A Fed rate rise in December looks likelier.** [Reuters](https://reuters.com/d)',
+  ].join('\n')
+  const keep = vi.fn(async (n: number) => ({ ...todo, n, changedAt: '2026-11-07T01:00:00.000Z' }))
+  afterEach(() => { showInDocument('run-1', null); keep.mockClear() })
+
+  it('stands each under the bullet it goes with, keeping the list whole and its sources', async () => {
+    showInDocument('run-1', { widgets: [jobs, stake, todo], live: false, onChange: keep })
+    const { container } = render(<AnswerDocument runId="run-1" by="Writer" streaming={false} text={brief} />)
+    const stakeChart = await screen.findByRole('region', { name: 'Kokuyo’s stake in Thien Long' })
+    // Between two bullets of a loose list: at the end of the one above, and the list stays one.
+    const kokuyo = stakeChart.closest('li')!
+    expect(kokuyo).toHaveTextContent(/^Kokuyo bought 46\.82% of Thien Long\./)
+    expect(kokuyo.parentElement!.children).toHaveLength(2)
+    // Between two bullets of a tight list too; its source is still a source.
+    const jobsItem = screen.getByRole('region', { name: 'US jobs added in October' }).closest('li')!
+    expect(jobsItem).toHaveTextContent(/^US employers added 165,000 jobs in October\./)
+    expect(within(jobsItem).getByRole('link', { name: /Yahoo Finance/ })).toHaveClass('md-source')
+    expect(jobsItem.parentElement!.children).toHaveLength(2)
+    // One its words didn't place: at the end, on its own.
+    const list = screen.getByRole('region', { name: 'Read before Monday' })
+    expect(list.closest('li')).toBeNull()
+    expect(screen.getByText(/A Fed rate rise/).compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(container.querySelectorAll('.md-widget')).toHaveLength(3)
+  })
+
+  it('keeps a numbered list counting and the footnotes at the very end', async () => {
+    const steps: KeptWidget = { ...stake, line: 2 }
+    showInDocument('run-1', { widgets: [steps, todo], live: false, onChange: keep })
+    const { container } = render(<AnswerDocument runId="run-1" by="Writer" streaming={false} text={'1. Read the offer.\n2. Check the price.\n3. Decide by Friday.\n\nThe offer closes in December.[^1]\n\n[^1]: From the filing.'} />)
+    const chart = await screen.findByRole('region', { name: 'Kokuyo’s stake in Thien Long' })
+    expect(chart.closest('li')).toHaveTextContent(/^Check the price\./)
+    expect(container.querySelectorAll('ol')[0].children).toHaveLength(3)
+    const notes = container.querySelector<HTMLElement>('section.footnotes')!
+    const list = screen.getByRole('region', { name: 'Read before Monday' })
+    expect(list.compareDocumentPosition(notes) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(within(notes).getByText(/From the filing\./)).toBeInTheDocument()
+  })
+
+  // `\[x\]` is read as a `$$` block of three lines: a widget after it still stands where it was placed.
+  it('stands where it was placed after math that takes more lines once read', async () => {
+    showInDocument('run-1', { widgets: [{ ...stake, line: 6 }], live: false, onChange: keep })
+    render(<AnswerDocument runId="run-1" by="Writer" streaming={false} text={'Intro.\n\n\\[x^2 + y^2 = z^2\\]\n\nAfter the formula.\n\nLast words.'} />)
+    const chart = await screen.findByRole('region', { name: 'Kokuyo’s stake in Thien Long' })
+    const after = (a: Node, b: Node) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(after(screen.getByText('After the formula.'), chart)).toBe(true)
+    expect(after(chart, screen.getByText('Last words.'))).toBe(true)
+  })
+
+  it('stands inside a quote, and under the item of a list inside a list', async () => {
+    showInDocument('run-1', { widgets: [{ ...stake, line: 2 }], live: false, onChange: keep })
+    const { container } = render(<AnswerDocument runId="run-1" by="Writer" streaming={false} text={'> First thought.\n>\n> Second thought.\n\nAfter the quote.'} />)
+    const inQuote = await screen.findByRole('region', { name: 'Kokuyo’s stake in Thien Long' })
+    expect(inQuote.closest('blockquote')).not.toBeNull()
+    expect(inQuote.compareDocumentPosition(screen.getByText('Second thought.')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(container.querySelectorAll('blockquote')).toHaveLength(1)
+    cleanup()
+    render(<AnswerDocument runId="run-1" by="Writer" streaming={false} text={'- Fruit\n  - Apples\n  - Pears\n- Bread'} />)
+    const nested = await screen.findByRole('region', { name: 'Kokuyo’s stake in Thien Long' })
+    expect(nested.closest('li')).toHaveTextContent(/^Apples/)
+  })
+
+  it('draws widgets that arrive after the words, and keeps each in place as the words grow', async () => {
+    const { rerender } = render(<AnswerDocument runId="run-1" by="Writer" streaming text={brief.split('\n').slice(0, 9).join('\n')} />)
+    expect(await screen.findByText(/Kokuyo bought/)).toBeInTheDocument()
+    expect(screen.queryByRole('region')).toBeNull()
+    act(() => showInDocument('run-1', { widgets: [stake], live: true, onChange: keep }))
+    const chart = await screen.findByRole('region', { name: 'Kokuyo’s stake in Thien Long' })
+    expect(chart.closest('li')).toHaveTextContent(/^Kokuyo bought/)
+    rerender(<AnswerDocument runId="run-1" by="Writer" streaming={false} text={brief} />)
+    expect(await screen.findByText(/A Fed rate rise/)).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Kokuyo’s stake in Thien Long' }).closest('li')).toHaveTextContent(/^Kokuyo bought/)
+  })
+
+  it('keeps a tick made in it, and waits while the answer is still written', async () => {
+    showInDocument('run-1', { widgets: [todo], live: false, onChange: keep })
+    render(<AnswerDocument runId="run-1" by="Writer" streaming={false} text={brief} />)
+    fireEvent.click(await screen.findByRole('checkbox', { name: /The jobs report/ }))
+    expect(keep).toHaveBeenCalledWith(3, { checked: [true, false] })
+    cleanup()
+    showInDocument('run-1', { widgets: [todo], live: true, onChange: keep })
+    render(<AnswerDocument runId="run-1" by="Writer" streaming text={brief} />)
+    expect(await screen.findByRole('checkbox', { name: /The jobs report/ })).toBeDisabled()
+  })
+
+  it('draws none for another answer, and its words read as before', async () => {
+    showInDocument('run-1', { widgets: [jobs], live: false, onChange: keep })
+    const { container } = render(<AnswerDocument runId="run-2" by="Writer" streaming={false} text={brief} />)
+    expect(await screen.findByText(/Kokuyo bought/)).toBeInTheDocument()
+    expect(container.querySelector('.md-widget')).toBeNull()
+    expect(screen.queryByRole('region')).toBeNull()
   })
 })
