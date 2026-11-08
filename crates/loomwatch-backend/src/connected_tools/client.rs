@@ -106,7 +106,7 @@ pub(super) async fn open(tools: &Tools, tool: &ConnectedTool) -> Result<Session,
     let config = StreamableHttpClientTransportConfig::with_uri(tool.url.as_str());
     let opened = match tool.auth {
         // A Mac app's actions run in the daemon; it has no server (ADR 0121).
-        Auth::OnThisMac => return Err(unreachable(&tool.name)),
+        Auth::OnThisMac | Auth::FromPhone => return Err(unreachable(&tool.name)),
         Auth::None => {
             tokio::time::timeout(
                 OPEN_TIMEOUT,
@@ -357,7 +357,7 @@ fn turned_away(tool: &ConnectedTool) -> String {
     match tool.auth {
         Auth::Token => token_again(&tool.name),
         Auth::SignIn => sign_in_again(&tool.name),
-        Auth::None | Auth::OnThisMac => format!(
+        Auth::None | Auth::OnThisMac | Auth::FromPhone => format!(
             "{} now asks who is calling. Remove it in Connections and connect it again.",
             tool.name
         ),

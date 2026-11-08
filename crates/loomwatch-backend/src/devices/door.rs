@@ -109,6 +109,10 @@ async fn through(State(door): State<Arc<Door>>, mut request: Request) -> Respons
     if device.kind == Kind::Phone && request.uri().path() == push::ROUTE {
         return push::route(&door.devices, &door.push_key, &device, request).await;
     }
+    // So are its Health readings (ADR 0121): a phone writes and forgets only its own.
+    if device.kind == Kind::Phone && request.uri().path() == crate::health::ROUTE {
+        return crate::health::route(crate::health::installed(), &device.id, request).await;
+    }
     match device.kind {
         Kind::Phone => match door.phone.clone().oneshot(request).await {
             Ok(response) => response,

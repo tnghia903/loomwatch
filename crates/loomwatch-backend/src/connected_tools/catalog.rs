@@ -29,6 +29,8 @@ use super::Auth;
 pub(super) enum Topic {
     /// This Mac's own apps (ADR 0121), listed only on a Mac.
     OnThisMac,
+    /// What the `LoomWatch` iPhone app sends: Apple Health (ADR 0121).
+    FromPhone,
     Tasks,
     Notes,
     Meetings,
@@ -100,6 +102,17 @@ pub(super) const CATALOG: &[Entry] = &[
         auth: Auth::OnThisMac,
         topic: Topic::OnThisMac,
         example: "What's Lan's phone number?",
+        token_help: None,
+    },
+    // From your iPhone: Apple Health, which the LoomWatch iPhone app sends (ADR 0121).
+    Entry {
+        name: "Apple Health",
+        site: "loomwatch:apple-health",
+        url: "loomwatch:apple-health",
+        does: "Read your steps, sleep, heart rate and workouts",
+        auth: Auth::FromPhone,
+        topic: Topic::FromPhone,
+        example: "How did I sleep this week compared with last week?",
         token_help: None,
     },
     // Tasks: the lists and boards work is planned on.
@@ -560,7 +573,12 @@ mod tests {
     #[test]
     fn every_entry_is_https_named_once_and_says_what_to_try() {
         for (index, entry) in CATALOG.iter().enumerate() {
-            if entry.auth == Auth::OnThisMac {
+            if entry.auth == Auth::FromPhone {
+                assert_eq!(
+                    (entry.url, entry.site),
+                    (crate::health::URL, crate::health::URL)
+                );
+            } else if entry.auth == Auth::OnThisMac {
                 // The Mac's own apps are reached here, never on the internet.
                 let app = crate::mac_apps::App::at(entry.url).expect("one of the Mac's apps");
                 assert_eq!((entry.url, entry.site), (app.url(), app.url()));
@@ -603,8 +621,9 @@ mod tests {
     /// together, and no topic left empty.
     #[test]
     fn every_topic_holds_its_entries_together_in_order() {
-        const ORDER: [Topic; 11] = [
+        const ORDER: [Topic; 12] = [
             Topic::OnThisMac,
+            Topic::FromPhone,
             Topic::Tasks,
             Topic::Notes,
             Topic::Meetings,

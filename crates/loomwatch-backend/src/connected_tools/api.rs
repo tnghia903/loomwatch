@@ -194,6 +194,9 @@ async fn connect(
     if let Some(app) = App::at(&body.url) {
         return connect_mac_app(&tools, app).await;
     }
+    if body.url.trim() == crate::health::URL {
+        return connect_health(&tools).await;
+    }
     let url = address(&body.url)?;
     let existing = tools.list().await;
     let same = existing
@@ -450,8 +453,70 @@ async fn open_settings(
     Ok(Json(json!({"opened": true})))
 }
 
+/// Connect Apple Health (ADR 0121): connected once a paired iPhone has sent readings. Until then
+/// it waits, and Connections says to turn it on in `LoomWatch` on the iPhone.
+async fn connect_health(tools: &Tools) -> ApiResult<Json<Value>> {
+    let existing = tools.list().await;
+    let same = existing
+        .iter()
+        .find(|tool| tool.url == crate::health::URL)
+        .cloned();
+    if let Some(tool) = same.as_ref().filter(|tool| !tool.pending) {
+        return Err(failure(
+            StatusCode::CONFLICT,
+            format!("That tool is already connected, as {}.", tool.name),
+        ));
+    }
+    if same.is_none() && existing.len() >= MAX_TOOLS {
+        return Err(failure(
+            StatusCode::BAD_REQUEST,
+            format!("LoomWatch keeps up to {MAX_TOOLS} tools. Remove one you don't use first."),
+        ));
+    }
+    let tool = same.unwrap_or_else(|| ConnectedTool {
+        id: uuid::Uuid::new_v4().simple().to_string(),
+        name: unique_name("Apple Health", &existing),
+        url: crate::health::URL.to_owned(),
+        auth: Auth::FromPhone,
+        calls: Vec::new(),
+        checked_at: None,
+        metadata: None,
+        pending: true,
+        problem: None,
+    });
+    let tool = finish_health(tools, tool).await?;
+    Ok(Json(health_answer(&tool)))
+}
+
+async fn finish_health(tools: &Tools, mut tool: ConnectedTool) -> ApiResult<ConnectedTool> {
+    let arrived = match crate::health::installed() {
+        Some(health) => health.has_readings().await,
+        None => false,
+    };
+    tool.auth = Auth::FromPhone;
+    tool.calls = crate::health::calls();
+    tool.checked_at = Some(super::now());
+    if arrived {
+        tool.pending = false;
+    }
+    keep(tools, &tool).await?;
+    Ok(tool)
+}
+
+fn health_answer(tool: &ConnectedTool) -> Value {
+    if tool.pending {
+        json!({"tool": public(tool), "needs": "phoneHealth"})
+    } else {
+        json!({"tool": public(tool)})
+    }
+}
+
 async fn check(State(tools): State<Tools>, Path(id): Path<String>) -> ApiResult<Json<Value>> {
     let tool = found(&tools, &id).await?;
+    if tool.url == crate::health::URL {
+        let tool = finish_health(&tools, tool).await?;
+        return Ok(Json(health_answer(&tool)));
+    }
     if let Some(app) = App::at(&tool.url) {
         let tool = finish_mac_app(&tools, tool, app).await?;
         if tool.pending {
@@ -469,6 +534,15 @@ async fn check(State(tools): State<Tools>, Path(id): Path<String>) -> ApiResult<
 
 async fn remove(State(tools): State<Tools>, Path(id): Path<String>) -> ApiResult<Json<Value>> {
     let tool = found(&tools, &id).await?;
+    // Apple Health's readings go with the tool (ADR 0121).
+    if tool.url == crate::health::URL
+        && let Some(health) = crate::health::installed()
+    {
+        health
+            .forget(None)
+            .await
+            .map_err(|said| failure(StatusCode::INTERNAL_SERVER_ERROR, said))?;
+    }
     tools
         .inner
         .vault

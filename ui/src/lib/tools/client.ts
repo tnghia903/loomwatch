@@ -5,8 +5,11 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { daemonFetch } from '../daemonFetch'
 
-/** `onThisMac`: one of this Mac's own apps, such as Calendar, that macOS lets in (ADR 0121). */
-export type ToolAuth = 'none' | 'token' | 'signIn' | 'onThisMac'
+/**
+ * `onThisMac`: one of this Mac's own apps, such as Calendar, that macOS lets in; `fromPhone`: Apple
+ * Health, from what the LoomWatch iPhone app sends (ADR 0121).
+ */
+export type ToolAuth = 'none' | 'token' | 'signIn' | 'onThisMac' | 'fromPhone'
 
 /** One call a tool offers, as its server describes it. */
 export interface ToolCallInfo {
@@ -49,11 +52,12 @@ export const NOTION_TOOL_URL = 'https://mcp.notion.com/mcp'
 
 /** What a starter tool is for, as the Skills page sorts skills by topic (`catalog::Topic`). */
 export type CatalogTopic =
-  | 'onThisMac' | 'tasks' | 'notes' | 'meetings' | 'design' | 'research' | 'travel' | 'payments' | 'customers' | 'websites' | 'code'
+  | 'onThisMac' | 'fromPhone' | 'tasks' | 'notes' | 'meetings' | 'design' | 'research' | 'travel' | 'payments' | 'customers' | 'websites' | 'code'
 
 /** The topics to start from, in the order the list is shown. */
 export const CATALOG_TOPICS: readonly { topic: CatalogTopic; label: string }[] = [
   { topic: 'onThisMac', label: 'On this Mac' },
+  { topic: 'fromPhone', label: 'From your iPhone' },
   { topic: 'tasks', label: 'Tasks' },
   { topic: 'notes', label: 'Notes and files' },
   { topic: 'meetings', label: 'Meetings' },
@@ -169,7 +173,7 @@ export function fetchTools(signal?: AbortSignal): Promise<{ tools: ConnectedTool
 /** What connecting answered: the tool, and what it still needs, if anything. */
 export interface ConnectAnswer {
   tool: ConnectedTool
-  needs?: 'signIn' | 'token' | 'macPermission'
+  needs?: 'signIn' | 'token' | 'macPermission' | 'phoneHealth'
   /** For a sign-in: the tool's consent page. */
   url?: string
 }
