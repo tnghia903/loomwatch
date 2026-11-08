@@ -644,7 +644,9 @@ your teams live in, which travel with the team files.
 
 Every agent is offered skills. Its instructions list the name and description of each skill in its
 work folder's `.agents/skills` and `.claude/skills` and in LoomWatch's skills folder, and the agent
-reads a skill's `SKILL.md` itself when its task calls for it. A skill turned off for the agent on
+reads a skill's `SKILL.md` itself when its task calls for it. When LoomWatch's folder holds more
+than 20 skills, the list has the ones the agent's role and task call for most, at most 15, and says
+where the others are so the agent can look for one it needs. A skill turned off for the agent on
 the canvas is left out of that list.
 
 A **wired** skill (`kind: skill`) is required. Before the agent starts, LoomWatch copies the

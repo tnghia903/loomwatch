@@ -65,7 +65,7 @@ pub use session::{
     Asks, CancelHandle, HostAsk, HostTools, MAX_PICTURE_BYTES, MAX_PICTURES, NoHostTools, Session,
     SessionConfig, Snapshot, StopReason, ToolSet, TurnEnd, WORK,
 };
-pub use skills::{SkillEntry, SkillIndex, index_skills};
+pub use skills::{SkillEntry, SkillFocus, SkillIndex, index_skills};
 pub use spend::{Go, Room, Spend, Unmetered};
 pub use store::SessionStore;
 
