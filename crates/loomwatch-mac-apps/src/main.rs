@@ -19,6 +19,9 @@
 //! It is its own program so that the `unsafe` calls into macOS stay out of loomwatchd, and so that
 //! one action that crashes or hangs ends only itself.
 
+// Only the Mac's own modules read most of these; elsewhere the program just says it works only on
+// a Mac.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod args;
 #[cfg(target_os = "macos")]
 mod calendar;
