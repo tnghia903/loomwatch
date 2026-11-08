@@ -688,13 +688,26 @@ mod tests {
     fn the_app_ships_the_helper_signed_for_the_data_macos_guards() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let read = |path: &str| std::fs::read_to_string(root.join(path)).unwrap();
-        let entitlements = read("packaging/macos/LoomWatch-mac-apps.entitlements");
-        for key in [
-            "com.apple.security.personal-information.calendars",
-            "com.apple.security.personal-information.addressbook",
+        // macOS checks the app it counts as asking, LoomWatch.app, not only the helper: on
+        // 2026-11-08 v0.40.0 had them on the helper alone, and tccd refused Calendar without
+        // asking ("requires entitlement … but it is missing for responsible=…LoomWatch").
+        for file in [
+            "packaging/macos/LoomWatch-app.entitlements",
+            "packaging/macos/LoomWatch-mac-apps.entitlements",
         ] {
-            assert!(entitlements.contains(&format!("<key>{key}</key>")), "{key}");
+            let entitlements = read(file);
+            for key in [
+                "com.apple.security.personal-information.calendars",
+                "com.apple.security.personal-information.addressbook",
+            ] {
+                assert!(
+                    entitlements.contains(&format!("<key>{key}</key>")),
+                    "{file}: {key}"
+                );
+            }
         }
+        let package = read("scripts/package-macos-app.sh");
+        assert!(package.contains("--entitlements \"$app_entitlements\""));
         let info = read("packaging/macos/Info.plist");
         for key in [
             "NSCalendarsFullAccessUsageDescription",
