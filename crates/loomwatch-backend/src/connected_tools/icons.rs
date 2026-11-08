@@ -130,7 +130,7 @@ async fn known_site(tools: &Tools, host: &str) -> Option<String> {
         .find(|site| host_of(site).as_deref() == Some(host))
 }
 
-/// One of this Mac's apps' own icon, as macOS draws it (ADR 0121), turned into a PNG once by
+/// One of this Mac's apps' own icon, as macOS draws it (ADR 0122), turned into a PNG once by
 /// `sips` and kept. It is the app's own mark, never redrawn.
 async fn mac_icon(tools: &Tools, app: crate::mac_apps::App) -> Option<(Vec<u8>, &'static str)> {
     if !cfg!(target_os = "macos") {

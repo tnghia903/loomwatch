@@ -223,7 +223,7 @@ impl PermissionPolicy {
         // A connected tool's call goes ahead only when the operator always allows it (ADR 0069):
         // no switch covers acting in someone's own accounts.
         if let Some(tool) = connected_tool(request) {
-            // What can't be taken back asks every time, whatever the team file says (ADR 0121).
+            // What can't be taken back asks every time, whatever the team file says (ADR 0122).
             return !tool.cant_undo
                 && self
                     .always
@@ -587,7 +587,7 @@ pub struct ToolAsk {
     pub server: String,
     /// Its own name for the call: `create_issue`.
     pub call: String,
-    /// It can't be taken back (ADR 0121): the operator allows it once, never for a run or always.
+    /// It can't be taken back (ADR 0122): the operator allows it once, never for a run or always.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub cant_undo: bool,
 }
@@ -1094,7 +1094,7 @@ mod tests {
         assert_eq!(detail.as_deref(), Some(r#"{"title":"Fix login"}"#));
     }
 
-    /// ADR 0121: what can't be undone, such as deleting an event, asks every time, even when the
+    /// ADR 0122: what can't be undone, such as deleting an event, asks every time, even when the
     /// team file says to always allow it.
     #[test]
     fn what_cant_be_undone_asks_even_when_always_allowed() {

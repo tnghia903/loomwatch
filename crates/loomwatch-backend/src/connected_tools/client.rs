@@ -105,7 +105,7 @@ pub(super) async fn open(tools: &Tools, tool: &ConnectedTool) -> Result<Session,
     let http = tools.inner.http.clone();
     let config = StreamableHttpClientTransportConfig::with_uri(tool.url.as_str());
     let opened = match tool.auth {
-        // A Mac app's actions run in the daemon; it has no server (ADR 0121).
+        // A Mac app's actions run in the daemon; it has no server (ADR 0122).
         Auth::OnThisMac | Auth::FromPhone => return Err(unreachable(&tool.name)),
         Auth::None => {
             tokio::time::timeout(

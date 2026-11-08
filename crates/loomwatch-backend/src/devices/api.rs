@@ -193,7 +193,7 @@ async fn share(State(manage): State<Arc<Manage>>) -> Response {
 /// Removes a device: its key stops working at once.
 async fn remove(State(manage): State<Arc<Manage>>, Path(id): Path<String>) -> Response {
     if manage.devices.remove(&id) {
-        // Its Health readings go with it (ADR 0121).
+        // Its Health readings go with it (ADR 0122).
         if let Some(health) = crate::health::installed()
             && let Err(error) = health.forget(Some(&id)).await
         {

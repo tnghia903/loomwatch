@@ -7,7 +7,7 @@ import { daemonFetch } from '../daemonFetch'
 
 /**
  * `onThisMac`: one of this Mac's own apps, such as Calendar, that macOS lets in; `fromPhone`: Apple
- * Health, from what the LoomWatch iPhone app sends (ADR 0121).
+ * Health, from what the LoomWatch iPhone app sends (ADR 0122).
  */
 export type ToolAuth = 'none' | 'token' | 'signIn' | 'onThisMac' | 'fromPhone'
 
@@ -20,7 +20,7 @@ export interface ToolCallInfo {
   description: string
   /** The server says it only reads. A hint: it still asks first. */
   readOnly: boolean
-  /** It can't be undone, such as deleting an event: it asks every time (ADR 0121). */
+  /** It can't be undone, such as deleting an event: it asks every time (ADR 0122). */
   cantUndo?: boolean
 }
 
@@ -43,7 +43,7 @@ export interface ConnectedTool {
   icon?: string | null
   /** Notion's: its sign-in also sends teams' answers to Notion and reads pages for agents (ADR 0070). */
   notion?: boolean
-  /** A Mac app macOS hasn't let in: the System Settings pane where you allow it (ADR 0121). */
+  /** A Mac app macOS hasn't let in: the System Settings pane where you allow it (ADR 0122). */
   settings?: string | null
 }
 
@@ -206,7 +206,7 @@ export async function checkToolAgain(id: string): Promise<ConnectAnswer> {
   return answer
 }
 
-/** Open, on this Mac, the System Settings pane where a Mac app is allowed (ADR 0121). */
+/** Open, on this Mac, the System Settings pane where a Mac app is allowed (ADR 0122). */
 export async function openMacSettings(id: string): Promise<void> {
   await request(`/api/tools/${encodeURIComponent(id)}/settings`, { method: 'POST' })
 }

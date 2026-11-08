@@ -1,4 +1,4 @@
-//! The Mac's own apps as tools (ADR 0121): Calendar, Reminders, Notes and Contacts.
+//! The Mac's own apps as tools (ADR 0122): Calendar, Reminders, Notes and Contacts.
 //!
 //! The person connects one in Connections like any other tool and gives it to an agent; each
 //! action then asks them first, as every connected tool's does (ADR 0069), and deleting asks every

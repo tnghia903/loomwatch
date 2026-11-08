@@ -368,7 +368,7 @@ async fn main() -> Result<()> {
             let _claim = loomwatch_backend::db::claim(&database)?;
             let opened = EventArchive::open(&database).await?;
             // Apple Health readings a paired iPhone sends through the door, for the agents given
-            // the Apple Health tool (ADR 0121).
+            // the Apple Health tool (ADR 0122).
             loomwatch_backend::health::install(loomwatch_backend::health::Health::new(
                 opened.db().clone(),
             ));

@@ -2,7 +2,7 @@
 """A stand-in for `loomwatch-mac-apps`, for trials of the Mac apps' tools that touch no real data.
 
 Start a trial daemon with LOOMWATCH_MAC_APPS_PROGRAM set to this file (it must be executable). It
-reads the same command lines as the real helper (ADR 0121):
+reads the same command lines as the real helper (ADR 0122):
 
     mock-mac-apps.py access <app>            -> {"access": "granted"}, or "refused" while the file
                                                 that MOCK_MAC_APPS_REFUSE names exists

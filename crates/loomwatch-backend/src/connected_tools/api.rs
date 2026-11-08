@@ -130,7 +130,7 @@ fn public(tool: &ConnectedTool) -> Value {
         "icon": icons::site_for(tool).as_deref().and_then(icons::path),
         // Its sign-in also sends teams' answers to Notion and reads pages for agents (ADR 0070).
         "notion": same_address(&tool.url, crate::notion::MCP_URL),
-        // A Mac app that macOS hasn't let in yet: where the person allows it (ADR 0121).
+        // A Mac app that macOS hasn't let in yet: where the person allows it (ADR 0122).
         "settings": App::at(&tool.url)
             .filter(|_| tool.pending || tool.problem.is_some())
             .map(App::settings),
@@ -350,7 +350,7 @@ async fn sign_in_again(
     }
 }
 
-/// Connect one of this Mac's apps (ADR 0121): macOS asks the person, in `LoomWatch`'s name, the
+/// Connect one of this Mac's apps (ADR 0122): macOS asks the person, in `LoomWatch`'s name, the
 /// first time. A refusal keeps the tool waiting, with where to allow it, until it is checked again.
 async fn connect_mac_app(tools: &Tools, app: App) -> ApiResult<Json<Value>> {
     if !cfg!(target_os = "macos") {
@@ -426,7 +426,7 @@ async fn finish_mac_app(
     Ok(tool)
 }
 
-/// Open System Settings on this Mac where a Mac app's tool is allowed (ADR 0121). The pane is
+/// Open System Settings on this Mac where a Mac app's tool is allowed (ADR 0122). The pane is
 /// `LoomWatch`'s own, never one the request names.
 async fn open_settings(
     State(tools): State<Tools>,
@@ -453,7 +453,7 @@ async fn open_settings(
     Ok(Json(json!({"opened": true})))
 }
 
-/// Connect Apple Health (ADR 0121): connected once a paired iPhone has sent readings. Until then
+/// Connect Apple Health (ADR 0122): connected once a paired iPhone has sent readings. Until then
 /// it waits, and Connections says to turn it on in `LoomWatch` on the iPhone.
 async fn connect_health(tools: &Tools) -> ApiResult<Json<Value>> {
     let existing = tools.list().await;
@@ -534,7 +534,7 @@ async fn check(State(tools): State<Tools>, Path(id): Path<String>) -> ApiResult<
 
 async fn remove(State(tools): State<Tools>, Path(id): Path<String>) -> ApiResult<Json<Value>> {
     let tool = found(&tools, &id).await?;
-    // Apple Health's readings go with the tool (ADR 0121).
+    // Apple Health's readings go with the tool (ADR 0122).
     if tool.url == crate::health::URL
         && let Some(health) = crate::health::installed()
     {

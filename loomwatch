@@ -239,7 +239,7 @@ build_if_needed() {
   (cd ui && npx --yes pnpm@12 install --frozen-lockfile && npx --yes pnpm@12 run build) ||
     fail "the browser app did not build. The messages above say why."
   # loomwatch-osascript is what agents' commands run as `osascript` on a Mac (ADR 0087), and
-  # loomwatch-mac-apps runs agents' actions in Calendar, Reminders, Contacts and Notes (ADR 0121).
+  # loomwatch-mac-apps runs agents' actions in Calendar, Reminders, Contacts and Notes (ADR 0122).
   cargo build --release --locked --bin loomwatchd --bin loomwatch-osascript --bin loomwatch-mac-apps ||
     fail "the LoomWatch program did not build. The messages above say why."
   printf '%s\n' "$fingerprint" >"$build_stamp"

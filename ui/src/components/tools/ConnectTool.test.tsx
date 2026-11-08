@@ -206,7 +206,7 @@ describe('what counts as an address', () => {
   })
 })
 
-describe('connecting one of this Mac’s apps (ADR 0121)', () => {
+describe('connecting one of this Mac’s apps (ADR 0122)', () => {
   const calendarEntry: CatalogEntry = { name: 'Apple Calendar', url: 'loomwatch:apple-calendar', does: 'See, add, change and delete your events', auth: 'onThisMac', topic: 'onThisMac' }
   const calendar = (extra: Partial<ConnectedTool> = {}) => tool({ id: 'mac1', name: 'Apple Calendar', url: 'loomwatch:apple-calendar', auth: 'onThisMac', ...extra })
 

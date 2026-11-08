@@ -1,4 +1,4 @@
-//! Apple Health readings from a paired iPhone, and the Apple Health tool that reads them (ADR 0121).
+//! Apple Health readings from a paired iPhone, and the Apple Health tool that reads them (ADR 0122).
 //!
 //! A Mac has no Health store, so the `LoomWatch` iPhone app reads the kinds the person switched on
 //! and sends them through the door ([`ROUTE`]), as one figure a day for each kind, plus each
