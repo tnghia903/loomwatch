@@ -16,6 +16,8 @@ Replies are scripted from what the request says, so a run exercises real tool ca
 - "MOCK-BRIEF" in the task           -> four show_widget calls at once (two charts, a checklist,
   choices), then a long brief that places the charts between its bullets and the checklist under a
   heading, and leaves the choices to the end (ADR 0114: a long answer's widgets stand in it)
+- "MOCK-KINDS" in the task           -> four show_widget calls at once (a finder, a quiz, a scale
+  and a timeline), then an answer that places each under the words it goes with
 - "MOCK-FAIL-402" in the task         -> a 402 out-of-credits answer
 - the chat's read of an @ message     -> TALK for a greeting, thanks or a question ("hi", "thanks",
                                          "Explain …", "… ?"), so the agents answer it in the chat;
@@ -24,6 +26,8 @@ Replies are scripted from what the request says, so a run exercises real tool ca
                                          or in bullets, one about the person ("aboutYou") when they
                                          ask for Vietnamese, else no edits; an agent whose
                                          instructions hold the bullets lesson answers in three bullets
+- the skill writer (ADR 0118)         -> a new skill made from the person's words; for a change,
+                                         their words added as a last line, so the sheet marks it
 - the next steps after an answer (ADR 0105) -> three short requests, the first naming the answer's
                                          first bold words
 - the read of what a message says done looks like (ADR 0098) -> its "at most <n> words" and
@@ -145,6 +149,59 @@ BRIEF_WIDGETS = [
 ]
 
 
+KINDS_WIDGETS = [
+    {"kind": "finder", "title": "Do you need a visa for Japan?",
+     "questions": [
+         {"text": "Which passport do you hold?", "answers": [
+             {"label": "US, UK or EU", "outcome": 1}, {"label": "Vietnam", "next": 2}, {"label": "Another", "outcome": 3}]},
+         {"text": "How long will you stay?", "answers": [
+             {"label": "Up to 15 days", "next": 3}, {"label": "Longer", "outcome": 3}]},
+         {"text": "What is the trip for?", "answers": [
+             {"label": "A holiday or family", "outcome": 2}, {"label": "Work", "outcome": 3}]}],
+     "outcomes": [
+         {"label": "No visa needed", "text": "Stay up to 90 days on your passport."},
+         {"label": "An e-visa", "text": "Apply online at least a week before you fly; it takes about five working days."},
+         {"label": "A visa from the embassy", "text": "Book an appointment at the embassy or a consulate near you."}]},
+    {"kind": "scale", "title": "Is 38.5 \u00b0C a fever?", "unit": "\u00b0C", "decimals": 1,
+     "ranges": [{"label": "Low", "from": 35, "to": 36.1}, {"label": "Normal", "from": 36.1, "to": 37.5},
+                {"label": "Fever", "from": 37.5, "to": 39.5}, {"label": "High fever", "from": 39.5, "to": 41}],
+     "pins": [{"label": "You", "value": 38.5}]},
+    {"kind": "timeline", "title": "Your visa, step by step",
+     "events": [{"date": "2026-10-20", "label": "Passport renewed"},
+                {"date": "2026-11-20", "label": "Apply for the e-visa", "note": "At least a week before you fly"},
+                {"date": "2026-11-27", "label": "E-visa arrives", "note": "About five working days"},
+                {"date": "2026-12-05", "label": "Fly to Tokyo"}]},
+    {"kind": "quiz", "title": "Check yourself",
+     "checks": [
+         {"question": "How long can a US passport holder stay without a visa?", "choices": ["15 days", "45 days", "90 days"],
+          "answer": "90 days", "why": "Visitors from the US, UK and EU may stay up to 90 days."},
+         {"question": "When should you apply for the e-visa?", "choices": ["The day you fly", "At least a week before"],
+          "answer": "At least a week before", "why": "It takes about five working days to arrive."}]},
+]
+
+
+def kinds_with(places):
+    """An answer that places a finder, a scale, a timeline and a quiz each under its words."""
+    place = (places + ["", "", "", ""])[:4]
+    return "\n".join([
+        "Whether you need a visa depends on your passport and your trip. Answer these to see yours:",
+        "",
+        place[0],
+        "",
+        "Your temperature of 38.5 \u00b0C is a fever, though not a high one:",
+        "",
+        place[1],
+        "",
+        "If you need the e-visa, here is when each step falls:",
+        "",
+        place[2],
+        "",
+        "Before you go, check what you took in:",
+        "",
+        place[3],
+    ])
+
+
 def brief_with(places):
     """A long brief, the charts' place lines between its bullets, the checklist's under a heading."""
     place = (places + ["", "", "", ""])[:4]
@@ -239,7 +296,7 @@ def plan(body):
         if call_name.endswith("dispatch"):
             # Both dispatches answered with "accepted": end this turn; the results come back later.
             return ("text", "I handed the two parts of the question to the Researcher. Their findings come back next.")
-        if call_name.endswith("show_widget") and "MOCK-BRIEF" in latest_task(messages):
+        if call_name.endswith("show_widget") and ("MOCK-BRIEF" in latest_task(messages) or "MOCK-KINDS" in latest_task(messages)):
             # Every widget shown this turn answered with its place line, in the order shown.
             places = []
             for message in reversed(messages):
@@ -249,7 +306,7 @@ def plan(body):
                     places.insert(0, json.loads(text_of(message.get("content"))).get("place", ""))
                 except (ValueError, AttributeError):
                     places.insert(0, "")
-            return ("text", brief_with(places))
+            return ("text", kinds_with(places) if "MOCK-KINDS" in latest_task(messages) else brief_with(places))
         if call_name.endswith("show_widget"):
             # ADR 0114: write the place line on a line of its own, between words that lead to the
             # widget and words that say what to try, as the tool asks.
@@ -278,6 +335,20 @@ def plan(body):
                 return ("text", json.dumps({"edits": [{"do": "missed", "number": 1}]}))
             return ("text", json.dumps({"edits": [{"do": "add", "lesson": "When answering, keep it to three short bullets."}]}))
         return ("text", json.dumps({"edits": []}))
+    # ADR 0118: the skill writer, one turn, JSON only, from the person's quoted words.
+    if "You write skills for the AI agents in LoomWatch" in system:
+        quoted = latest.split('"""')
+        said = " ".join((quoted[1] if len(quoted) >= 3 else latest).split())
+        if "one numbered line per line" in latest:
+            numbers = re.findall(r"^\[(\d+)\]", latest, re.MULTILINE)
+            last = int(numbers[-1]) if numbers else 0
+            return ("text", json.dumps({"description": None, "edits": [{"after": last, "add": f"- {said}"}]}))
+        title = " ".join(said.split()[:4]).strip(".,:;!?") or "New skill"
+        return ("text", json.dumps({
+            "title": title[:1].upper() + title[1:],
+            "description": f"Helps with {said[:140].rstrip('.')}. Use it when someone asks for this kind of work.",
+            "instructions": f"1. Read what the person asked for.\n2. {said}\n3. Before you finish, check the work against what they asked.",
+        }))
     if "## What you have learned" in system and "keep it to three short bullets" in system:
         return ("text", "- First point, short.\n- Second point, short.\n- Third point, short.")
 
@@ -352,6 +423,8 @@ def plan(body):
 
     if "MOCK-BRIEF" in task and find_tool(names, "show_widget"):
         return ("calls", [(find_tool(names, "show_widget"), spec) for spec in BRIEF_WIDGETS])
+    if "MOCK-KINDS" in task and find_tool(names, "show_widget"):
+        return ("calls", [(find_tool(names, "show_widget"), spec) for spec in KINDS_WIDGETS])
     if "MOCK-TOOL:" in task:
         line = task.rsplit("MOCK-TOOL:", 1)[1].strip().splitlines()[0]
         call, _, arguments = line.partition(" ")

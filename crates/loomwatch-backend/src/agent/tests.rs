@@ -2953,7 +2953,10 @@ async fn the_skills_listed_are_the_ones_its_first_message_calls_for() {
     let demo = Demo::scripted(vec![Completion::text("One.")]);
     let mut config = SessionConfig::new("s", "designer", folder.0.clone(), "m");
     config.skill_library = vec![library.clone()];
-    config.skill_focus = Some("You make decks.\nPrepare the slides for Monday.".to_owned());
+    config.skill_focus = Some(SkillFocus {
+        role: "You make decks.".to_owned(),
+        task: "Prepare the slides for Monday.".to_owned(),
+    });
     let mut focused = Session::open(
         config,
         Provider::Demo(demo.clone()),

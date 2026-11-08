@@ -1866,6 +1866,88 @@ fn a_run_of_an_agents_own_chat_opens_that_agents_chat() {
     );
 }
 
+/// ADR 0118: a skill is written from the person's words, or changed by edits to its numbered
+/// lines, in one turn with no tools, and not told about the person. Nothing is saved: the sheet
+/// shows it and the person saves it.
+#[tokio::test]
+async fn a_skill_is_written_from_the_persons_words_and_changed_line_by_line() {
+    let pool = crate::db::Db::temp().await;
+    let demo = Demo::responder(|request| {
+        let prompt = request.prompt();
+        Some(Completion::text(
+            if prompt.contains("one numbered line per line") {
+                assert!(prompt.contains("[2] 2. Write five bullets."), "{prompt}");
+                r#"{"description": null, "edits": [{"n": 2, "replace": "2. Write three bullets."}]}"#
+            } else if prompt.contains("weekly update") {
+                assert!(prompt.contains("Never make up a detail"), "{prompt}");
+                r#"Here: {"title": "Weekly client update", "description": "Writes the weekly update for a client.", "instructions": "1. Read the notes.\n2. Write three bullets."}"#
+            } else {
+                "I can't."
+            },
+        ))
+    });
+    let fixture = Fixture::start(
+        Some(EventArchive::new(pool)),
+        Some(crate::engine::demo_model(demo.clone())),
+    )
+    .await;
+
+    let (status, new) = fixture
+        .post(
+            "/api/ask/skill",
+            &json!({"words": "My weekly update for a client: three bullets."}),
+        )
+        .await;
+    assert_eq!(status, 200, "{new}");
+    assert_eq!(new["title"], "Weekly client update");
+    assert_eq!(new["description"], "Writes the weekly update for a client.");
+    assert_eq!(
+        new["instructions"],
+        "1. Read the notes.\n2. Write three bullets."
+    );
+    assert_eq!(new["appName"], "Ask LoomWatch");
+
+    let (status, changed) = fixture
+        .post(
+            "/api/ask/skill",
+            &json!({
+                "words": "Three bullets, not five",
+                "skill": {"description": "Writes the weekly update.", "instructions": "1. Read the notes.\n2. Write five bullets.\n3. Sign it Mai."},
+            }),
+        )
+        .await;
+    assert_eq!(status, 200, "{changed}");
+    assert_eq!(changed["description"], "Writes the weekly update.");
+    assert_eq!(
+        changed["instructions"], "1. Read the notes.\n2. Write three bullets.\n3. Sign it Mai.",
+        "the lines it didn't name stay as they were"
+    );
+
+    for request in demo.requests() {
+        assert!(request.tools.is_empty(), "no tools");
+        let all = format!("{:?}", request.messages);
+        assert!(!all.contains("The person you work for"), "{all}");
+    }
+    assert!(
+        fixture.control.inner.conversations.read().await.is_empty(),
+        "writing a skill is not an Ask conversation"
+    );
+
+    let (status, refused) = fixture
+        .post("/api/ask/skill", &json!({"words": "something else"}))
+        .await;
+    assert_eq!(status, 502, "{refused}");
+    assert_eq!(
+        refused["error"],
+        "Ask LoomWatch replied without a skill. Try again."
+    );
+
+    let (status, refused) = fixture
+        .post("/api/ask/skill", &json!({"words": "  "}))
+        .await;
+    assert_eq!(status, 422, "{refused}");
+}
+
 /// ADR 0119: asked for an agent to keep, Ask proposes that one agent on its own, from
 /// `LoomWatch`'s Writer, with no team around it. Nothing is written until the person saves it on
 /// its page, and what they did with it is recorded under the proposal.

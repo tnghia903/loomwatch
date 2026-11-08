@@ -5762,9 +5762,17 @@ mod tests {
                 .contains(&crate::widgets::TOOL.to_owned()),
             "an agent with its switch on is offered the tool here"
         );
+        // ADR 0118: either may suggest a skill; only the one with its switch on shows widgets.
+        let tools = &writer.requests()[0].tools;
         assert!(
-            writer.requests()[0].tools.is_empty(),
-            "one with its switch off has no tools here, as before"
+            tools.contains(&crate::widgets::skill::TOOL.to_owned())
+                && !tools.contains(&crate::widgets::TOOL.to_owned()),
+            "one with its switch off has suggest_skill here, and no show_widget: {tools:?}"
+        );
+        assert!(
+            researcher.requests()[0]
+                .tools
+                .contains(&crate::widgets::skill::TOOL.to_owned())
         );
         // A real model reads the ask for a few short sentences, which comes last, as words only:
         // the same ask says a widget goes with them where one fits.
@@ -5781,6 +5789,77 @@ mod tests {
             plain.contains("in one to four short sentences") && !plain.contains("show_widget"),
             "one with its switch off is asked as before: {plain}"
         );
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
+    /// ADR 0118: in a quick answer too, an agent with its widgets switch off may suggest a skill.
+    /// It is kept under the message and the agent, after the words, and nothing is saved.
+    #[tokio::test]
+    async fn a_quick_answer_in_the_chat_can_suggest_a_skill() {
+        use crate::test_support::{stand_in, turn};
+        let pool = crate::db::Db::temp().await;
+        let store = ChatStore::new(pool.clone());
+        let skill = json!({
+            "name": "Weekly client update",
+            "description": "Writes the weekly update for a client.",
+            "instructions": "1. Read the notes.\n2. Write three bullets.\n3. Sign it Mai."
+        });
+        let (researcher_model, researcher) = stand_in(vec![
+            turn(
+                &["remember how I like my weekly update"],
+                "Done: I suggested it as a skill, so every agent writes it your way.",
+            )
+            .calling(crate::widgets::skill::TOOL, skill, "under your answer"),
+        ]);
+        let mut team = team();
+        team.agents[0].model = researcher_model;
+        team.agents[0].widgets = Some(false);
+        team.agents.truncate(1);
+        let mut message = note(
+            "2026-11-08T02:00:00.000Z",
+            "remember how I like my weekly update @researcher",
+            None,
+        );
+        message.answers = Some(NoteAnswers {
+            waiting: vec!["researcher".to_owned()],
+            ..NoteAnswers::default()
+        });
+        store.insert(&message).await.expect("insert");
+        let folder = std::env::temp_dir().join(format!("loomwatch-quick-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&folder).expect("folder");
+        answer_together(
+            store.clone(),
+            Answering {
+                archive: Some(EventArchive::new(pool.clone())),
+                teams_root: folder.clone(),
+                team,
+                whole_team: false,
+                task: "remember how I like my weekly update @researcher".to_owned(),
+                context: crate::intent::Context::default(),
+                newest_work: None,
+                notes: NotesAnswering::default(),
+            },
+            message.clone(),
+        )
+        .await;
+        let kept = store.get(&message.id).await.expect("read").expect("kept");
+        let answers = kept.answers.expect("answers");
+        assert_eq!(answers.said.len(), 1, "{answers:?}");
+        let tools = &researcher.requests()[0].tools;
+        assert!(
+            tools.contains(&crate::widgets::skill::TOOL.to_owned())
+                && !tools.contains(&crate::widgets::TOOL.to_owned()),
+            "{tools:?}"
+        );
+        let key = crate::widgets::host::note_key(&message.id, "researcher");
+        let widgets = crate::widgets::store::of_runs(&pool, std::slice::from_ref(&key))
+            .await
+            .expect("widgets");
+        let shown = &widgets[&key];
+        assert_eq!(shown.len(), 1, "{shown:?}");
+        assert_eq!(shown[0].spec.kind(), "skill");
+        assert_eq!(shown[0].spec.title(), "Weekly client update");
+        assert_eq!(shown[0].line, None, "after the words");
         let _ = std::fs::remove_dir_all(folder);
     }
 

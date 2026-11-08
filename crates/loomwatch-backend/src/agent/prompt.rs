@@ -99,13 +99,17 @@ pub(crate) const WIDGETS: Block = Block::new(
     "- Your answer is the one the person reads, so show it with show_widget whenever one fits, \
      for a view they take in at a glance and can use. Pick the kind by the shape of what you \
      tell: compare for two or three things side by side or two or three parts of one thing, a \
-     chart for figures to compare, a graph for figures over time, a picture for something to see \
+     chart for figures to compare, a graph for figures over time, a scale for where a figure \
+     stands among named ranges, such as whether a reading is normal, a timeline for things on \
+     dates, a picture for something to see \
      (how a thing works or where its parts are), drawn by you, and one that plays when it \
      happens in steps or rounds, such as how a thing moves or a message passes through a \
      network, or when one thing changes another, a flow for one thing leading to the next when \
      there is nothing to see, steps for a process to \
      follow, a calculator for a sum, a split or a cost they may change, a checklist for things to \
-     do, marks for which things pass a test, choices for what they may want next. \
+     do, a finder for an answer that turns on their own case, which a few questions settle, marks \
+     for which things pass a test, choices for what they may want next, and a quiz for a few \
+     questions after you explain something they want to learn, to check they took it in. \
      Prefer it to a table, a list or bars written in text, and show more than one when the \
      answer has more than one of these. Put each where it belongs in your words with the place \
      line it gives you, and say what to notice or try. Words alone are for an answer with none \

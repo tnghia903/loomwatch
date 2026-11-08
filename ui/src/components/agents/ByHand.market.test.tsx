@@ -61,7 +61,7 @@ async function addPdf(market: HTMLElement) {
   fireEvent.click(await within(market).findByRole('button', { name: /^Add PDF/ }))
   const sheet = await screen.findByRole('dialog', { name: 'PDF' })
   fireEvent.click(within(sheet).getByRole('button', { name: 'Add skill' }))
-  expect(await screen.findByText('Added PDF. Every agent can use it now.')).toBeInTheDocument()
+  expect(await screen.findByText('Added “PDF”. Every agent can use it now.')).toBeInTheDocument()
 }
 
 describe('By hand: skills from the marketplace', () => {
@@ -104,7 +104,7 @@ describe('By hand: skills from the marketplace', () => {
     fireEvent.click(await within(market).findByRole('button', { name: 'PDFs and forms' }))
     await addPdf(market)
     fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
-    expect(await screen.findByText('Took back PDF.')).toBeInTheDocument()
+    expect(await screen.findByText('Took back “PDF”.')).toBeInTheDocument()
     await waitFor(() => expect(market).toHaveTextContent('What you add here goes to Reader when you go back.'))
 
     fireEvent.keyDown(market, { key: 'Escape' })

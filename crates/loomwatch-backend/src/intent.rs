@@ -65,8 +65,11 @@ const SHOW_IN_REPLY: &str = "Keep your words that short, and when one of the vie
      shape of what you tell: compare for two or three things side by side or two or three parts \
      of one thing, a picture for something to see, such as how a thing works or moves, even in \
      stages, drawn by you, a flow for how one thing leads to the next when there is nothing to \
-     see, steps for how to do something, a chart for figures to compare, a calculator for a sum \
-     or a split they may change, a checklist for things to do. Put its place line where it \
+     see, steps for how to do something, a chart for figures to compare, a scale for where a \
+     figure stands among named ranges, such as whether a reading is normal, a timeline for \
+     things on dates, a finder for an answer that turns on their own case, which a few \
+     questions settle, a calculator for a sum or a split they may change, a checklist for things \
+     to do. Put its place line where it \
      belongs, and let your sentences say what to notice.";
 
 /// Who a message was for.
@@ -146,8 +149,8 @@ pub(crate) enum Reply {
 }
 
 /// `agent`'s own answer to `message`, as itself in the team's chat: one turn on its own model,
-/// remembering what it said last in the newest work. Its only tool is `show_widget` when `widgets`
-/// (its switch, ADR 0114); otherwise it has none.
+/// remembering what it said last in the newest work. Its tools are `suggest_skill` (ADR 0118), and
+/// `show_widget` when `widgets` (its switch, ADR 0114).
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn reply(
     archive: Option<&EventArchive>,
@@ -166,7 +169,8 @@ pub(crate) async fn reply(
     let instructions = own_instructions(addressed.team, agent);
     let prompt = reply_prompt(addressed, message.trim(), context, own, widgets);
     let model = agent.model_selector();
-    let tools = widgets.then(crate::widgets::host::WidgetTools::new);
+    // Widgets when its switch is on; a skill to suggest whether it is or not (ADR 0118).
+    let tools = Some(crate::widgets::host::WidgetTools::new(widgets));
     let turn = one_turn_with(
         archive,
         teams_root,

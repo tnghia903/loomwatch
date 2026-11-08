@@ -1181,7 +1181,7 @@ function TeamNote({ message, reactions, lessons, widgets, fixFill = null, name, 
           const placed = kept.length > 0 ? partsOf(said.text, kept) : null
           const reply = answerReply(message.replyTo, { runId: null, messageId: `note:${message.id}`, from: said.from, to: null, kind: 'answer', text: said.text })
           const draw = (one: KeptWidget) => (
-            <AnswerWidget kept={one} onChange={(n, state) => onWidgetChange ? onWidgetChange(said.from, n, state) : Promise.reject(new Error('not kept'))}
+            <AnswerWidget kept={one} by={name(said.from)} onChange={(n, state) => onWidgetChange ? onWidgetChange(said.from, n, state) : Promise.reject(new Error('not kept'))}
               onChoose={onChoose ? (label) => onChoose(label, reply) : undefined} chosen={chosen?.(said.from) ?? null} />
           )
           const inWords = placed !== null && placed.parts.length > 1

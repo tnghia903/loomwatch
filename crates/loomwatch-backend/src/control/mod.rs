@@ -16,6 +16,7 @@ mod instructions;
 mod jobs;
 mod line_edits;
 mod mcp;
+mod skill;
 #[cfg(test)]
 mod tests;
 
@@ -241,6 +242,7 @@ impl Control {
                 post(decide_run_request),
             )
             .route("/api/ask/instructions", post(instructions::rewrite))
+            .route("/api/ask/skill", post(skill::write))
             .route("/api/ask/proposals/{id}", get(get_proposal))
             .route("/api/ask/proposals/{id}/outcome", post(proposal_outcome))
             .route_layer(middleware::from_fn(local_evidence))

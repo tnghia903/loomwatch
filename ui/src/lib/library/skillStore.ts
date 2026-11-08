@@ -11,12 +11,15 @@ import { SKILLS_CHANGED_EVENT } from './client'
  * - **Install** fetches from skills.sh, ClawHub or a GitHub link. The daemon does every fetch; this
  *   page never calls those sites itself. Inspect shows what a download holds before anything is
  *   installed.
+ * - **Write** saves a skill's own words: a new skill, or a change to one already here (ADR 0118).
+ *   LoomWatch's own model can write them from the person's words (`draftSkill`), and an agent can
+ *   suggest one in the chat; either way nothing is saved until the person says so.
  *
  * A skill whose license says "All rights reserved" is restricted and never comes in either way.
  */
 
 /** How a skill reached the folder. `found`: someone put its folder there by hand. */
-export type OriginKind = 'brought_in' | 'installed' | 'found'
+export type OriginKind = 'brought_in' | 'installed' | 'written' | 'found'
 export type SkillSource = 'github' | 'skills.sh' | 'clawhub'
 export type SearchSource = Exclude<SkillSource, 'github'>
 export type Runtime = 'node' | 'python'
@@ -33,6 +36,8 @@ export interface SkillOrigin {
   commit?: string
   /** A page about it the person can open. */
   url?: string
+  /** The agent that suggested a written skill, by the name the chat showed. */
+  suggestedBy?: string
 }
 
 export interface SkillLicense {
@@ -58,6 +63,48 @@ export interface SkillRecord {
   addedAt: string
   /** The bring-in it came with; Undo takes that bring-in back whole. */
   batchId?: string
+  /** When the person last changed its words in LoomWatch. */
+  changedAt?: string
+}
+
+/** One skill's own words: `GET /api/skills/words`. */
+export interface SkillWords {
+  name: string
+  /** When to use it: its `description:`, which is all an agent sees before it opens the skill. */
+  description: string
+  /** What to do: everything after its front matter. */
+  instructions: string
+  /** Its other files, which a change keeps as they are. */
+  files: string[]
+  /** The `SKILL.md` these words were read from, which a change names. */
+  base: string
+}
+
+/** What `saveSkillWords` takes: a new skill without `base`, a change with it. */
+export interface SkillWrite {
+  name: string
+  description: string
+  instructions: string
+  base?: string
+  /** For a new skill an agent suggested: that agent's name. */
+  suggestedBy?: string
+}
+
+/** `PUT /api/skills/words`. */
+export interface WrittenSkill {
+  skill: SkillRecord
+  /** The `SKILL.md` now in place, which the next change, or Undo, names. */
+  base: string
+  /** The words before a change, for Undo. */
+  previous?: SkillWords
+}
+
+/** `POST /api/ask/skill`: a skill LoomWatch's own model wrote, or changed, from the person's words. */
+export interface SkillDraft {
+  /** A new skill's name, in words. */
+  title?: string
+  description: string
+  instructions: string
 }
 
 export interface SkillsFolder {
@@ -214,6 +261,18 @@ export const searchSkills = async (query: string, source: SearchSource) =>
 export const inspectInstall = (ref: string, source?: SkillSource) =>
   change<Inspection>('/api/skills/install/inspect', 'POST', source ? { ref, source } : { ref })
 
+export const readSkillWords = (name: string) => call<SkillWords>(`/api/skills/words?${new URLSearchParams({ name })}`)
+
+/** A new skill, or a change to the one `base` was read from; 409 when the name is taken or the skill changed since. */
+export const saveSkillWords = (write: SkillWrite) => changed(change<WrittenSkill>('/api/skills/words', 'PUT', write))
+
+/**
+ * LoomWatch's own model writes a new skill from the person's words, or, given the skill, makes the
+ * change they ask for. Nothing is saved.
+ */
+export const draftSkill = (words: string, skill?: Pick<SkillWords, 'description' | 'instructions'>) =>
+  call<SkillDraft>('/api/ask/skill', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(skill ? { words, skill: { description: skill.description, instructions: skill.instructions } } : { words }) })
+
 /** Without `replace`, a name already in LoomWatch answers 409 and nothing is installed. */
 export const installSkills = async (token: string, paths: string[], replace = false) =>
   (await changed(change<{ installed: SkillRecord[] }>('/api/skills/install', 'POST', { token, paths, replace }))).installed
@@ -251,8 +310,15 @@ export function describeOrigin(origin: SkillOrigin): string {
   switch (origin.kind) {
     case 'brought_in': return origin.app ? `Brought in from ${origin.app}` : 'Brought in from your apps'
     case 'installed': return origin.source ? `Installed from ${sourceName(origin.source)}` : 'Installed'
+    case 'written': return origin.suggestedBy ? `Suggested by ${origin.suggestedBy}, saved by you` : 'Written by you'
     default: return 'Added to the folder by hand'
   }
+}
+
+/** Where a skill came from, and whether you changed it since. */
+export function describeRecord(skill: Pick<SkillRecord, 'origin' | 'changedAt'>): string {
+  const from = describeOrigin(skill.origin)
+  return skill.changedAt && skill.origin.kind !== 'written' ? `${from}, changed by you` : from
 }
 
 export function licenseLabel(license: SkillLicense): string {
@@ -465,6 +531,7 @@ export function originShort(origin: SkillOrigin): string {
   switch (origin.kind) {
     case 'brought_in': return origin.app ?? 'Your apps'
     case 'installed': return origin.source ? sourceName(origin.source) : 'Installed'
+    case 'written': return origin.suggestedBy ? `Suggested by ${origin.suggestedBy}` : 'Written by you'
     default: return 'Added by hand'
   }
 }

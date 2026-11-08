@@ -6,13 +6,17 @@
 //! - the agent's own skills, the ones delivered to its folder, always are;
 //! - `LoomWatch`'s library is listed whole while it is small ([`SMALL_LIBRARY`]);
 //! - a larger library is listed by what the agent's work calls for ([`relevant`]): the skills that
-//!   share the most rare words with its role and task, at most [`MATCHED`] of them, then one line
-//!   saying where the rest are, so the agent can look for one the list leaves out.
+//!   share the most rare words with its role and task ([`SkillFocus`]), at most [`MATCHED`] of
+//!   them, then one line saying where the rest are, so the agent can look for one the list leaves
+//!   out.
 
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
+
+use unicode_normalization::UnicodeNormalization as _;
+use unicode_normalization::char::is_combining_mark;
 
 use crate::skill_routing::{description, frontmatter_field, split_frontmatter};
 
@@ -30,8 +34,10 @@ pub(crate) const MATCHED: usize = 15;
 /// a skill the work may need is not hidden, while one that shares a word in passing is not listed
 /// beside one the work is plainly about.
 const NEAR_THE_BEST: f64 = 0.25;
-/// A word is rare when at most this share of the library uses it, and never fewer than two skills.
-const RARE_SHARE: usize = 10;
+/// A word tells skills apart while at most this share of the library uses it (a quarter), and
+/// never fewer than two skills. Past that it is the library's own vocabulary ("writes",
+/// "documents"). A word the library shares with fewer skills counts for more ([`relevant`]).
+const RARE_SHARE: usize = 4;
 /// Past this many listed skills, each description is cut to its first [`SHORT_DESCRIPTION_CHARS`].
 const LONG_LIST: usize = 30;
 const SHORT_DESCRIPTION_CHARS: usize = 140;
@@ -39,6 +45,9 @@ const SHORT_DESCRIPTION_CHARS: usize = 140;
 const MAX_SKILL_BYTES: u64 = 1024 * 1024;
 /// A word a skill's name shares with the work counts this many times one its description shares.
 const NAME_WEIGHT: f64 = 3.0;
+/// A word only the agent's role has, not its task, counts this much: what it was asked now says
+/// more about the skill it needs than what it does in general.
+const ROLE_WEIGHT: f64 = 0.5;
 /// Words that say nothing about what a piece of work is about: English's commonest, and the words
 /// every request and every skill use ("task", "request", "result").
 const COMMON_WORDS: &[&str] = &[
@@ -57,6 +66,25 @@ const COMMON_WORDS: &[&str] = &[
     "was", "way", "we", "were", "what", "when", "where", "which", "while", "who", "whom", "why",
     "will", "with", "work", "would", "you", "your",
 ];
+
+/// What picks the skills a large library lists for an agent.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SkillFocus {
+    /// What the agent is for, the same for all its work: its role's first line.
+    pub role: String,
+    /// What it was asked now.
+    pub task: String,
+}
+
+impl From<&str> for SkillFocus {
+    /// Only what it was asked, with no role.
+    fn from(task: &str) -> Self {
+        Self {
+            role: String::new(),
+            task: task.to_owned(),
+        }
+    }
+}
 
 /// One skill an agent can read.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -164,19 +192,24 @@ fn read_skill(folder: &Path) -> Option<SkillEntry> {
     })
 }
 
-/// The library skills `work` calls for most, best first, at most `limit`.
+/// The library skills `focus` calls for most, best first, at most `limit`.
 ///
 /// One rule for any library and any work. A skill scores for each rare word it shares with the
-/// work (one at most a [`RARE_SHARE`]th of the library uses), weighted by how rare it is, and a
-/// word of its name counts [`NAME_WEIGHT`] times. It is a match when it shares a rare word of its
-/// name, or two rare words, and scores [`NEAR_THE_BEST`] of the best match or more. Ties keep the
-/// library's order.
+/// role and task (one at most a [`RARE_SHARE`]th of the library uses), weighted by how rare it
+/// is; a word of its name counts [`NAME_WEIGHT`] times, and a word only the role has
+/// [`ROLE_WEIGHT`]. It is a match when it shares a word of
+/// the task, a word of its name or two words, and scores [`NEAR_THE_BEST`] of the best match or
+/// more. One word of the task is enough, since a description names each kind of work it is for
+/// once ("Use it when asked for a caption or a post"); a role says the same for all the agent's
+/// work, so one word it shares with a description in passing is not. Ties keep the library's
+/// order.
 pub(crate) fn relevant<'a>(
     library: &'a [SkillEntry],
-    work: &str,
+    focus: &SkillFocus,
     limit: usize,
 ) -> Vec<&'a SkillEntry> {
-    let work: HashSet<String> = words(work).collect();
+    let task: HashSet<String> = words(&focus.task).collect();
+    let work: HashSet<String> = words(&focus.role).chain(task.iter().cloned()).collect();
     if work.is_empty() || library.is_empty() {
         return Vec::new();
     }
@@ -212,7 +245,11 @@ pub(crate) fn relevant<'a>(
                 .iter()
                 .filter(|word| work.contains(*word) && used[word.as_str()] <= rare)
                 .collect();
-            if shared.len() < 2 && !shared.iter().any(|word| name.contains(*word)) {
+            if shared.len() < 2
+                && !shared
+                    .iter()
+                    .any(|word| task.contains(*word) || name.contains(*word))
+            {
                 return None;
             }
             let score = shared
@@ -220,6 +257,11 @@ pub(crate) fn relevant<'a>(
                 .map(|word| {
                     #[allow(clippy::cast_precision_loss)]
                     let rarity = ((total + 1.0) / (used[word.as_str()] as f64 + 0.5)).ln();
+                    let rarity = if task.contains(*word) {
+                        rarity
+                    } else {
+                        rarity * ROLE_WEIGHT
+                    };
                     if name.contains(*word) {
                         rarity * NAME_WEIGHT
                     } else {
@@ -242,15 +284,112 @@ pub(crate) fn relevant<'a>(
 
 /// The words of `text` that can say what it is about: lowercased, common words left out, and the
 /// commonest English endings taken off, so "researcher", "researching" and "research" meet.
-fn words(text: &str) -> impl Iterator<Item = String> + '_ {
-    text.split(|c: char| !c.is_alphanumeric())
-        .map(str::to_lowercase)
-        .filter(|word| {
-            word.chars().count() >= 2
-                && !word.chars().all(|c| c.is_ascii_digit())
-                && !COMMON_WORDS.contains(&word.as_str())
-        })
-        .map(|word| stem(&word))
+///
+/// Text is compared in one Unicode form (NFKC), so an accent typed as a separate mark and a
+/// full-width "ＰＤＦ" read as the same letters. A mark belongs to its letter's word. Scripts written
+/// without spaces between words ([`Script::Unspaced`]) give every two letters side by side as a
+/// word, the way search engines read them, so "議事録" and "議事録を作って" share "議事" and
+/// "事録"; a letter standing alone is a word by itself. Hiragana, the grammar between Japanese
+/// words, is left out as common words are.
+fn words(text: &str) -> std::vec::IntoIter<String> {
+    let text: String = text.nfkc().collect();
+    let mut found = Vec::new();
+    for run in text.split(|c: char| !(c.is_alphanumeric() || is_combining_mark(c))) {
+        for (script, piece) in by_script(run) {
+            match script {
+                Script::Spaced => {
+                    let word = piece.to_lowercase();
+                    if word.chars().count() >= 2
+                        && !word.chars().all(|c| c.is_ascii_digit())
+                        && !COMMON_WORDS.contains(&word.as_str())
+                    {
+                        found.push(stem(&word));
+                    }
+                }
+                Script::Unspaced(_) => {
+                    let letters = letters(piece);
+                    if let [letter] = letters.as_slice() {
+                        found.push((*letter).to_owned());
+                    }
+                    found.extend(letters.windows(2).map(<[&str]>::concat));
+                }
+                Script::Grammar => {}
+            }
+        }
+    }
+    found.into_iter()
+}
+
+/// How a script shows where its words end.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Script {
+    /// With spaces or punctuation: Latin, Cyrillic, Greek, Arabic, Devanagari and most others.
+    Spaced,
+    /// Without spaces, or with endings joined to the word: Chinese characters, katakana, Hangul,
+    /// Thai, Lao, Khmer and Myanmar, each its own so a word in one doesn't run into the next.
+    Unspaced(u8),
+    /// Japanese hiragana, mostly particles and endings between the words.
+    Grammar,
+}
+
+fn script(c: char) -> Script {
+    match u32::from(c) {
+        0x3040..=0x309F => Script::Grammar,
+        0x2E80..=0x2FDF
+        | 0x3005..=0x3007
+        | 0x3021..=0x3029
+        | 0x3400..=0x4DBF
+        | 0x4E00..=0x9FFF
+        | 0xF900..=0xFAFF
+        | 0x20000..=0x323AF => Script::Unspaced(0),
+        0x30A0..=0x30FF | 0x31F0..=0x31FF | 0xFF66..=0xFF9F => Script::Unspaced(1),
+        0x1100..=0x11FF | 0x3130..=0x318F | 0xA960..=0xA97F | 0xAC00..=0xD7FF => {
+            Script::Unspaced(2)
+        }
+        0x0E00..=0x0E7F => Script::Unspaced(3),
+        0x0E80..=0x0EFF => Script::Unspaced(4),
+        0x1780..=0x17FF | 0x19E0..=0x19FF => Script::Unspaced(5),
+        0x1000..=0x109F | 0xA9E0..=0xA9FF | 0xAA60..=0xAA7F => Script::Unspaced(6),
+        _ => Script::Spaced,
+    }
+}
+
+/// `run` cut where its script changes. A mark goes with the letter before it.
+fn by_script(run: &str) -> Vec<(Script, &str)> {
+    let mut pieces: Vec<(Script, &str)> = Vec::new();
+    let mut start = 0;
+    let mut current: Option<Script> = None;
+    for (at, c) in run.char_indices() {
+        if is_combining_mark(c) && current.is_some() {
+            continue;
+        }
+        let this = script(c);
+        if let Some(previous) = current.filter(|previous| *previous != this) {
+            pieces.push((previous, &run[start..at]));
+            start = at;
+        }
+        current = Some(this);
+    }
+    if let Some(last) = current {
+        pieces.push((last, &run[start..]));
+    }
+    pieces
+}
+
+/// The letters of `piece`, each with the marks written over or under it.
+fn letters(piece: &str) -> Vec<&str> {
+    let mut letters = Vec::new();
+    let mut start = 0;
+    for (at, c) in piece.char_indices() {
+        if at > start && !is_combining_mark(c) {
+            letters.push(&piece[start..at]);
+            start = at;
+        }
+    }
+    if start < piece.len() {
+        letters.push(&piece[start..]);
+    }
+    letters
 }
 
 /// A root keeps four letters at least, so "notes" and "note" meet and "news" stays news.
@@ -273,10 +412,11 @@ fn stem(word: &str) -> String {
 ///
 /// Each folder of skills is named once, and each skill by its name and what it is for: a skill's
 /// instructions are `<folder>/<its folder>/SKILL.md`, and its own folder is named only when it
-/// differs from its name. `work` is what the agent was asked, for picking from a large library.
-pub(crate) fn prompt_section(index: &SkillIndex, work: &str) -> String {
+/// differs from its name. `focus` is what the agent is for and was asked, for picking from a large
+/// library.
+pub(crate) fn prompt_section(index: &SkillIndex, focus: &SkillFocus) -> String {
     let picked: Vec<&SkillEntry> = if index.picks_by_work() {
-        relevant(&index.library, work, MATCHED)
+        relevant(&index.library, focus, MATCHED)
     } else {
         index.library.iter().collect()
     };
@@ -410,7 +550,7 @@ mod tests {
             names(&index.library),
             [("research".to_owned(), "Find sources.".to_owned())]
         );
-        let section = prompt_section(&index, "");
+        let section = prompt_section(&index, &"".into());
         assert!(section.starts_with("## Skills\n"));
         // Each folder is named once, and each skill by name and purpose under it.
         assert!(section.contains(&format!(
@@ -475,9 +615,9 @@ mod tests {
     /// section at all.
     #[test]
     fn a_small_library_is_listed_whole() {
-        assert_eq!(prompt_section(&library(0), "Make a deck"), "");
+        assert_eq!(prompt_section(&library(0), &"Make a deck".into()), "");
         for size in [1, 5, SMALL_LIBRARY] {
-            let section = prompt_section(&library(size), "Something else entirely");
+            let section = prompt_section(&library(size), &"Something else entirely".into());
             assert_eq!(listed(&section), size, "{section}");
             assert!(!section.contains("more skills"), "{section}");
             assert_eq!(section.matches(&format!("In {LIBRARY}:")).count(), 1);
@@ -492,7 +632,8 @@ mod tests {
             let index = library(size);
             let section = prompt_section(
                 &index,
-                "## Your assigned role\nYou make decks.\n\n## Task\nPrepare the slides for Monday's presentation.",
+                &"## Your assigned role\nYou make decks.\n\n## Task\nPrepare the slides for Monday's presentation."
+                    .into(),
             );
             assert_eq!(listed(&section), 1, "{size}: {section}");
             assert!(
@@ -506,19 +647,22 @@ mod tests {
             assert!(section.contains("list_files that folder"), "{section}");
             // Words every skill in the library uses say nothing about which one the work needs.
             assert_eq!(
-                listed(&prompt_section(&index, "Tidy the outline of these notes.")),
+                listed(&prompt_section(
+                    &index,
+                    &"Tidy the outline of these notes.".into()
+                )),
                 0,
                 "{size}"
             );
             // Nothing the work is about: no skill listed, and the folder still named.
-            let unrelated = prompt_section(&index, "Summarise this quarterly budget.");
+            let unrelated = prompt_section(&index, &"Summarise this quarterly budget.".into());
             assert_eq!(listed(&unrelated), 0, "{unrelated}");
             assert!(unrelated.contains(&format!("There are {size} skills in {LIBRARY}.")));
             // Before the work is known, the same.
-            assert_eq!(prompt_section(&index, ""), unrelated);
+            assert_eq!(prompt_section(&index, &"".into()), unrelated);
         }
         // Three hundred skills cost a few hundred characters, not the 13,700 of a full list.
-        assert!(prompt_section(&library(300), "Prepare the slides").len() < 1_000);
+        assert!(prompt_section(&library(300), &"Prepare the slides".into()).len() < 1_000);
     }
 
     /// The agent's own skills are always listed, and at most [`MATCHED`] from the library.
@@ -540,7 +684,7 @@ mod tests {
                 "Draws a chart of quarterly figures.",
             );
         }
-        let section = prompt_section(&index, "Make a chart of the quarterly figures.");
+        let section = prompt_section(&index, &"Make a chart of the quarterly figures.".into());
         assert!(
             section.contains("- house-style: How we write."),
             "{section}"
@@ -599,7 +743,7 @@ mod tests {
             ),
         ];
         let names = |work: &str| -> Vec<String> {
-            relevant(&skills, work, MATCHED)
+            relevant(&skills, &work.into(), MATCHED)
                 .into_iter()
                 .map(|skill| skill.name.clone())
                 .collect()
@@ -616,8 +760,6 @@ mod tests {
             names("charts of quarterly figures"),
             ["chart-maker", "Data_Viz"]
         );
-        // One rare word of a description is a word in passing, not a match.
-        assert!(names("A figure of speech").is_empty());
     }
 
     /// Matching is generous, so a skill the work may need is listed, but one far behind the skill
@@ -647,7 +789,7 @@ mod tests {
             )
         }));
         let names = |work: &str| -> Vec<String> {
-            relevant(&skills, work, MATCHED)
+            relevant(&skills, &work.into(), MATCHED)
                 .into_iter()
                 .map(|skill| skill.name.clone())
                 .collect()
@@ -660,6 +802,213 @@ mod tests {
         assert_eq!(
             names("Annotate what a viewer saw"),
             ["pdf-viewer-app", "annotation-log"]
+        );
+    }
+
+    fn names_for<'a>(skills: &'a [SkillEntry], focus: &SkillFocus) -> Vec<&'a str> {
+        relevant(skills, focus, MATCHED)
+            .into_iter()
+            .map(|skill| skill.name.as_str())
+            .collect()
+    }
+
+    fn fillers(skills: &mut Vec<SkillEntry>, count: usize) {
+        skills.extend((0..count).map(|index| {
+            entry(
+                LIBRARY,
+                &format!("tool-{index}"),
+                &format!("tool-{index}"),
+                "Tidies a folder.",
+            )
+        }));
+    }
+
+    /// Scripts written without spaces between words are read two letters at a time, so a request
+    /// finds its skill however its words run on; Japanese grammar alone finds nothing.
+    #[test]
+    fn text_without_spaces_is_read_two_letters_at_a_time() {
+        let mut skills = vec![
+            entry(
+                LIBRARY,
+                "議事録作成",
+                "議事録作成",
+                "会議のメモから議事録を作成する。",
+            ),
+            entry(
+                LIBRARY,
+                "請求書作成",
+                "請求書作成",
+                "作業時間から請求書を作成する。",
+            ),
+            entry(
+                LIBRARY,
+                "周报撰写",
+                "周报撰写",
+                "根据本周的工作记录撰写周报。",
+            ),
+            entry(
+                LIBRARY,
+                "회의록-정리",
+                "회의록-정리",
+                "회의 메모를 회의록으로 정리한다.",
+            ),
+            entry(
+                LIBRARY,
+                "สรุปยอดขาย",
+                "สรุปยอดขาย",
+                "สรุปยอดขายประจำเดือนจากไฟล์ส่งออก",
+            ),
+            entry(LIBRARY, "pdf-merge", "pdf-merge", "Merges PDF files."),
+        ];
+        fillers(&mut skills, 6);
+        let names = |task: &str| names_for(&skills, &task.into());
+        assert_eq!(names("今日の会議メモを議事録にまとめて"), ["議事録作成"]);
+        assert_eq!(names("このメモから議事録を作って"), ["議事録作成"]);
+        assert_eq!(names("帮我写这周的周报"), ["周报撰写"]);
+        assert_eq!(
+            names("오늘 회의 메모로 회의록을 만들어 줘"),
+            ["회의록-정리"]
+        );
+        assert_eq!(names("ช่วยสรุปยอดขายเดือนนี้ให้หน่อย"), ["สรุปยอดขาย"]);
+        // Letters typed full width, as a Japanese keyboard types them, are the same letters.
+        assert_eq!(names("ＰＤＦを結合して"), ["pdf-merge"]);
+        // Only particles and endings in common: nothing.
+        assert!(names("これからするの？").is_empty());
+    }
+
+    /// An accent typed as a separate mark is the same letter as one typed whole, and a mark
+    /// belongs to its letter's word: ब्लॉग (blog) is one word, not लॉग (log) after a mark.
+    #[test]
+    fn a_word_is_the_same_however_its_marks_are_typed() {
+        use unicode_normalization::UnicodeNormalization as _;
+        let decomposed: String = "Soạn báo giá cho khách hàng.".nfd().collect();
+        let mut skills = vec![
+            entry(LIBRARY, "bao-gia", "bao-gia", &decomposed),
+            entry(LIBRARY, "ब्लॉग-लेख", "ब्लॉग-लेख", "हिंदी में ब्लॉग लेख लिखता है।"),
+            entry(LIBRARY, "लॉग-फ़ाइलें", "लॉग-फ़ाइलें", "सर्वर की लॉग फ़ाइलें पढ़ता है।"),
+        ];
+        fillers(&mut skills, 6);
+        let names = |task: &str| names_for(&skills, &task.into());
+        assert_eq!(names("Làm báo giá sơn nhà"), ["bao-gia"]);
+        assert_eq!(names("मेरी बेकरी पर ब्लॉग लिखो"), ["ब्लॉग-लेख"]);
+    }
+
+    /// A description names each kind of work it is for once, so one word of the task is enough,
+    /// and a word several skills share still finds them; a word more than a quarter of the
+    /// library uses finds nothing.
+    #[test]
+    fn one_word_of_the_task_finds_a_skill_among_others_that_share_it() {
+        let mut skills = vec![entry(
+            LIBRARY,
+            "bakery-captions",
+            "bakery-captions",
+            "Writes Instagram captions for the bakery. Use it when asked for a caption or a post.",
+        )];
+        for site in [
+            "linkedin",
+            "blog",
+            "forum",
+            "facebook",
+            "newsletter",
+            "community",
+            "jobs",
+            "events",
+        ] {
+            skills.push(entry(
+                LIBRARY,
+                &format!("{site}-posts"),
+                &format!("{site}-posts"),
+                &format!("Writes posts for {site}."),
+            ));
+        }
+        skills.extend((0..31).map(|index| {
+            entry(
+                LIBRARY,
+                &format!("notes-{index}"),
+                &format!("notes-{index}"),
+                "Writes a tidy summary of a folder of notes.",
+            )
+        }));
+        // Nine of forty skills say "post".
+        let names = |task: &str| names_for(&skills, &task.into());
+        let found = names("Write a post about the new sourdough");
+        assert_eq!(found.len(), 9, "{found:?}");
+        assert_eq!(found.last(), Some(&"bakery-captions"), "{found:?}");
+        // Every skill writes: the word finds none of them.
+        assert!(names("Write something").is_empty());
+    }
+
+    /// The role is the same for all the agent's work: a word only it has counts half, and one
+    /// such word in a description is not enough. What was asked now decides.
+    #[test]
+    fn the_task_counts_more_than_the_role() {
+        let mut skills = vec![
+            entry(
+                LIBRARY,
+                "bakery-captions",
+                "bakery-captions",
+                "Writes Instagram captions for the bakery. Use it when asked for a caption or a post.",
+            ),
+            entry(
+                LIBRARY,
+                "business-email",
+                "business-email",
+                "Drafts business emails in Japanese.",
+            ),
+            entry(
+                LIBRARY,
+                "meeting-actions",
+                "meeting-actions",
+                "Turns meeting notes into action items, each with an owner.",
+            ),
+            entry(
+                LIBRARY,
+                "blog-posts",
+                "blog-posts",
+                "Writes posts for the blog.",
+            ),
+            entry(
+                LIBRARY,
+                "linkedin-posts",
+                "linkedin-posts",
+                "Writes posts for LinkedIn.",
+            ),
+            entry(
+                LIBRARY,
+                "forum-posts",
+                "forum-posts",
+                "Writes posts for the forum.",
+            ),
+        ];
+        fillers(&mut skills, 14);
+        let focus = |role: &str, task: &str| SkillFocus {
+            role: role.to_owned(),
+            task: task.to_owned(),
+        };
+        let helper = "You help a small business owner.";
+        assert_eq!(
+            names_for(
+                &skills,
+                &focus(helper, "A post about the new sourdough, please.")
+            ),
+            [
+                "blog-posts",
+                "linkedin-posts",
+                "forum-posts",
+                "business-email",
+                "bakery-captions"
+            ]
+        );
+        // The role alone still finds the skills it is about.
+        assert_eq!(
+            names_for(
+                &skills,
+                &focus(
+                    "You write Instagram captions for the bakery.",
+                    "Do today's."
+                )
+            ),
+            ["bakery-captions"]
         );
     }
 }

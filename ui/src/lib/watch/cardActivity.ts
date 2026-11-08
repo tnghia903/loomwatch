@@ -140,6 +140,8 @@ export function asUse(item: Evidence): Use | null {
   if (item.kind === 'search') return make('file', `Find ${firstLine(item.name)}`)
   // ADR 0114: what it put in its answer, in words, not the tool's name.
   if (firstLine(item.name) === 'Team Bus: show_widget') return make('tool', shownIn(item.rawInput))
+  // ADR 0118.
+  if (firstLine(item.name) === 'Team Bus: suggest_skill') return make('tool', 'Suggest a skill')
   return make('tool', firstLine(item.name))
 }
 
@@ -148,7 +150,8 @@ export function asUse(item: Evidence): Use | null {
 const SHOWN: Record<WidgetSpec['kind'], string> = {
   calculator: 'a calculator', checklist: 'a checklist', choices: 'choices', steps: 'steps',
   chart: 'a chart', graph: 'a graph', marks: 'a yes-or-no row', flow: 'a diagram', compare: 'a comparison',
-  picture: 'a picture',
+  picture: 'a picture', finder: 'a decision guide', quiz: 'a quiz', scale: 'a scale', timeline: 'a timeline',
+  skill: 'a suggested skill',
 }
 
 /** "Show a calculator in the answer", from a `show_widget` call's input. */

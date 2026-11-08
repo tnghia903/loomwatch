@@ -43,7 +43,7 @@ use super::provider::{
     Cancel, ChatRequest, Completion, DeltaSink, Finish, Message, Parts, Picture, Provider,
     ServerTools, ToolCall, ToolSpec, Usage, WebLimits,
 };
-use super::skills::{SkillIndex, prompt_section};
+use super::skills::{SkillFocus, SkillIndex, prompt_section};
 use super::spend::{Go, Spend, Unmetered};
 use super::tools::{self, Builtin, CommandSettings, Context, Output, Pictures};
 use crate::documents::Kind;
@@ -233,8 +233,8 @@ pub struct SessionConfig {
     /// `LoomWatch`'s library of skills: listed whole while small, else by what the work calls for.
     pub skill_library: Vec<PathBuf>,
     /// What the agent is for and was asked, which picks the skills a large library lists: its
-    /// role's first line and its task. `None`: its first message, whole.
-    pub skill_focus: Option<String>,
+    /// role's first line and its task. `None`: its first message, whole, as its task.
+    pub skill_focus: Option<SkillFocus>,
     pub turned_off: Vec<String>,
     /// More instructions after the built-in ones, such as Ask `LoomWatch`'s.
     pub instructions: Option<String>,
@@ -1018,7 +1018,7 @@ impl Session {
             && self.skills.picks_by_work()
             && self.config.skill_focus.is_none()
         {
-            let system = instructions(&self.config, self.host.as_ref(), &self.skills, text);
+            let system = instructions(&self.config, self.host.as_ref(), &self.skills, &text.into());
             self.history[0] = Message::System { content: system };
         }
         self.last_step_usd = None;
@@ -2202,12 +2202,12 @@ impl ToolCalls {
 /// What a turn is for when nothing says otherwise.
 pub const WORK: &str = "work";
 
-/// The instructions a session starts with, listing the skills `work` calls for.
+/// The instructions a session starts with, listing the skills `focus` calls for.
 fn instructions(
     config: &SessionConfig,
     host: &dyn HostTools,
     skills: &SkillIndex,
-    work: &str,
+    focus: &SkillFocus,
 ) -> String {
     let abilities = Abilities {
         files: config.tools.files,
@@ -2232,7 +2232,7 @@ fn instructions(
         abilities,
         config.person.as_ref(),
         &config.lessons,
-        &prompt_section(skills, work),
+        &prompt_section(skills, focus),
         notes.as_deref(),
         config.instructions.as_deref(),
     )

@@ -80,6 +80,29 @@ export interface WidgetMove { stages: { part: number; shapes: number[]; labels?:
     choice's place, from 0. */
 export interface WidgetGuess { before: number; question: string; choices: string[]; answer: number }
 
+/** One answer of a finder's question, and where it leads: a later question (`next`) or an outcome,
+    each by its number from 1. */
+export interface WidgetAnswer { label: string; next?: number; outcome?: number }
+
+/** One question of a finder: its words and the answers you tap. */
+export interface WidgetQuestion { text: string; answers: WidgetAnswer[] }
+
+/** Where a finder's path ends: what is true in that case, and what to do. */
+export interface WidgetOutcome { label: string; text?: string }
+
+/** One question of a quiz: its choices, the right one's place (from 0), and why it is right. */
+export interface WidgetCheck { question: string; choices: string[]; answer: number; why?: string }
+
+/** One named range of a scale, from where it starts to where it ends. */
+export interface WidgetRange { label: string; from: number; to: number }
+
+/** One figure placed on a scale, and whose it is. */
+export interface WidgetPin { label: string; value: number }
+
+/** One event of a timeline: its date as the daemon keeps it (`1997`, `1997-06`, `1997-06-26`,
+    `-500` for 500 BC), what happened or is due, and a few words more. */
+export interface WidgetEvent { date: string; label: string; note?: string }
+
 export type WidgetSpec =
   | { kind: 'choices'; title: string; options: WidgetChoice[] }
   | { kind: 'checklist'; title: string; items: WidgetItem[] }
@@ -91,9 +114,25 @@ export type WidgetSpec =
   | { kind: 'flow'; title: string; boxes: WidgetBox[]; repeats?: boolean }
   | { kind: 'graph'; title: string; style: 'bar' | 'line'; labels: string[]; series: WidgetSeries[]; unit?: string; prefix?: string; decimals?: number }
   | { kind: 'picture'; title: string; width: number; height: number; shapes: WidgetShape[]; parts?: WidgetPart[]; labels?: WidgetLabel[]; moves?: WidgetMove[]; guess?: WidgetGuess; dial?: string }
+  | { kind: 'finder'; title: string; questions: WidgetQuestion[]; outcomes: WidgetOutcome[] }
+  | { kind: 'quiz'; title: string; checks: WidgetCheck[] }
+  | { kind: 'scale'; title: string; ranges: WidgetRange[]; pins: WidgetPin[]; unit?: string; prefix?: string; decimals?: number }
+  | { kind: 'timeline'; title: string; events: WidgetEvent[] }
+  /** A skill the agent suggested with `suggest_skill` (ADR 0118): its name in words, when to use
+      it, and what to do. Nothing is saved until the person saves it. */
+  | { kind: 'skill'; title: string; description: string; instructions: string }
 
-/** What you made of a widget: a checklist's ticks, or a calculator's values by input id. */
-export type WidgetState = { checked: boolean[] } | { values: Record<string, number | boolean> }
+/** What you made of a widget: a checklist's ticks, a calculator's values by input id, the answer
+    you took at each of a finder's questions from the first (each from 0), the choice you picked
+    for each of a quiz's questions (from 0, or null), or a suggested skill saved (by its folder
+    name) or left. */
+export type WidgetState =
+  | { checked: boolean[] }
+  | { values: Record<string, number | boolean> }
+  | { answers: number[] }
+  | { picked: (number | null)[] }
+  | { saved: string }
+  | { dismissed: true }
 
 /** A widget kept with an answer: its place among the answer's widgets (from 1), the line of the
     answer's words it stands before (none: at the end), and what you last made of it. */

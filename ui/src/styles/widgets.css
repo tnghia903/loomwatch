@@ -1,6 +1,7 @@
 /* ===========================================================================
-   Widgets in an answer (ADR 0114): a comparison, a chart, a graph, a flow, steps, a picture, a
-   calculator, a checklist, marks, choices; each where the answer's words place it, the rest after them.
+   Widgets in an answer (ADR 0114): a comparison, a chart, a graph, a scale, a timeline, a flow,
+   steps, a picture, a calculator, a checklist, a finder, a quiz, marks, choices; each where the
+   answer's words place it, the rest after them.
    components/chat/widgets/. Every rule is under a .wg- class; tokens only.
 
    The look ("Counted"): a card set into the bubble with a rim of light; its title in the serif;
@@ -702,6 +703,155 @@
 .wg-gline.s3, .wg-swatch.s3 line { stroke: var(--color-series-3); }
 
 /* ---------------------------------------------------------------------------
+   Finder: what you answered as quiet rows you tap to change, with one hint line; the question
+   waiting on you with its number in the steps' gold ring, its answers in a quiz's look (they
+   answer here; choices send a reply), the one you gave before ringed; and the outcome set in,
+   its few words in the serif. The outcome has no gold: it is the answer, not something to tap.
+   --------------------------------------------------------------------------- */
+.wg-trail-wrap { display: flex; flex-direction: column; gap: 2px; }
+.wg-trail { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.wg-trail-hint { margin: 0; font: 400 12px/16px var(--font-sans); color: var(--color-ink-2); }
+.wg-trail > li + li { border-top: 1px solid var(--color-hairline); }
+.wg-trail-step { display: flex; flex-wrap: wrap; align-items: baseline; align-content: center; gap: 2px var(--sp-2); width: 100%; padding: 6px 0; border: 0; background: none; color: var(--color-ink); font: inherit; text-align: left; cursor: pointer; }
+.wg-trail-step:disabled { cursor: default; }
+.wg-trail-q { min-width: 0; font: 400 13px/18px var(--font-sans); color: var(--color-ink-2); overflow-wrap: break-word; }
+.wg-trail-a { font: 600 13px/18px var(--font-sans); color: var(--color-ink); }
+@media (hover: hover) { .wg-trail-step:hover:not(:disabled) .wg-trail-a { text-decoration: underline; text-underline-offset: 3px; } }
+.wg-trail-step:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; border-radius: var(--r-xs); }
+.wg-finder-ask { display: flex; flex-direction: column; gap: var(--sp-2); }
+.wg-finder-q, .wg-check-q { margin: 0; display: flex; align-items: flex-start; gap: var(--sp-2); font: 500 15px/22px var(--font-sans); color: var(--color-ink); }
+/* A question's number, in the steps' gold ring: a finder's and a quiz's, and a scale's ranges'. */
+.wg-q-n {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-full);
+  box-shadow: inset 0 0 0 1.5px var(--color-accent);
+  color: var(--color-accent);
+  font: 600 12px/1 var(--font-sans);
+  font-variant-numeric: tabular-nums;
+}
+.wg-outcome { padding: var(--sp-3); border-radius: var(--r-md); background: color-mix(in srgb, var(--color-ink) 5%, transparent); }
+.wg-outcome-label { margin: 0; font: 400 20px/26px var(--font-serif); letter-spacing: -.005em; color: var(--color-ink); text-wrap: balance; }
+.wg-outcome-text { margin: 4px 0 0; font: 400 15px/22px var(--font-sans); color: var(--color-ink); }
+
+/* ---------------------------------------------------------------------------
+   Quiz: each question, its choices to tap, then why. Once picked, the right choice wears green's
+   glyph on a faint green edge; yours, if it isn't, keeps its edge and a cross, quiet, not red; the
+   rest step back.
+   --------------------------------------------------------------------------- */
+.wg-checks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-4); }
+.wg-check { display: flex; flex-direction: column; gap: var(--sp-2); }
+.wg-check-choices { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 150px), 1fr)); gap: var(--sp-2); }
+.wg-check-choice {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid color-mix(in srgb, var(--color-ink) 16%, transparent);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--color-ink) 3%, transparent);
+  color: var(--color-ink);
+  font: 500 14px/20px var(--font-sans);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--t-instant) var(--ease-out), background-color var(--t-instant) var(--ease-out);
+}
+.wg-check-choice:hover:not(:disabled, [aria-disabled="true"]) { border-color: var(--color-ink-3); background: color-mix(in srgb, var(--color-ink) 6%, transparent); }
+/* While the answer is still written: nothing can be picked yet. */
+.wg-check-choice:disabled { cursor: default; color: var(--color-ink-2); }
+/* Settled: told to assistive tech with aria-disabled, so a focused choice keeps its focus. */
+.wg-check-choice[aria-disabled="true"] { cursor: default; }
+/* A finder's answer you gave before, marked while that question is asked again. */
+.wg-check-choice.on { border-color: var(--color-accent); background: var(--color-accent-tint); box-shadow: 0 0 0 1px var(--color-accent); }
+/* The right choice leads: a full green edge, which a wrong pick's ink edge doesn't outweigh. */
+.wg-check-choice.right { border-color: var(--color-ok); background: color-mix(in srgb, var(--color-ok) 9%, transparent); }
+.wg-check-choice.right .wg-check-mark { color: var(--color-ok); }
+.wg-check-choice.missed { border-color: var(--color-ink-3); }
+.wg-check-choice.missed .wg-check-mark { color: var(--color-ink-2); }
+.wg-check-choice.rest { color: var(--color-ink-2); border-color: transparent; }
+.wg-check-mark { flex: none; display: grid; place-items: center; }
+.wg-check-why { margin: 0; padding: var(--sp-2) var(--sp-3); border-radius: var(--r-md); background: color-mix(in srgb, var(--color-ink) 5%, transparent); font: 400 14px/20px var(--font-sans); color: var(--color-ink); }
+.wg-check-why b { font-weight: 600; }
+.wg-quiz-again { align-self: flex-start; padding: 7px 4px; border: 0; background: none; color: var(--color-ink); font: 500 13px/18px var(--font-sans); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+
+/* ---------------------------------------------------------------------------
+   Scale: each figure in words first; then the ranges as one bar to scale, told apart by a gap and
+   a shade that steps, each named inside (or numbered, with the names listed under); each figure
+   a gold stem from its name to a point on the bar; where ranges meet, the figure under.
+   --------------------------------------------------------------------------- */
+.wg-scale-read { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.wg-scale-read li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--sp-2); font: 400 15px/22px var(--font-sans); color: var(--color-ink); font-variant-numeric: tabular-nums; }
+.wg-scale-read b { font-weight: 600; }
+.wg-scale-in { font: 400 20px/26px var(--font-serif); letter-spacing: -.005em; }
+.wg-scale-draw { --tier-h: 20px; position: relative; display: flex; flex-direction: column; margin-inline: 2px; }
+/* Room under the lowest name for a stem that reads on its own. */
+.wg-scale-pins { position: relative; height: calc(var(--tiers) * var(--tier-h) + 8px); }
+/* A pin's stem runs from its name down to the top of the bar and ends in a point there, so it never
+   crosses a range's name. */
+.wg-scale-pin { position: absolute; top: calc(var(--tier) * var(--tier-h)); bottom: -4px; width: 0; z-index: 1; }
+.wg-scale-pin::before { content: ''; position: absolute; top: 16px; bottom: 5px; left: -1px; width: 2px; border-radius: 1px; background: var(--color-accent); }
+.wg-scale-pin::after { content: ''; position: absolute; bottom: 0; left: -5px; border: 5px solid transparent; border-bottom: 0; border-top: 6px solid var(--color-accent); }
+.wg-scale-pin-label { position: absolute; top: 0; left: 0; transform: translateX(-50%); white-space: nowrap; font: 600 12px/16px var(--font-sans); color: var(--color-ink); }
+/* A name near either end of the bar stands from that end, as its figures do, never off the card. */
+.wg-scale-pin-label.first { left: -6px; transform: none; }
+.wg-scale-pin-label.last { left: 6px; transform: translateX(-100%); }
+.wg-scale-bar { position: relative; height: 34px; margin-top: 4px; }
+.wg-scale-range {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: var(--r-xs);
+  box-shadow: inset 2px 0 0 var(--wg-surface), inset -1px 0 0 var(--wg-surface);
+  background: color-mix(in srgb, var(--color-ink) 7%, transparent);
+  color: var(--color-ink);
+  font: 500 12px/16px var(--font-sans);
+  white-space: nowrap;
+}
+.wg-scale-range .wg-q-n { width: 18px; height: 18px; font-size: 11px; }
+.wg-scale-range:nth-child(even) { background: color-mix(in srgb, var(--color-ink) 12%, transparent); }
+.wg-scale-range.held { background: var(--color-accent-tint); font-weight: 600; box-shadow: inset 2px 0 0 var(--wg-surface), inset -1px 0 0 var(--wg-surface), inset 0 0 0 1px var(--color-accent); }
+/* Dark's gold tint is darker than the card, so a held range would read as a hole: gold mixed into
+   the card instead. */
+[data-theme="dark"] .wg-scale-range.held { background: color-mix(in srgb, var(--color-accent) 14%, var(--wg-surface)); }
+.wg-scale-ticks { position: relative; height: 18px; margin-top: 4px; }
+.wg-scale-tick { position: absolute; top: 0; transform: translateX(-50%); white-space: nowrap; font: 400 12px/16px var(--font-sans); color: var(--color-ink-2); font-variant-numeric: tabular-nums; }
+.wg-scale-tick.first { transform: none; }
+.wg-scale-tick.last { transform: translateX(-100%); }
+.wg-scale-key { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 2px var(--sp-3); font: 400 12px/16px var(--font-sans); color: var(--color-ink-2); }
+.wg-scale-key li { display: inline-flex; align-items: baseline; gap: 4px; }
+.wg-scale-key li.held { color: var(--color-ink); font-weight: 600; }
+.wg-scale-key li .wg-q-n { width: 16px; height: 16px; font-size: 10px; align-self: center; }
+.wg-scale-key-span { font-variant-numeric: tabular-nums; font-weight: 400; color: var(--color-ink-2); }
+
+/* ---------------------------------------------------------------------------
+   Timeline: one grid, so dates line up; a rail down the middle with a dot for each event and
+   today as a gold ring; the room between rows grows with the time between them, and a long gap
+   says how long, beside the rail.
+   --------------------------------------------------------------------------- */
+.wg-when { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: max-content 14px minmax(0, 1fr); column-gap: var(--sp-2); }
+.wg-when > li { display: contents; }
+.wg-when-date { padding: 1px 0; text-align: right; font: 600 13px/20px var(--font-sans); color: var(--color-ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.wg-when-rail { position: relative; display: grid; justify-items: center; }
+.wg-when-rail::before { content: ''; position: absolute; top: 0; bottom: 0; left: 50%; border-left: 1px solid var(--color-warp); }
+.wg-when-row:first-child .wg-when-rail::before { top: 11px; }
+.wg-when-row:last-child .wg-when-rail::before { bottom: calc(100% - 11px); }
+.wg-when-dot { position: relative; z-index: 1; width: 9px; height: 9px; margin-top: 7px; border-radius: var(--r-full); background: var(--color-ink-2); box-shadow: 0 0 0 3px var(--wg-surface); }
+.wg-when-row.today .wg-when-dot { width: 11px; height: 11px; margin-top: 6px; background: var(--wg-surface); box-shadow: 0 0 0 3px var(--wg-surface), inset 0 0 0 2px var(--color-accent); }
+.wg-when-row.today .wg-when-date { color: var(--color-ink); }
+.wg-when-what { display: flex; flex-direction: column; gap: 1px; padding: 1px 0; min-width: 0; }
+.wg-when-what b { font: 500 14px/20px var(--font-sans); color: var(--color-ink); overflow-wrap: break-word; }
+.wg-when-what span { font: 400 13px/18px var(--font-sans); color: var(--color-ink-2); overflow-wrap: break-word; }
+.wg-when-gap > span:first-child, .wg-when-gap .wg-when-rail { min-height: calc(var(--sp-2) + var(--space, 0px)); }
+.wg-when-gap-words { align-self: center; font: 400 12px/16px var(--font-sans); color: var(--color-ink-2); font-variant-numeric: tabular-nums; font-style: italic; }
+
+/* ---------------------------------------------------------------------------
    Where a widget stands: between its paragraphs, in a bubble as wide as the chat allows, so a
    calculator lays itself out by its own room.
    --------------------------------------------------------------------------- */
@@ -744,10 +894,32 @@
 .wg-fresh .wg-part-n { animation: wg-part-in var(--t-move) var(--ease-out) backwards; animation-delay: calc(var(--t-entrance) + var(--k, 0) * 80ms); }
 @media (prefers-reduced-motion: reduce) {
   .wg-fresh .wg-bar-fill, .wg-fresh .wg-side-scale i, .wg-fresh .wg-dots i, .wg-fresh .wg-rail, .wg-fresh .wg-part-n { animation: none; }
-  .wg-switch-track i, .wg-progress i, .wg-option, .wg-shape, .wg-label { transition: none; }
+  .wg-switch-track i, .wg-progress i, .wg-option, .wg-check-choice, .wg-shape, .wg-label { transition: none; }
 }
 
+/* ---------------------------------------------------------------------------
+   A SKILL THE AGENT SUGGESTS (ADR 0118): its mark and name, when to use it, what it says one tap
+   away, and Save, Change or Not now. Save is the ring button, not a fill: the chat's send is the
+   one. Not now is ink, not the gold of a link: leaving is not the thing to do here.
+   --------------------------------------------------------------------------- */
+.wg-skill { gap: var(--sp-3); }
+.wg-skill-head { display: flex; align-items: flex-start; gap: var(--sp-3); min-width: 0; }
+.wg-skill-name { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.wg-skill-when { margin: 0; font: 400 13.5px/1.5 var(--font-sans); color: var(--color-ink-2); overflow-wrap: anywhere; }
+.wg-skill-says > summary { width: fit-content; cursor: pointer; font: 400 13px/18px var(--font-sans); color: var(--color-ink-2); }
+.wg-skill-says[open] > summary { margin-bottom: var(--sp-2); }
+.wg-skill-says .lw-skills-recipe-text { max-height: 320px; overflow-y: auto; }
+.wg-skill-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); }
+.wg-skill-actions .btn { height: 32px; padding: 0 var(--sp-4); }
+.wg-skill-actions .link { color: var(--color-ink-2); }
+.wg-skill-saved { margin: 0; font: 500 13px/18px var(--font-sans); color: var(--color-ok); }
+.wg-skill-error { margin: 0; font: 400 12.5px/1.45 var(--font-sans); color: var(--color-alert); }
+.wg-skill.left { padding: var(--sp-2) var(--sp-4); box-shadow: none; }
+.wg-skill-left { margin: 0; font: 400 13px/18px var(--font-sans); color: var(--color-ink-2); }
+
 @media (pointer: coarse) {
+  .wg-skill-actions .btn { min-height: 44px; }
+  .wg-skill-actions .link, .wg-skill-left .link, .wg-skill-says > summary { min-height: 44px; display: inline-flex; align-items: center; }
   .wg-option, .wg-input, .wg-preset, .wg-box { min-height: 44px; }
   .wg-step { min-height: 44px; min-width: 44px; }
   .wg-tick { padding: 12px 0; }
@@ -759,6 +931,8 @@
   .wg-picture { --wg-play: 44px; }
   .wg-ask-choice, .wg-ask-skip { min-height: 44px; }
   .wg-ask-skip { min-width: 44px; }
+  .wg-trail-step { min-height: 44px; }
+  .wg-quiz-again { min-height: 44px; min-width: 44px; }
   /* The number stays small on the picture; its hit area is 44 points around it. */
   .wg-part-n::before { content: ''; position: absolute; inset: -8px; border-radius: var(--r-full); }
 }

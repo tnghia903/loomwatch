@@ -244,8 +244,9 @@ depend on the document as a whole:
   of My agents, its lessons go with it.
 - Optional `Agent.widgets` says whether the agent may put widgets in its answer when its reply
   is the answer the person reads (ADR 0114): choices to tap, a checklist to tick, a calculator
-  LoomWatch works out, steps to tap through, a chart LoomWatch draws to scale, a graph of bars or a
-  line, a row of things marked yes or no, or a diagram of boxes and arrows. Absent means
+  LoomWatch works out, questions to tap through to the outcome for the person's own case, a quiz,
+  steps to tap through, a chart LoomWatch draws to scale, a graph of bars or a line, a scale of
+  named ranges, a timeline, a row of things marked yes or no, or a diagram of boxes and arrows. Absent means
   LoomWatch's default, which is on; `false` keeps it off for that agent. One of My agents keeps it
   as its own (`widgets` in its file), and every team that uses it follows. Not for an operator node.
 - **Notes set aside from the answer.** Some sections an agent ends its reply with are for the
@@ -643,7 +644,9 @@ your teams live in, which travel with the team files.
 
 Every agent is offered skills. Its instructions list the name and description of each skill in its
 work folder's `.agents/skills` and `.claude/skills` and in LoomWatch's skills folder, and the agent
-reads a skill's `SKILL.md` itself when its task calls for it. A skill turned off for the agent on
+reads a skill's `SKILL.md` itself when its task calls for it. When LoomWatch's folder holds more
+than 20 skills, the list has the ones the agent's role and task call for most, at most 15, and says
+where the others are so the agent can look for one it needs. A skill turned off for the agent on
 the canvas is left out of that list.
 
 A **wired** skill (`kind: skill`) is required. Before the agent starts, LoomWatch copies the

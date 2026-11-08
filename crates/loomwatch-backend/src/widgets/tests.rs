@@ -895,7 +895,7 @@ fn every_kind_the_tool_offers_has_its_place_in_the_guide() {
         .iter()
         .map(|kind| kind.as_str().unwrap())
         .collect();
-    assert_eq!(kinds.len(), 10);
+    assert_eq!(kinds.len(), 14);
     let guide = SHOW_WIDGET.default_text();
     let habit = crate::agent::prompt::WIDGETS.default_text();
     let kind_line = SHOW_WIDGET_KIND.default_text();
@@ -918,6 +918,18 @@ fn every_kind_the_tool_offers_has_its_place_in_the_guide() {
         guide.contains("parts that sit side by side")
             && guide.contains("are shown with compare, not flow"),
         "the guide says a flow is not for parts side by side"
+    );
+    // A finder and choices both offer taps: the guide says which one answers at once.
+    assert!(
+        guide.contains(
+            "A finder answers them at once from what you set out; choices send their \
+                        reply to you"
+        ),
+        "{guide}"
+    );
+    assert!(
+        guide.contains("When things in order have dates, show a timeline"),
+        "{guide}"
     );
     // ADR 0117: something to see is drawn. The picture is offered before the flow in the guide
     // and the habit, and the flow is for what has nothing to see: a live model drew a plane's

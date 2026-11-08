@@ -293,9 +293,33 @@
 }
 .lw-skills-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 
-/* The way to the skills other apps already have: above the list, so a long one never hides it.
-   As wide as its words, so it doesn't read as a second box beside the filter. */
-.lw-skills-look { align-self: flex-start; }
+/* New skill and the way to the skills other apps already have: above the list, so a long one never
+   hides them. Each as wide as its words, so they don't read as a second box beside the filter. */
+.lw-skills-shelf-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.lw-skills-item-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
+.lw-skills-item-actions .btn { height: 28px; padding: 0 var(--sp-3); font-size: 12.5px; }
+.lw-skills-item-actions .lw-skills-remove { align-self: auto; }
+
+/* ---- Writing a skill (SkillSheet, ADR 0118) ---------------------------------------------------- */
+/* The person's own words first: what they want, which LoomWatch writes or changes the skill from. */
+.lw-skill-ask {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--color-ink) 3%, transparent);
+}
+.lw-skill-ask > label, .lw-skill-field > label { font: 500 13.5px/1.35 var(--font-sans); color: var(--color-ink); }
+.lw-skill-ask textarea { min-height: 0; resize: vertical; font-size: 14px; line-height: 1.5; }
+.lw-skill-ask-row { display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-3); }
+.lw-skill-ask-row .btn { height: 32px; padding: 0 var(--sp-4); }
+.lw-skill-ask-row .lw-skills-quiet { margin-right: auto; }
+.lw-skill-ask .inline-error { margin: 0; }
+.lw-skill-field textarea { min-height: 0; line-height: 1.5; }
+.lw-skill-field .lw-skills-quiet { font-size: 12.5px; }
+.lw-skill-field textarea.lw-skill-steps { min-height: 220px; font-size: 13.5px; }
 
 /* ---- The review sheet ------------------------------------------------------ */
 .lw-skills-scrim {
@@ -442,12 +466,14 @@
 .lw-skills-skipped b { font-weight: 500; color: var(--color-ink); }
 
 /* ---- What just happened --------------------------------------------------- */
+/* Under a sheet's dimmed page, not over its buttons: a sheet opened after a save is the thing to
+   answer. */
 .lw-skills-toast {
   position: fixed;
   left: 0;
   right: 0;
   bottom: var(--sp-5);
-  z-index: 210;
+  z-index: 190;
   width: fit-content;
   max-width: calc(100vw - 32px);
   margin: 0 auto;
@@ -499,7 +525,9 @@
   .lw-skills-layout { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 767px) {
-  .lw-skills-look { align-self: stretch; justify-content: center; }
+  .lw-skills-shelf-actions > .btn { flex: 1 1 auto; justify-content: center; }
+  /* A thumb's size: these rules are more particular than the phone's own .btn height. */
+  .lw-skills-item-actions .btn, .lw-skill-ask-row .btn, .lw-skills-sheet .instructions-updated-actions .btn, .lw-skills-sheet-foot .btn { height: 44px; }
   /* The "?" is the only way to what My skills is for: a thumb-sized target, the row unchanged. */
   .lw-skills-shelf .explain-toggle { position: relative; }
   .lw-skills-shelf .explain-toggle::before { content: ""; position: absolute; inset: -13px; }

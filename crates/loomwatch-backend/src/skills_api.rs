@@ -1,8 +1,12 @@
 //! The Skills page's routes: `LoomWatch`'s skills folder, bringing skills in from the apps on this
-//! computer, and installing them from GitHub, skills.sh and `ClawHub`.
+//! computer, installing them from GitHub, skills.sh and `ClawHub`, and writing and changing them
+//! (ADR 0118).
 //!
 //! - `GET /api/skills` → `{folder, skills}`
 //! - `DELETE /api/skills/{name}` → `{removed}`
+//! - `GET /api/skills/words?name=` → one skill's `{name, description, instructions, files, base}`
+//! - `PUT /api/skills/words` `{name, description, instructions, base?, suggestedBy?}` → `{skill,
+//!   base, previous?}`: a new skill without `base`, a change to the one `base` names with it
 //! - `POST /api/skills/bring-in/preview` → `{candidates}`
 //! - `POST /api/skills/bring-in` `{keys}` → `{batchId, imported, skipped}`
 //! - `POST /api/skills/bring-in/{batchId}/undo` → `{removed}`
@@ -29,10 +33,13 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::marketplace::{AvatarKind, Endpoints, Marketplace, Source};
+use crate::skills_store::written::WriteSkill;
 use crate::skills_store::{self, SkillsError, SkillsStore};
 
 /// Bring-in keys are 16 characters each; this holds thousands of them.
 const BODY_LIMIT: usize = 64 * 1024;
+/// A skill's words: the longest `SKILL.md` `LoomWatch` keeps, written as JSON.
+const WORDS_LIMIT: usize = 3 * 1024 * 1024;
 const MAX_KEYS: usize = 5_000;
 const MAX_PATHS: usize = 500;
 
@@ -75,6 +82,13 @@ fn router_with(store: Arc<SkillsStore>, market: Arc<Marketplace>, home: PathBuf)
         .route("/api/skills/avatar", delete(remove_fixed))
         .route("/api/skills/avatar/{kind}/{id}", get(avatar))
         .layer(DefaultBodyLimit::max(BODY_LIMIT))
+        .route(
+            "/api/skills/words",
+            get(words)
+                .put(write)
+                .delete(remove_fixed)
+                .layer(DefaultBodyLimit::max(WORDS_LIMIT)),
+        )
         .route_layer(middleware::from_fn(protect))
         .route_layer(middleware::from_fn(crate::watch_api::local_evidence))
         .with_state(state)
@@ -160,6 +174,24 @@ async fn removed(state: SkillsState, name: String) -> Answer {
     let store = state.store.clone();
     let removed = blocking(move || store.remove(&name)).await?;
     Ok(Json(json!({ "removed": removed })).into_response())
+}
+
+#[derive(Deserialize)]
+struct WordsQuery {
+    #[serde(default)]
+    name: String,
+}
+
+async fn words(State(state): State<SkillsState>, Query(query): Query<WordsQuery>) -> Answer {
+    let store = state.store.clone();
+    let words = blocking(move || store.words(&query.name)).await?;
+    Ok(Json(words).into_response())
+}
+
+async fn write(State(state): State<SkillsState>, Json(body): Json<WriteSkill>) -> Answer {
+    let store = state.store.clone();
+    let written = blocking(move || store.write(&body)).await?;
+    Ok(Json(written).into_response())
 }
 
 async fn preview(State(state): State<SkillsState>) -> Answer {
@@ -401,6 +433,101 @@ mod tests {
         assert_eq!(body["removed"], json!(["pdf"]));
         let (status, _) = send(&app, request("POST", &undo, true, None)).await;
         assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn a_skill_is_written_and_changed_from_the_page_only() {
+        let state = Scratch::new("state");
+        let home = Scratch::new("home");
+        let app = app(&state, &home);
+        let long = "Check every figure twice.\n".repeat(4_000);
+        let new = json!({
+            "name": "weekly-update",
+            "description": "Writes the weekly update.",
+            "instructions": long,
+        });
+
+        let (status, body) = send(
+            &app,
+            request("PUT", "/api/skills/words", false, Some(new.clone())),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+        assert!(!state.path().join("skills/weekly-update").exists());
+
+        // Longer than the other routes take: a skill's instructions can be.
+        let (status, body) = send(&app, request("PUT", "/api/skills/words", true, Some(new))).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["skill"]["origin"]["kind"], "written");
+        assert!(body.get("previous").is_none());
+
+        let (status, words) = send(
+            &app,
+            request("GET", "/api/skills/words?name=weekly-update", false, None),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{words}");
+        assert_eq!(words["description"], "Writes the weekly update.");
+        assert_eq!(words["base"], body["base"]);
+
+        let change = json!({
+            "name": "weekly-update",
+            "description": "Writes the weekly update in three bullets.",
+            "instructions": "Three bullets.",
+            "base": words["base"],
+        });
+        let (status, changed) = send(
+            &app,
+            request("PUT", "/api/skills/words", true, Some(change.clone())),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{changed}");
+        assert_eq!(
+            changed["previous"]["description"],
+            "Writes the weekly update."
+        );
+        assert!(changed["skill"]["changedAt"].is_string());
+
+        // The same change again starts from words that are no longer there.
+        let (status, again) = send(
+            &app,
+            request("PUT", "/api/skills/words", true, Some(change)),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{again}");
+        assert!(again["error"].as_str().unwrap().contains("changed since"));
+
+        // Past what one skill holds, but within what the route reads: the person is told why in
+        // words, rather than the bare refusal of a request too big to read (2 MB by default).
+        let (status, refused) = send(
+            &app,
+            request(
+                "PUT",
+                "/api/skills/words",
+                true,
+                Some(json!({
+                    "name": "huge-update",
+                    "description": "Writes a huge update.",
+                    "instructions": "x".repeat(2_500_000),
+                })),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+        assert_eq!(refused["error"], "What to do is too long for one skill.");
+
+        let (status, missing) = send(
+            &app,
+            request("GET", "/api/skills/words?name=nothing", false, None),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{missing}");
+
+        // A skill named like the route can still be removed.
+        skill(&state.path().join("skills/words"), "words", "");
+        let (status, body) = send(&app, request("DELETE", "/api/skills/words", true, None)).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["removed"], "words");
     }
 
     #[tokio::test]

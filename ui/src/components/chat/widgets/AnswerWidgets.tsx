@@ -9,11 +9,16 @@ import { WidgetChart } from './WidgetChart'
 import { WidgetChecklist } from './WidgetChecklist'
 import { WidgetChoices } from './WidgetChoices'
 import { WidgetCompare } from './WidgetCompare'
+import { WidgetFinder } from './WidgetFinder'
 import { WidgetFlow } from './WidgetFlow'
 import { WidgetGraph } from './WidgetGraph'
 import { WidgetMarks } from './WidgetMarks'
 import { WidgetPicture } from './WidgetPicture'
+import { WidgetQuiz } from './WidgetQuiz'
+import { WidgetScale } from './WidgetScale'
+import { WidgetSkill } from './WidgetSkill'
 import { WidgetSteps } from './WidgetSteps'
+import { WidgetTimeline } from './WidgetTimeline'
 
 export interface AnswerWidgetsProps {
   widgets: readonly KeptWidget[]
@@ -27,6 +32,8 @@ export interface AnswerWidgetsProps {
   /** The answer is still being written: the widgets are drawn as they will be, and work once it is
       done. */
   live?: boolean
+  /** Who answered, as the chat names them: a skill they suggest says so once saved. */
+  by?: string
 }
 
 /**
@@ -43,8 +50,10 @@ export function AnswerWidgets(props: AnswerWidgetsProps) {
 
 /**
  * One widget in an answer (ADR 0114): choices to tap, a checklist to tick, a calculator LoomWatch
- * works out, steps to tap through, a picture the agent drew whose parts you step through, or a
- * comparison, a chart, a graph, a row of marks or a flow to look at. What you tick or change is kept, and the next work's conversation says so. When it
+ * works out, a finder whose questions lead you to the outcome for your case, a quiz that checks
+ * what the answer explained, steps to tap through, a picture the agent drew whose parts you step
+ * through, or a comparison, a chart, a graph, a scale, a timeline, a row of marks or a flow to look
+ * at. What you tick, answer or change is kept, and the next work's conversation says so. When it
  * arrives as news (ADR 0051) and this window hasn't drawn it before, its marks grow in once
  * (`wg-fresh`); history and a widget drawn again are simply there.
  */
@@ -95,7 +104,7 @@ class WidgetGuard extends Component<{ drawing: string; title: unknown; children:
   }
 }
 
-function drawn({ kept, onChange, onChoose, chosen = null, live = false }: Omit<AnswerWidgetsProps, 'widgets'> & { kept: KeptWidget }, fresh: boolean) {
+function drawn({ kept, onChange, onChoose, chosen = null, live = false, by }: Omit<AnswerWidgetsProps, 'widgets'> & { kept: KeptWidget }, fresh: boolean) {
   switch (kept.spec.kind) {
     case 'choices': return <WidgetChoices spec={kept.spec} onChoose={live ? undefined : onChoose} chosen={chosen} live={live} />
     case 'checklist': return <HeldChecklist kept={kept} onChange={onChange} live={live} />
@@ -107,6 +116,11 @@ function drawn({ kept, onChange, onChoose, chosen = null, live = false }: Omit<A
     case 'chart': return <WidgetChart spec={kept.spec} />
     case 'graph': return <WidgetGraph spec={kept.spec} />
     case 'picture': return <WidgetPicture spec={kept.spec} fresh={fresh} />
+    case 'finder': return <HeldFinder kept={kept} onChange={onChange} live={live} />
+    case 'quiz': return <HeldQuiz kept={kept} onChange={onChange} live={live} />
+    case 'scale': return <WidgetScale spec={kept.spec} />
+    case 'timeline': return <WidgetTimeline spec={kept.spec} />
+    case 'skill': return <WidgetSkill kept={kept} onChange={onChange} live={live} by={by} />
   }
   return null
 }
@@ -121,4 +135,16 @@ function HeldCalculator({ kept, onChange, live }: { kept: KeptWidget; onChange: 
   const held = useHeldState(kept, onChange)
   if (kept.spec.kind !== 'calculator') return null
   return <WidgetCalculator spec={kept.spec} state={held.state} onShow={held.show} onKeep={held.keep} error={held.error} disabled={live} />
+}
+
+function HeldFinder({ kept, onChange, live }: { kept: KeptWidget; onChange: AnswerWidgetsProps['onChange']; live: boolean }) {
+  const held = useHeldState(kept, onChange)
+  if (kept.spec.kind !== 'finder') return null
+  return <WidgetFinder spec={kept.spec} state={held.state} onAnswer={(answers) => held.keep({ answers })} error={held.error} disabled={live} />
+}
+
+function HeldQuiz({ kept, onChange, live }: { kept: KeptWidget; onChange: AnswerWidgetsProps['onChange']; live: boolean }) {
+  const held = useHeldState(kept, onChange)
+  if (kept.spec.kind !== 'quiz') return null
+  return <WidgetQuiz spec={kept.spec} state={held.state} onPick={(picked) => held.keep({ picked })} error={held.error} disabled={live} />
 }
