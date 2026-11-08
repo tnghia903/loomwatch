@@ -573,8 +573,12 @@ async fn a_lesson_about_a_missing_chart_says_to_show_one_with_a_widget() {
     );
     // ADR 0117: feedback asking for a picture teaches it to draw one there, not to make a file.
     assert!(
-        with.contains("steps, a picture or another view like these"),
+        with.contains("steps, a picture, a timeline, a quiz or another view like these"),
         "{with}"
+    );
+    assert!(
+        with.contains("a scale, a timeline, a calculator, a checklist, a decision guide, a quiz"),
+        "the learner knows every kind the agent can show: {with}"
     );
     assert!(
         with.contains("steps, a picture it draws, choices"),

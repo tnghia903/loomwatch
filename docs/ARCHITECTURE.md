@@ -577,10 +577,12 @@ that were set when the turn failed. `GET /api/messages-at` lists what is waiting
 ### Widgets in an answer
 
 The agent whose reply is the answer a person reads can put up to four widgets in it with the Team
-Bus's `show_widget` (ADR 0114): choices to tap, a checklist to tick, a calculator, steps to tap
-through, a comparison of two or three things side by side, a chart whose bars LoomWatch draws to
-scale from the agent's figures, a graph of bars or a line over labels, a row of marks, a flow, or a
-picture the agent draws (ADR 0117). The bus offers it only to that agent
+Bus's `show_widget` (ADR 0114): choices to tap, a checklist to tick, a calculator, a finder whose
+questions lead to the outcome for the person's own case, a quiz that checks what the answer
+explained, steps to tap through, a comparison of two or three things side by side, a chart whose
+bars LoomWatch draws to scale from the agent's figures, a graph of bars or a line over labels, a
+scale of named ranges with figures pinned where they fall, a timeline of events on their dates, a
+row of marks, a flow, or a picture the agent draws (ADR 0117). The bus offers it only to that agent
 (`BusSeat.answers`): the run's responder, told to the bus once per run (`TeamBus::answered_by`), not
 a helper or an agent started by another, with a person there, and with its `widgets` switch on.
 Absent, the switch is `widgets::DEFAULT_ON`, which is on: an agent asked for a chart or something
@@ -592,8 +594,12 @@ place line the call answers with. Both that habit and the tool's description (`w
 a line per kind) pick the kind by the shape of what the agent tells: things side by side or the
 parts of one thing a comparison, figures a chart, figures over time a graph, one thing leading to
 the next a flow, a process to follow steps, something to see (a machine, a living thing, how
-something moves) a picture, and so on; a flow's arrows mean order, so parts side by side are a
-comparison. A quick answer's last ask (`intent::SHOW_IN_REPLY`) names the same.
+something moves) a picture, where a figure stands among ranges a scale, things on dates a timeline,
+an answer that turns on the person's own case a finder, a check after an explanation a quiz, and so
+on; a flow's arrows mean order, so parts side by side are a comparison, and things in order with
+dates are a timeline. A finder answers at once from what the agent set out, where choices send the
+person's reply to the agent. A quick answer's last ask (`intent::SHOW_IN_REPLY`) names the same,
+less the quiz.
 
 `widgets::read` checks a widget against limits kept in one place (`widgets::limits`) and says what
 to change when it is refused. A calculator's results are formulas in a small language that the
@@ -614,6 +620,25 @@ answers with its figures (`figures`), and the app draws each from one zero. A ch
 whose figures count whole things sets `counted` (each a whole number, 0 or more): the app draws a
 dot for each thing, in tens, or for a round number of them (1, 2, 5, 10, …) when they don't fit,
 with a key saying which (`ui/src/lib/widgets/dots.ts`).
+
+The kinds added on 8 November (ADR 0114, amended) each live in their own module. A finder
+(`widgets/finder.rs`) has 1 to 6 `questions` of 2 to 4 answers and 2 to 8 `outcomes`; each answer
+leads to a later question (`next`) or an outcome, by number, so every path ends at an outcome, and
+every question and outcome must be reachable, or the call says which isn't. Its state is the answer
+taken at each question along the person's path (`{"answers": [1, 0]}`), checked by walking it, and
+the next run reads the path in words ("answered: Which passport? Vietnam; … → An e-visa"). A quiz
+(`widgets/quiz.rs`) has 1 to 5 `checks`, each with 2 to 4 differing choices, the right one named as
+written and kept by its place, and a `why`; its state is the choice picked for each (`{"picked":
+[1, null]}`), and the next run reads how many were right and what was missed, with the right
+answer. A scale (`widgets/scale.rs`) has 2 to 6 `ranges` from low to high, each starting where the
+one before ends, and 1 to 3 `pins` on it; a figure where two ranges meet is in the higher, the very
+top in the last (`scale::range_of`, twin of `rangeOf` in `ui/src/lib/widgets/scale.ts`), and the
+call answers with the range each pin falls in (`pins`) so the agent's words agree. A timeline
+(`widgets/timeline.rs`) has 2 to 12 `events`, each a year (`1997`, or `-500` for 500 BC), a month or
+a day that exists; the daemon puts them in date order and writes each date one way, and the call
+answers with that order (`order`). The app (`ui/src/lib/widgets/timeline.ts`) spaces events by the
+time between them, says how long the gaps worth noticing are at the coarser of their two dates,
+and puts today among them when one is still to come. Scales and timelines keep nothing.
 
 A picture (ADR 0117) is the one kind the agent draws: its `drawing` is SVG, read by
 `widgets/picture.rs`, which keeps only shapes (`path`, `circle`, `ellipse`, `rect`, `line`,
@@ -929,7 +954,7 @@ drawn on the canvas.
 | `ask_user(question, context?)` | A question for the person running the team. Returns at once; the answer arrives as the agent's next turn | none — the run waits on the operator |
 | `memory_search`, `memory_read`, `memory_write`, `checkpoint` | The team's Notebook, when the team turns it on (see [TEAM_MEMORY.md](TEAM_MEMORY.md)) | none |
 | `earlier_work(work)` | Read one earlier piece of the team's work in full. Offered in runs started from the app, which have a team chat to read | none |
-| `show_widget(kind, title, …)` | Put a widget in the answer: a comparison, a chart, a graph, a flow, steps, a picture it draws, a calculator, a checklist, marks or choices, picked by the shape of what it tells, placed by the line it answers with (ADR 0114). Offered only to the agent whose reply is the answer, with its switch on (on unless `widgets: false`) | none — kept with the answer when the run succeeds |
+| `show_widget(kind, title, …)` | Put a widget in the answer: a comparison, a chart, a graph, a scale, a timeline, a flow, steps, a picture it draws, a calculator, a checklist, a finder, a quiz, marks or choices, picked by the shape of what it tells, placed by the line it answers with (ADR 0114). Offered only to the agent whose reply is the answer, with its switch on (on unless `widgets: false`) | none — kept with the answer when the run succeeds |
 
 The bus grants the *ability* to delegate. The *judgment* of when to comes with it:
 
