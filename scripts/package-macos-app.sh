@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# Builds LoomWatch.app and the LoomWatch-macos.dmg people download, from three built programs.
+# Builds LoomWatch.app and the LoomWatch-macos.dmg people download, from four built programs.
 #
-#   scripts/package-macos-app.sh LOOMWATCHD LOOMWATCH_APP LOOMWATCH_OSASCRIPT OUT_DIR
+#   scripts/package-macos-app.sh LOOMWATCHD LOOMWATCH_APP LOOMWATCH_OSASCRIPT LOOMWATCH_MAC_APPS OUT_DIR
 #
 # LOOMWATCHD is a built loomwatchd (with the UI built into it), LOOMWATCH_APP the built
-# `LoomWatch` program from crates/loomwatch-app, and LOOMWATCH_OSASCRIPT the built
+# `LoomWatch` program from crates/loomwatch-app, LOOMWATCH_OSASCRIPT the built
 # `loomwatch-osascript` from crates/loomwatch-osascript, which loomwatchd signs a copy of for agents'
-# commands (ADR 0087); all may be universal. Writes OUT_DIR/LoomWatch-macos.dmg and
+# commands (ADR 0087), and LOOMWATCH_MAC_APPS the built `loomwatch-mac-apps` from
+# crates/loomwatch-mac-apps, which runs agents' actions in Calendar, Reminders, Contacts and Notes
+# (ADR 0121); all may be universal. Writes OUT_DIR/LoomWatch-macos.dmg and
 # OUT_DIR/LoomWatch-macos.dmg.sha256.
 #
 # Signing, from the environment:
@@ -21,7 +23,10 @@
 #   python3 -m venv .dmgbuild && .dmgbuild/bin/pip install --require-hashes -r packaging/macos/dmgbuild-requirements.txt
 set -euo pipefail
 
-[ $# -eq 4 ] || { echo "usage: $0 LOOMWATCHD LOOMWATCH_APP LOOMWATCH_OSASCRIPT OUT_DIR" >&2; exit 2; }
+[ $# -eq 5 ] || {
+  echo "usage: $0 LOOMWATCHD LOOMWATCH_APP LOOMWATCH_OSASCRIPT LOOMWATCH_MAC_APPS OUT_DIR" >&2
+  exit 2
+}
 dmgbuild=${DMGBUILD:-$(command -v dmgbuild || true)}
 [ -x "$dmgbuild" ] || {
   echo "$0: needs dmgbuild; see packaging/macos/dmgbuild-requirements.txt, or set DMGBUILD" >&2
@@ -30,7 +35,8 @@ dmgbuild=${DMGBUILD:-$(command -v dmgbuild || true)}
 daemon=$1
 app_program=$2
 osascript_program=$3
-out=$4
+mac_apps_program=$4
+out=$5
 root=$(cd "$(dirname "$0")/.." && pwd)
 version=$(sed -n 's/^version = "\(.*\)"$/\1/p' "$root/crates/loomwatch-backend/Cargo.toml" | head -n 1)
 [ -n "$version" ] || { echo "$0: no version in crates/loomwatch-backend/Cargo.toml" >&2; exit 1; }
@@ -43,8 +49,9 @@ mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$app_program" "$app/Contents/MacOS/LoomWatch"
 cp "$daemon" "$app/Contents/MacOS/loomwatchd"
 cp "$osascript_program" "$app/Contents/MacOS/loomwatch-osascript"
+cp "$mac_apps_program" "$app/Contents/MacOS/loomwatch-mac-apps"
 chmod 755 "$app/Contents/MacOS/LoomWatch" "$app/Contents/MacOS/loomwatchd" \
-  "$app/Contents/MacOS/loomwatch-osascript"
+  "$app/Contents/MacOS/loomwatch-osascript" "$app/Contents/MacOS/loomwatch-mac-apps"
 cp "$root/packaging/macos/AppIcon.icns" "$app/Contents/Resources/AppIcon.icns"
 cp "$root/LICENSE-MIT" "$root/LICENSE-APACHE" "$root/TRADEMARKS.md" "$app/Contents/Resources/"
 printf '%s %s\n' "$version" "$commit" >"$app/Contents/Resources/VERSION"
@@ -61,6 +68,10 @@ if [ -n "${MACOS_SIGN_IDENTITY:-}" ]; then
   app_entitlements=$root/packaging/macos/LoomWatch-app.entitlements
   codesign --force --options runtime --timestamp --sign "$MACOS_SIGN_IDENTITY" \
     "$app/Contents/MacOS/loomwatch-osascript"
+  # Calendar, Reminders and Contacts are refused to a hardened program without these (ADR 0121).
+  codesign --force --options runtime --timestamp \
+    --entitlements "$root/packaging/macos/LoomWatch-mac-apps.entitlements" \
+    --sign "$MACOS_SIGN_IDENTITY" "$app/Contents/MacOS/loomwatch-mac-apps"
   codesign --force --options runtime --timestamp --entitlements "$entitlements" \
     --sign "$MACOS_SIGN_IDENTITY" "$app/Contents/MacOS/loomwatchd"
   codesign --force --options runtime --timestamp --entitlements "$app_entitlements" \

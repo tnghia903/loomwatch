@@ -932,6 +932,24 @@ impl std::fmt::Debug for RunRegistry {
     }
 }
 
+/// Deleting an event or a contact can't be taken back, so each one is its own yes (ADR 0121):
+/// never allowed for the run or the whole team.
+fn once_only(
+    decision: crate::permissions::PermissionDecision,
+    request: &crate::permissions::PermissionRequest,
+) -> Result<(), OperatorError> {
+    let wide = matches!(
+        decision,
+        crate::permissions::PermissionDecision::AllowRun
+            | crate::permissions::PermissionDecision::AllowTeam
+    );
+    if wide && request.tool.as_ref().is_some_and(|tool| tool.cant_undo) {
+        return Err(OperatorError::conflict(
+            "This can't be undone, so it is allowed one at a time. Choose Allow, or Deny.",
+        ));
+    }
+    Ok(())
+}
 impl RunRegistry {
     /// A registry backed by the `runs` table. Records still live in the cache; this is what makes
     /// them outlive the process.
@@ -1858,6 +1876,7 @@ impl RunRegistry {
         } else {
             None
         };
+        once_only(decision, &entry.record.permission_requests[position])?;
         let request = entry.record.permission_requests.remove(position);
         // "Allow for the whole team" also answers every other agent already waiting on the same
         // thing, as the grant would have let it through had it asked a moment later.
@@ -5361,6 +5380,47 @@ pub(crate) mod tests {
             PermissionDecision::AllowOnce
         );
         assert!(!registry.allowed_for_run(&run_id, "a", "execute"));
+    }
+
+    /// What can't be undone is allowed one at a time (ADR 0121): never for the run or the team.
+    #[tokio::test]
+    async fn what_cant_be_undone_is_allowed_once_only() {
+        use crate::permissions::PermissionDecision;
+        let team = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: x\n      cwd: .\n    model: m\n",
+        )
+        .unwrap();
+        let registry = RunRegistry::default();
+        let manual =
+            RunRecord::queued("t.yaml".into(), "go".into(), &team, RunTrigger::Manual).unwrap();
+        let manual_id = manual.run_id.clone();
+        registry.insert(manual);
+        let mut deleting = permission_request("p-delete", "other");
+        deleting.scope = "mcp:Apple Calendar.delete_event".to_owned();
+        deleting.tool = Some(crate::permissions::ToolAsk {
+            server: "Apple Calendar".to_owned(),
+            call: "delete_event".to_owned(),
+            cant_undo: true,
+        });
+        let delete_answer = registry
+            .open_permission_request(&manual_id, deleting)
+            .expect("open");
+        for wide in [PermissionDecision::AllowRun, PermissionDecision::AllowTeam] {
+            assert!(
+                registry
+                    .answer_permission(&manual_id, "p-delete", wide, None)
+                    .is_err()
+            );
+        }
+        assert!(!registry.allowed_for_run(&manual_id, "a", "mcp:Apple Calendar.delete_event"));
+        registry
+            .answer_permission(&manual_id, "p-delete", PermissionDecision::AllowOnce, None)
+            .expect("still waiting, and allowed once");
+        assert_eq!(
+            delete_answer.await.unwrap().decision,
+            PermissionDecision::AllowOnce
+        );
+        assert!(!registry.allowed_for_run(&manual_id, "a", "mcp:Apple Calendar.delete_event"));
     }
 
     /// ADR 0040: a live run can be asked, a routine's too since ADR 0090; an answer reaches the

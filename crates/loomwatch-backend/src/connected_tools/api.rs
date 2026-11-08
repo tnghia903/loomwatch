@@ -28,6 +28,7 @@ use super::sign_in::{self, Begun, Outcome};
 use super::vault::Secret;
 use super::{Auth, ConnectedTool, MAX_TOOLS, Tools, same_address, unique_name};
 use crate::api::ApiError;
+use crate::mac_apps::App;
 
 /// The longest address accepted.
 const MAX_URL_CHARS: usize = 2_048;
@@ -44,6 +45,7 @@ pub fn router(tools: Tools) -> Router {
         .route("/api/tools/{id}/token", post(token))
         .route("/api/tools/{id}/sign-in", post(sign_in_again))
         .route("/api/tools/{id}/check", post(check))
+        .route("/api/tools/{id}/settings", post(open_settings))
         .route("/api/tools/icon/{host}", get(icon))
         .layer(DefaultBodyLimit::max(16 * 1024))
         .route_layer(middleware::from_fn(protect))
@@ -118,6 +120,7 @@ fn public(tool: &ConnectedTool) -> Value {
             "label": call.label(),
             "description": call.description,
             "readOnly": call.read_only,
+            "cantUndo": call.cant_undo,
         })).collect::<Vec<_>>(),
         "checkedAt": tool.checked_at,
         "pending": tool.pending,
@@ -127,6 +130,10 @@ fn public(tool: &ConnectedTool) -> Value {
         "icon": icons::site_for(tool).as_deref().and_then(icons::path),
         // Its sign-in also sends teams' answers to Notion and reads pages for agents (ADR 0070).
         "notion": same_address(&tool.url, crate::notion::MCP_URL),
+        // A Mac app that macOS hasn't let in yet: where the person allows it (ADR 0121).
+        "settings": App::at(&tool.url)
+            .filter(|_| tool.pending || tool.problem.is_some())
+            .map(App::settings),
     })
 }
 
@@ -134,7 +141,7 @@ async fn list(State(tools): State<Tools>) -> Json<Value> {
     let listed = tools.list().await;
     Json(json!({
         "tools": listed.iter().map(public).collect::<Vec<_>>(),
-        "catalog": CATALOG.iter().map(|entry| {
+        "catalog": CATALOG.iter().filter(|entry| shown_here(entry)).map(|entry| {
             let mut shown = serde_json::to_value(entry).unwrap_or_default();
             shown["icon"] = json!(icons::path(entry.site));
             shown
@@ -167,6 +174,11 @@ async fn icon(State(tools): State<Tools>, Path(host): Path<String>) -> Response 
     }
 }
 
+/// Whether this computer can connect `entry`: the Mac's own apps only on a Mac.
+fn shown_here(entry: &catalog::Entry) -> bool {
+    entry.auth != Auth::OnThisMac || cfg!(target_os = "macos")
+}
+
 #[derive(Deserialize)]
 struct Connect {
     url: String,
@@ -179,6 +191,9 @@ async fn connect(
     headers: HeaderMap,
     Json(body): Json<Connect>,
 ) -> ApiResult<Json<Value>> {
+    if let Some(app) = App::at(&body.url) {
+        return connect_mac_app(&tools, app).await;
+    }
     let url = address(&body.url)?;
     let existing = tools.list().await;
     let same = existing
@@ -332,8 +347,122 @@ async fn sign_in_again(
     }
 }
 
+/// Connect one of this Mac's apps (ADR 0121): macOS asks the person, in `LoomWatch`'s name, the
+/// first time. A refusal keeps the tool waiting, with where to allow it, until it is checked again.
+async fn connect_mac_app(tools: &Tools, app: App) -> ApiResult<Json<Value>> {
+    if !cfg!(target_os = "macos") {
+        return Err(failure(
+            StatusCode::BAD_REQUEST,
+            "This tool works only when LoomWatch runs on a Mac.",
+        ));
+    }
+    let existing = tools.list().await;
+    let same = existing.iter().find(|tool| tool.url == app.url()).cloned();
+    if let Some(tool) = same.as_ref().filter(|tool| !tool.pending) {
+        return Err(failure(
+            StatusCode::CONFLICT,
+            format!("That tool is already connected, as {}.", tool.name),
+        ));
+    }
+    if same.is_none() && existing.len() >= MAX_TOOLS {
+        return Err(failure(
+            StatusCode::BAD_REQUEST,
+            format!("LoomWatch keeps up to {MAX_TOOLS} tools. Remove one you don't use first."),
+        ));
+    }
+    let wanted = catalog::at(app.url()).map_or("Mac app", |entry| entry.name);
+    let tool = same.unwrap_or_else(|| ConnectedTool {
+        id: uuid::Uuid::new_v4().simple().to_string(),
+        name: unique_name(wanted, &existing),
+        url: app.url().to_owned(),
+        auth: Auth::OnThisMac,
+        calls: Vec::new(),
+        checked_at: None,
+        metadata: None,
+        pending: true,
+        problem: None,
+    });
+    let tool = finish_mac_app(tools, tool, app).await?;
+    if tool.pending {
+        return Ok(Json(json!({
+            "tool": public(&tool),
+            "needs": "macPermission",
+            "settings": app.settings(),
+        })));
+    }
+    Ok(Json(json!({"tool": public(&tool)})))
+}
+
+/// Ask macOS for `app` and keep `tool` as it answered: connected, or waiting with why.
+async fn finish_mac_app(
+    tools: &Tools,
+    mut tool: ConnectedTool,
+    app: App,
+) -> ApiResult<ConnectedTool> {
+    let granted = tools
+        .mac()
+        .access(app)
+        .await
+        .map_err(|said| failure(StatusCode::BAD_GATEWAY, said))?;
+    tool.auth = Auth::OnThisMac;
+    tool.calls = app.calls();
+    tool.checked_at = Some(super::now());
+    if granted {
+        tool.pending = false;
+        tool.problem = None;
+    } else {
+        // Connected once, it stays given to agents, and tells them what to ask for; never
+        // connected, it waits.
+        if tool.pending {
+            tool.problem = None;
+        } else {
+            tool.problem = Some(app.refused().to_owned());
+        }
+    }
+    keep(tools, &tool).await?;
+    Ok(tool)
+}
+
+/// Open System Settings on this Mac where a Mac app's tool is allowed (ADR 0121). The pane is
+/// `LoomWatch`'s own, never one the request names.
+async fn open_settings(
+    State(tools): State<Tools>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Value>> {
+    let tool = found(&tools, &id).await?;
+    let Some(app) = App::at(&tool.url).filter(|_| cfg!(target_os = "macos")) else {
+        return Err(failure(
+            StatusCode::BAD_REQUEST,
+            "Only a Mac app's tool is allowed in System Settings.",
+        ));
+    };
+    let opened = tokio::process::Command::new("/usr/bin/open")
+        .arg(app.settings())
+        .status()
+        .await
+        .is_ok_and(|status| status.success());
+    if !opened {
+        return Err(failure(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "System Settings didn't open. Open it from the Apple menu, then Privacy & Security.",
+        ));
+    }
+    Ok(Json(json!({"opened": true})))
+}
+
 async fn check(State(tools): State<Tools>, Path(id): Path<String>) -> ApiResult<Json<Value>> {
     let tool = found(&tools, &id).await?;
+    if let Some(app) = App::at(&tool.url) {
+        let tool = finish_mac_app(&tools, tool, app).await?;
+        if tool.pending {
+            return Ok(Json(json!({
+                "tool": public(&tool),
+                "needs": "macPermission",
+                "settings": app.settings(),
+            })));
+        }
+        return Ok(Json(json!({"tool": public(&tool)})));
+    }
     let tool = finish_connecting(&tools, tool).await?;
     Ok(Json(json!({"tool": public(&tool)})))
 }

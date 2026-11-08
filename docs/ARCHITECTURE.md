@@ -167,7 +167,8 @@ instructions and tools.
   folder first on commands' `PATH`. `loomwatch-osascript` (`crates/loomwatch-osascript`) is
   LoomWatch's own `osascript`: the same command line and output, through macOS's OpenScripting. A
   command can then work in Calendar, Mail or any other app once the person allows LoomWatch in
-  System Settings → Privacy & Security → Automation. Calendar, Reminders, Contacts and Photos also
+  System Settings → Privacy & Security → Automation (ADR 0121 gives Calendar, Reminders, Notes and
+  Contacts tools of their own, below). Calendar, Reminders, Contacts and Photos also
   ask macOS whether LoomWatch may have their data before they answer, so the app's `Info.plist`
   (`packaging/macos/Info.plist`) carries a line for each, shown under macOS's question: without
   that line macOS refuses at once and never asks the person. An app macOS quit to free memory
@@ -758,6 +759,24 @@ its first 256 KB (never an SVG), keeps only an ICO, PNG, GIF, JPEG or WebP of at
 keeps it in `<state dir>/site-icons/` for 30 days. Only `LoomWatch`'s own page on this computer's address can
 ask (`watch_api::local_evidence`), and a paired iPhone through the door (`phone::ALLOWED`), which
 passes the call on as a local program's. The phone never asks the site itself.
+
+### The Mac's own apps as tools
+
+Calendar, Reminders, Notes and Contacts connect in Connections like any other tool (ADR 0121), with
+`auth: onThisMac` and a fixed address (`loomwatch:apple-calendar`) in `tools.json`. Their actions
+are LoomWatch's own list (`mac_apps.rs`), never what `tools.json` says, and an agent given one is
+offered them as `apple_calendar__find_events` and so on, asking first like every connected tool's.
+The daemon runs each action by starting `loomwatch-mac-apps` (`crates/loomwatch-mac-apps`, beside
+`loomwatchd`) outside the command sandbox, with the arguments as JSON on its standard input: EventKit
+for Calendar and Reminders, the Contacts framework for Contacts, and fixed JavaScript for
+Automation scripts run by `/usr/bin/osascript` for Notes, whose arguments reach the script only
+through `run(argv)`. macOS asks in LoomWatch's name, so the package signs the helper with
+`packaging/macos/LoomWatch-mac-apps.entitlements` (calendars and address book under the hardened
+runtime). Connecting asks macOS (`access`); a refusal leaves the tool waiting, with the System
+Settings pane to open. An action marked `cantUndo` (deleting) adds `cantUndo` to its permission
+request: `approves()` ignores `alwaysAllow` for it, and the run registry refuses "Allow for this
+run" and "Allow for the whole team". `LOOMWATCH_MAC_APPS_PROGRAM` swaps in a stand-in
+(`scripts/mock-mac-apps.py`) for trials that touch no real data.
 
 ### Permissions
 

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 
-import { NOTION_TOOL_URL, actionCount, checkTool, keptInWords, removeTool, useConnectedTools, type ConnectedTool } from '../../lib/tools/client'
+import { NOTION_TOOL_URL, actionCount, checkTool, keptInWords, openMacSettings, removeTool, useConnectedTools, type ConnectedTool } from '../../lib/tools/client'
 import { ConnectTool } from '../tools/ConnectTool'
 import { ToolIcon } from '../tools/ToolIcon'
 import { InlineMarkdown } from '../ui/Markdown'
@@ -65,7 +65,7 @@ export function ConnectedTools() {
   return (
     <section className="e1 lw-settings-section" aria-labelledby="tools-heading" aria-busy={busy}>
       <h2 id="tools-heading" className="t-title">Tools</h2>
-      <p className="t-body lw-settings-quiet">A tool lets your agents use a service, such as Notion or Todoist. Connect it here, then give it to an agent under Tools it can use. The agent asks you before each action it takes there, unless you always allow that action. Notion also lets LoomWatch send your teams’ answers to a page.</p>
+      <p className="t-body lw-settings-quiet">A tool lets your agents use an app or service, such as Apple Calendar or Notion. Connect it here, then give it to an agent under Tools it can use. The agent asks you before each action it takes there, unless you always allow that action. Notion also lets LoomWatch send your teams’ answers to a page.</p>
       {error && <p role="alert" className="inline-error t-body"><span className="detail">{error}</span></p>}
       {notice && <p role="status" className="lw-notice t-meta">{notice}</p>}
       {tools.state === 'loading' && <p role="status" className="t-meta lw-settings-quiet">Loading tools…</p>}
@@ -75,20 +75,21 @@ export function ConnectedTools() {
           <li key={tool.id} ref={tool.notion ? notionCard : undefined}>
             <div className="tools-connected-head">
               <span className="tools-connected-name"><ToolIcon name={tool.name} icon={tool.icon} size={28} /><b>{tool.name}</b></span>
-              <span className="t-meta">{tool.pending ? 'Not finished connecting' : `${actionCount(tool.calls.length)} · ${tool.auth === 'signIn' ? 'signed in' : tool.auth === 'token' ? 'with a token' : 'no sign-in'}`}</span>
+              <span className="t-meta">{tool.pending ? 'Not finished connecting' : `${actionCount(tool.calls.length)} · ${tool.auth === 'signIn' ? 'signed in' : tool.auth === 'token' ? 'with a token' : tool.auth === 'onThisMac' ? 'on this Mac' : 'no sign-in'}`}</span>
             </div>
-            <p className="t-meta">{tool.url}</p>
+            {tool.auth !== 'onThisMac' && <p className="t-meta">{tool.url}</p>}
             {tool.problem && <p className="t-meta problem">{tool.problem}</p>}
             {tool.example && !tool.pending && <p className="t-meta">Try asking an agent: “{tool.example}”</p>}
             {tool.calls.length > 0 && <details>
               <summary>What it can do</summary>
-              <ul>{tool.calls.map((call) => <li key={call.name}><strong>{call.label}</strong>{call.readOnly ? ' · only reads' : ''}{call.description ? <span className="lw-call-desc"><InlineMarkdown>{call.description}</InlineMarkdown></span> : null}</li>)}</ul>
+              <ul>{tool.calls.map((call) => <li key={call.name}><strong>{call.label}</strong>{call.readOnly ? ' · only reads' : ''}{call.cantUndo ? ' · can’t be undone, asks every time' : ''}{call.description && tool.auth !== 'onThisMac' ? <span className="lw-call-desc"><InlineMarkdown>{call.description}</InlineMarkdown></span> : null}</li>)}</ul>
             </details>}
             {tool.notion && !tool.pending && <NotionAnswers choosing={choosingFor === tool.id} />}
             <div className="lw-settings-actions">
               {tool.pending
                 ? <button type="button" className="link" disabled={busy} onClick={() => setConnecting(tool)}>Finish connecting</button>
                 : <button type="button" className="link" disabled={busy} onClick={() => void act(async () => { const checked = await checkTool(tool.id); setNotice(`${checked.name} can do ${actionCount(checked.calls.length)}.`) })}>Check again</button>}
+              {!tool.pending && tool.settings && <button type="button" className="link" disabled={busy} onClick={() => void act(() => openMacSettings(tool.id))}>Open System Settings</button>}
               {!tool.pending && tool.auth === 'signIn' && <button type="button" className="link" disabled={busy} onClick={() => setConnecting(tool)}>Sign in again</button>}
               {!tool.pending && tool.auth === 'token' && <button type="button" className="link" disabled={busy} onClick={() => setConnecting(tool)}>Replace its token</button>}
               <button type="button" className="link alert" disabled={busy} onClick={() => void act(async () => {

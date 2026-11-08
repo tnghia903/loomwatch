@@ -800,3 +800,153 @@ fn slugs_and_names_stay_inside_their_limits() {
     assert_eq!(unique_name("linear", &taken), "linear 2");
     assert_eq!(unique_name("  Docs   site ", &taken), "Docs site");
 }
+
+/// ADR 0121: one of this Mac's apps connects once macOS lets `LoomWatch` have it, and an agent
+/// given it is offered its actions, which the daemon runs itself. Deleting is marked as what can't
+/// be undone, so it asks every time.
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn connects_a_mac_app_and_runs_an_agents_action_here() {
+    let folder = Folder::new();
+    let (tools, fake) = Tools::with_mac_for_tests(&folder.0);
+    let app = router(tools.clone());
+
+    let (status, listed) = ask(&app, "GET", "/api/tools", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let calendar = listed["catalog"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["name"] == "Apple Calendar")
+        .expect("listed on a Mac");
+    assert_eq!(calendar["topic"], "onThisMac");
+    assert_eq!(calendar["icon"], "/api/tools/icon/mac-calendar");
+
+    let (status, body) = ask(
+        &app,
+        "POST",
+        "/api/tools",
+        Some(json!({"url": "loomwatch:apple-calendar"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["tool"]["auth"], "onThisMac");
+    assert_eq!(body["tool"]["pending"], false);
+    assert!(body.get("needs").is_none(), "{body}");
+    let deleting = body["tool"]["calls"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|call| call["name"] == "delete_event")
+        .unwrap();
+    assert_eq!(deleting["cantUndo"], true);
+
+    let given = tools.named_now("apple calendar").expect("connected");
+    let offered = OutsideTools::new(tools.clone(), vec![given]);
+    let names: Vec<String> = offered.specs().into_iter().map(|spec| spec.name).collect();
+    assert!(
+        names.contains(&"apple_calendar__find_events".to_owned()),
+        "{names:?}"
+    );
+    let (text, failed) = offered
+        .call("apple_calendar__find_events", json!({"from": "2026-11-09"}))
+        .await;
+    assert!(!failed, "{text}");
+    assert_eq!(
+        fake.called.lock().unwrap().as_slice(),
+        [(
+            crate::mac_apps::App::Calendar,
+            "find_events".to_owned(),
+            json!({"from": "2026-11-09"})
+        )]
+    );
+    assert!(
+        !offered
+            .asks("apple_calendar__find_events")
+            .unwrap()
+            .cant_undo
+    );
+    assert!(
+        offered
+            .asks("apple_calendar__delete_event")
+            .unwrap()
+            .cant_undo
+    );
+}
+
+/// When macOS hasn't let `LoomWatch` in, the tool waits with where to allow it, and checking it
+/// again once allowed connects it. A Mac app's actions come from `LoomWatch`'s own list, so a
+/// `tools.json` changed by hand can't take "can't be undone" off deleting.
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn a_mac_app_macos_refused_waits_until_it_is_allowed() {
+    let folder = Folder::new();
+    let (tools, fake) = Tools::with_mac_for_tests(&folder.0);
+    let app = router(tools.clone());
+    fake.refuses
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+
+    let (status, body) = ask(
+        &app,
+        "POST",
+        "/api/tools",
+        Some(json!({"url": "loomwatch:contacts"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["needs"], "macPermission");
+    assert_eq!(
+        body["settings"],
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_Contacts"
+    );
+    assert_eq!(body["tool"]["pending"], true);
+    assert!(
+        tools.named_now("Apple Contacts").is_none(),
+        "not given to agents yet"
+    );
+
+    fake.refuses
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    let id = body["tool"]["id"].as_str().unwrap();
+    let (status, checked) = ask(&app, "POST", &format!("/api/tools/{id}/check"), None).await;
+    assert_eq!(status, StatusCode::OK, "{checked}");
+    assert_eq!(checked["tool"]["pending"], false);
+    assert!(checked["tool"]["settings"].is_null());
+
+    let mut kept = tools.named_now("Apple Contacts").expect("connected");
+    for call in &mut kept.calls {
+        call.cant_undo = false;
+    }
+    let offered = OutsideTools::new(tools.clone(), vec![kept]);
+    assert!(
+        offered
+            .asks("apple_contacts__delete_contact")
+            .unwrap()
+            .cant_undo
+    );
+}
+
+/// Elsewhere the Mac's apps aren't listed, and can't be connected.
+#[cfg(not(target_os = "macos"))]
+#[tokio::test]
+async fn the_mac_apps_are_only_on_a_mac() {
+    let folder = Folder::new();
+    let (tools, _fake) = Tools::with_mac_for_tests(&folder.0);
+    let app = router(tools.clone());
+    let (_, listed) = ask(&app, "GET", "/api/tools", None).await;
+    assert!(
+        listed["catalog"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|entry| entry["auth"] != "onThisMac")
+    );
+    let (status, _) = ask(
+        &app,
+        "POST",
+        "/api/tools",
+        Some(json!({"url": "loomwatch:apple-calendar"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}

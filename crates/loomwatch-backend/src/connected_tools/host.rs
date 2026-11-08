@@ -12,8 +12,9 @@ use serde_json::{Value, json};
 use tokio::sync::Mutex;
 
 use super::client::{self, Session};
-use super::{ConnectedTool, Tools, slug};
+use super::{Auth, ConnectedTool, ToolCall, Tools, slug};
 use crate::agent::{BoxFuture, HostAsk, HostTools, ToolSpec};
+use crate::mac_apps::{self, App};
 
 /// The longest a function name may be, for the providers' sake.
 const MAX_FUNCTION_CHARS: usize = 64;
@@ -36,6 +37,20 @@ struct Offered {
     given: usize,
     call: String,
     title: String,
+    cant_undo: bool,
+}
+
+/// The Mac app `tool` is, when it is one (ADR 0121).
+fn mac_app(tool: &ConnectedTool) -> Option<App> {
+    (tool.auth == Auth::OnThisMac)
+        .then(|| App::at(&tool.url))
+        .flatten()
+}
+
+/// What `tool` offers: a Mac app's own list, which `tools.json` can't change, or what its server
+/// listed when last checked.
+fn offered_calls(tool: &ConnectedTool) -> Vec<ToolCall> {
+    mac_app(tool).map_or_else(|| tool.calls.clone(), App::calls)
 }
 
 impl OutsideTools {
@@ -50,7 +65,7 @@ impl OutsideTools {
                 prefix = format!("{prefix}_{}", index + 1);
             }
             slugs.push(prefix.clone());
-            for call in &tool.calls {
+            for call in &offered_calls(tool) {
                 let name = function_name(&prefix, &call.name);
                 if calls.contains_key(&name) {
                     continue;
@@ -71,6 +86,7 @@ impl OutsideTools {
                         given: index,
                         call: call.name.clone(),
                         title: format!("{}: {}", tool.name, sentence_case(&call.label())),
+                        cant_undo: call.cant_undo,
                     },
                 );
             }
@@ -124,6 +140,7 @@ impl HostTools for OutsideTools {
             title: offered.title.clone(),
             server: self.given[offered.given].tool.name.clone(),
             call: offered.call.clone(),
+            cant_undo: offered.cant_undo,
         })
     }
 
@@ -132,7 +149,13 @@ impl HostTools for OutsideTools {
             let Some(offered) = self.calls.get(name) else {
                 return (format!("There's no tool called {name}."), true);
             };
-            let tool = &self.given[offered.given].tool.name;
+            let given = &self.given[offered.given].tool;
+            if let Some(app) = mac_app(given) {
+                // A Mac app's action runs here, never through a server (ADR 0121).
+                let answer = self.tools.mac().call(app, &offered.call, input).await;
+                return mac_apps::for_the_agent(answer);
+            }
+            let tool = &given.name;
             match self.session(offered.given).await {
                 Ok(session) => client::call(&session, tool, &offered.call, input).await,
                 Err(said) => (said, true),
@@ -202,6 +225,7 @@ mod tests {
                     description: String::new(),
                     input_schema: json!({"properties": {"q": {"type": "string"}}}),
                     read_only: false,
+                    cant_undo: false,
                 })
                 .collect(),
             checked_at: None,

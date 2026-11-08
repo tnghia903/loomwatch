@@ -43,6 +43,19 @@ describe('a permission ticket in the tray (ADR 0040)', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Allow\s*A$/ }))
     expect(await screen.findByText('Researcher: Allowed for the rest of the run.')).toBeInTheDocument()
   })
+
+  // ADR 0121: deleting an event or a contact can't be undone, so it is allowed one at a time.
+  it('allows what can’t be undone once only, and says so', async () => {
+    const deleting: Ticket = { ...ticket, team: true, cantUndo: true, text: 'Researcher wants to use Apple Calendar', context: 'Apple Calendar: Delete event · {"id":"e1"}' }
+    const onPermission = vi.fn(() => Promise.resolve())
+    render(<NeedsYouTray tickets={[deleting]} working={0} onAnswer={vi.fn()} onPermission={onPermission} onDismiss={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: /1 needs you/ }))
+    expect(screen.getByText('Researcher wants to use Apple Calendar. This can’t be undone. It is paused until you answer.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Allow for this run' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Allow for the whole team' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /^Allow\s*A$/ }))
+    expect(onPermission).toHaveBeenLastCalledWith(deleting, 'allow_once')
+  })
 })
 
 describe('opened from a Review on Home (ADR 0097)', () => {

@@ -223,9 +223,11 @@ impl PermissionPolicy {
         // A connected tool's call goes ahead only when the operator always allows it (ADR 0069):
         // no switch covers acting in someone's own accounts.
         if let Some(tool) = connected_tool(request) {
-            return self
-                .always
-                .contains(&format!("{}.{}", tool.server, tool.call).to_lowercase());
+            // What can't be taken back asks every time, whatever the team file says (ADR 0121).
+            return !tool.cant_undo
+                && self
+                    .always
+                    .contains(&format!("{}.{}", tool.server, tool.call).to_lowercase());
         }
         let kind = request
             .pointer("/params/toolCall/kind")
@@ -585,6 +587,9 @@ pub struct ToolAsk {
     pub server: String,
     /// Its own name for the call: `create_issue`.
     pub call: String,
+    /// It can't be taken back (ADR 0121): the operator allows it once, never for a run or always.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cant_undo: bool,
 }
 
 fn connected_tool(request: &Value) -> Option<ToolAsk> {
@@ -600,6 +605,7 @@ fn connected_tool(request: &Value) -> Option<ToolAsk> {
     Some(ToolAsk {
         server: text("server")?.to_owned(),
         call: text("tool")?.to_owned(),
+        cant_undo: input.get("cantUndo").and_then(Value::as_bool) == Some(true),
     })
 }
 
@@ -1051,6 +1057,7 @@ mod tests {
         let wired = |connected: bool| crate::delivery::WiredTool {
             name: "linear".to_owned(),
             connected,
+            on_this_mac: false,
             always_allow: vec!["create_issue".to_owned()],
         };
         assert!(!policy(&scratch, ALL).approves(&call("create_issue")));
@@ -1070,7 +1077,8 @@ mod tests {
             connected_tool(&call("create_issue")),
             Some(ToolAsk {
                 server: "Linear".into(),
-                call: "create_issue".into()
+                call: "create_issue".into(),
+                cant_undo: false,
             })
         );
         assert_eq!(
@@ -1084,6 +1092,37 @@ mod tests {
             ("Linear: Create issue", "other")
         );
         assert_eq!(detail.as_deref(), Some(r#"{"title":"Fix login"}"#));
+    }
+
+    /// ADR 0121: what can't be undone, such as deleting an event, asks every time, even when the
+    /// team file says to always allow it.
+    #[test]
+    fn what_cant_be_undone_asks_even_when_always_allowed() {
+        let scratch = Scratch::new();
+        let call = |cant_undo: bool| {
+            let mut input = json!({"server": "Apple Calendar", "tool": "delete_event", "arguments": {"id": "e1"}});
+            if cant_undo {
+                input["cantUndo"] = json!(true);
+            }
+            json!({"params": {"sessionId": "s", "toolCall": {
+                "toolCallId": "c1",
+                "title": "Apple Calendar: Delete event",
+                "kind": "other",
+                "rawInput": input,
+            }}})
+        };
+        let always = policy(&scratch, ALL).always_allowing(&[crate::delivery::WiredTool {
+            name: "Apple Calendar".to_owned(),
+            connected: true,
+            on_this_mac: true,
+            always_allow: vec!["delete_event".to_owned()],
+        }]);
+        assert!(
+            always.approves(&call(false)),
+            "the same call, undoable, goes ahead"
+        );
+        assert!(!always.approves(&call(true)));
+        assert!(connected_tool(&call(true)).is_some_and(|tool| tool.cant_undo));
     }
 
     fn policy(scratch: &Scratch, allow: AgentAllow) -> PermissionPolicy {

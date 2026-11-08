@@ -106,6 +106,8 @@ export function PermissionActions({ runId, request, team = false, onAlwaysAllow,
   const [text, setText] = useState('')
   const fieldId = useId()
   const webAsk = !request.tool && request.switch === 'web'
+  // What can't be undone, such as deleting an event, is allowed one at a time (ADR 0121).
+  const once = Boolean(request.tool?.cantUndo)
 
   const answer = async (decision: PermissionDecision, words?: string) => {
     onDecide?.()
@@ -159,16 +161,16 @@ export function PermissionActions({ runId, request, team = false, onAlwaysAllow,
   }
   return (
     <>
-      <p className="permission-note">{request.name} is paused until you answer. {permissionDeadline(request.expiresAt, now)}</p>
+      <p className="permission-note">{once && <>This can’t be undone. </>}{request.name} is paused until you answer. {permissionDeadline(request.expiresAt, now)}</p>
       <div className="permission-acts">
         {/* A yes to the web is for the rest of the run (ADR 0104): one search is rarely enough, so
             the web has one Allow, and it says so. */}
         <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void answer(webAsk ? 'allow_run' : 'allow_once')} title={webAsk ? `${request.name} may use the web until this run ends` : undefined}>Allow</button>
-        {!webAsk && <button type="button" className="btn" disabled={busy} onClick={() => void answer('allow_run')} title={`Allow every ${request.title.toLowerCase()} request from ${request.name} until this run ends`}>Allow for this run</button>}
-        {team && (
+        {!webAsk && !once && <button type="button" className="btn" disabled={busy} onClick={() => void answer('allow_run')} title={`Allow every ${request.title.toLowerCase()} request from ${request.name} until this run ends`}>Allow for this run</button>}
+        {team && !once && (
           <button type="button" className="btn" disabled={busy} onClick={() => void answer('allow_team')} title={`Allow ${request.title} for every agent in this run, without asking, until the run ends. Other tools still ask.`}>Allow for the whole team</button>
         )}
-        {request.tool && onAlwaysAllow && (
+        {request.tool && !once && onAlwaysAllow && (
           <button type="button" className="btn" disabled={busy} onClick={always} title={`${request.name} may do “${request.title}” without asking from now on, in every team it’s in. Its other actions still ask. Take it back in its Tools block.`}>Always allow this</button>
         )}
         {!request.tool && request.switch && onAlwaysAllow && (

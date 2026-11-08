@@ -617,7 +617,13 @@ impl ComposedPrompt {
             });
         }
         for tool in &delivery.tools {
-            let text = if tool.connected {
+            let text = if tool.connected && tool.on_this_mac {
+                // ADR 0121: one of the Mac's own apps, reached through these calls, not a command.
+                format!(
+                    "The operator gave you {name} on this Mac: its calls are your tools whose descriptions start \"From {name}\". Use them for {name}, not osascript or another command. Each call waits for the operator to allow it unless they always allow that call, and what can't be undone always waits. Use one when the task needs it; if one is declined, carry on without it and say what it would have done.",
+                    name = tool.name
+                )
+            } else if tool.connected {
                 format!(
                     "The operator gave you {name}: its calls are your tools whose descriptions start \"From {name}\". They act in the operator's own {name} account, so each call waits for the operator to allow it unless they always allow that call. Use one when the task needs it; if one is declined, carry on without it and say what it would have done.",
                     name = tool.name
@@ -3807,6 +3813,44 @@ mod tests {
                     .starts_with("## Your assigned role\nworks\n\n## Done when\n")
             );
         }
+    }
+
+    /// ADR 0121: an agent given one of the Mac's apps is told to use its calls, not a command,
+    /// and that deleting always waits; an agent given an online tool isn't told about commands.
+    #[test]
+    fn an_agent_given_a_mac_app_uses_its_calls_not_a_command() {
+        let composed = crate::compose_prompt(
+            &agent("a"),
+            &ContextPacket::default(),
+            &crate::NodeTask::goal("Am I free on Thursday?"),
+        );
+        let tool = |name: &str, on_this_mac: bool| crate::delivery::WiredTool {
+            name: name.to_owned(),
+            connected: true,
+            on_this_mac,
+            always_allow: Vec::new(),
+        };
+        let delivery = crate::delivery::Delivery {
+            tools: vec![tool("Apple Calendar", true), tool("Linear", false)],
+            ..crate::delivery::Delivery::default()
+        };
+        let loaded = composed.with_delivery(&delivery);
+        let section = |heading: &str| {
+            loaded
+                .sections
+                .iter()
+                .find(|section| section.heading == heading)
+                .map(|section| section.text.clone())
+                .unwrap()
+        };
+        let calendar = section("## Tool: Apple Calendar");
+        assert!(calendar.contains("not osascript"), "{calendar}");
+        assert!(
+            calendar.contains("what can't be undone always waits"),
+            "{calendar}"
+        );
+        let linear = section("## Tool: Linear");
+        assert!(!linear.contains("osascript"), "{linear}");
     }
 
     fn agent(id: &str) -> AgentConfig {

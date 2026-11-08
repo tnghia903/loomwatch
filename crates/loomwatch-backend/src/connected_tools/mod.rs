@@ -63,6 +63,9 @@ pub enum Auth {
     Token,
     /// A sign-in through the tool's own site.
     SignIn,
+    /// One of this Mac's own apps (ADR 0121): macOS's own permission lets it in, and the daemon
+    /// runs its actions itself (`crate::mac_apps`).
+    OnThisMac,
 }
 
 /// One connected tool, as `tools.json` keeps it.
@@ -108,6 +111,10 @@ pub struct ToolCall {
     /// The server says it only reads. A hint, shown to the operator; it never skips asking.
     #[serde(default)]
     pub read_only: bool,
+    /// What it does can't be taken back, such as deleting an event (ADR 0121). It asks every
+    /// time: never allowed for a whole run or always.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cant_undo: bool,
 }
 
 impl ToolCall {
@@ -196,6 +203,8 @@ struct Inner {
     sign_ins: sign_in::Pending,
     /// One refresh at a time per tool, across every run and the API.
     refreshing: std::sync::Mutex<std::collections::HashMap<String, Arc<Mutex<()>>>>,
+    /// What runs the actions of this Mac's own apps.
+    mac: Arc<dyn crate::mac_apps::Runner>,
 }
 
 /// The one [`Tools`] runs use, set once at startup.
@@ -223,10 +232,15 @@ impl Tools {
         Ok(Self::with(
             state_dir,
             vault::Vault::chosen(state_dir, crate::ai::keys_in_file()),
+            Arc::new(crate::mac_apps::Helper::beside_this_program()),
         )?)
     }
 
-    fn with(state_dir: &Path, vault: vault::Vault) -> reqwest::Result<Self> {
+    fn with(
+        state_dir: &Path,
+        vault: vault::Vault,
+        mac: Arc<dyn crate::mac_apps::Runner>,
+    ) -> reqwest::Result<Self> {
         Ok(Self {
             inner: Arc::new(Inner {
                 file: state_dir.join(TOOLS_FILE),
@@ -236,13 +250,28 @@ impl Tools {
                 writes: Mutex::new(()),
                 sign_ins: sign_in::Pending::default(),
                 refreshing: std::sync::Mutex::default(),
+                mac,
             }),
         })
     }
 
     #[cfg(test)]
     pub(crate) fn for_tests(state_dir: &Path) -> Self {
-        Self::with(state_dir, vault::Vault::memory()).expect("an HTTP client")
+        Self::with_mac_for_tests(state_dir).0
+    }
+
+    /// [`Self::for_tests`], with the stand-in that answers the Mac's apps' actions.
+    #[cfg(test)]
+    pub(crate) fn with_mac_for_tests(state_dir: &Path) -> (Self, Arc<crate::mac_apps::Fake>) {
+        let fake = Arc::new(crate::mac_apps::Fake::default());
+        let tools = Self::with(state_dir, vault::Vault::memory(), Arc::new(fake.clone()))
+            .expect("an HTTP client");
+        (tools, fake)
+    }
+
+    /// What runs the actions of this Mac's own apps.
+    pub(crate) fn mac(&self) -> &dyn crate::mac_apps::Runner {
+        self.inner.mac.as_ref()
     }
 
     /// A tool at `url` taking `token`, kept as connected without asking its server, for tests of
@@ -334,7 +363,7 @@ impl Tools {
     /// Why there is none to send, which says what the operator can do.
     pub(crate) async fn bearer(&self, tool: &ConnectedTool) -> Result<String, Unusable> {
         match tool.auth {
-            Auth::None => Err(Unusable::SignInAgain),
+            Auth::None | Auth::OnThisMac => Err(Unusable::SignInAgain),
             Auth::Token => match self.inner.vault.get(&tool.id).await {
                 Ok(Some(vault::Secret::Token { token })) => Ok(token),
                 Ok(_) => Err(Unusable::SignInAgain),
@@ -421,13 +450,10 @@ impl Tools {
 
     /// List what `tool` offers now and note it, or note what went wrong.
     async fn recheck(&self, tool: &ConnectedTool) -> Result<Vec<ToolCall>, String> {
-        let listed = match client::open(self, tool).await {
-            Ok(session) => {
-                let listed = client::calls(&session, &tool.name).await;
-                let _ = session.cancel().await;
-                listed
-            }
-            Err(said) => Err(said),
+        let listed = if let Some(app) = crate::mac_apps::App::at(&tool.url) {
+            Ok(app.calls())
+        } else {
+            self.ask_server(tool).await
         };
         self.note(
             &tool.id,
@@ -438,6 +464,17 @@ impl Tools {
         )
         .await;
         listed
+    }
+
+    async fn ask_server(&self, tool: &ConnectedTool) -> Result<Vec<ToolCall>, String> {
+        match client::open(self, tool).await {
+            Ok(session) => {
+                let listed = client::calls(&session, &tool.name).await;
+                let _ = session.cancel().await;
+                listed
+            }
+            Err(said) => Err(said),
+        }
     }
 
     async fn get(&self, id: &str) -> Option<ConnectedTool> {

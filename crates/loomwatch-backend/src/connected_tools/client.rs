@@ -105,6 +105,8 @@ pub(super) async fn open(tools: &Tools, tool: &ConnectedTool) -> Result<Session,
     let http = tools.inner.http.clone();
     let config = StreamableHttpClientTransportConfig::with_uri(tool.url.as_str());
     let opened = match tool.auth {
+        // A Mac app's actions run in the daemon; it has no server (ADR 0121).
+        Auth::OnThisMac => return Err(unreachable(&tool.name)),
         Auth::None => {
             tokio::time::timeout(
                 OPEN_TIMEOUT,
@@ -216,6 +218,8 @@ fn call_of(tool: &Value) -> Option<ToolCall> {
             .and_then(|notes| notes.get("readOnlyHint"))
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        // A server's own hint can't make a call ask less, so none is read for this.
+        cant_undo: false,
     })
 }
 
@@ -353,7 +357,7 @@ fn turned_away(tool: &ConnectedTool) -> String {
     match tool.auth {
         Auth::Token => token_again(&tool.name),
         Auth::SignIn => sign_in_again(&tool.name),
-        Auth::None => format!(
+        Auth::None | Auth::OnThisMac => format!(
             "{} now asks who is calling. Remove it in Connections and connect it again.",
             tool.name
         ),

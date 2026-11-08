@@ -1,0 +1,62 @@
+[package]
+name = "loomwatch-mac-apps"
+description = "What loomwatchd runs for an agent's action in Calendar, Reminders, Contacts or Notes on a Mac."
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[[bin]]
+name = "loomwatch-mac-apps"
+path = "src/main.rs"
+
+# The workspace's lints, except that `unsafe` code is denied rather than forbidden, so that the
+# modules that call EventKit and Contacts can allow it for themselves, as `loomwatch-osascript` does.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+serde_json = "1"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6"
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = [
+  "std",
+  "block2",
+  "NSArray",
+  "NSCalendar",
+  "NSDate",
+  "NSError",
+  "NSObject",
+  "NSPredicate",
+  "NSString",
+] }
+objc2-event-kit = { version = "0.3", default-features = false, features = [
+  "std",
+  "block2",
+  "EKCalendar",
+  "EKCalendarItem",
+  "EKError",
+  "EKEvent",
+  "EKEventStore",
+  "EKObject",
+  "EKReminder",
+  "EKTypes",
+] }
+objc2-contacts = { version = "0.3", default-features = false, features = [
+  "std",
+  "block2",
+  "CNContact",
+  "CNContactStore",
+  "CNContact_Predicates",
+  "CNLabeledValue",
+  "CNMutableContact",
+  "CNPhoneNumber",
+  "CNSaveRequest",
+] }

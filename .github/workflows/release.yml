@@ -110,6 +110,15 @@ jobs:
             target/x86_64-apple-darwin/release/loomwatch-osascript
           lipo -info build/loomwatch-osascript
           build/loomwatch-osascript -e 'return 1 + 1'
+      # What runs agents' actions in Calendar, Reminders, Contacts and Notes (ADR 0121).
+      - name: Build the Mac apps helper for Apple silicon and Intel
+        run: |
+          cargo build --release --locked -p loomwatch-mac-apps --target aarch64-apple-darwin
+          cargo build --release --locked -p loomwatch-mac-apps --target x86_64-apple-darwin
+          lipo -create -output build/loomwatch-mac-apps \
+            target/aarch64-apple-darwin/release/loomwatch-mac-apps \
+            target/x86_64-apple-darwin/release/loomwatch-mac-apps
+          lipo -info build/loomwatch-mac-apps
       # dmgbuild lays out the .dmg's window (packaging/macos/dmg-settings.py), pinned by hash.
       - name: Install dmgbuild
         run: |
@@ -145,7 +154,8 @@ jobs:
               export MACOS_NOTARY_PROFILE=loomwatch
             fi
           fi
-          scripts/package-macos-app.sh build/loomwatchd build/LoomWatch build/loomwatch-osascript dist
+          scripts/package-macos-app.sh build/loomwatchd build/LoomWatch build/loomwatch-osascript \
+            build/loomwatch-mac-apps dist
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-macos-universal

@@ -5,7 +5,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { daemonFetch } from '../daemonFetch'
 
-export type ToolAuth = 'none' | 'token' | 'signIn'
+/** `onThisMac`: one of this Mac's own apps, such as Calendar, that macOS lets in (ADR 0121). */
+export type ToolAuth = 'none' | 'token' | 'signIn' | 'onThisMac'
 
 /** One call a tool offers, as its server describes it. */
 export interface ToolCallInfo {
@@ -16,6 +17,8 @@ export interface ToolCallInfo {
   description: string
   /** The server says it only reads. A hint: it still asks first. */
   readOnly: boolean
+  /** It can't be undone, such as deleting an event: it asks every time (ADR 0121). */
+  cantUndo?: boolean
 }
 
 export interface ConnectedTool {
@@ -37,6 +40,8 @@ export interface ConnectedTool {
   icon?: string | null
   /** Notion's: its sign-in also sends teams' answers to Notion and reads pages for agents (ADR 0070). */
   notion?: boolean
+  /** A Mac app macOS hasn't let in: the System Settings pane where you allow it (ADR 0121). */
+  settings?: string | null
 }
 
 /** Where the Notion tool is connected — `notion::MCP_URL`. */
@@ -44,10 +49,11 @@ export const NOTION_TOOL_URL = 'https://mcp.notion.com/mcp'
 
 /** What a starter tool is for, as the Skills page sorts skills by topic (`catalog::Topic`). */
 export type CatalogTopic =
-  | 'tasks' | 'notes' | 'meetings' | 'design' | 'research' | 'travel' | 'payments' | 'customers' | 'websites' | 'code'
+  | 'onThisMac' | 'tasks' | 'notes' | 'meetings' | 'design' | 'research' | 'travel' | 'payments' | 'customers' | 'websites' | 'code'
 
 /** The topics to start from, in the order the list is shown. */
 export const CATALOG_TOPICS: readonly { topic: CatalogTopic; label: string }[] = [
+  { topic: 'onThisMac', label: 'On this Mac' },
   { topic: 'tasks', label: 'Tasks' },
   { topic: 'notes', label: 'Notes and files' },
   { topic: 'meetings', label: 'Meetings' },
@@ -163,7 +169,7 @@ export function fetchTools(signal?: AbortSignal): Promise<{ tools: ConnectedTool
 /** What connecting answered: the tool, and what it still needs, if anything. */
 export interface ConnectAnswer {
   tool: ConnectedTool
-  needs?: 'signIn' | 'token'
+  needs?: 'signIn' | 'token' | 'macPermission'
   /** For a sign-in: the tool's consent page. */
   url?: string
 }
@@ -186,9 +192,19 @@ export async function signInToToolAgain(id: string): Promise<string> {
 }
 
 export async function checkTool(id: string): Promise<ConnectedTool> {
-  const { tool } = await request<{ tool: ConnectedTool }>(`/api/tools/${encodeURIComponent(id)}/check`, { method: 'POST' })
+  return (await checkToolAgain(id)).tool
+}
+
+/** Check a tool again, and what it still needs: a Mac app macOS hasn't let in yet says so. */
+export async function checkToolAgain(id: string): Promise<ConnectAnswer> {
+  const answer = await request<ConnectAnswer>(`/api/tools/${encodeURIComponent(id)}/check`, { method: 'POST' })
   announceToolsChanged()
-  return tool
+  return answer
+}
+
+/** Open, on this Mac, the System Settings pane where a Mac app is allowed (ADR 0121). */
+export async function openMacSettings(id: string): Promise<void> {
+  await request(`/api/tools/${encodeURIComponent(id)}/settings`, { method: 'POST' })
 }
 
 export async function removeTool(id: string): Promise<void> {

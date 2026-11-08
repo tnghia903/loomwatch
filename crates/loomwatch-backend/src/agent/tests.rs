@@ -1234,6 +1234,7 @@ impl HostTools for AskingTool {
             title: "Linear: Create issue".to_owned(),
             server: "Linear".to_owned(),
             call: "create_issue".to_owned(),
+            cant_undo: false,
         })
     }
 

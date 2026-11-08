@@ -205,3 +205,36 @@ describe('what counts as an address', () => {
     expect(isToolAddress('https://mcp.example.com/a b')).toBe(false)
   })
 })
+
+describe('connecting one of this Mac’s apps (ADR 0121)', () => {
+  const calendarEntry: CatalogEntry = { name: 'Apple Calendar', url: 'loomwatch:apple-calendar', does: 'See, add, change and delete your events', auth: 'onThisMac', topic: 'onThisMac' }
+  const calendar = (extra: Partial<ConnectedTool> = {}) => tool({ id: 'mac1', name: 'Apple Calendar', url: 'loomwatch:apple-calendar', auth: 'onThisMac', ...extra })
+
+  it('lists them first, under On this Mac, saying the Mac asks first', () => {
+    render(<ConnectTool catalog={[...topical, calendarEntry]} connected={[]} keptIn="keychain" onConnected={vi.fn()} />)
+    const headings = screen.getAllByRole('heading', { level: 5 }).map((heading) => heading.textContent)
+    expect(headings[0]).toBe('On this Mac')
+    expect(screen.getByRole('button', { name: /Apple Calendar/ })).toHaveTextContent('Your Mac asks you first')
+  })
+
+  it('when the Mac said no, opens System Settings and connects once it is allowed', async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(json({ tool: calendar({ pending: true }), needs: 'macPermission' }))
+      .mockResolvedValueOnce(json({ opened: true }))
+      .mockResolvedValueOnce(json({ tool: calendar({ pending: true }), needs: 'macPermission' }))
+      .mockResolvedValueOnce(json({ tool: calendar() }))
+    vi.stubGlobal('fetch', fetch)
+    const onConnected = vi.fn()
+    render(<ConnectTool catalog={[calendarEntry]} connected={[]} keptIn="keychain" onConnected={onConnected} />)
+    fireEvent.click(screen.getByRole('button', { name: /Apple Calendar/ }))
+    expect(await screen.findByRole('heading', { name: 'Allow Apple Calendar on this Mac' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Open System Settings' }))
+    await waitFor(() => expect(sent(fetch, 1)).toMatchObject({ url: '/api/tools/mac1/settings', method: 'POST' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Check again' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('still hasn’t let LoomWatch use Apple Calendar')
+    expect(onConnected).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Check again' }))
+    await waitFor(() => expect(onConnected).toHaveBeenCalledWith(calendar()))
+    expect(sent(fetch, 3)).toMatchObject({ url: '/api/tools/mac1/check', method: 'POST' })
+  })
+})
