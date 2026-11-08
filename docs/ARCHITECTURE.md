@@ -183,8 +183,11 @@ instructions and tools.
   provider's prompt cache keeps them. The team's role, task and "Done when" come in the first
   user message. Skills are listed by name and description only, from the agent's folder
   (`.agents/skills`, `.claude/skills`) and LoomWatch's skills folder. The agent reads a skill's
-  `SKILL.md` itself when the task calls for it. An `AGENTS.md` in the work folder is read in as
-  project notes.
+  `SKILL.md` itself when the task calls for it. Past 20 skills in LoomWatch's folder, the list
+  holds the ones the agent's role and task call for most (`agent/skills.rs`): at most 15, by the
+  rare words they share, a word of the task counting more than one of the role, and text in a
+  script without spaces (Chinese, Japanese, Thai) read two letters at a time. A last line says
+  where the rest are. An `AGENTS.md` in the work folder is read in as project notes.
 - **Fixed texts have ids** (`src/prompt_blocks/`). What an agent reads that its team file doesn't
   hold (the habits above, its place in the team, helpers, the built-in and Team Bus tools'
   descriptions, the items every check step checks) is made of `Block`s: a stable id such as

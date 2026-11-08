@@ -26,7 +26,7 @@ pub(crate) use recorder::{EventLog, Recorder, ReplyText, commentary, new_event_i
 
 use crate::agent::{
     AgentError, Anthropic, ChatGptPlan, Demo, HostTools, NoHostTools, OFFLINE_MODEL, OpenRouter,
-    Problem, ProblemKind, Provider, Session, SessionConfig, ToolSet,
+    Problem, ProblemKind, Provider, Session, SessionConfig, SkillFocus, ToolSet,
 };
 use crate::ai::{ClaudeModel, ModelRef, Source};
 use crate::archive::EventArchive;
@@ -1193,18 +1193,21 @@ impl AgentRun {
 
 /// What picks the skills a large library lists for an agent: what it is for (its role's first line)
 /// and what it was asked (its task), not everything it was handed with them.
-fn skill_focus(composed: &crate::memory::ComposedPrompt) -> String {
+fn skill_focus(composed: &crate::memory::ComposedPrompt) -> SkillFocus {
     use crate::memory::PromptSectionKind;
-    composed
-        .sections
-        .iter()
-        .filter_map(|section| match section.kind {
-            PromptSectionKind::Role => Some(crate::orientation::role_summary(&section.text)),
-            PromptSectionKind::Task => Some(section.text.clone()),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+    let of = |kind: PromptSectionKind| {
+        composed
+            .sections
+            .iter()
+            .filter(|section| section.kind == kind)
+            .map(|section| section.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    SkillFocus {
+        role: crate::orientation::role_summary(&of(PromptSectionKind::Role)),
+        task: of(PromptSectionKind::Task),
+    }
 }
 
 async fn write(recorder: &mut Recorder, record: Record) -> Result<()> {
@@ -1295,7 +1298,10 @@ mod tests {
             crate::compose_prompt(agent, &crate::memory::ContextPacket::default(), &task);
         assert_eq!(
             skill_focus(&composed),
-            "You write the brief.\nPrepare the slides."
+            SkillFocus {
+                role: "You write the brief.".to_owned(),
+                task: "Prepare the slides.".to_owned(),
+            }
         );
     }
     use crate::test_support::{stand_in, turn};
