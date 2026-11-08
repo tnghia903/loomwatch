@@ -770,9 +770,10 @@ The daemon runs each action by starting `loomwatch-mac-apps` (`crates/loomwatch-
 `loomwatchd`) outside the command sandbox, with the arguments as JSON on its standard input: EventKit
 for Calendar and Reminders, the Contacts framework for Contacts, and fixed JavaScript for
 Automation scripts run by `/usr/bin/osascript` for Notes, whose arguments reach the script only
-through `run(argv)`. macOS asks in LoomWatch's name, so the package signs the helper with
-`packaging/macos/LoomWatch-mac-apps.entitlements` (calendars and address book under the hardened
-runtime). Connecting asks macOS (`access`); a refusal leaves the tool waiting, with the System
+through `run(argv)`. macOS asks in LoomWatch's name: it counts `LoomWatch.app` as the app asking,
+and under the hardened runtime it refuses without asking unless the app's own signature names
+calendars and the address book (`packaging/macos/LoomWatch-app.entitlements`). The helper carries
+the same in `packaging/macos/LoomWatch-mac-apps.entitlements`. Connecting asks macOS (`access`); a refusal leaves the tool waiting, with the System
 Settings pane to open. An action marked `cantUndo` (deleting) adds `cantUndo` to its permission
 request: `approves()` ignores `alwaysAllow` for it, and the run registry refuses "Allow for this
 run" and "Allow for the whole team". `LOOMWATCH_MAC_APPS_PROGRAM` swaps in a stand-in

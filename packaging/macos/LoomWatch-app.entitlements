@@ -3,12 +3,19 @@
 <!-- LoomWatch.app itself under the hardened runtime (scripts/package-macos-app.sh): what
      LoomWatch.entitlements gives loomwatchd, and the microphone, which the app hears through only
      while Control-Option-Space is held at the notch. loomwatchd, which runs the agents' commands,
-     is not given the microphone, and their sandbox refuses it (agent/sandbox.rs). -->
+     is not given the microphone, and their sandbox refuses it (agent/sandbox.rs).
+     Calendars and the address book (ADR 0121): macOS counts LoomWatch.app as the app asking when
+     loomwatch-mac-apps reads Calendar, Reminders or Contacts, and under the hardened runtime it
+     refuses without asking the person unless this signature names them. -->
 <plist version="1.0">
 <dict>
   <key>com.apple.security.automation.apple-events</key>
   <true/>
   <key>com.apple.security.device.audio-input</key>
+  <true/>
+  <key>com.apple.security.personal-information.calendars</key>
+  <true/>
+  <key>com.apple.security.personal-information.addressbook</key>
   <true/>
 </dict>
 </plist>
