@@ -2069,10 +2069,16 @@ async fn a_proposed_agent_names_only_what_is_there() {
         fixture.control.clone(),
         Caller::Conversation("ask-test".to_owned()),
     );
+    // Folders that aren't there, written as paths every computer reads as whole ones: on Windows
+    // `/moved/away` names no drive, so an agent reading it isn't one of My agents at all.
+    let moved = crate::test_support::sh_path(&fixture.root.0.join("moved-away"));
+    let gone = crate::test_support::sh_path(&fixture.root.0.join("no-such-folder"));
     save_agent(
         &fixture.root.0,
         "researcher",
-        "name: Researcher\ninstructions: Find the facts.\nskills: [gone-skill]\ntools: [Linear]\nreads:\n  - {name: Old, path: /moved/away}\n",
+        &format!(
+            "name: Researcher\ninstructions: Find the facts.\nskills: [gone-skill]\ntools: [Linear]\nreads:\n  - {{name: Old, path: '{moved}'}}\n"
+        ),
     );
     let new = |extra: &Value| {
         let mut agent = json!({"name": "Editor", "instructions": "Tidy what you are handed."});
@@ -2081,11 +2087,11 @@ async fn a_proposed_agent_names_only_what_is_there() {
         }
         json!({"summary": "An editor.", "new": agent})
     };
-    let refused = |arguments: Value, says: &'static str| {
-        let tools = &tools;
+    let refused = |arguments: Value, says: &str| {
+        let (tools, says) = (&tools, says.to_owned());
         async move {
             let (message, failed) = tools.call("propose_agent", arguments.clone()).await;
-            assert!(failed && message.contains(says), "{arguments}: {message}");
+            assert!(failed && message.contains(&says), "{arguments}: {message}");
         }
     };
 
@@ -2116,8 +2122,8 @@ async fn a_proposed_agent_names_only_what_is_there() {
     )
     .await;
     refused(
-        new(&json!({"reads": [{"name": "Gone", "path": "/no/such/folder"}]})),
-        "There is no folder or file at /no/such/folder on this computer",
+        new(&json!({"reads": [{"name": "Gone", "path": gone}]})),
+        &format!("There is no folder or file at {gone} on this computer"),
     )
     .await;
     refused(
