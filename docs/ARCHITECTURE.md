@@ -909,11 +909,12 @@ Ask (`control/`) is the same agent, on the operator's key and the model they cho
 any run. It is kept open across turns and archived as its own session. It gets the LoomWatch
 Control tools and nothing else: no files, no commands, no web. The tools are `list_teams`,
 `read_team`, `list_models`, `list_skills`, `list_jobs`, `read_job`, `list_my_agents`,
-`list_tools`, `find_files`, `read_my_agent`, `propose_agent`, `propose_team`, `start_run`,
-`get_run` and `draft_review_note`, all direct calls in the daemon. They read and propose. None of
-them writes a team file, saves an agent or answers a review stop: a proposed team is shown on the
-canvas and saved only when the person presses Apply, and a proposed agent opens on its own page and
-is saved only with that page's Save.
+`list_tools`, `find_files`, `read_my_agent`, `propose_agent`, `read_skill`, `propose_skill`,
+`propose_team`, `start_run`, `get_run` and `draft_review_note`, all direct calls in the daemon.
+They read and propose. None of them writes a team file, saves an agent or a skill, or answers a
+review stop: a proposed team is shown on the canvas and saved only when the person presses Apply, a
+proposed agent opens on its own page and is saved only with that page's Save, and a proposed skill
+opens on the Skills page's sheet and is saved only with its Save skill.
 
 One agent on its own (ADR 0119, `control/agent.rs`). When the person wants an agent to keep, to
 talk to or to use in their teams, Ask proposes that agent alone with `propose_agent` `new`, and no
@@ -930,6 +931,22 @@ served by `GET /api/ask/proposals/{id}` with `kind: agent`. The panel's card ope
 the proposal, marks what Ask changed over its settings, and its Save sends `If-Match` with the
 version Ask read, so a change saved since is never written over, then records the outcome. Ask still
 never changes one of My agents to suit a team: what a team needs goes in its `part`.
+
+A skill (ADR 0121, `control/skill_proposal.rs`). When the person asks for a skill, or says how a
+kind of work should always be done by any of their agents, Ask proposes it with `propose_skill`:
+`new` gives its title, when to use it and what to do, whole; `change` gives the `base` that
+`read_skill` read (the `SKILL.md`'s hash, as the sheet's save names it), edits to the numbered
+lines that change (`control/line_edits.rs`, now shared with the skill writer too), and a whole new
+description only when what it does changes. It names a skill as `list_skills` does: its folder, or
+the `name:` its `SKILL.md` gives. Only `LoomWatch`'s own skills can be changed; a project's skill
+is refused with what to do instead. A new one's folder name (`written::skill_name`) must not be
+taken, and its description must fit in 1024 characters. It is archived as `ask_skill_proposal`
+with the whole skill and the agents in My agents given it, kept in `skill_proposals`, and served
+with `kind: skill`. The panel's card opens `SkillSheet` over the screen it is on, filled in, or for
+a change marked with what Ask took out and put in; a change made from a `SKILL.md` that has
+changed since opens as the skill is saved now and says so. Save skill records the outcome. A team
+or agent can be given only a saved skill, so Ask proposes the skill first and the team after it is
+saved.
 
 Ask builds from what the person has (ADR 0096). Its first turn names their teams, My agents (with
 the ids a team points at), skills, connected tools and ways of paying. `list_jobs` and `read_job`

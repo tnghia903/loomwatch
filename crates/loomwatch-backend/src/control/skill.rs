@@ -11,9 +11,6 @@
 //! Only the person's words are sent, with the skill they are changing: never a page, a file or
 //! another agent's words.
 
-use std::collections::BTreeMap;
-use std::collections::btree_map::Entry;
-use std::fmt::Write as _;
 use std::time::Duration;
 
 use axum::Json;
@@ -24,7 +21,9 @@ use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use super::{AGENT_ID, ASSISTANT_NAME, Control, ask_spec, error, first_line, prepare_workspace};
+use super::{
+    AGENT_ID, ASSISTANT_NAME, Control, ask_spec, error, first_line, line_edits, prepare_workspace,
+};
 use crate::engine::{AgentRun, EventLog, TeamSessionContext};
 use crate::skills_store::written::DESCRIPTION_CHARS;
 
@@ -208,10 +207,7 @@ fn compose_new(words: &str) -> String {
 }
 
 fn compose_change(words: &str, skill: &SkillDraft) -> String {
-    let mut listing = String::new();
-    for (index, line) in skill.instructions.split('\n').enumerate() {
-        let _ = writeln!(listing, "[{}] {line}", index + 1);
-    }
+    let listing = line_edits::numbered(&skill.instructions);
     let description = skill.description.trim();
     format!(
         "The person wants to change a skill their agents use.\n\n\
@@ -272,74 +268,19 @@ fn read_new(reply: &str) -> Result<Value, String> {
     }))
 }
 
-/// What the reply asked for one line.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum Edit {
-    Drop,
-    Replace(String),
-}
-
-fn number(value: Option<&Value>) -> Option<usize> {
-    let value = value?;
-    let n = value
-        .as_u64()
-        .or_else(|| value.as_str().and_then(|n| n.trim().parse().ok()))?;
-    usize::try_from(n).ok()
-}
-
-/// The skill with the reply's edits made. An edit to a line the agent wasn't shown is ignored, and
-/// so is a second edit to one line; a reply whose edits all miss, or that changes nothing, isn't
-/// an answer.
+/// The skill with the reply's edits made ([`line_edits::apply`]). An edit to a line the agent
+/// wasn't shown is left out, and so is a second edit to one line; a reply whose edits all miss, or
+/// that changes nothing, isn't an answer.
 fn read_change(reply: &str, skill: &SkillDraft) -> Result<Value, String> {
     const MISSING: &str = "replied without the change. Try again.";
     let value = object(reply).ok_or(MISSING)?;
-    let lines: Vec<&str> = skill.instructions.split('\n').collect();
-    let mut edits: BTreeMap<usize, Edit> = BTreeMap::new();
-    let mut added: BTreeMap<usize, Vec<String>> = BTreeMap::new();
-    for item in value
+    let edits = value
         .get("edits")
         .and_then(Value::as_array)
         .map(Vec::as_slice)
-        .unwrap_or_default()
-    {
-        if let Some(after) = number(item.get("after")) {
-            let add = text_of(item, "add");
-            if after <= lines.len() && !add.is_empty() {
-                added.entry(after).or_default().push(add.to_owned());
-            }
-            continue;
-        }
-        let Some(n) = number(item.get("n")) else {
-            continue;
-        };
-        if n == 0 || n > lines.len() {
-            continue;
-        }
-        let edit = if item.get("drop").and_then(Value::as_bool) == Some(true) {
-            Edit::Drop
-        } else {
-            match item.get("replace").and_then(Value::as_str) {
-                Some(text) if text.trim().is_empty() => Edit::Drop,
-                Some(text) => Edit::Replace(text.trim_end().to_owned()),
-                None => continue,
-            }
-        };
-        if let Entry::Vacant(slot) = edits.entry(n) {
-            slot.insert(edit);
-        }
-    }
-    let mut out: Vec<String> = added.remove(&0).unwrap_or_default();
-    for (index, line) in lines.iter().enumerate() {
-        match edits.get(&(index + 1)) {
-            Some(Edit::Drop) => {}
-            Some(Edit::Replace(text)) => out.push(text.clone()),
-            None => out.push((*line).to_owned()),
-        }
-        if let Some(more) = added.remove(&(index + 1)) {
-            out.extend(more);
-        }
-    }
-    let instructions = out.join("\n").trim().to_owned();
+        .unwrap_or_default();
+    let applied = line_edits::apply(&skill.instructions, edits);
+    let instructions = applied.text.trim().to_owned();
     let description = match value.get("description").and_then(Value::as_str) {
         Some(text) if !text.trim().is_empty() => one_line(text, DESCRIPTION_CHARS),
         _ => skill.description.trim().to_owned(),

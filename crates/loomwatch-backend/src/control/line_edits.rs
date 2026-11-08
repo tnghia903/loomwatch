@@ -3,7 +3,8 @@
 //! edits, so a line it doesn't name stays exactly as it was. A model asked to write the whole text
 //! again loses detail with every pass.
 //!
-//! Each edit is a JSON object in the shape the skill writer uses (ADR 0118):
+//! The skill writer (`skill.rs`, ADR 0118) and Ask's changes to an agent (`agent.rs`) and to a
+//! skill (`skill_proposal.rs`, ADR 0121) all make their edits here. Each edit is a JSON object:
 //! - `{"n": <line>, "replace": "<the whole new line, or lines>"}`. An empty replacement drops it.
 //! - `{"n": <line>, "drop": true}`
 //! - `{"after": <line>, "add": "<new lines>"}`, with 0 for the start.
