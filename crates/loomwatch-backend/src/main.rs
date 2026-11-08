@@ -367,6 +367,11 @@ async fn main() -> Result<()> {
             // Held until the process ends: one LoomWatch per run history file.
             let _claim = loomwatch_backend::db::claim(&database)?;
             let opened = EventArchive::open(&database).await?;
+            // Apple Health readings a paired iPhone sends through the door, for the agents given
+            // the Apple Health tool (ADR 0121).
+            loomwatch_backend::health::install(loomwatch_backend::health::Health::new(
+                opened.db().clone(),
+            ));
             println!("run history: {}", database.display());
             // Every router takes an optional archive, which tests leave out. The daemon always
             // has one.

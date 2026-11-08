@@ -18,6 +18,7 @@ type Step =
   | { kind: 'token'; tool: ConnectedTool; help: string | null }
   | { kind: 'signIn'; tool: ConnectedTool; url: string; opened: boolean }
   | { kind: 'macPermission'; tool: ConnectedTool; opened: boolean }
+  | { kind: 'phoneHealth'; tool: ConnectedTool }
 
 interface ConnectToolProps {
   catalog: readonly CatalogEntry[]
@@ -63,6 +64,7 @@ export function ConnectTool({ catalog, connected, keptIn, onConnected, onClose, 
     const answer = await connectTool(url, name)
     if (answer.needs === 'signIn' && answer.url) setStep({ kind: 'signIn', tool: answer.tool, url: answer.url, opened: false })
     else if (answer.needs === 'macPermission') setStep({ kind: 'macPermission', tool: answer.tool, opened: false })
+    else if (answer.needs === 'phoneHealth') setStep({ kind: 'phoneHealth', tool: answer.tool })
     else if (answer.needs === 'token') setStep({ kind: 'token', tool: answer.tool, help: answer.tool.tokenHelp ?? catalog.find((entry) => entry.url === url)?.tokenHelp ?? null })
     else onConnected(answer.tool)
   }
@@ -72,7 +74,9 @@ export function ConnectTool({ catalog, connected, keptIn, onConnected, onClose, 
   useEffect(() => {
     if (!resume || resumed.current === resume.id) return
     resumed.current = resume.id
-    if (resume.auth === 'onThisMac') {
+    if (resume.auth === 'fromPhone') {
+      setStep({ kind: 'phoneHealth', tool: resume })
+    } else if (resume.auth === 'onThisMac') {
       setStep({ kind: 'macPermission', tool: resume, opened: false })
     } else if (resume.auth === 'token') {
       setStep({ kind: 'token', tool: resume, help: resume.tokenHelp })
@@ -121,7 +125,7 @@ export function ConnectTool({ catalog, connected, keptIn, onConnected, onClose, 
         <button type="button" disabled={Boolean(busy) || already} title={entry.example ? `Try asking: ${entry.example}` : undefined} onClick={() => void act(entry.name, () => begin(entry.url, entry.name))}>
           <span className="connect-tool-name"><ToolIcon name={entry.name} icon={entry.icon} size={24} /><b>{entry.name}</b></span>
           <span>{entry.does}</span>
-          <em>{already ? <><Check size={12} aria-hidden="true" /> Connected</> : busy === entry.name ? 'Connecting…' : entry.auth === 'signIn' ? 'Sign in' : entry.auth === 'token' ? 'Paste a token' : entry.auth === 'onThisMac' ? 'Your Mac asks you first' : 'No sign-in needed'}</em>
+          <em>{already ? <><Check size={12} aria-hidden="true" /> Connected</> : busy === entry.name ? 'Connecting…' : entry.auth === 'signIn' ? 'Sign in' : entry.auth === 'token' ? 'Paste a token' : entry.auth === 'onThisMac' ? 'Your Mac asks you first' : entry.auth === 'fromPhone' ? 'Turn it on in the iPhone app' : 'No sign-in needed'}</em>
         </button>
       </li>
     )
@@ -132,7 +136,7 @@ export function ConnectTool({ catalog, connected, keptIn, onConnected, onClose, 
   return (
     <div className="connect-tool" role="group" aria-labelledby={`${ids}-title`}>
       <div className="connect-tool-head">
-        <h4 id={`${ids}-title`}>{step.kind === 'pick' ? 'Connect a tool' : step.kind === 'token' ? `${step.tool.name} needs a token` : step.kind === 'macPermission' ? `Allow ${step.tool.name} on this Mac` : `Sign in to ${step.tool.name}`}</h4>
+        <h4 id={`${ids}-title`}>{step.kind === 'pick' ? 'Connect a tool' : step.kind === 'token' ? `${step.tool.name} needs a token` : step.kind === 'macPermission' ? `Allow ${step.tool.name} on this Mac` : step.kind === 'phoneHealth' ? `Turn on ${step.tool.name} on your iPhone` : `Sign in to ${step.tool.name}`}</h4>
         {onClose && <button type="button" className="link" onClick={onClose}>{step.kind === 'pick' ? 'Close' : 'Cancel'}</button>}
       </div>
       {error && <p role="alert" className="inline-error t-meta"><span className="detail">{error}</span></p>}
@@ -203,6 +207,15 @@ export function ConnectTool({ catalog, connected, keptIn, onConnected, onClose, 
             else onConnected(answer.tool)
           })}>{busy === 'check' ? 'Checking…' : 'Check again'}</button>
         </div>
+      </>}
+
+      {step.kind === 'phoneHealth' && <>
+        <p className="t-body">In LoomWatch on your iPhone, open Settings, then Apple Health, and choose what to send. It connects here once the first readings arrive.</p>
+        <button type="button" className="btn btn-primary connect-tool-start" disabled={Boolean(busy)} onClick={() => void act('check', async () => {
+          const answer = await checkToolAgain(step.tool.id)
+          if (answer.needs === 'phoneHealth') setError('No readings have arrived from your iPhone yet.')
+          else onConnected(answer.tool)
+        })}>{busy === 'check' ? 'Checking…' : 'Check again'}</button>
       </>}
 
       {step.kind === 'token' && <form className="field" onSubmit={(event) => {

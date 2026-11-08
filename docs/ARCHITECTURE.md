@@ -778,6 +778,19 @@ request: `approves()` ignores `alwaysAllow` for it, and the run registry refuses
 run" and "Allow for the whole team". `LOOMWATCH_MAC_APPS_PROGRAM` swaps in a stand-in
 (`scripts/mock-mac-apps.py`) for trials that touch no real data.
 
+### Apple Health from the iPhone
+
+A Mac has no Health store, so the LoomWatch iPhone app sends the kinds the person switched on
+(ADR 0121). It sends `PUT /phone/v0/health` through the door: one figure a day for each kind, plus
+sleep and workouts as events, each filed under the day it started where the person was (its own offset, or this computer's time zone for a time sent in UTC). The door answers the route itself, as it does the push token,
+because only the door knows which phone is calling. It keeps the batch in `health_days` and
+`health_events` (`health.rs`, migration `20261108120000_health.sql`) under that phone's id, so a
+phone writes and forgets only its own (`DELETE` the same route). The Apple Health tool
+(`auth: fromPhone`, `loomwatch:apple-health`) connects once any readings exist. Its calls only read:
+`list_kinds`, `daily`, `weekly`, `latest`, `sleep` and `workouts`. When phones' days overlap, a
+day's total is the larger one and an average is averaged. Removing the tool deletes every
+reading, and removing a phone under Your devices deletes its readings.
+
 ### Permissions
 
 Any tool call that reaches past reading the agent's own folder is a permission request. One

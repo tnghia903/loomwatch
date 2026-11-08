@@ -66,6 +66,8 @@ pub enum Auth {
     /// One of this Mac's own apps (ADR 0121): macOS's own permission lets it in, and the daemon
     /// runs its actions itself (`crate::mac_apps`).
     OnThisMac,
+    /// Apple Health, from the readings a paired iPhone sends (ADR 0121, `crate::health`).
+    FromPhone,
 }
 
 /// One connected tool, as `tools.json` keeps it.
@@ -363,7 +365,7 @@ impl Tools {
     /// Why there is none to send, which says what the operator can do.
     pub(crate) async fn bearer(&self, tool: &ConnectedTool) -> Result<String, Unusable> {
         match tool.auth {
-            Auth::None | Auth::OnThisMac => Err(Unusable::SignInAgain),
+            Auth::None | Auth::OnThisMac | Auth::FromPhone => Err(Unusable::SignInAgain),
             Auth::Token => match self.inner.vault.get(&tool.id).await {
                 Ok(Some(vault::Secret::Token { token })) => Ok(token),
                 Ok(_) => Err(Unusable::SignInAgain),
@@ -452,6 +454,8 @@ impl Tools {
     async fn recheck(&self, tool: &ConnectedTool) -> Result<Vec<ToolCall>, String> {
         let listed = if let Some(app) = crate::mac_apps::App::at(&tool.url) {
             Ok(app.calls())
+        } else if tool.url == crate::health::URL {
+            Ok(crate::health::calls())
         } else {
             self.ask_server(tool).await
         };

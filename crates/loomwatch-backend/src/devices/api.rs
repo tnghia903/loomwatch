@@ -193,6 +193,12 @@ async fn share(State(manage): State<Arc<Manage>>) -> Response {
 /// Removes a device: its key stops working at once.
 async fn remove(State(manage): State<Arc<Manage>>, Path(id): Path<String>) -> Response {
     if manage.devices.remove(&id) {
+        // Its Health readings go with it (ADR 0121).
+        if let Some(health) = crate::health::installed()
+            && let Err(error) = health.forget(Some(&id)).await
+        {
+            eprintln!("warning: a removed phone's Health readings weren't deleted: {error}");
+        }
         StatusCode::NO_CONTENT.into_response()
     } else {
         failure(StatusCode::NOT_FOUND, "That device isn't connected.")

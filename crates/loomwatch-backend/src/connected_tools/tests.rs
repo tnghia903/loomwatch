@@ -950,3 +950,59 @@ async fn the_mac_apps_are_only_on_a_mac() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
+
+/// ADR 0121: Apple Health waits until a paired iPhone has sent readings, then connects; an agent
+/// given it reads them; removing it forgets them.
+#[tokio::test]
+async fn apple_health_connects_once_the_phone_has_sent_readings() {
+    let health = crate::health::Health::new(crate::db::Db::temp().await);
+    crate::health::install(health);
+    let health = crate::health::installed().unwrap();
+    health.forget(None).await.unwrap();
+    let folder = Folder::new();
+    let tools = Tools::for_tests(&folder.0);
+    let app = router(tools.clone());
+
+    let (status, body) = ask(
+        &app,
+        "POST",
+        "/api/tools",
+        Some(json!({"url": "loomwatch:apple-health"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["needs"], "phoneHealth");
+    assert_eq!(body["tool"]["auth"], "fromPhone");
+    assert!(tools.named_now("Apple Health").is_none(), "waiting");
+
+    let batch: crate::health::Batch = serde_json::from_value(json!({
+        "days": [{"kind": "steps", "day": "2026-11-02", "value": 4321, "unit": "count"}]
+    }))
+    .unwrap();
+    health.keep("phone-a", &batch).await.unwrap();
+    let id = body["tool"]["id"].as_str().unwrap();
+    let (status, checked) = ask(&app, "POST", &format!("/api/tools/{id}/check"), None).await;
+    assert_eq!(status, StatusCode::OK, "{checked}");
+    assert!(checked.get("needs").is_none(), "{checked}");
+
+    let given = tools.named_now("Apple Health").expect("connected");
+    let offered = OutsideTools::new(tools.clone(), vec![given]);
+    assert!(
+        offered.asks("apple_health__daily").is_some(),
+        "it asks first"
+    );
+    let (text, failed) = offered
+        .call(
+            "apple_health__daily",
+            json!({"kind": "steps", "from": "2026-11-01", "to": "2026-11-03"}),
+        )
+        .await;
+    assert!(!failed && text.contains("4321"), "{text}");
+
+    let (status, _) = ask(&app, "DELETE", &format!("/api/tools/{id}"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        !health.has_readings().await,
+        "the readings went with the tool"
+    );
+}

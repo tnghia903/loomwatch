@@ -75,14 +75,14 @@ export function ConnectedTools() {
           <li key={tool.id} ref={tool.notion ? notionCard : undefined}>
             <div className="tools-connected-head">
               <span className="tools-connected-name"><ToolIcon name={tool.name} icon={tool.icon} size={28} /><b>{tool.name}</b></span>
-              <span className="t-meta">{tool.pending ? 'Not finished connecting' : `${actionCount(tool.calls.length)} · ${tool.auth === 'signIn' ? 'signed in' : tool.auth === 'token' ? 'with a token' : tool.auth === 'onThisMac' ? 'on this Mac' : 'no sign-in'}`}</span>
+              <span className="t-meta">{tool.pending ? 'Not finished connecting' : `${actionCount(tool.calls.length)} · ${tool.auth === 'signIn' ? 'signed in' : tool.auth === 'token' ? 'with a token' : tool.auth === 'onThisMac' ? 'on this Mac' : tool.auth === 'fromPhone' ? 'from your iPhone' : 'no sign-in'}`}</span>
             </div>
-            {tool.auth !== 'onThisMac' && <p className="t-meta">{tool.url}</p>}
+            {tool.auth !== 'onThisMac' && tool.auth !== 'fromPhone' && <p className="t-meta">{tool.url}</p>}
             {tool.problem && <p className="t-meta problem">{tool.problem}</p>}
             {tool.example && !tool.pending && <p className="t-meta">Try asking an agent: “{tool.example}”</p>}
             {tool.calls.length > 0 && <details>
               <summary>What it can do</summary>
-              <ul>{tool.calls.map((call) => <li key={call.name}><strong>{call.label}</strong>{call.readOnly ? ' · only reads' : ''}{call.cantUndo ? ' · can’t be undone, asks every time' : ''}{call.description && tool.auth !== 'onThisMac' ? <span className="lw-call-desc"><InlineMarkdown>{call.description}</InlineMarkdown></span> : null}</li>)}</ul>
+              <ul>{tool.calls.map((call) => <li key={call.name}><strong>{call.label}</strong>{call.readOnly ? ' · only reads' : ''}{call.cantUndo ? ' · can’t be undone, asks every time' : ''}{call.description && tool.auth !== 'onThisMac' && tool.auth !== 'fromPhone' ? <span className="lw-call-desc"><InlineMarkdown>{call.description}</InlineMarkdown></span> : null}</li>)}</ul>
             </details>}
             {tool.notion && !tool.pending && <NotionAnswers choosing={choosingFor === tool.id} />}
             <div className="lw-settings-actions">

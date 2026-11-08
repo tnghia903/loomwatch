@@ -17,6 +17,7 @@ Open an agent's **Tools it can use** row and click **Connect a new tool**, or op
 | Topic | Tools | How it connects |
 |---|---|---|
 | On this Mac | Apple Calendar, Apple Reminders, Apple Notes, Apple Contacts | Your Mac asks you first |
+| From your iPhone | Apple Health | Turned on in the LoomWatch iPhone app |
 | Tasks | Todoist, Linear, Jira and Confluence, monday.com, ClickUp, Airtable | Sign in |
 | Notes and files | Notion | Sign in |
 | Meetings | Cal.com, Granola, Fireflies | Sign in |
@@ -37,7 +38,15 @@ Each tool shows its own icon. LoomWatch fetches it from the service's own websit
 it's shown and keeps a copy for a week. The icons belong to their makers and aren't part of
 LoomWatch. A site that won't hand one over shows the tool's first letter instead.
 
-There are four ways a tool connects:
+There are five ways a tool connects:
+
+- **From your iPhone.** Apple Health's data lives on your iPhone, not your Mac. In LoomWatch on your
+  iPhone, open Settings, then Apple Health, and choose what to send: steps, active energy,
+  exercise minutes, heart rate, resting heart rate, heart rate variability, weight, sleep and
+  workouts. The iPhone sends one figure a day for each, plus each night's sleep and each workout,
+  to the computer it's connected to. Apple Health connects once the first readings arrive. Agents
+  only read them. Removing Apple Health in Connections, or removing the iPhone under Your devices,
+  deletes the readings from this computer.
 
 - **On this Mac.** Calendar, Reminders, Notes and Contacts are your Mac's own apps, so they show
   only when LoomWatch runs on a Mac. Connecting one asks macOS: the first time, macOS asks you
@@ -59,8 +68,6 @@ There are four ways a tool connects:
 **Any other tool.** A service that works with AI assistants usually lists an "MCP server" address,
 which often ends in `/mcp`. Paste it in the box at the top of the list. LoomWatch connects over
 `https://` only.
-
-Apple Health isn't here yet: its data lives on your iPhone, not your Mac.
 
 LoomWatch keeps sign-ins and tokens in your Mac's Keychain (or Windows Credential Manager), never in
 team files, and agents never get them.

@@ -237,4 +237,23 @@ describe('connecting one of this Mac’s apps (ADR 0121)', () => {
     await waitFor(() => expect(onConnected).toHaveBeenCalledWith(calendar()))
     expect(sent(fetch, 3)).toMatchObject({ url: '/api/tools/mac1/check', method: 'POST' })
   })
+
+  it('waits for Apple Health until the iPhone has sent readings', async () => {
+    const healthEntry: CatalogEntry = { name: 'Apple Health', url: 'loomwatch:apple-health', does: 'Read your steps, sleep, heart rate and workouts', auth: 'fromPhone', topic: 'fromPhone' }
+    const health = (extra: Partial<ConnectedTool> = {}) => tool({ id: 'h1', name: 'Apple Health', url: 'loomwatch:apple-health', auth: 'fromPhone', ...extra })
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(json({ tool: health({ pending: true }), needs: 'phoneHealth' }))
+      .mockResolvedValueOnce(json({ tool: health({ pending: true }), needs: 'phoneHealth' }))
+      .mockResolvedValueOnce(json({ tool: health() }))
+    vi.stubGlobal('fetch', fetch)
+    const onConnected = vi.fn()
+    render(<ConnectTool catalog={[healthEntry]} connected={[]} keptIn="keychain" onConnected={onConnected} />)
+    expect(screen.getByRole('heading', { level: 5, name: 'From your iPhone' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Apple Health/ }))
+    expect(await screen.findByRole('heading', { name: 'Turn on Apple Health on your iPhone' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Check again' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('No readings have arrived')
+    fireEvent.click(screen.getByRole('button', { name: 'Check again' }))
+    await waitFor(() => expect(onConnected).toHaveBeenCalledWith(health()))
+  })
 })

@@ -26,6 +26,7 @@ pub mod devices;
 pub mod documents;
 pub mod engine;
 mod files;
+pub mod health;
 pub mod helpers;
 mod intent;
 mod jobs;

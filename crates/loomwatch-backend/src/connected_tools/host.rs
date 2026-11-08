@@ -47,9 +47,17 @@ fn mac_app(tool: &ConnectedTool) -> Option<App> {
         .flatten()
 }
 
-/// What `tool` offers: a Mac app's own list, which `tools.json` can't change, or what its server
-/// listed when last checked.
+/// Whether `tool` is Apple Health, read from what a paired iPhone sent (ADR 0121).
+fn is_health(tool: &ConnectedTool) -> bool {
+    tool.auth == Auth::FromPhone && tool.url == crate::health::URL
+}
+
+/// What `tool` offers: a Mac app's or Apple Health's own list, which `tools.json` can't change, or
+/// what its server listed when last checked.
 fn offered_calls(tool: &ConnectedTool) -> Vec<ToolCall> {
+    if is_health(tool) {
+        return crate::health::calls();
+    }
     mac_app(tool).map_or_else(|| tool.calls.clone(), App::calls)
 }
 
@@ -150,6 +158,15 @@ impl HostTools for OutsideTools {
                 return (format!("There's no tool called {name}."), true);
             };
             let given = &self.given[offered.given].tool;
+            if is_health(given) {
+                return match crate::health::installed() {
+                    Some(health) => health.call(&offered.call, &input).await,
+                    None => (
+                        "Apple Health's readings can't be read right now.".to_owned(),
+                        true,
+                    ),
+                };
+            }
             if let Some(app) = mac_app(given) {
                 // A Mac app's action runs here, never through a server (ADR 0121).
                 let answer = self.tools.mac().call(app, &offered.call, input).await;
