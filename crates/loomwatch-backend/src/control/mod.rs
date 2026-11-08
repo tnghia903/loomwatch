@@ -17,6 +17,7 @@ mod jobs;
 mod line_edits;
 mod mcp;
 mod skill;
+mod skill_proposal;
 #[cfg(test)]
 mod tests;
 
@@ -92,6 +93,8 @@ struct Inner {
     proposals: RwLock<BTreeMap<String, Proposal>>,
     /// One of My agents on its own, new or changed (ADR 0119), by the same kind of id.
     agent_proposals: RwLock<BTreeMap<String, agent::AgentProposal>>,
+    /// A skill, new or changed (ADR 0121), by the same kind of id.
+    skill_proposals: RwLock<BTreeMap<String, skill_proposal::SkillProposal>>,
 }
 
 /// Who a tool call is from: an Ask conversation, by id.
@@ -220,6 +223,7 @@ impl Control {
                 conversations: RwLock::default(),
                 proposals: RwLock::default(),
                 agent_proposals: RwLock::default(),
+                skill_proposals: RwLock::default(),
             }),
         }
     }
@@ -1063,7 +1067,10 @@ async fn get_proposal(
     if let Some(proposal) = control.inner.proposals.read().await.get(&id) {
         return Json(proposal).into_response();
     }
-    match control.inner.agent_proposals.read().await.get(&id) {
+    if let Some(proposal) = control.inner.agent_proposals.read().await.get(&id) {
+        return Json(proposal).into_response();
+    }
+    match control.inner.skill_proposals.read().await.get(&id) {
         Some(proposal) => Json(proposal).into_response(),
         None => error(
             StatusCode::NOT_FOUND,
@@ -1103,6 +1110,8 @@ async fn proposal_outcome(
             proposal.source,
             json!({"agent": proposal.agent, "name": proposal.name}),
         )
+    } else if let Some(proposal) = control.inner.skill_proposals.read().await.get(&id).cloned() {
+        (proposal.source, json!({"skill": proposal.skill}))
     } else {
         return error(
             StatusCode::NOT_FOUND,

@@ -42,7 +42,7 @@ function cards(overrides: Partial<CardActions> = {}): CardActions {
   return {
     previewingId: null, savedYamlFor: () => null, busyCard: null, cardError: null,
     onShowProposal: vi.fn(), onApply: vi.fn(), onDiscard: vi.fn(), onStartRun: vi.fn(), onDeclineRun: vi.fn(), onOpenRun: vi.fn(), onUseNote: vi.fn(),
-    onOpenAgent: vi.fn(), onDiscardAgent: vi.fn(),
+    onOpenAgent: vi.fn(), onDiscardAgent: vi.fn(), onSkillSettled: vi.fn(),
     ...overrides,
   }
 }

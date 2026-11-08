@@ -42,10 +42,11 @@ function newLines(spec: JobSpec): string[] {
 }
 
 /**
- * How the instructions changed, by line: a line taken out and one put in count as one changed, and
- * blank lines don't count, so a line that was only extended reads as "1 line changed".
+ * How a text changed, by line: a line taken out and one put in count as one changed, and blank
+ * lines don't count, so a line that was only extended reads as "1 line changed". Null when no line
+ * changed. A skill's card says it the same way (`skillProposal.ts`).
  */
-function instructionsLine(now: string, was: string): string | null {
+export function lineChanges(now: string, was: string): string | null {
   const added = more(lines(now), lines(was)).length
   const taken = more(lines(was), lines(now)).length
   const changed = Math.min(added, taken)
@@ -54,7 +55,12 @@ function instructionsLine(now: string, was: string): string | null {
     added - changed && `${plural(added - changed, 'line')} put in`,
     taken - changed && `${plural(taken - changed, 'line')} taken out`,
   ].filter(Boolean)
-  return parts.length ? `Instructions: ${parts.join(', ')}` : null
+  return parts.length ? parts.join(', ') : null
+}
+
+function instructionsLine(now: string, was: string): string | null {
+  const changes = lineChanges(now, was)
+  return changes ? `Instructions: ${changes}` : null
 }
 
 /** A change's lines: each setting that differs from `saved`, most noticed first. */

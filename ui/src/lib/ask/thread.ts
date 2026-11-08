@@ -67,6 +67,30 @@ export interface AgentProposalCard {
   superseded: boolean
 }
 
+/** A skill Ask proposed, new or changed (ADR 0121). */
+export interface SkillProposalCard {
+  kind: 'skill-proposal'
+  id: string
+  at: string
+  /** Its folder's name: the one it has, or the one a new skill's title makes. */
+  skill: string
+  /** A new skill's name in words; null for a change, which keeps its own. */
+  title: string | null
+  isNew: boolean
+  summary: string
+  /** When to use it, whole, as it would be saved. */
+  description: string
+  /** What to do, whole, as it would be saved. */
+  instructions: string
+  /** The `SKILL.md` a change was made from; null for a new skill. */
+  base: string | null
+  /** The agents in My agents given it, by name. */
+  givenTo: string[]
+  outcome: ProposalOutcome | null
+  /** A later proposal for the same skill replaced this one. */
+  superseded: boolean
+}
+
 export interface RunRequestCard {
   kind: 'run-request'
   id: string
@@ -96,7 +120,7 @@ export interface ReviewNoteCard {
   text: string
 }
 
-export type AskCard = ProposalCard | AgentProposalCard | RunRequestCard | RunStartedCard | ReviewNoteCard
+export type AskCard = ProposalCard | AgentProposalCard | SkillProposalCard | RunRequestCard | RunStartedCard | ReviewNoteCard
 
 export interface PersonTurn {
   kind: 'person'
@@ -142,6 +166,8 @@ const STEP_WORDS: Record<string, { running: string; done: string; failed: string
   list_my_agents: { running: 'Looking at My agents', done: 'Looked at My agents', failed: 'Couldn’t list My agents' },
   read_my_agent: { running: 'Looking at your agent', done: 'Looked at your agent', failed: 'Couldn’t look at your agent' },
   propose_agent: { running: 'Drafting the agent', done: 'Drafted the agent', failed: 'Found a problem in the draft', fixed: 'Fixed a problem in its draft' },
+  read_skill: { running: 'Looking at your skill', done: 'Looked at your skill', failed: 'Couldn’t look at your skill' },
+  propose_skill: { running: 'Drafting the skill', done: 'Drafted the skill', failed: 'Found a problem in the draft', fixed: 'Fixed a problem in its draft' },
   list_tools: { running: 'Looking at your tools', done: 'Looked at your tools', failed: 'Couldn’t list your tools' },
   find_files: { running: 'Looking for a folder or file', done: 'Looked for a folder or file', failed: 'Couldn’t look for it' },
   propose_team: { running: 'Drafting the team', done: 'Drafted the team', failed: 'Found a problem in the draft', fixed: 'Fixed a problem in its draft' },
@@ -197,6 +223,11 @@ function names(value: unknown): Record<string, string> {
   return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1].trim() !== ''))
 }
 
+/** The words in a list, leaving out anything else. */
+function strings(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && item.trim() !== '') : []
+}
+
 function text(value: unknown): string {
   return typeof value === 'string' ? value : ''
 }
@@ -238,6 +269,7 @@ export function projectAskThread(events: readonly RunEvent[]): AskThread {
   let current: Building | null = null
   const proposals = new Map<string, ProposalCard>()
   const agentProposals = new Map<string, AgentProposalCard>()
+  const skillProposals = new Map<string, SkillProposalCard>()
   const requests = new Map<string, RunRequestCard>()
 
   const open = (id: string): Building => {
@@ -300,8 +332,22 @@ export function projectAskThread(events: readonly RunEvent[]): AskThread {
           }
           agentProposals.set(card.id, card)
           active(event.id).turn.cards.push(card)
+        } else if (phase === 'ask_skill_proposal') {
+          const skill = text(payload.skill)
+          const instructions = text(payload.instructions)
+          if (!skill || !instructions) break
+          const card: SkillProposalCard = {
+            kind: 'skill-proposal', id: text(payload.proposalId), at: event.ts, skill, title: text(payload.title) || null,
+            isNew: payload.isNew === true, summary: text(payload.summary), description: text(payload.description), instructions,
+            base: text(payload.base) || null, givenTo: strings(payload.givenTo), outcome: null, superseded: false,
+          }
+          // A later draft of the same skill replaces the earlier.
+          for (const earlier of skillProposals.values()) if (earlier.skill === card.skill) earlier.superseded = true
+          skillProposals.set(card.id, card)
+          active(event.id).turn.cards.push(card)
         } else if (phase === 'ask_proposal_outcome') {
-          const card = proposals.get(text(payload.proposalId)) ?? agentProposals.get(text(payload.proposalId))
+          const id = text(payload.proposalId)
+          const card = proposals.get(id) ?? agentProposals.get(id) ?? skillProposals.get(id)
           const outcome = text(payload.outcome)
           if (card && (outcome === 'applied' || outcome === 'discarded' || outcome === 'undone')) card.outcome = outcome
         } else if (phase === 'ask_run_request') {

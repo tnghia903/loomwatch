@@ -5,7 +5,7 @@ import { briefFileNameFor, fetchMemory, writeMemoryFile } from '../../lib/memory
 import { addProjectNote, fetchProjects, projectsChanged, saveProject } from '../../lib/projects/client'
 import { decideRunRequest, fetchProposal, reportProposalOutcome, type Proposal } from '../../lib/ask/client'
 import { proposalChanges, type ProposalChanges } from '../../lib/ask/proposal'
-import type { AgentProposalCard, ProposalCard, ReviewNoteCard, RunRequestCard } from '../../lib/ask/thread'
+import type { AgentProposalCard, ProposalCard, ReviewNoteCard, RunRequestCard, SkillProposalCard } from '../../lib/ask/thread'
 import { agentProposalHref } from '../agents/route'
 import { newStartKey, startRun, type RunRecord } from '../../lib/runs/client'
 import { goToTeam } from '../../lib/team-file/teamPage'
@@ -381,6 +381,28 @@ export function useAskActions({ doc, conversationId, activeRunId, waiting, toBui
     }
   }, [busyCard])
 
+  /**
+   * What the person did with a skill Ask proposed (ADR 0121): saved on the sheet, or discarded on
+   * the card. A save is the person's whether or not it is recorded, so only a discard says it
+   * failed.
+   */
+  const settleSkill = useCallback(async (card: SkillProposalCard, outcome: 'applied' | 'discarded') => {
+    if (outcome === 'applied') {
+      await reportProposalOutcome(card.id, 'applied').catch(() => undefined)
+      return
+    }
+    if (busyCard) return
+    setBusyCard(card.id)
+    setCardError(null)
+    try {
+      await reportProposalOutcome(card.id, 'discarded')
+    } catch (caught) {
+      setCardError({ id: card.id, message: caught instanceof Error ? caught.message : String(caught) })
+    } finally {
+      setBusyCard(null)
+    }
+  }, [busyCard])
+
   const openRun = useCallback((runId: string, file: string) => {
     if (sameTeamFile(doc.path, file)) showRun(runId)
     else goToTeam(teamUrl(file, { run: runId }))
@@ -423,6 +445,6 @@ export function useAskActions({ doc, conversationId, activeRunId, waiting, toBui
   return {
     preview, notice, dismissNotice: () => setNotice(null), marks, busyCard, cardError,
     showProposal, applyProposal, discardProposal, startRequestedRun, declineRequestedRun, openRun, takeNote,
-    openAgent, discardAgent,
+    openAgent, discardAgent, settleSkill,
   }
 }

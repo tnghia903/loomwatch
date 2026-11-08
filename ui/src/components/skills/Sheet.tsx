@@ -1,10 +1,27 @@
 import { X } from '../ui/icon'
-import { useEffect, useId, useRef, type ReactNode } from 'react'
+import { useEffect, useId, useRef, type KeyboardEvent, type ReactNode } from 'react'
+
+const FOCUSABLE = 'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
+/** Tab and Shift+Tab go round the sheet's own controls, never to the page behind it. */
+function keepFocusIn(event: KeyboardEvent<HTMLDivElement>, panel: HTMLDivElement | null) {
+  if (!panel) return
+  const inside = [...panel.querySelectorAll<HTMLElement>(FOCUSABLE)]
+  const first = inside[0]
+  const last = inside[inside.length - 1]
+  if (!first || !last) { event.preventDefault(); return }
+  const at = document.activeElement
+  if (event.shiftKey && (at === first || at === panel)) { event.preventDefault(); last.focus() }
+  else if (!event.shiftKey && at === last) { event.preventDefault(); first.focus() }
+}
 
 /**
  * The Skills page's one dialog: a sheet over a dimmed page, where every add and bring-in is
  * reviewed before it happens. It takes focus when it opens and gives it back when it closes;
- * Escape and a click on the dimmed page close it, unless something is in progress.
+ * Escape and a click on the dimmed page close it, unless something is in progress. It also opens
+ * over other screens (a suggestion in the chat, a skill Ask proposed), so it keeps the keyboard:
+ * Tab stays in it, and no key reaches the page's own shortcuts behind it, such as the canvas's
+ * Cmd+Enter, which starts a run.
  */
 export function Sheet({ title, kicker, onClose, busy = false, children, footer, returnFocus }: {
   title: ReactNode
@@ -45,7 +62,11 @@ export function Sheet({ title, kicker, onClose, busy = false, children, footer, 
         tabIndex={-1}
         className="e2 lw-skills-sheet"
         onMouseDown={(event) => event.stopPropagation()}
-        onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); close() } }}
+        onKeyDown={(event) => {
+          event.stopPropagation()
+          if (event.key === 'Escape') close()
+          else if (event.key === 'Tab') keepFocusIn(event, panel.current)
+        }}
       >
         <header className="lw-skills-sheet-head">
           <div className="lw-skills-sheet-title">

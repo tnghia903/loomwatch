@@ -1,11 +1,16 @@
 import { ArrowRight, Check, PenLine, Play } from '../ui/icon'
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 
 import { agentProposalLines, savedSinceAsk } from '../../lib/ask/agentProposal'
 import { proposalChanges } from '../../lib/ask/proposal'
-import type { AgentProposalCard, AskCard, ProposalCard, ReviewNoteCard, RunRequestCard, RunStartedCard } from '../../lib/ask/thread'
+import { changedSinceAsk, skillProposalLines, skillProposalName } from '../../lib/ask/skillProposal'
+import type { AgentProposalCard, AskCard, ProposalCard, ReviewNoteCard, RunRequestCard, RunStartedCard, SkillProposalCard } from '../../lib/ask/thread'
 import { useSavedJobs } from '../../lib/library/jobs'
+import { SKILLS_CHANGED_EVENT } from '../../lib/library/client'
+import { readSkillWords, SkillsApiError, type SkillWords } from '../../lib/library/skillStore'
 import { SaidText } from '../chat/SaidText'
+import { SkillSheet, type Writing } from '../skills/SkillSheet'
 import { InlineMarkdown } from '../ui/Markdown'
 
 export interface CardActions {
@@ -26,6 +31,8 @@ export interface CardActions {
   /** An agent Ask proposed (ADR 0119): open it on its page, where Save keeps it. */
   onOpenAgent: (card: AgentProposalCard) => void
   onDiscardAgent: (card: AgentProposalCard) => void
+  /** A skill Ask proposed (ADR 0121), saved on the Skills page's sheet or discarded on its card. */
+  onSkillSettled: (card: SkillProposalCard, outcome: 'applied' | 'discarded') => void
 }
 
 /** The dashed edge a proposal wears until it is applied, drawn so the dashes can travel. */
@@ -116,6 +123,98 @@ function AgentProposalView({ card, actions }: { card: AgentProposalCard; actions
   )
 }
 
+/** The skill a change is for, as it is saved now: null while it loads, `gone` when it isn't there. */
+function useSkillWords(name: string | null): SkillWords | 'gone' | null {
+  const [words, setWords] = useState<{ name: string; read: SkillWords | 'gone' } | null>(null)
+  const [turn, setTurn] = useState(0)
+  useEffect(() => {
+    if (!name) return
+    // A save anywhere in the app, this card's own included, may change the skill.
+    const again = () => setTurn((value) => value + 1)
+    window.addEventListener(SKILLS_CHANGED_EVENT, again)
+    return () => window.removeEventListener(SKILLS_CHANGED_EVENT, again)
+  }, [name])
+  useEffect(() => {
+    if (!name) return
+    let active = true
+    readSkillWords(name).then(
+      (read) => { if (active) setWords({ name, read }) },
+      // Not knowing (the daemon away) is not the same as gone: the sheet says what went wrong.
+      (caught: unknown) => { if (active && caught instanceof SkillsApiError && caught.status === 404) setWords({ name, read: 'gone' }) },
+    )
+    return () => { active = false }
+  }, [name, turn])
+  return words && words.name === name ? words.read : null
+}
+
+/**
+ * A skill Ask proposed (ADR 0121): when agents use a new one, or what a change changes and who it
+ * changes it for. Open shows it on the Skills page's own sheet, over this screen, where Save skill
+ * keeps it; for a change, what Ask took out and put in is marked there, with Put back.
+ */
+function SkillProposalView({ card, actions }: { card: SkillProposalCard; actions: CardActions }) {
+  const [open, setOpen] = useState(false)
+  // Saved here: shown at once, whether or not the daemon could still record it.
+  const [saved, setSaved] = useState(false)
+  const words = useSkillWords(card.isNew || card.outcome || saved ? null : card.skill)
+  const now = words === 'gone' ? null : words
+  const stale = !card.outcome && !saved && changedSinceAsk(card, now)
+  const gone = !card.outcome && !saved && words === 'gone'
+  const lines = useMemo(() => (card.outcome || saved || stale || gone ? [] : skillProposalLines(card, now)), [card, saved, stale, gone, now])
+  const name = skillProposalName(card)
+  // A later draft replaces the card, but not a sheet the person has open on this one.
+  if (card.superseded && !card.outcome && !open) {
+    return <div className="ask-card ask-card-quiet t-meta">An earlier draft of “{name}”, replaced by the one below.</div>
+  }
+  const outcome = saved ? 'applied' : card.outcome
+  const settledText = outcome === 'applied' ? 'Saved' : outcome === 'discarded' ? 'Discarded' : null
+  const error = actions.cardError?.id === card.id ? actions.cardError.message : null
+  const busy = actions.busyCard === card.id
+  // Where the sheet gives focus back once Open is gone, after a save: this card, which says Saved.
+  const landing = !card.outcome || saved
+  const writing: Writing = card.isNew
+    ? { kind: 'new', start: { title: card.title ?? name, description: card.description, instructions: card.instructions } }
+    : { kind: 'change', name: card.skill, proposed: { description: card.description, instructions: card.instructions, ...(card.base ? { base: card.base } : {}) } }
+  return (
+    <article
+      className={`ask-card ask-proposal ask-skill-proposal ${outcome ? `is-${outcome}` : 'is-open'}`}
+      aria-label={`${card.isNew ? 'Proposed skill' : 'Proposed change to'} ${name}`}
+      tabIndex={landing ? -1 : undefined}
+      data-ask-card={card.id}
+    >
+      {!outcome && <DashedEdge />}
+      <header className="ask-card-head"><span className="t-micro">{card.isNew ? 'New skill' : 'Changes'}</span></header>
+      <strong className="ask-card-title">{name}</strong>
+      {card.summary && <p className="ask-card-text"><InlineMarkdown>{card.summary}</InlineMarkdown></p>}
+      {lines.length > 0 && <ul className="ask-card-lines">{lines.map((line) => <li key={line}>{line}</li>)}</ul>}
+      {error && <p role="alert" className="ask-card-error">{error}</p>}
+      {settledText ? (
+        <p className={`ask-card-outcome ${outcome === 'applied' ? 'ok' : ''}`}>{outcome === 'applied' && <Check size={14} aria-hidden="true" />}{settledText}</p>
+      ) : stale || gone ? (
+        <div className="ask-card-acts">
+          <span className="ask-card-hint">{gone ? `${name} isn’t in your skills any more.` : `${name} was changed after Ask read it. Ask again for a new change.`}</span>
+          <button type="button" className="btn" disabled={busy} onClick={() => actions.onSkillSettled(card, 'discarded')}>Discard</button>
+        </div>
+      ) : (
+        <div className="ask-card-acts">
+          <button type="button" className="btn btn-act" onClick={() => setOpen(true)}>Open<ArrowRight size={14} aria-hidden="true" /></button>
+          <button type="button" className="btn" disabled={busy} onClick={() => actions.onSkillSettled(card, 'discarded')}>Discard</button>
+          <span className="ask-card-hint">Nothing is saved until you press Save skill.</span>
+        </div>
+      )}
+      {open && createPortal(
+        <SkillSheet
+          writing={writing}
+          returnFocus={landing ? `[data-ask-card=${JSON.stringify(card.id)}]` : undefined}
+          onClose={() => setOpen(false)}
+          onSaved={() => { setOpen(false); setSaved(true); actions.onSkillSettled(card, 'applied') }}
+        />,
+        document.body,
+      )}
+    </article>
+  )
+}
+
 function RunRequestView({ card, actions }: { card: RunRequestCard; actions: CardActions }) {
   const busy = actions.busyCard === card.id
   const error = actions.cardError?.id === card.id ? actions.cardError.message : null
@@ -169,6 +268,7 @@ export function AskCardView({ card, actions }: { card: AskCard; actions: CardAct
   switch (card.kind) {
     case 'proposal': return <ProposalView card={card} actions={actions} />
     case 'agent-proposal': return <AgentProposalView card={card} actions={actions} />
+    case 'skill-proposal': return <SkillProposalView card={card} actions={actions} />
     case 'run-request': return <RunRequestView card={card} actions={actions} />
     case 'run-started': return <RunStartedView card={card} actions={actions} />
     case 'review-note': return <ReviewNoteView card={card} actions={actions} />

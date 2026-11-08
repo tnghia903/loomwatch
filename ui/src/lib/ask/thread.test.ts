@@ -261,3 +261,37 @@ describe('an agent Ask proposed', () => {
     expect(turn.cards).toEqual([])
   })
 })
+
+// ADR 0121: a skill Ask proposed is a card of its own, settled by what the person did with it on
+// the Skills page's sheet, and replaced by a later draft of the same skill.
+describe('a skill Ask proposed', () => {
+  function skillTurn(): RunEvent[] {
+    seq = 0
+    const change = (proposalId: string, summary: string) => meta('ask_skill_proposal', {
+      proposalId, skill: 'weekly-update', isNew: false, summary, description: 'Writes the weekly update.',
+      instructions: '1. Read the notes.\n2. Write three bullets.', base: 'base-1', givenTo: ['Writer', 7],
+    })
+    return [
+      status('ready'), status('working'),
+      meta('ask_message', { text: 'Make my weekly update skill three bullets', context: { view: 'home' } }),
+      call('c1', 'read_skill', { skill: 'weekly-update' }), done('c1', {}),
+      change('s1', 'Three bullets.'),
+      call('c2', 'propose_skill', { change: { skill: 'weekly-update' } }), done('c2', { proposalId: 's1' }),
+      change('s2', 'Three bullets, not five.'),
+      meta('ask_skill_proposal', { proposalId: 's3', skill: 'client-letters', title: 'Client letters', isNew: true, summary: 'Letters.', description: 'Writes letters to clients.', instructions: 'Be warm.' }),
+      meta('ask_skill_proposal', { proposalId: 's9', skill: 'broken', isNew: true, summary: 'No words.', description: 'x' }),
+      meta('ask_proposal_outcome', { proposalId: 's2', skill: 'weekly-update', outcome: 'applied' }),
+      say('Done.', 'm1'), event('turn_end', { stopReason: 'end_turn' }), status('ready'),
+    ]
+  }
+
+  it('is a card with the whole skill, the words it changed and who it is given to', () => {
+    const turn = projectAskThread(skillTurn()).items[1] as AssistantTurn
+    expect(turn.steps.map((step) => step.label)).toEqual(['Looked at your skill', 'Drafted the skill'])
+    expect(turn.cards).toEqual([
+      expect.objectContaining({ kind: 'skill-proposal', id: 's1', skill: 'weekly-update', title: null, isNew: false, base: 'base-1', givenTo: ['Writer'], outcome: null, superseded: true }),
+      expect.objectContaining({ kind: 'skill-proposal', id: 's2', summary: 'Three bullets, not five.', description: 'Writes the weekly update.', instructions: '1. Read the notes.\n2. Write three bullets.', outcome: 'applied', superseded: false }),
+      expect.objectContaining({ kind: 'skill-proposal', id: 's3', skill: 'client-letters', title: 'Client letters', isNew: true, base: null, givenTo: [], outcome: null, superseded: false }),
+    ])
+  })
+})

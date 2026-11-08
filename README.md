@@ -336,7 +336,8 @@ Run a team every morning and send the answer to Notion. A review stop still wait
 Describe the team you want in a sentence, or, on Home, say what you're working on and click **Set
 up project**. Ask proposes the team on the canvas from your own agents, folders, skills and tools,
 on the models you've connected. Nothing is saved until you click **Apply**. Ask it for one agent, or
-to change one of yours, and it drafts that agent on its page for you to save.
+to change one of yours, and it drafts that agent on its page for you to save. Ask for a skill, or
+to change one, and it drafts the skill for you to check and save.
 
 </td>
 <td valign="top">
@@ -921,6 +922,12 @@ first team. New and changed agents are marked, and nothing is saved until you cl
   you asked. Click **Open** on its card: the agent's page shows what Ask changed, and nothing is
   saved until you click **Save** there. **Put back what you had** drops the change. Teams that use
   the agent get the change from their next run.
+- **It writes skills.** Describe a skill, or say how something should always be done, such as
+  _"make a skill for my weekly client update: three bullets, signed Mai"_, and Ask writes it. Ask it
+  to change one of yours, such as _"make my weekly update skill three bullets, not five"_, and it
+  changes only the lines that need it. Click **Open** on its card: the skill opens just as it does
+  on the Skills page, with what Ask changed marked, and nothing is saved until you click **Save
+  skill**. Every agent can use a saved skill.
 - **It picks the team's shape.** One agent for most work; agents that hand work on in turn when it
   needs different jobs, such as research then writing; a lead that hands parts to teammates
   working at the same time; a review step where the work should wait for you; and a check step
@@ -1268,7 +1275,7 @@ whose agent was behind a newer save of it in My agents says so once in its chat.
 | "You signed in with ChatGPT but didn't allow LoomWatch to use your plan" | Click **Turn on plan use** on **Your ChatGPT plan** in **Connections** (under **You**), and allow it on ChatGPT's page. |
 | "Your OpenRouter account is out of credits" | Add credits at [openrouter.ai/settings/credits](https://openrouter.ai/settings/credits), or choose a free model for the agent. |
 | "OpenRouter has no model called …" | The model was renamed or retired. Choose another model in the agent's panel. |
-| A skill is missing | Add it on the Skills page, or click **Find skills in your apps** there to copy it from an AI app's skills. Skills that travel with a team go in `.agents/skills` beside its file. |
+| A skill is missing | Add it on the Skills page or ask Ask to write it, or click **Find skills in your apps** there to copy it from an AI app's skills. Skills that travel with a team go in `.agents/skills` beside its file. |
 | Ask or a team says a way of paying isn't connected | The agent's model is paid by your ChatGPT plan, your Claude credit or OpenRouter, and that one isn't connected. Connect it in **Connections** (under **You**), or choose a model you can run. When a connected one has the same models, the team offers to move its agents with one click. |
 | An agent's working folder is missing | Native teams should use a real folder on this computer. Container-run teams must use `/workspaces/...` and mount its host parent through `LOOMWATCH_WORKSPACES_DIR`. |
 | Agent cannot perform a tool action | While the run is going, answer its question in the run or the Needs-you tray before it is declined after 10 minutes. Afterwards, read the run receipt: it says what the agent wasn't allowed to do. Click **Allow from now on**, or switch it on under **Allowed without asking** in the agent's panel on the Team tab. An edit outside the agent's own folder always asks, even with **Edit files** on. |

@@ -643,6 +643,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     onUseNote: (card) => { ask.setOpen(false); askActions.takeNote(card) },
     onOpenAgent: askActions.openAgent,
     onDiscardAgent: (card) => void askActions.discardAgent(card),
+    onSkillSettled: (card, outcome) => void askActions.settleSkill(card, outcome),
   }
   // A proposal made in answer to a message sent from this page goes straight onto the canvas when
   // nothing of the person's would be in the way; otherwise its card waits for "Show on canvas".

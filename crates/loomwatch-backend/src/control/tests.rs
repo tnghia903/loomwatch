@@ -118,6 +118,10 @@ fn assistant() -> Demo {
             one_agent(step, &answers)
         } else if message.contains("how sure") {
             change_an_agent(step, &answers)
+        } else if message.contains("skill for") {
+            new_skill(step)
+        } else if message.contains("three bullets") {
+            change_a_skill(step, &answers)
         } else if message.contains("folder") {
             build_from_what_they_have(step, &answers)
         } else if message.contains("note") {
@@ -334,6 +338,66 @@ fn change_an_agent(step: usize, answers: &[&str]) -> Completion {
     }
 }
 
+/// "A skill for my weekly client update" (ADR 0121): the stand-in writes the skill whole.
+fn new_skill(step: usize) -> Completion {
+    match step {
+        0 => calling(
+            step,
+            "",
+            "propose_skill",
+            &json!({
+                "summary": "A skill for your weekly client update.",
+                "new": {
+                    "title": "Weekly client update",
+                    "description": "Writes the weekly update for a client. Use it when someone asks for a client update or a weekly summary.",
+                    "instructions": "1. Read this week's notes.\n2. Write three short bullets.\n3. Sign it Mai.",
+                },
+            }),
+        ),
+        _ => Completion::text(
+            "I wrote a Weekly client update skill. Open it to check it, then press Save skill: \
+             once saved, every agent can use it.",
+        ),
+    }
+}
+
+/// "Make my weekly update skill three bullets, not five" (ADR 0121): the stand-in reads the skill
+/// by the name `list_skills` gives it, then replaces only the line that says five.
+fn change_a_skill(step: usize, answers: &[&str]) -> Completion {
+    match step {
+        0 => calling(step, "", "read_skill", &json!({"skill": "Weekly update"})),
+        1 => {
+            let read = serde_json::from_str::<Value>(answers[0]).unwrap_or_default();
+            let n = read["instructions"]
+                .as_str()
+                .unwrap_or_default()
+                .lines()
+                .find(|line| line.contains("five bullets"))
+                .and_then(|line| line.strip_prefix('['))
+                .and_then(|rest| rest.split_once(']'))
+                .and_then(|(n, _)| n.parse::<u64>().ok())
+                .unwrap_or(99);
+            calling(
+                step,
+                "",
+                "propose_skill",
+                &json!({
+                    "summary": "Three bullets, not five.",
+                    "change": {
+                        "skill": read["skill"],
+                        "base": read["base"],
+                        "edits": [{"n": n, "replace": "2.  Write three bullets."}],
+                    },
+                }),
+            )
+        }
+        _ => Completion::text(
+            "I drafted the change: three bullets, not five. Nothing changes until you open the \
+             card and press Save skill; then every agent that uses it gets the new words.",
+        ),
+    }
+}
+
 fn rewrite(prompt: &str) -> String {
     let removed = prompt
         .split("removed the ")
@@ -372,7 +436,9 @@ fn rewrite(prompt: &str) -> String {
 /// A served [`Control`] over a scratch teams folder, skills folder and home folder.
 struct Fixture {
     root: TempDirectory,
-    skills: TempDirectory,
+    /// Where `LoomWatch` keeps its state, with its skills folder in it, as on a person's computer.
+    _state: TempDirectory,
+    skills: PathBuf,
     home: TempDirectory,
     base: String,
     control: Control,
@@ -385,7 +451,9 @@ impl Fixture {
     /// `LOOMWATCH_ASK_MODEL` makes them.
     async fn start(archive: Option<EventArchive>, ask_model: Option<String>) -> Self {
         let root = TempDirectory::new("teams");
-        let skills = TempDirectory::new("skills");
+        let state = TempDirectory::new("state");
+        let skills = state.0.join("skills");
+        std::fs::create_dir_all(&skills).expect("the skills folder");
         let home = TempDirectory::new("home");
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
             .await
@@ -395,7 +463,7 @@ impl Fixture {
         let control = Control::new(ControlOptions {
             archive,
             teams_root: root.0.clone(),
-            skills_folder: Some(skills.0.clone()),
+            skills_folder: Some(skills.clone()),
             registry: registry.clone(),
             listen: address,
             ask_model,
@@ -405,6 +473,7 @@ impl Fixture {
         tokio::spawn(async move { axum::serve(listener, router).await });
         Self {
             root,
+            _state: state,
             skills,
             home,
             base: format!("http://{address}"),
@@ -612,6 +681,8 @@ async fn a_conversation_proposes_asks_before_running_and_drafts_a_review_note() 
             "find_files",
             "read_my_agent",
             "propose_agent",
+            "read_skill",
+            "propose_skill",
             "propose_team",
             "start_run",
             "get_run",
@@ -1440,7 +1511,7 @@ async fn every_message_says_what_agents_models_lean_to() {
 #[tokio::test]
 async fn ask_wires_a_skill_by_a_name_a_run_can_deliver() {
     let fixture = Fixture::start(None, None).await;
-    let skill = fixture.skills.0.join("explain-like-im-5");
+    let skill = fixture.skills.join("explain-like-im-5");
     std::fs::create_dir_all(&skill).expect("skill folder");
     std::fs::write(
         skill.join("SKILL.md"),
@@ -1491,7 +1562,8 @@ async fn ask_wires_a_skill_by_a_name_a_run_can_deliver() {
         .await;
     assert!(failed, "{message}");
     assert!(
-        message == "eli5 isn't one of your skills. Add it on the Skills page.",
+        message
+            == "eli5 isn't one of your skills yet. Propose it with `propose_skill`: a team can have it once the person saves it.",
         "{message}"
     );
 
@@ -2219,9 +2291,9 @@ async fn a_proposed_agent_names_only_what_is_there() {
     )
     .await;
 
-    std::fs::create_dir_all(fixture.skills.0.join("house-style")).expect("a skill");
+    std::fs::create_dir_all(fixture.skills.join("house-style")).expect("a skill");
     std::fs::write(
-        fixture.skills.0.join("house-style/SKILL.md"),
+        fixture.skills.join("house-style/SKILL.md"),
         "---\nname: house-style\ndescription: How we write.\n---\nShort sentences.\n",
     )
     .expect("its file");
@@ -2275,4 +2347,394 @@ fn ask_is_told_when_one_agent_is_the_answer() {
             && told.contains("never change one to suit this request"),
         "{told}"
     );
+}
+
+/// A skill in `LoomWatch`'s folder, as the Skills page keeps one.
+fn save_skill(skills: &std::path::Path, folder: &str, text: &str) {
+    std::fs::create_dir_all(skills.join(folder)).expect("the skill's folder");
+    std::fs::write(skills.join(folder).join("SKILL.md"), text).expect("the skill");
+}
+
+/// ADR 0121: asked for a skill, Ask writes it whole and shows it as a card. Nothing is saved until
+/// the person saves it on the Skills page's sheet, and what they did is recorded under it.
+#[tokio::test]
+async fn ask_writes_a_new_skill_for_the_person_to_save() {
+    let pool = crate::db::Db::temp().await;
+    let demo = assistant();
+    let fixture = Fixture::start(
+        Some(EventArchive::new(pool)),
+        Some(crate::engine::demo_model(demo.clone())),
+    )
+    .await;
+    let (status, started) = fixture.post("/api/ask/conversations", &json!({})).await;
+    assert_eq!(status, 201, "{started}");
+    let id = started["id"].as_str().expect("id").to_owned();
+    fixture
+        .say(
+            &id,
+            "Make a skill for my weekly client update: three short bullets, signed Mai.",
+        )
+        .await;
+    let events = fixture.events(&id).await;
+
+    assert!(
+        phases(&events, "ask_proposal").is_empty()
+            && phases(&events, "ask_agent_proposal").is_empty(),
+        "a skill, no team or agent: {}",
+        dump(&events)
+    );
+    let proposed = phases(&events, "ask_skill_proposal");
+    assert_eq!(proposed.len(), 1, "{}", dump(&events));
+    let proposal = proposed[0];
+    assert_eq!(proposal["isNew"], true);
+    assert_eq!(
+        proposal["skill"], "weekly-client-update",
+        "the folder the sheet saves it in, from its title"
+    );
+    assert_eq!(proposal["title"], "Weekly client update");
+    assert_eq!(
+        proposal["summary"],
+        "A skill for your weekly client update."
+    );
+    assert_eq!(
+        proposal["instructions"],
+        "1. Read this week's notes.\n2. Write three short bullets.\n3. Sign it Mai."
+    );
+    assert!(
+        proposal.get("base").is_none_or(Value::is_null),
+        "{proposal}"
+    );
+    assert!(
+        !fixture.skills.join("weekly-client-update").exists(),
+        "nothing is saved until the person presses Save skill"
+    );
+    let result = events
+        .iter()
+        .filter(|event| event.kind == crate::EventKind::ToolUpdate)
+        .map(|event| event.payload.to_string())
+        .find(|text| text.contains("waiting_for_the_person"))
+        .unwrap_or_default();
+    assert!(
+        result.contains("Nothing is saved until they open it and press Save skill")
+            && result.contains("every agent can use it"),
+        "{result}"
+    );
+
+    let proposal_id = proposal["proposalId"].as_str().expect("an id");
+    let (status, stored) = fixture
+        .get(&format!("/api/ask/proposals/{proposal_id}"))
+        .await;
+    assert_eq!(status, 200, "{stored}");
+    assert_eq!(stored["kind"], "skill", "the card tells it from a team's");
+    assert_eq!(stored["description"], proposal["description"]);
+
+    let (status, _) = fixture
+        .post(
+            &format!("/api/ask/proposals/{proposal_id}/outcome"),
+            &json!({"outcome": "applied"}),
+        )
+        .await;
+    assert_eq!(status, 204);
+    let events = fixture.events(&id).await;
+    let outcomes = phases(&events, "ask_proposal_outcome");
+    assert_eq!(outcomes.len(), 1, "{}", dump(&events));
+    assert_eq!(outcomes[0]["proposalId"], proposal_id);
+    assert_eq!(outcomes[0]["skill"], "weekly-client-update");
+    assert_eq!(outcomes[0]["outcome"], "applied");
+}
+
+/// ADR 0121: asked to change one of their skills, Ask reads it by the name `list_skills` gives it,
+/// then proposes edits to the lines that change, against the `SKILL.md` it read. Every other line
+/// stays byte for byte, the file on disk is untouched, and the agents given it are named.
+#[tokio::test]
+async fn ask_changes_a_skill_by_its_lines() {
+    let pool = crate::db::Db::temp().await;
+    let demo = assistant();
+    let fixture = Fixture::start(
+        Some(EventArchive::new(pool)),
+        Some(crate::engine::demo_model(demo.clone())),
+    )
+    .await;
+    let saved = "---\nname: Weekly update\ndescription: Writes the weekly update.\nlicense: MIT\n---\n# Weekly update\n\n1.  Read the notes:   all of them.\n2. Write five bullets.\n  - Sign it Mai.\n";
+    save_skill(&fixture.skills, "weekly-update", saved);
+    save_agent(
+        &fixture.root.0,
+        "writer",
+        "name: Writer\ninstructions: Write it.\nskills: [weekly-update]\n",
+    );
+
+    let (status, started) = fixture.post("/api/ask/conversations", &json!({})).await;
+    assert_eq!(status, 201, "{started}");
+    let id = started["id"].as_str().expect("id").to_owned();
+    fixture
+        .say(&id, "Make my weekly update skill three bullets, not five.")
+        .await;
+    let events = fixture.events(&id).await;
+
+    let proposed = phases(&events, "ask_skill_proposal");
+    assert_eq!(proposed.len(), 1, "{}", dump(&events));
+    let proposal = proposed[0];
+    assert_eq!(proposal["skill"], "weekly-update", "found by its title");
+    assert_eq!(proposal["isNew"], false);
+    assert_eq!(
+        proposal["instructions"],
+        "# Weekly update\n\n1.  Read the notes:   all of them.\n2.  Write three bullets.\n  - Sign it Mai.",
+        "one line replaced; the lines it didn't name are as they were, odd spaces and all"
+    );
+    assert_eq!(
+        proposal["description"], "Writes the weekly update.",
+        "what it didn't change stays"
+    );
+    assert_eq!(proposal["givenTo"], json!(["Writer"]));
+    let base = crate::skills_store::SkillsStore::new(fixture.skills.parent().expect("state"))
+        .words("weekly-update")
+        .expect("the skill's words")
+        .base;
+    assert_eq!(
+        proposal["base"], base,
+        "the save names the SKILL.md it was made from"
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.skills.join("weekly-update/SKILL.md")).expect("the file"),
+        saved,
+        "nothing is saved until the person presses Save skill"
+    );
+    let result = events
+        .iter()
+        .filter(|event| event.kind == crate::EventKind::ToolUpdate)
+        .map(|event| event.payload.to_string())
+        .find(|text| text.contains("waiting_for_the_person"))
+        .unwrap_or_default();
+    assert!(
+        result.contains("Nothing is saved until they open it and press Save skill")
+            && result.contains("every agent that uses it has the new words"),
+        "{result}"
+    );
+}
+
+/// A proposed skill is checked as the sheet's save checks it (ADR 0121): a title that makes a
+/// folder name none of theirs has, when to use it within what a skill allows, and, for a change,
+/// one of `LoomWatch`'s own skills, the `SKILL.md` it read, edits to lines it has, and a change at
+/// all.
+#[tokio::test]
+#[allow(clippy::too_many_lines)]
+async fn a_proposed_skill_is_refused_with_what_to_do() {
+    let fixture = Fixture::start(None, None).await;
+    let tools = ControlTools::new(
+        fixture.control.clone(),
+        Caller::Conversation("ask-test".to_owned()),
+    );
+    // Its `name:` isn't its folder's, so it is found by the folder's name whatever the case, and a
+    // new skill whose title makes that folder's name is refused though no listed name matches.
+    save_skill(
+        &fixture.skills,
+        "house-style",
+        "---\nname: Our style\ndescription: Our house style.\n---\nShort sentences.\nNo jargon.\n",
+    );
+    std::fs::write(
+        fixture.skills.join("house-style/examples.md"),
+        "A short sentence.",
+    )
+    .expect("another file");
+    save_agent(
+        &fixture.root.0,
+        "writer",
+        "name: Writer\ninstructions: Write it.\nskills: [House style]\n",
+    );
+    let project = fixture.root.0.join(".agents/skills/release-notes");
+    std::fs::create_dir_all(&project).expect("a project's skill");
+    std::fs::write(
+        project.join("SKILL.md"),
+        "---\nname: release-notes\ndescription: Writes release notes.\n---\nList the changes.\n",
+    )
+    .expect("a project's skill");
+    let (read, failed) = tools
+        .call("read_skill", json!({"skill": "House-Style"}))
+        .await;
+    assert!(!failed, "{read}");
+    let read: Value = serde_json::from_str(&read).expect("json");
+    assert_eq!(
+        read["instructions"],
+        "[1] Short sentences.\n[2] No jargon.\n"
+    );
+    assert_eq!(read["skill"], "house-style");
+    assert_eq!(read["description"], "Our house style.");
+    assert_eq!(read["otherFiles"], json!(["examples.md"]));
+    assert_eq!(
+        read["givenTo"],
+        json!(["Writer"]),
+        "an agent that names it by its title"
+    );
+    let base = read["base"].clone();
+    let new = |extra: &Value| {
+        let mut skill = json!({"title": "Client letters", "description": "Writes letters to clients.", "instructions": "Be warm."});
+        if let (Some(skill), Some(extra)) = (skill.as_object_mut(), extra.as_object()) {
+            skill.extend(extra.clone());
+        }
+        json!({"summary": "Letters.", "new": skill})
+    };
+    let change = |extra: &Value| {
+        let mut change = json!({"skill": "house-style", "base": base, "edits": [{"n": 2, "replace": "No jargon, ever."}]});
+        if let (Some(change), Some(extra)) = (change.as_object_mut(), extra.as_object()) {
+            change.extend(extra.clone());
+        }
+        json!({"summary": "Stricter.", "change": change})
+    };
+    let refused = |name: &'static str, arguments: Value, says: &'static str| {
+        let tools = &tools;
+        async move {
+            let (message, failed) = tools.call(name, arguments.clone()).await;
+            assert!(failed && message.contains(says), "{arguments}: {message}");
+        }
+    };
+
+    refused(
+        "propose_skill",
+        json!({"summary": "x"}),
+        "Give `new` for a new skill, or `change`",
+    )
+    .await;
+    refused(
+        "propose_skill",
+        new(&json!({"title": "House style"})),
+        "already have a skill called house-style",
+    )
+    .await;
+    refused(
+        "propose_skill",
+        new(&json!({"title": "Release notes"})),
+        "already have a skill called release-notes",
+    )
+    .await;
+    refused(
+        "propose_skill",
+        new(&json!({"title": "!!"})),
+        "a `title` with letters or numbers",
+    )
+    .await;
+    refused(
+        "propose_skill",
+        new(&json!({"description": " "})),
+        "its `description`",
+    )
+    .await;
+    refused(
+        "propose_skill",
+        new(&json!({"description": "word ".repeat(300)})),
+        "in 1024 or fewer",
+    )
+    .await;
+    refused(
+        "propose_skill",
+        new(&json!({"instructions": "\n"})),
+        "its `instructions`",
+    )
+    .await;
+    refused(
+        "propose_skill",
+        new(&json!({"colour": "blue"})),
+        "unknown field `colour`",
+    )
+    .await;
+    refused(
+        "propose_skill",
+        change(&json!({"base": "older"})),
+        "house-style changed since you read it",
+    )
+    .await;
+    refused(
+        "propose_skill",
+        change(&json!({"base": null})),
+        "or `base` is missing",
+    )
+    .await;
+    refused(
+        "propose_skill",
+        change(&json!({"edits": [{"n": 9, "replace": "x"}]})),
+        "line 9: there are only 2 lines",
+    )
+    .await;
+    refused(
+        "propose_skill",
+        change(&json!({"edits": [{"n": 2, "replace": "No jargon."}]})),
+        "That changes nothing in the skill",
+    )
+    .await;
+    refused(
+        "propose_skill",
+        change(&json!({"instructions": "All new."})),
+        "with `edits`",
+    )
+    .await;
+    refused(
+        "propose_skill",
+        change(&json!({"description": "word ".repeat(300)})),
+        "in 1024 or fewer",
+    )
+    .await;
+    refused(
+        "propose_skill",
+        change(&json!({"skill": "release-notes"})),
+        "kept with the project's own files",
+    )
+    .await;
+    refused(
+        "read_skill",
+        json!({"skill": "nothing-here"}),
+        "There is no skill called nothing-here",
+    )
+    .await;
+
+    let proposed = |arguments: Value| {
+        let tools = &tools;
+        let control = fixture.control.clone();
+        async move {
+            let (answer, failed) = tools.call("propose_skill", arguments).await;
+            assert!(!failed, "{answer}");
+            let answer: Value = serde_json::from_str(&answer).expect("json");
+            let id = answer["proposalId"].as_str().expect("an id").to_owned();
+            let stored = control.inner.skill_proposals.read().await;
+            serde_json::to_value(&stored[&id]).expect("json")
+        }
+    };
+
+    // A changed description alone is a change, and the skill on disk stays as it was.
+    let described = proposed(change(
+        &json!({"edits": [], "description": "Our house style for anything the person sends out."}),
+    ))
+    .await;
+    assert_eq!(described["skill"], "house-style");
+    assert_eq!(described["instructions"], "Short sentences.\nNo jargon.");
+    // What a change makes is kept as the store saves it: no blank lines before the first.
+    let tidied = proposed(change(
+        &json!({"edits": [{"n": 1, "replace": "\n\nShort sentences!"}]}),
+    ))
+    .await;
+    assert_eq!(tidied["instructions"], "Short sentences!\nNo jargon.");
+    // A title is a few words: a longer one is cut.
+    let long = proposed(new(&json!({"title": "x".repeat(100)}))).await;
+    assert_eq!(long["title"], "x".repeat(80));
+}
+
+/// Ask is told when a skill is the answer, how a good one is written, and to read one before it
+/// changes it (ADR 0121); and that a team asked for is proposed now, not held back for a skill.
+#[test]
+fn ask_is_told_when_a_skill_is_the_answer() {
+    let told = super::mcp::INSTRUCTIONS;
+    for says in [
+        "Propose one with `propose_skill` `new` when the person asks for a skill, or says how a kind of work should always be done, whoever does it",
+        "Look in `list_skills` first: when one of their skills already covers this work, change it instead of writing a second",
+        "a `description` in the third person",
+        "Keep every detail the person gave, word for word where it matters",
+        "read it with `read_skill`, then propose `change` with its `base`, `edits` naming only the lines that change",
+        "propose the team or agent now, with what they said in its `part` or instructions; don't hold it back for a skill",
+        "never as if it were done (\"I added…\")",
+        "`propose_skill` shows them one skill as a card; nothing is saved until they open it and press Save skill",
+        "then a short list of what to check before finishing",
+        "Only LoomWatch's own skills can be changed: for a skill kept with a project's files, offer a new one",
+        "Name a skill as the Skills page shows it, in words",
+        "If no skill in `list_skills` is the one they mean, say so, and offer to write it with `propose_skill`",
+    ] {
+        assert!(told.contains(says), "{says}");
+    }
 }

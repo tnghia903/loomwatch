@@ -235,4 +235,56 @@ describe('changing a skill', () => {
     await waitFor(() => expect(onSaved).toHaveBeenCalled())
     expect(sent.find((request) => request.method === 'PUT')?.body).toMatchObject({ name: 'pdf', base: 'base-1', instructions: proposed.instructions })
   })
+
+  it('shows a proposed change before the box for more, and closes untouched without warning', async () => {
+    daemon((request) => {
+      if (request.method === 'GET' && request.url === '/api/skills') return folder([record('pdf')])
+      if (request.url === '/api/skills/words?name=pdf') return json(PDF_WORDS)
+      return undefined
+    })
+    const onClose = vi.fn()
+    const proposed = { description: PDF_WORDS.description, instructions: `${PDF_WORDS.instructions}\nSend it back as a PDF.`, base: 'base-1' }
+    const { unmount } = render(<SkillSheet writing={{ kind: 'change', name: 'pdf', proposed }} onClose={onClose} onSaved={() => {}} />)
+    const marked = await within(sheet()).findByRole('region', { name: 'What LoomWatch changed' })
+    const box = within(sheet()).getByLabelText('Anything else to change?')
+    // The change comes first: the person asked for it already.
+    expect(marked.compareDocumentPosition(box) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    fireEvent.click(within(sheet()).getByRole('button', { name: 'Cancel' }))
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(screen.queryByText(/Leave without saving/)).toBeNull()
+    unmount()
+
+    // Touched, it is the person's own work, and leaving asks.
+    const asked = vi.fn()
+    render(<SkillSheet writing={{ kind: 'change', name: 'pdf', proposed }} onClose={asked} onSaved={() => {}} />)
+    await waitFor(() => expect(within(sheet()).getByLabelText('What to do')).toHaveValue(proposed.instructions))
+    fireEvent.change(within(sheet()).getByLabelText('What to do'), { target: { value: `${proposed.instructions}\nKeep it short.` } })
+    fireEvent.click(within(sheet()).getByRole('button', { name: 'Cancel' }))
+    expect(asked).not.toHaveBeenCalled()
+    expect(within(sheet()).getByText('Leave without saving? What you wrote here will be lost.')).toBeTruthy()
+    // Put back, the box asks what should change, and the marked change is gone.
+    fireEvent.change(within(sheet()).getByLabelText('What to do'), { target: { value: proposed.instructions } })
+    fireEvent.click(within(within(sheet()).getByRole('region', { name: 'What LoomWatch changed' })).getByRole('button', { name: 'Put back' }))
+    expect(within(sheet()).getByLabelText('What should change?')).toBeTruthy()
+  })
+
+  it('opens a change made from words the skill no longer has as the skill is saved now, and says so', async () => {
+    daemon((request) => {
+      if (request.method === 'GET' && request.url === '/api/skills') return folder([record('pdf')])
+      if (request.url === '/api/skills/words?name=pdf') return json(PDF_WORDS)
+      return undefined
+    })
+    const made = { description: PDF_WORDS.description, instructions: 'Words from before.\nSend it back as a PDF.' }
+    const { unmount } = render(<SkillSheet writing={{ kind: 'change', name: 'pdf', proposed: { ...made, base: 'base-0' } }} onClose={() => {}} onSaved={() => {}} />)
+    expect(await within(sheet()).findByText('This skill was changed after Ask read it, so Ask’s change isn’t shown. Ask again for a new change.')).toBeTruthy()
+    expect(within(sheet()).getByLabelText('What to do')).toHaveValue(PDF_WORDS.instructions)
+    expect(within(sheet()).queryByRole('region', { name: 'What LoomWatch changed' })).toBeNull()
+    expect(within(sheet()).getByRole('button', { name: 'Save skill' })).toBeDisabled()
+    unmount()
+
+    // Made from the words it has, it opens as the change.
+    render(<SkillSheet writing={{ kind: 'change', name: 'pdf', proposed: { ...made, base: 'base-1' } }} onClose={() => {}} onSaved={() => {}} />)
+    await waitFor(() => expect(within(sheet()).getByLabelText('What to do')).toHaveValue(made.instructions))
+    expect(within(sheet()).queryByText(/changed after Ask read it/)).toBeNull()
+  })
 })

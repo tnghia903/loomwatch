@@ -546,3 +546,8 @@
   .lw-skills-sheet { width: 100%; max-height: 88vh; border-radius: var(--r-lg) var(--r-lg) 0 0; }
   .lw-skills-toast { bottom: var(--sp-3); }
 }
+
+/* An open sheet's Save skill is the screen's one gold fill (law 1): the page's own fill behind the
+   dimmed page, such as the canvas's Run team, steps back to a ring, as the reader's Send does. */
+:root:has(.lw-skills-scrim) .btn-primary:not(.lw-skills-sheet *):not(:disabled),
+:root:has(.lw-skills-scrim) .lw-send.primary:not(:disabled) { background: transparent; color: var(--color-ink); border-color: var(--color-accent); filter: none; }

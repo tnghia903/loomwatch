@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { Proposal } from '../../lib/ask/client'
-import type { AgentProposalCard, ProposalCard } from '../../lib/ask/thread'
+import type { AgentProposalCard, SkillProposalCard, ProposalCard } from '../../lib/ask/thread'
 import { proposalSource, sameTeamFile, teamFileForAsk, useAskActions } from './useAskActions'
 
 const client = vi.hoisted(() => ({
@@ -372,5 +372,21 @@ describe('team file names', () => {
     } finally {
       Object.defineProperty(window, 'location', { configurable: true, value: real })
     }
+  })
+  // ADR 0121: a skill is saved on the sheet, so a save that couldn't be recorded is still saved;
+  // a discard that couldn't be recorded says so.
+  it('records what the person did with a skill Ask proposed', async () => {
+    const hook = setup()
+    const card: SkillProposalCard = { kind: 'skill-proposal', id: 's1', at: '', skill: 'weekly-update', title: null, isNew: false, summary: '', description: 'd', instructions: 'i', base: 'b', givenTo: [], outcome: null, superseded: false }
+    client.reportProposalOutcome.mockRejectedValueOnce(new Error('This proposal is no longer available.'))
+    await act(async () => { await hook.result.current.actions.settleSkill(card, 'applied') })
+    expect(client.reportProposalOutcome).toHaveBeenLastCalledWith('s1', 'applied')
+    expect(hook.result.current.actions.cardError).toBeNull()
+
+    await act(async () => { await hook.result.current.actions.settleSkill(card, 'discarded') })
+    expect(client.reportProposalOutcome).toHaveBeenLastCalledWith('s1', 'discarded')
+    client.reportProposalOutcome.mockRejectedValueOnce(new Error('The daemon isn’t answering.'))
+    await act(async () => { await hook.result.current.actions.settleSkill(card, 'discarded') })
+    expect(hook.result.current.actions.cardError).toEqual({ id: 's1', message: 'The daemon isn’t answering.' })
   })
 })

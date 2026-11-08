@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { decideRunRequest, reportProposalOutcome, type AskContext } from '../../lib/ask/client'
-import type { AgentProposalCard, ProposalCard, ReviewNoteCard, RunRequestCard } from '../../lib/ask/thread'
+import type { AgentProposalCard, ProposalCard, ReviewNoteCard, RunRequestCard, SkillProposalCard } from '../../lib/ask/thread'
 import { agentProposalHref } from '../agents/route'
 import { useAsk } from '../../lib/ask/useAsk'
 import { newStartKey, startRun } from '../../lib/runs/client'
@@ -72,6 +72,12 @@ export function RoomAsk({ project, name }: { project: string; name: string }) {
     onOpenAgent: (card: AgentProposalCard) => window.location.assign(agentProposalHref(card.agent, card.id)),
     onDiscardAgent: (card: AgentProposalCard) => {
       void reportProposalOutcome(card.id, 'discarded').catch((caught: unknown) => setCardError({ id: card.id, message: caught instanceof Error ? caught.message : String(caught) }))
+    },
+    // A skill opens on the Skills page's sheet over this room, and is saved there (ADR 0121).
+    onSkillSettled: (card: SkillProposalCard, outcome: 'applied' | 'discarded') => {
+      void reportProposalOutcome(card.id, outcome).catch((caught: unknown) => {
+        if (outcome === 'discarded') setCardError({ id: card.id, message: caught instanceof Error ? caught.message : String(caught) })
+      })
     },
   }
   return (
