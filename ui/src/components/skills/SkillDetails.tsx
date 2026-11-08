@@ -3,9 +3,10 @@ import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 
 import { fetchCapabilityDetails, type CapabilityDetails, type DetectedCapability } from '../../lib/library/client'
-import { describeOrigin, displayName, errorText, fetchSkills, formatSize, licenseLabel, shortPath, skillBody, type SkillRecord } from '../../lib/library/skillStore'
+import { describeRecord, displayName, errorText, fetchSkills, formatSize, licenseLabel, shortPath, skillBody, type SkillRecord } from '../../lib/library/skillStore'
 import { InlineMarkdown, Markdown } from '../ui/Markdown'
 import { Sheet } from './Sheet'
+import { SkillSheet } from './SkillSheet'
 import { Glyph, NeedTags } from './SkillTags'
 
 type Read = { details: CapabilityDetails | null; record: SkillRecord | null; error: string }
@@ -15,7 +16,8 @@ type Read = { details: CapabilityDetails | null; record: SkillRecord | null; err
  * needs, and every word of its instructions, so you can tell what pinning it up would give the
  * agent before you do. The instructions are the copy a run would deliver (the first definition).
  *
- * Laid over the page in the Skills page's sheet. Pinning it up or taking it down closes it.
+ * Laid over the page in the Skills page's sheet. Pinning it up or taking it down closes it. A skill
+ * in LoomWatch's own folder can be changed from here, on the Skills page's own sheet (ADR 0118).
  */
 export function SkillDetails({ item, pinned, onPin, onTakeDown, onClose }: {
   item: DetectedCapability
@@ -27,6 +29,9 @@ export function SkillDetails({ item, pinned, onPin, onTakeDown, onClose }: {
 }) {
   const [read, setRead] = useState<Read | null>(null)
   const [turn, setTurn] = useState(0)
+  const [changing, setChanging] = useState(false)
+  // Saved from here: said here, since this sheet has no toast.
+  const [saved, setSaved] = useState(false)
   useEffect(() => {
     let active = true
     // Its record in LoomWatch's folder says where it came from and under what license. A
@@ -45,16 +50,26 @@ export function SkillDetails({ item, pinned, onPin, onTakeDown, onClose }: {
   const record = read?.record ?? null
   const needs = read?.details?.portability?.needs ?? record?.needs ?? []
   const body = definition ? skillBody(definition.content) : ''
+  const change = record && <button type="button" className="btn lw-skills-details-change" data-skill-change={record.name} onClick={() => setChanging(true)}>Change</button>
   const footer = pinned
     ? <>
+      {change}
       <button type="button" className="btn" onClick={onTakeDown}>Take this skill away</button>
       <button type="button" className="btn btn-primary" onClick={onClose}>Close</button>
     </>
     : <>
+      {change}
       <button type="button" className="btn" onClick={onClose}>Close</button>
       <button type="button" className="btn btn-primary" onClick={onPin}><Plus size={14} aria-hidden="true" />Give it this skill</button>
     </>
 
+  if (changing && record) {
+    return createPortal(
+      <SkillSheet writing={{ kind: 'change', name: record.name }} onClose={() => setChanging(false)}
+        onSaved={() => { setChanging(false); setSaved(true); setRead(null); setTurn((value) => value + 1) }} />,
+      document.body,
+    )
+  }
   return createPortal(
     <Sheet kicker={`Skill · ${item.source}`} title={displayName(item.name)} onClose={onClose} footer={footer} returnFocus={`[data-skill=${JSON.stringify(item.name)}]`}>
       <div className="lw-skills-intro">
@@ -62,13 +77,14 @@ export function SkillDetails({ item, pinned, onPin, onTakeDown, onClose }: {
         <div>
           {item.detail && <p className="lw-skills-intro-desc"><InlineMarkdown>{item.detail}</InlineMarkdown></p>}
           <p className="lw-skills-quiet">{pinned ? 'This agent has it, and opens it when the work calls for it.' : 'It opens a skill only when the work calls for it.'}</p>
+          {saved && <p className="lw-skills-quiet" role="status">Saved. Your agents use the new words from now on.</p>}
         </div>
       </div>
       <NeedTags runtimes={record?.runtimes ?? []} needs={needs} hasScripts={record?.hasScripts ?? false} />
       <dl className="lw-skills-facts">
         <dt>From</dt>
-        <dd>{record ? describeOrigin(record.origin) : item.source}{record?.origin.url && <>{' · '}<a className="link lw-skills-out" href={record.origin.url} target="_blank" rel="noreferrer">Open its page<ExternalLink size={11} aria-hidden="true" /></a></>}</dd>
-        {record && <><dt>License</dt><dd>{licenseLabel(record.license).replace(/^License: /, '')}</dd></>}
+        <dd>{record ? describeRecord(record) : item.source}{record?.origin.url && <>{' · '}<a className="link lw-skills-out" href={record.origin.url} target="_blank" rel="noreferrer">Open its page<ExternalLink size={11} aria-hidden="true" /></a></>}</dd>
+        {record && record.origin.kind !== 'written' && <><dt>License</dt><dd>{licenseLabel(record.license).replace(/^License: /, '')}</dd></>}
         {record && <><dt>Size</dt><dd>{formatSize(record.sizeBytes)}</dd></>}
         {definition && <><dt>File</dt><dd className="lw-skills-mono" title={definition.path}>{shortPath(definition.path)}</dd></>}
       </dl>

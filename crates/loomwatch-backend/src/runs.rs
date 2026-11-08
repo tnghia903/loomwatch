@@ -8762,6 +8762,100 @@ pub(crate) mod tests {
         assert!(fetched.get("widgets").is_none(), "{fetched}");
     }
 
+    /// ADR 0118: the agent whose reply is the answer may suggest a skill, its widgets switch off or
+    /// not. The suggestion is kept with the answer like a widget, nothing is saved by it, and what
+    /// the person does with it is what the next work is told.
+    #[tokio::test]
+    async fn a_skill_an_agent_suggests_is_kept_with_its_answer_for_the_person_to_decide() {
+        use crate::agent::ToolCall;
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let offered: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
+        let seen = offered.clone();
+        let model = demo_model(Demo::responder(move |request| {
+            Some(match calls.fetch_add(1, Ordering::SeqCst) {
+                0 => {
+                    seen.lock().unwrap().clone_from(&request.tools);
+                    Completion::calls(
+                        "",
+                        vec![ToolCall {
+                            id: "call-0".into(),
+                            name: crate::widgets::skill::TOOL.into(),
+                            arguments: r#"{"name":"Weekly client update","description":"Writes the weekly update for a client.","instructions":"1. Read the notes.\n2. Write three bullets."}"#.into(),
+                        }],
+                    )
+                }
+                1 => Completion::text("Here is your update. I suggested a skill for next time."),
+                _ => Completion::text("Done."),
+            })
+        }));
+        fs::write(
+            dir.0.join("spool.yaml"),
+            format!(
+                "schemaVersion: 1\nid: spool\nname: Spool\nentrypoint: solo\nagents:\n  - id: solo\n    name: Solo\n    role: answer\n    model: {model}\n    widgets: false\n"
+            ),
+        )
+        .expect("write team file");
+        let archive = EventArchive::new(pool);
+        let registry = RunRegistry::durable(archive.run_store());
+        let app = router(Some(archive.clone()), dir.0.clone(), registry.clone());
+
+        let run = start(&app, "spool.yaml").await;
+        let done = wait_for(&registry, &run.run_id, |r| r.status.is_terminal()).await;
+        assert_eq!(done.status, RunStatus::Succeeded, "{done:?}");
+        let tools = offered.lock().unwrap().clone();
+        assert!(
+            tools.contains(&crate::widgets::skill::TOOL.to_owned()),
+            "{tools:?}"
+        );
+        assert!(
+            !tools.contains(&crate::widgets::TOOL.to_owned()),
+            "its widgets switch is off: {tools:?}"
+        );
+
+        let kept = crate::widgets::store::of_runs(archive.db(), std::slice::from_ref(&run.run_id))
+            .await
+            .unwrap();
+        let kept = &kept[&run.run_id];
+        assert_eq!(kept.len(), 1, "{kept:?}");
+        assert_eq!(kept[0].spec.kind(), "skill");
+        assert_eq!(kept[0].spec.title(), "Weekly client update");
+        assert_eq!(
+            kept[0].line, None,
+            "under the answer's words, which placed nothing"
+        );
+        assert_eq!(
+            json!(kept[0].spec)["instructions"],
+            "1. Read the notes.\n2. Write three bullets."
+        );
+
+        // The person saves it from the card; the next work is told.
+        let state =
+            crate::widgets::read_state(&kept[0].spec, &json!({"saved": "weekly-client-update"}))
+                .expect("a saved skill's state");
+        assert!(
+            crate::widgets::store::set_state(
+                archive.db(),
+                &run.run_id,
+                1,
+                &state,
+                "2026-11-08T10:00:00Z"
+            )
+            .await
+            .unwrap()
+        );
+        let kept = crate::widgets::store::of_runs(archive.db(), std::slice::from_ref(&run.run_id))
+            .await
+            .unwrap();
+        let told = crate::widgets::changes("Nghia", "the answer", &kept[&run.run_id], "2026-11-09")
+            .expect("what the person did");
+        assert!(
+            told.contains("Saved the skill \"Weekly client update\" you suggested"),
+            "{told}"
+        );
+    }
+
     /// "Finish with what it has" when no agent has written a word yet: there is nothing to finish
     /// with, and the run says so in one plain sentence.
     #[tokio::test]

@@ -21,6 +21,9 @@
 //! markup. The tool's description tells it which kind fits which shape of answer
 //! ([`SHOW_WIDGET`]).
 //!
+//! One more kind is not shown with `show_widget`: a skill an agent suggests with its own tool
+//! ([`skill`], ADR 0118), kept with the answer the same way so the person can save it.
+//!
 //! Each widget is told a place line, `{{widget N}}`, that the agent writes on its own line where the
 //! widget belongs in its answer. When the run ends the line is taken out of the answer's words and
 //! the widget keeps the line it stood before ([`place`]), so the words read whole everywhere else.
@@ -31,6 +34,7 @@ pub(crate) mod host;
 pub(crate) mod picture;
 pub(crate) mod quiz;
 pub(crate) mod scale;
+pub(crate) mod skill;
 pub(crate) mod store;
 pub(crate) mod timeline;
 
@@ -237,6 +241,13 @@ pub(crate) enum Widget {
         /// the person turns, such as "Speed". Each part's label is then its value.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         dial: Option<String>,
+    },
+    /// A skill the agent suggests with `suggest_skill` (ADR 0118), never with `show_widget`: its
+    /// name in words, when to use it and what to do. The person saves it, changes it or leaves it.
+    Skill {
+        title: String,
+        description: String,
+        instructions: String,
     },
     /// A graph: bars or a line over labelled points, up to three series. To look at; tapping a
     /// point reads its values.
@@ -455,6 +466,7 @@ impl Widget {
             | Self::Marks { title, .. }
             | Self::Flow { title, .. }
             | Self::Picture { title, .. }
+            | Self::Skill { title, .. }
             | Self::Graph { title, .. }
             | Self::Finder { title, .. }
             | Self::Quiz { title, .. }
@@ -474,6 +486,7 @@ impl Widget {
             Self::Marks { .. } => "marks",
             Self::Flow { .. } => "flow",
             Self::Picture { .. } => "picture",
+            Self::Skill { .. } => "skill",
             Self::Graph { .. } => "graph",
             Self::Finder { .. } => "finder",
             Self::Quiz { .. } => "quiz",
@@ -494,6 +507,7 @@ impl Widget {
             Self::Marks { .. } => "a row of marks",
             Self::Flow { .. } => "a flow",
             Self::Picture { .. } => "a picture",
+            Self::Skill { .. } => "a suggested skill",
             Self::Graph {
                 style: GraphStyle::Bar,
                 ..
@@ -2138,7 +2152,8 @@ pub(crate) struct Shown {
     pub(crate) widget: Widget,
 }
 
-/// The widgets of `responder`'s answer: the `show_widget` calls that went through in the turn
+/// The widgets of `responder`'s answer: the `show_widget` and `suggest_skill` calls that went
+/// through in the turn
 /// whose reply became the answer, or, when that turn showed none, in the latest earlier turn of
 /// work in the same session that did (a revision after a check sent the work back, an answer after
 /// a question). The last [`MOST_PER_ANSWER`].
@@ -2151,6 +2166,8 @@ pub(crate) fn of_answer(events: &[RunEvent], responder: Option<&str>) -> Vec<Sho
         current: Vec<Shown>,
         earlier: Vec<Shown>,
     }
+    // How a tool's arguments are read into what it showed.
+    type Reader = fn(&Value) -> Result<Widget, String>;
     let Some(responder) = responder else {
         return Vec::new();
     };
@@ -2158,7 +2175,7 @@ pub(crate) fn of_answer(events: &[RunEvent], responder: Option<&str>) -> Vec<Sho
     let mut session = String::new();
     let mut turns: BTreeMap<String, Turns> = BTreeMap::new();
     // The calls asked for, by call id, until their update says how they went.
-    let mut asked: BTreeMap<String, (String, Value)> = BTreeMap::new();
+    let mut asked: BTreeMap<String, (String, Value, Reader)> = BTreeMap::new();
     for event in events.iter().filter(|event| event.agent_id == responder) {
         if let Some(named) = event
             .raw
@@ -2179,17 +2196,24 @@ pub(crate) fn of_answer(events: &[RunEvent], responder: Option<&str>) -> Vec<Sho
                     turn.earlier = std::mem::take(&mut turn.current);
                 }
             }
-            EventKind::ToolCall if event.payload["name"] == TOOL => {
+            EventKind::ToolCall
+                if event.payload["name"] == TOOL || event.payload["name"] == skill::TOOL =>
+            {
                 if let Some(call) = event.payload["callId"].as_str() {
+                    let read: Reader = if event.payload["name"] == TOOL {
+                        read
+                    } else {
+                        skill::read
+                    };
                     asked.insert(
                         call.to_owned(),
-                        (session.clone(), event.payload["rawInput"].clone()),
+                        (session.clone(), event.payload["rawInput"].clone(), read),
                     );
                 }
             }
             EventKind::ToolUpdate if event.payload["status"] == "completed" => {
                 let call = event.payload["callId"].as_str().unwrap_or_default();
-                if let Some((at, arguments)) = asked.remove(call)
+                if let Some((at, arguments, read)) = asked.remove(call)
                     && let Ok(widget) = read(&arguments)
                 {
                     let place = event.payload["rawOutput"]["place"]
@@ -2281,6 +2305,7 @@ pub(crate) fn read_state(widget: &Widget, state: &Value) -> Result<Value, String
             ..
         } => finder::read_state(questions, outcomes, state),
         Widget::Quiz { checks, .. } => quiz::read_state(checks, state),
+        Widget::Skill { .. } => skill::read_state(state),
         Widget::Choices { .. }
         | Widget::Steps { .. }
         | Widget::Chart { .. }
@@ -2384,7 +2409,7 @@ pub(crate) fn showed(widgets: &[Kept]) -> Option<String> {
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
-            Widget::Picture { .. } => kept.spec.named(),
+            Widget::Picture { .. } | Widget::Skill { .. } => kept.spec.named(),
             Widget::Compare { .. } => {
                 format!("{} ({})", kept.spec.named(), compare_line(&kept.spec))
             }
@@ -2505,6 +2530,7 @@ fn change(widget: &Widget, state: &Value) -> Option<String> {
             ..
         } => finder::change(widget.title(), questions, outcomes, state),
         Widget::Quiz { checks, .. } => quiz::change(widget.title(), checks, state),
+        Widget::Skill { title, .. } => skill::change(title, state),
         Widget::Choices { .. }
         | Widget::Steps { .. }
         | Widget::Chart { .. }

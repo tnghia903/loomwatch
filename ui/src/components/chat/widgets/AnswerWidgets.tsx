@@ -16,6 +16,7 @@ import { WidgetMarks } from './WidgetMarks'
 import { WidgetPicture } from './WidgetPicture'
 import { WidgetQuiz } from './WidgetQuiz'
 import { WidgetScale } from './WidgetScale'
+import { WidgetSkill } from './WidgetSkill'
 import { WidgetSteps } from './WidgetSteps'
 import { WidgetTimeline } from './WidgetTimeline'
 
@@ -31,6 +32,8 @@ export interface AnswerWidgetsProps {
   /** The answer is still being written: the widgets are drawn as they will be, and work once it is
       done. */
   live?: boolean
+  /** Who answered, as the chat names them: a skill they suggest says so once saved. */
+  by?: string
 }
 
 /**
@@ -101,7 +104,7 @@ class WidgetGuard extends Component<{ drawing: string; title: unknown; children:
   }
 }
 
-function drawn({ kept, onChange, onChoose, chosen = null, live = false }: Omit<AnswerWidgetsProps, 'widgets'> & { kept: KeptWidget }, fresh: boolean) {
+function drawn({ kept, onChange, onChoose, chosen = null, live = false, by }: Omit<AnswerWidgetsProps, 'widgets'> & { kept: KeptWidget }, fresh: boolean) {
   switch (kept.spec.kind) {
     case 'choices': return <WidgetChoices spec={kept.spec} onChoose={live ? undefined : onChoose} chosen={chosen} live={live} />
     case 'checklist': return <HeldChecklist kept={kept} onChange={onChange} live={live} />
@@ -117,6 +120,7 @@ function drawn({ kept, onChange, onChoose, chosen = null, live = false }: Omit<A
     case 'quiz': return <HeldQuiz kept={kept} onChange={onChange} live={live} />
     case 'scale': return <WidgetScale spec={kept.spec} />
     case 'timeline': return <WidgetTimeline spec={kept.spec} />
+    case 'skill': return <WidgetSkill kept={kept} onChange={onChange} live={live} by={by} />
   }
   return null
 }

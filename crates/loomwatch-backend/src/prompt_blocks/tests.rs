@@ -230,6 +230,7 @@ fn bus_tools(out: &mut String) {
         my_agents: false,
         own_chat: false,
         answers: false,
+        suggests_skills: false,
     };
     let stage = BusSeat {
         mode: TeamBusMode::Pipeline,
@@ -309,6 +310,28 @@ fn bus_tools(out: &mut String) {
         out,
         "bus: show_widget, once shown",
         &serde_json::to_string_pretty(&crate::widgets::shown(&calculator, 1)).expect("shown"),
+    );
+    suggest_skill(out);
+}
+
+/// ADR 0118: the tool the agent whose reply is the answer is offered to suggest a skill, and what
+/// it is told after.
+fn suggest_skill(out: &mut String) {
+    section(
+        out,
+        "bus: suggest_skill",
+        &serde_json::to_string_pretty(&crate::widgets::skill::tool_definition()).expect("tool"),
+    );
+    let skill = crate::widgets::skill::read(&serde_json::json!({
+        "name": "Weekly client update",
+        "description": "Writes the weekly update for a client.",
+        "instructions": "1. Read the notes.\n2. Write three bullets."
+    }))
+    .expect("a skill");
+    section(
+        out,
+        "bus: suggest_skill, once suggested",
+        &serde_json::to_string_pretty(&crate::widgets::skill::suggested(&skill)).expect("told"),
     );
 }
 

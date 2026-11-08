@@ -118,15 +118,21 @@ export type WidgetSpec =
   | { kind: 'quiz'; title: string; checks: WidgetCheck[] }
   | { kind: 'scale'; title: string; ranges: WidgetRange[]; pins: WidgetPin[]; unit?: string; prefix?: string; decimals?: number }
   | { kind: 'timeline'; title: string; events: WidgetEvent[] }
+  /** A skill the agent suggested with `suggest_skill` (ADR 0118): its name in words, when to use
+      it, and what to do. Nothing is saved until the person saves it. */
+  | { kind: 'skill'; title: string; description: string; instructions: string }
 
 /** What you made of a widget: a checklist's ticks, a calculator's values by input id, the answer
-    you took at each of a finder's questions from the first (each from 0), or the choice you picked
-    for each of a quiz's questions (from 0, or null). */
+    you took at each of a finder's questions from the first (each from 0), the choice you picked
+    for each of a quiz's questions (from 0, or null), or a suggested skill saved (by its folder
+    name) or left. */
 export type WidgetState =
   | { checked: boolean[] }
   | { values: Record<string, number | boolean> }
   | { answers: number[] }
   | { picked: (number | null)[] }
+  | { saved: string }
+  | { dismissed: true }
 
 /** A widget kept with an answer: its place among the answer's widgets (from 1), the line of the
     answer's words it stands before (none: at the end), and what you last made of it. */

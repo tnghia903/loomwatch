@@ -289,7 +289,9 @@ stream read it. Nothing is guessed from a title.
 
 ### 🧰 Skills, folders and files
 
-Add skills from skills.sh, ClawHub or GitHub, or copy in the ones your AI apps already have. Give an
+Add skills from skills.sh, ClawHub or GitHub, copy in the ones your AI apps already have, or write
+your own: say what your agents should know how to do, and LoomWatch writes the skill for you to check
+and change. An agent can suggest one, too, when you ask it to remember how you like something. Give an
 agent any folder or file: PDFs, Word, Excel and PowerPoint files, and emails saved from Mail, are
 read as text, with nothing to install, and an agent on a model that can see pictures looks at
 screenshots and photos. LoomWatch

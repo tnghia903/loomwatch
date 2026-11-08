@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import {
-  displayName, errorText, fetchSkills, inspectInstall, installedKeys, publisherOf, removeSkill, resultKey, searchEverywhere, skillCount,
-  type FoundSkills, type Publisher, type SearchResult, type SkillRecord, type SkillSource, type SkillsFolder,
+  displayName, errorText, fetchSkills, inspectInstall, installedKeys, publisherOf, removeSkill, resultKey, saveSkillWords, searchEverywhere, skillCount,
+  type FoundSkills, type Publisher, type SearchResult, type SkillRecord, type SkillSource, type SkillsFolder, type WrittenSkill,
 } from '../../lib/library/skillStore'
 import { AddSheet, type Adding } from './AddSheet'
 import { BringInSheet } from './BringInSheet'
 import { Finder, Topics } from './Finder'
 import { Results, type ResultState } from './Results'
 import { Shelf } from './Shelf'
+import { SkillSheet, type Writing } from './SkillSheet'
 import { Toast } from './Toast'
 import { SectionHead } from '../ui/SectionHead'
 
@@ -36,7 +37,7 @@ export interface SkillsStoreProps {
   intro: ReactNode
   /** A search to start with, as if it had been typed. */
   initialQuery?: string
-  /** Skills just added with Add, by name. Not a bring-in's: that can be all of an app's skills. */
+  /** Skills just added with Add or written here, by name. Not a bring-in's: that can be all of an app's skills. */
   onAdded?: (names: string[]) => void
   /** Each time My skills is read: what the folder holds now (an Undo, a removal). */
   onFolder?: (folder: SkillsFolder) => void
@@ -60,6 +61,7 @@ export function SkillsStore({ heading, intro, initialQuery = '', onAdded, onFold
   const [adding, setAdding] = useState<{ state: Adding; key?: string; publisher?: Publisher } | null>(null)
   const [outcomes, setOutcomes] = useState<Record<string, ResultState>>({})
   const [bringingIn, setBringingIn] = useState(false)
+  const [writing, setWriting] = useState<Writing | null>(null)
   const [toast, setToast] = useState<(ToastState & { id: number }) | null>(null)
   const [fresh, setFresh] = useState<ReadonlySet<string>>(new Set())
   // Results a look inside found the license keeps out: the search leaves them out from now on.
@@ -137,14 +139,40 @@ export function SkillsStore({ heading, intro, initialQuery = '', onAdded, onFold
     if (key) setOutcomes((current) => ({ ...current, [key]: { kind: 'added' } }))
     setFresh(new Set(records.map((record) => record.name)))
     onAdded?.(records.map((record) => record.name))
-    const text = records.length === 1 ? `Added ${displayName(records[0].name)}. Every agent can use it now.` : `Added ${skillCount(records.length)}. Every agent can use them now.`
+    const text = records.length === 1 ? `Added “${displayName(records[0].name)}”. Every agent can use it now.` : `Added ${skillCount(records.length)}. Every agent can use them now.`
     // Undo removes what was just added; after a replace that would leave nothing, so it isn't offered.
     say(replaced ? { text } : { text, action: 'Undo', onAction: () => void takeBack(records, key) })
+  }
+  function saved(written: WrittenSkill, kind: Writing['kind']) {
+    setWriting(null)
+    void load()
+    const { skill, previous } = written
+    const label = displayName(skill.name)
+    setFresh(new Set([skill.name]))
+    if (kind === 'new') {
+      onAdded?.([skill.name])
+      say({ text: `Saved “${label}”. Every agent can use it now.`, action: 'Undo', onAction: () => void takeBack([skill]) })
+      return
+    }
+    say(previous
+      ? { text: `Saved “${label}”. Your agents use the new words from now on.`, action: 'Undo', onAction: () => void putBack(written) }
+      : { text: `Saved “${label}”.` })
+  }
+  /** Undo a change: the words it had, saved over the ones just saved. */
+  async function putBack({ skill, base, previous }: WrittenSkill) {
+    if (!previous) return
+    try {
+      await saveSkillWords({ name: skill.name, description: previous.description, instructions: previous.instructions, base })
+      say({ text: `Put back “${displayName(skill.name)}” as it was.` })
+    } catch (caught) {
+      say({ text: errorText(caught) })
+    }
+    void load()
   }
   async function takeBack(records: SkillRecord[], key?: string) {
     try {
       for (const record of records) await removeSkill(record.name)
-      say({ text: records.length === 1 ? `Took back ${displayName(records[0].name)}.` : `Took back ${skillCount(records.length)}.` })
+      say({ text: records.length === 1 ? `Took back “${displayName(records[0].name)}”.` : `Took back ${skillCount(records.length)}.` })
       if (key) setOutcomes((current) => Object.fromEntries(Object.entries(current).filter(([other]) => other !== key)))
     } catch (caught) {
       say({ text: errorText(caught) })
@@ -170,11 +198,13 @@ export function SkillsStore({ heading, intro, initialQuery = '', onAdded, onFold
               : <Topics onPick={(query) => void runSearch(query)} />}
           </div>
           <aside className="lw-skills-rail">
-            <Shelf folder={folder} error={folderError} fresh={fresh} onRetry={() => void load()} onChanged={() => void load()} onBringIn={() => setBringingIn(true)} />
+            <Shelf folder={folder} error={folderError} fresh={fresh} onRetry={() => void load()} onChanged={() => void load()} onBringIn={() => setBringingIn(true)}
+              onNew={() => setWriting({ kind: 'new' })} onChange={(name) => setWriting({ kind: 'change', name })} />
           </aside>
         </div>
       </main>
       {adding && <AddSheet adding={adding.state} publisher={adding.publisher} onClose={closeAdd} onAdded={added} returnFocus={adding.key ? (gone.has(adding.key) ? 'input[aria-label="Find skills"]' : `[data-result=${JSON.stringify(adding.key)}]`) : undefined} />}
+      {writing && <SkillSheet writing={writing} onClose={() => setWriting(null)} onSaved={saved} />}
       {bringingIn && <BringInSheet onClose={() => setBringingIn(false)} onChanged={() => void load()} onBroughtIn={(names) => setFresh(new Set(names))} />}
       {toast && <Toast key={toast.id} text={toast.text} action={toast.action} onAction={toast.onAction} onClose={() => setToast(null)} />}
     </>

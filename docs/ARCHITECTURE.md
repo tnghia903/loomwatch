@@ -380,8 +380,8 @@ The backend is `loomwatchd`, a single binary the user runs locally. Its job:
   (`permissions.rs`, `auto_mode.rs`)
 - **Team Bus:** the delegation tools agents call (see §3)
 - **Pipeline orchestrator:** topological execution for drawn DAGs (see §4)
-- **Skills:** LoomWatch's own skills folder, and installing skills into it (`skills_store.rs`,
-  `marketplace.rs`, `skills_api.rs`)
+- **Skills:** LoomWatch's own skills folder, installing skills into it, and writing and changing
+  them (`skills_store.rs`, `skills_store/written.rs`, `marketplace.rs`, `skills_api.rs`)
 - **Ask LoomWatch:** an assistant that builds and runs teams (`control/`)
 - **Schedules:** runs a team at its `schedule` time and tries again a run that couldn't reach its
   AI source (`schedule.rs`)
@@ -601,6 +601,13 @@ dates are a timeline. A finder answers at once from what the agent set out, wher
 person's reply to the agent. A quick answer's last ask (`intent::SHOW_IN_REPLY`) names the same,
 less the quiz.
 
+That same agent may suggest a skill with `suggest_skill` (`widgets/skill.rs`, ADR 0118), its
+widgets switch on or off (`BusSeat.suggests_skills`; in a quick answer `widgets::host::WidgetTools`
+serves it). The suggestion is kept with the answer as a widget of kind `skill`, after the words,
+and drawn with Save skill, Change and Not now; `show_widget` never makes one. Nothing is saved by the
+tool: Save writes it through the Skills page's route, and what the person did is kept and told to the
+agent's next work like any widget's change.
+
 `widgets::read` checks a widget against limits kept in one place (`widgets::limits`) and says what
 to change when it is refused. A calculator's results are formulas in a small language that the
 daemon (`widgets/formula.rs`) and the app (`ui/src/lib/widgets/formula.ts`) both work out, tested
@@ -787,7 +794,7 @@ helpers have no policy, and they are offered no tool that would need one.
 
 Agents use the skills in LoomWatch's own folder, `<state dir>/skills/<name>/`.
 `<state dir>/skills.json` records where each one came from (`skills_store.rs`). The Skills page
-(`/skills`) fills the folder in three ways:
+(`/skills`) fills the folder in four ways:
 
 - **Install** from skills.sh, ClawHub or GitHub (`marketplace.rs`). The daemon downloads the
   skill into a staging folder and lists every skill folder in it with its license, files and
@@ -796,7 +803,21 @@ Agents use the skills in LoomWatch's own folder, `<state dir>/skills/<name>/`.
 - **Bring in skills from your apps** copies skills from other AI apps' skill folders
   (`~/.claude/skills`, `~/.codex/skills`, …). It runs only when the person presses the button,
   and it reads skill folders only, never an app's settings or sign-in.
+- **Write one** (ADR 0118): New skill opens one sheet with the person's own words first, then the
+  skill's name, when to use it (its `description:`, all an agent sees before it opens a skill) and
+  what to do. LoomWatch's own model (`control/skill.rs`, `POST /api/ask/skill`) writes a new skill
+  from the words, or changes one by edits to its numbered lines, in one turn with no tools; nothing
+  is saved until Save. `PUT /api/skills/words` saves it (`skills_store/written.rs`). The folder is
+  named by `written::skill_name`, which the app's `lib/library/skillName.ts` twins
+  (`schemas/skill-name.cases.json`).
 - **By hand:** a skill put in the folder directly.
+
+Change, on any skill in My skills or opened from an agent's Skills block, opens the same sheet on
+its words (`GET /api/skills/words`). A change names the hash of the `SKILL.md` it read (`base`), and
+one changed since is refused; the old `SKILL.md` is kept in `skills/.removed/`, every other front
+matter key and file stays, and a `SKILL.md` that is a link is never written through. An agent can
+also suggest a skill under its answer (`suggest_skill`, see Widgets in an answer); the person saves
+it from there with the same route, and its origin says which agent suggested it.
 
 Removing a skill moves its folder to `skills/.removed/`. The routes are in `skills_api.rs`.
 

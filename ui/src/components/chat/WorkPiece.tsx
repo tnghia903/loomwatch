@@ -631,6 +631,7 @@ export function WorkPiece({ item, newest = false, approveFilled = true, fixFille
         render: (kept) => (
           <AnswerWidget
             kept={kept}
+            by={name(run.responder)}
             live={inAnswer.live}
             onChange={(n, state) => onWidgetChange(run.runId, n, state)}
             onChoose={onChoose ? (label) => onChoose(label, answerReply(item.request?.replyTo, { runId: run.runId, messageId: answerKey, from: run.responder, to: null, kind: 'answer', text: answer })) : undefined}
