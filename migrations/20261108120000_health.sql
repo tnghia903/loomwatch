@@ -17,16 +17,18 @@ CREATE TABLE health_days (
 CREATE INDEX health_days_kind_day ON health_days (kind, day);
 
 -- health_events: what has a start and an end, a night's sleep or a workout, replaced when the
--- phone sends the same start again.
+-- phone sends the same start again. `day` is the day it started where the person was: the date in
+-- the offset the phone sent, or this computer's own time zone for a time sent in UTC.
 CREATE TABLE health_events (
     device      TEXT NOT NULL,
     kind        TEXT NOT NULL,
     start       TEXT NOT NULL,
     end         TEXT NOT NULL,
+    day         TEXT NOT NULL,
     value       REAL,
     unit        TEXT,
     detail      TEXT,
     received_at TEXT NOT NULL,
     PRIMARY KEY (device, kind, start)
 );
-CREATE INDEX health_events_kind_start ON health_events (kind, start);
+CREATE INDEX health_events_kind_day ON health_events (kind, day);

@@ -185,3 +185,51 @@ fn the_tool_only_reads() {
     );
     assert!(unknown_kind("blood_type").contains("steps"));
 }
+
+/// A night that starts after midnight where the person is belongs to that day, though in UTC it
+/// is still the day before; a time sent in UTC is read in this computer's time zone.
+#[tokio::test]
+async fn an_event_belongs_to_the_day_it_started_where_the_person_was() {
+    let health = Health::new(Db::temp().await);
+    let batch = json!({"events": [
+        {"kind": "sleep", "start": "2026-11-08T00:30:00+07:00", "end": "2026-11-08T07:00:00+07:00"}
+    ]});
+    let (status, _) = answer(route(Some(&health), "phone-a", put(&batch)).await).await;
+    assert_eq!(status, StatusCode::OK);
+    let night = called(
+        &health,
+        "sleep",
+        json!({"from": "2026-11-08", "to": "2026-11-08"}),
+    )
+    .await;
+    assert_eq!(night["events"].as_array().unwrap().len(), 1, "{night}");
+    assert_eq!(night["events"][0]["day"], "2026-11-08");
+    let before = called(
+        &health,
+        "sleep",
+        json!({"from": "2026-11-07", "to": "2026-11-07"}),
+    )
+    .await;
+    assert!(before["events"].as_array().unwrap().is_empty(), "{before}");
+
+    let utc = "2026-11-07T17:30:00Z";
+    let local = DateTime::parse_from_rfc3339(utc)
+        .unwrap()
+        .with_timezone(&chrono::Local)
+        .date_naive()
+        .to_string();
+    assert_eq!(start_day(utc), Some(local.clone()));
+    assert_eq!(start_day("not a time"), None);
+    // Sent in UTC, it is found on its local day: 8 November on a computer seven or more hours
+    // ahead of UTC, where reading the date as sent would miss it.
+    let batch =
+        json!({"events": [{"kind": "workout", "start": utc, "end": "2026-11-07T18:00:00Z"}]});
+    let (status, _) = answer(route(Some(&health), "phone-a", put(&batch)).await).await;
+    assert_eq!(status, StatusCode::OK);
+    let workouts = called(&health, "workouts", json!({"from": local, "to": local})).await;
+    assert_eq!(
+        workouts["events"].as_array().unwrap().len(),
+        1,
+        "{workouts}"
+    );
+}

@@ -782,7 +782,7 @@ run" and "Allow for the whole team". `LOOMWATCH_MAC_APPS_PROGRAM` swaps in a sta
 
 A Mac has no Health store, so the LoomWatch iPhone app sends the kinds the person switched on
 (ADR 0121). It sends `PUT /phone/v0/health` through the door: one figure a day for each kind, plus
-sleep and workouts as events. The door answers the route itself, as it does the push token,
+sleep and workouts as events, each filed under the day it started where the person was (its own offset, or this computer's time zone for a time sent in UTC). The door answers the route itself, as it does the push token,
 because only the door knows which phone is calling. It keeps the batch in `health_days` and
 `health_events` (`health.rs`, migration `20261108120000_health.sql`) under that phone's id, so a
 phone writes and forgets only its own (`DELETE` the same route). The Apple Health tool

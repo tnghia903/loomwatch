@@ -157,6 +157,18 @@ impl Batch {
     }
 }
 
+/// The day `start` began where the person was: its date in the offset it was sent with, or in this
+/// computer's time zone when it came in UTC (a phone that sent `Z` said nothing of where it was).
+fn start_day(start: &str) -> Option<String> {
+    let at = DateTime::parse_from_rfc3339(start).ok()?;
+    let day = if at.offset().local_minus_utc() == 0 {
+        at.with_timezone(&chrono::Local).date_naive()
+    } else {
+        at.date_naive()
+    };
+    Some(day.to_string())
+}
+
 fn short(text: Option<&str>) -> Option<String> {
     text.map(str::trim)
         .filter(|text| !text.is_empty())
@@ -222,16 +234,18 @@ impl Health {
         }
         for event in &batch.events {
             sqlx::query(
-                "INSERT INTO health_events (device, kind, start, end, value, unit, detail, received_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                "INSERT INTO health_events (device, kind, start, end, day, value, unit, detail, received_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                  ON CONFLICT (device, kind, start) DO UPDATE SET
-                   end = excluded.end, value = excluded.value, unit = excluded.unit,
-                   detail = excluded.detail, received_at = excluded.received_at",
+                   end = excluded.end, day = excluded.day, value = excluded.value,
+                   unit = excluded.unit, detail = excluded.detail,
+                   received_at = excluded.received_at",
             )
             .bind(device)
             .bind(&event.kind)
             .bind(&event.start)
             .bind(&event.end)
+            .bind(start_day(&event.start).unwrap_or_default())
             .bind(event.value)
             .bind(short(event.unit.as_deref()))
             .bind(short(event.detail.as_deref()))
@@ -281,8 +295,7 @@ impl Health {
         .await
         .map_err(|e| failed(&e))?;
         let events = sqlx::query(
-            "SELECT kind, MIN(substr(start, 1, 10)) AS first, MAX(substr(start, 1, 10)) AS last,
-                    COUNT(*) AS days
+            "SELECT kind, MIN(day) AS first, MAX(day) AS last, COUNT(*) AS days
              FROM health_events GROUP BY kind ORDER BY kind",
         )
         .fetch_all(self.db.reader())
@@ -398,9 +411,9 @@ impl Health {
 
     async fn events(&self, kind: &str, from: &str, to: &str) -> Result<Value, String> {
         let rows = sqlx::query(
-            "SELECT start, end, MAX(value) AS value, MAX(unit) AS unit, MAX(detail) AS detail
+            "SELECT start, end, MAX(day) AS day, MAX(value) AS value, MAX(unit) AS unit, MAX(detail) AS detail
              FROM health_events
-             WHERE kind = $1 AND substr(start, 1, 10) BETWEEN $2 AND $3
+             WHERE kind = $1 AND day BETWEEN $2 AND $3
              GROUP BY start, end ORDER BY start LIMIT $4",
         )
         .bind(kind)
@@ -416,6 +429,7 @@ impl Health {
             .take(usize::try_from(MAX_EVENTS).unwrap_or(usize::MAX))
             .map(|row| {
                 json!({
+                    "day": row.get::<String, _>("day"),
                     "start": row.get::<String, _>("start"),
                     "end": row.get::<String, _>("end"),
                     "value": row.get::<Option<f64>, _>("value"),
