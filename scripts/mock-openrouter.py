@@ -26,6 +26,8 @@ Replies are scripted from what the request says, so a run exercises real tool ca
                                          or in bullets, one about the person ("aboutYou") when they
                                          ask for Vietnamese, else no edits; an agent whose
                                          instructions hold the bullets lesson answers in three bullets
+- the skill writer (ADR 0118)         -> a new skill made from the person's words; for a change,
+                                         their words added as a last line, so the sheet marks it
 - the next steps after an answer (ADR 0105) -> three short requests, the first naming the answer's
                                          first bold words
 - the read of what a message says done looks like (ADR 0098) -> its "at most <n> words" and
@@ -333,6 +335,20 @@ def plan(body):
                 return ("text", json.dumps({"edits": [{"do": "missed", "number": 1}]}))
             return ("text", json.dumps({"edits": [{"do": "add", "lesson": "When answering, keep it to three short bullets."}]}))
         return ("text", json.dumps({"edits": []}))
+    # ADR 0118: the skill writer, one turn, JSON only, from the person's quoted words.
+    if "You write skills for the AI agents in LoomWatch" in system:
+        quoted = latest.split('"""')
+        said = " ".join((quoted[1] if len(quoted) >= 3 else latest).split())
+        if "one numbered line per line" in latest:
+            numbers = re.findall(r"^\[(\d+)\]", latest, re.MULTILINE)
+            last = int(numbers[-1]) if numbers else 0
+            return ("text", json.dumps({"description": None, "edits": [{"after": last, "add": f"- {said}"}]}))
+        title = " ".join(said.split()[:4]).strip(".,:;!?") or "New skill"
+        return ("text", json.dumps({
+            "title": title[:1].upper() + title[1:],
+            "description": f"Helps with {said[:140].rstrip('.')}. Use it when someone asks for this kind of work.",
+            "instructions": f"1. Read what the person asked for.\n2. {said}\n3. Before you finish, check the work against what they asked.",
+        }))
     if "## What you have learned" in system and "keep it to three short bullets" in system:
         return ("text", "- First point, short.\n- Second point, short.\n- Third point, short.")
 

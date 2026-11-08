@@ -149,8 +149,8 @@ pub(crate) enum Reply {
 }
 
 /// `agent`'s own answer to `message`, as itself in the team's chat: one turn on its own model,
-/// remembering what it said last in the newest work. Its only tool is `show_widget` when `widgets`
-/// (its switch, ADR 0114); otherwise it has none.
+/// remembering what it said last in the newest work. Its tools are `suggest_skill` (ADR 0118), and
+/// `show_widget` when `widgets` (its switch, ADR 0114).
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn reply(
     archive: Option<&EventArchive>,
@@ -169,7 +169,8 @@ pub(crate) async fn reply(
     let instructions = own_instructions(addressed.team, agent);
     let prompt = reply_prompt(addressed, message.trim(), context, own, widgets);
     let model = agent.model_selector();
-    let tools = widgets.then(crate::widgets::host::WidgetTools::new);
+    // Widgets when its switch is on; a skill to suggest whether it is or not (ADR 0118).
+    let tools = Some(crate::widgets::host::WidgetTools::new(widgets));
     let turn = one_turn_with(
         archive,
         teams_root,

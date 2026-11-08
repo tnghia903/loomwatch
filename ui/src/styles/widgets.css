@@ -897,7 +897,29 @@
   .wg-switch-track i, .wg-progress i, .wg-option, .wg-check-choice, .wg-shape, .wg-label { transition: none; }
 }
 
+/* ---------------------------------------------------------------------------
+   A SKILL THE AGENT SUGGESTS (ADR 0118): its mark and name, when to use it, what it says one tap
+   away, and Save, Change or Not now. Save is the ring button, not a fill: the chat's send is the
+   one. Not now is ink, not the gold of a link: leaving is not the thing to do here.
+   --------------------------------------------------------------------------- */
+.wg-skill { gap: var(--sp-3); }
+.wg-skill-head { display: flex; align-items: flex-start; gap: var(--sp-3); min-width: 0; }
+.wg-skill-name { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.wg-skill-when { margin: 0; font: 400 13.5px/1.5 var(--font-sans); color: var(--color-ink-2); overflow-wrap: anywhere; }
+.wg-skill-says > summary { width: fit-content; cursor: pointer; font: 400 13px/18px var(--font-sans); color: var(--color-ink-2); }
+.wg-skill-says[open] > summary { margin-bottom: var(--sp-2); }
+.wg-skill-says .lw-skills-recipe-text { max-height: 320px; overflow-y: auto; }
+.wg-skill-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); }
+.wg-skill-actions .btn { height: 32px; padding: 0 var(--sp-4); }
+.wg-skill-actions .link { color: var(--color-ink-2); }
+.wg-skill-saved { margin: 0; font: 500 13px/18px var(--font-sans); color: var(--color-ok); }
+.wg-skill-error { margin: 0; font: 400 12.5px/1.45 var(--font-sans); color: var(--color-alert); }
+.wg-skill.left { padding: var(--sp-2) var(--sp-4); box-shadow: none; }
+.wg-skill-left { margin: 0; font: 400 13px/18px var(--font-sans); color: var(--color-ink-2); }
+
 @media (pointer: coarse) {
+  .wg-skill-actions .btn { min-height: 44px; }
+  .wg-skill-actions .link, .wg-skill-left .link, .wg-skill-says > summary { min-height: 44px; display: inline-flex; align-items: center; }
   .wg-option, .wg-input, .wg-preset, .wg-box { min-height: 44px; }
   .wg-step { min-height: 44px; min-width: 44px; }
   .wg-tick { padding: 12px 0; }

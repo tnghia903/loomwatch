@@ -183,7 +183,7 @@ describe('adding a skill', () => {
     expect(sent.some((request) => request.url === '/api/skills/install')).toBe(false)
 
     fireEvent.click(within(sheet).getByRole('button', { name: 'Add skill' }))
-    expect(await screen.findByText('Added PDF. Every agent can use it now.')).toBeInTheDocument()
+    expect(await screen.findByText('Added “PDF”. Every agent can use it now.')).toBeInTheDocument()
     const install = sent.find((request) => request.url === '/api/skills/install')!
     expect(install.body).toEqual({ token: 'tok', paths: ['.'], replace: false })
     expect(install.header).toBe('1')
@@ -192,7 +192,7 @@ describe('adding a skill', () => {
     expect(await screen.findByRole('list', { name: 'My skills' })).toHaveTextContent('PDF')
 
     fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
-    expect(await screen.findByText('Took back PDF.')).toBeInTheDocument()
+    expect(await screen.findByText('Took back “PDF”.')).toBeInTheDocument()
     expect(sent.find((request) => request.method === 'DELETE')?.url).toBe('/api/skills/pdf')
     await waitFor(() => expect(screen.queryByRole('list', { name: 'My skills' })).toBeNull())
   })
@@ -235,7 +235,7 @@ describe('adding a skill', () => {
     const sheet = await screen.findByRole('dialog', { name: 'PDF' })
     expect(await within(sheet).findByRole('list', { name: 'What to know' })).toHaveTextContent('You already have a skill called “pdf”. Adding this one replaces it')
     fireEvent.click(within(sheet).getByRole('button', { name: 'Replace and add' }))
-    expect(await screen.findByText('Added PDF. Every agent can use it now.')).toBeInTheDocument()
+    expect(await screen.findByText('Added “PDF”. Every agent can use it now.')).toBeInTheDocument()
     expect(sent.find((request) => request.url === '/api/skills/install')?.body).toEqual({ token: 'tok', paths: ['.'], replace: true })
     expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull()
   })
@@ -255,7 +255,7 @@ describe('adding a skill', () => {
     expect(await within(sheet).findByText('“pdf” is already in LoomWatch. Replace it?')).toBeInTheDocument()
     expect(within(sheet).queryByRole('alert')).toBeNull()
     fireEvent.click(within(sheet).getByRole('button', { name: 'Replace' }))
-    expect(await screen.findByText('Added PDF. Every agent can use it now.')).toBeInTheDocument()
+    expect(await screen.findByText('Added “PDF”. Every agent can use it now.')).toBeInTheDocument()
   })
 
   it('lets you pick from a collection, leaving out the skills whose license keeps them out', async () => {

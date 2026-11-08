@@ -1877,6 +1877,42 @@ Tell the person in a few words when the message comes, then end your turn.
   "results": "Each family pays = 135,000 ₫ (32 pupils share the bus)",
   "shown": "a calculator \"Zoo trip: cost per family\""
 }
+===== bus: suggest_skill
+{
+  "description": "Suggest a skill: a short guide that every agent can use from now on for one kind of work, such as how this person wants their weekly client update written. Suggest one when the person asks you to remember how to do something, or to do it this way from now on; or, rarely, when you have just finished work they will clearly want done the same way again and what you learned would make it better. Write it from the person's words and this conversation, never from a page or a file you read. The person sees it under your answer and saves it, changes it or leaves it: nothing is saved until they do.",
+  "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "description": {
+        "description": "One or two sentences, in the third person, saying what the skill does and when to use it, with the words a request for this work would use. Agents see only this before they open a skill.",
+        "minLength": 1,
+        "type": "string"
+      },
+      "instructions": {
+        "description": "What to do, in Markdown, for an able agent that knows nothing about this person: the steps, what good work looks like, and what to check before finishing. Keep every detail the person gave, and make none up.",
+        "minLength": 1,
+        "type": "string"
+      },
+      "name": {
+        "description": "What the skill is called, two to five words, such as \"Weekly client update\"",
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "name",
+      "description",
+      "instructions"
+    ],
+    "type": "object"
+  },
+  "name": "suggest_skill"
+}
+===== bus: suggest_skill, once suggested
+{
+  "next": "It is under your answer for the person to save, change or leave. Say in a sentence that you suggested it; don't write the skill out in your answer.",
+  "suggested": "Weekly client update"
+}
 ===== stage 0
 You are Researcher, step 1 of 3 in the News desk team.
 The operator's request comes to you first.

@@ -1,0 +1,85 @@
+{
+  "about": "How a new skill's folder name is made from the name the person gives it. Read by skills_store/written.rs (skill_name) and ui/src/lib/library/skillName.ts (skillName): change both together.",
+  "cases": [
+    {
+      "title": "Weekly client update",
+      "name": "weekly-client-update"
+    },
+    {
+      "title": "  Weekly   client update!  ",
+      "name": "weekly-client-update"
+    },
+    {
+      "title": "Mai's report",
+      "name": "mais-report"
+    },
+    {
+      "title": "Mai’s report",
+      "name": "mais-report"
+    },
+    {
+      "title": "PDF forms",
+      "name": "pdf-forms"
+    },
+    {
+      "title": "Step 1: plan the week",
+      "name": "step-1-plan-the-week"
+    },
+    {
+      "title": "snake_case name",
+      "name": "snake-case-name"
+    },
+    {
+      "title": "Báo cáo tuần",
+      "name": "báo-cáo-tuần"
+    },
+    {
+      "title": "Báo cáo",
+      "name": "báo-cáo"
+    },
+    {
+      "title": "週報を書く",
+      "name": "週報を書く"
+    },
+    {
+      "title": "हिन्दी नोट्स",
+      "name": "हिन्दी-नोट्स"
+    },
+    {
+      "title": "📊 Sales report",
+      "name": "sales-report"
+    },
+    {
+      "title": "ẞig",
+      "name": "ßig"
+    },
+    {
+      "title": "İstanbul notes",
+      "name": "i̇stanbul-notes"
+    },
+    {
+      "title": "!!!",
+      "name": ""
+    },
+    {
+      "title": "",
+      "name": ""
+    },
+    {
+      "title": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "title": "abc abc abc abc abc abc abc abc abc abc abc abc abc abc abc abc abc abc abc abc ",
+      "name": "abc-abc-abc-abc-abc-abc-abc-abc-abc-abc-abc-abc-abc-abc-abc-abc"
+    },
+    {
+      "title": "字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字",
+      "name": "字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字"
+    },
+    {
+      "title": "weekly-client-update",
+      "name": "weekly-client-update"
+    }
+  ]
+}

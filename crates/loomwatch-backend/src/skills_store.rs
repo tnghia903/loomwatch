@@ -2,9 +2,10 @@
 //!
 //! `LoomWatch` keeps the skills its agents can use in one folder of its own,
 //! `<state dir>/skills/<name>/`, and records where each one came from in `<state dir>/skills.json`:
-//! brought in from an app, installed from GitHub, skills.sh or `ClawHub` (`marketplace.rs`), or put
-//! in the folder by hand. Removing a skill moves its folder to `skills/.removed/`, so nothing is
-//! deleted outright.
+//! brought in from an app, installed from GitHub, skills.sh or `ClawHub` (`marketplace.rs`),
+//! written in `LoomWatch` ([`written`], ADR 0118), or put in the folder by hand. Removing a skill
+//! moves its folder to `skills/.removed/`, and changing one keeps its old `SKILL.md` there, so
+//! nothing is deleted outright.
 //!
 //! "Bring in skills from your apps" looks through the skill folders the agent apps on this
 //! computer keep (`~/.claude/skills`, `~/.codex/skills`, …) and copies the ones the person ticks.
@@ -25,6 +26,8 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+
+pub mod written;
 
 const MANIFEST_FILE: &str = "skills.json";
 const SKILLS_FOLDER: &str = "skills";
@@ -155,6 +158,8 @@ pub enum OriginKind {
     BroughtIn,
     /// Installed from GitHub, skills.sh or `ClawHub`.
     Installed,
+    /// Written in `LoomWatch`: by the person, or suggested by an agent and saved by them.
+    Written,
     /// Put in the folder by hand: `LoomWatch` has no record of it.
     Found,
 }
@@ -183,6 +188,9 @@ pub struct Origin {
     /// A page about it the person can open.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+    /// The agent that suggested a written skill, by the name the chat showed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suggested_by: Option<String>,
 }
 
 impl Origin {
@@ -196,6 +204,7 @@ impl Origin {
             reference: None,
             commit: None,
             url: None,
+            suggested_by: None,
         }
     }
 }
@@ -232,6 +241,9 @@ pub struct SkillRecord {
     /// The bring-in it arrived with, which Undo takes back as one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub batch_id: Option<String>,
+    /// When the person last changed its words in `LoomWatch`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub changed_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -362,6 +374,7 @@ impl SkillsStore {
                 sha256: String::new(),
                 added_at,
                 batch_id: None,
+                changed_at: None,
             });
         }
         skills.sort_by_key(|record| record.name.to_lowercase());
@@ -458,6 +471,7 @@ impl SkillsStore {
             sha256,
             added_at: Utc::now(),
             batch_id: new.batch_id.clone(),
+            changed_at: None,
         };
         manifest.skills.retain(|kept| kept.name != record.name);
         manifest.skills.push(record.clone());
@@ -602,6 +616,11 @@ fn stamp() -> String {
 
 /// Move `folder/name` to `folder/.removed/<name>-<time>/`.
 fn move_to_removed(folder: &Path, name: &str) -> io::Result<()> {
+    fs::rename(folder.join(name), removed_place(folder, name)?)
+}
+
+/// `folder/.removed/<name>-<time>/`, a place nothing is in yet.
+fn removed_place(folder: &Path, name: &str) -> io::Result<PathBuf> {
     let removed = folder.join(REMOVED_FOLDER);
     fs::create_dir_all(&removed)?;
     let base = format!("{name}-{}", stamp());
@@ -611,7 +630,7 @@ fn move_to_removed(folder: &Path, name: &str) -> io::Result<()> {
         extra += 1;
         target = removed.join(format!("{base}-{extra}"));
     }
-    fs::rename(folder.join(name), target)
+    Ok(target)
 }
 
 /// Copy a skill's folder, leaving out links, `.git` and `node_modules`, and stop once it is

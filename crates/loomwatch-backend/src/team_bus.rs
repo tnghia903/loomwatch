@@ -512,6 +512,19 @@ impl TeamBus {
     /// responder, a person is there to use them, and its switch is on (or absent, with the
     /// default on).
     fn shows_widgets(&self, agent_id: &str) -> bool {
+        self.gives_the_answer(agent_id)
+            && self
+                .state
+                .team
+                .agents
+                .iter()
+                .find(|agent| agent.id == agent_id)
+                .is_some_and(|agent| agent.widgets.unwrap_or(crate::widgets::DEFAULT_ON))
+    }
+
+    /// Whether `agent_id`'s reply is the answer a person at the keyboard reads: the one agent that
+    /// may put something under it, such as a skill to save (ADR 0118), whatever its widgets switch.
+    fn gives_the_answer(&self, agent_id: &str) -> bool {
         self.state.operator.is_some()
             && self
                 .state
@@ -524,9 +537,7 @@ impl TeamBus {
                 .agents
                 .iter()
                 .find(|agent| agent.id == agent_id)
-                .is_some_and(|agent| {
-                    !agent.is_operator() && agent.widgets.unwrap_or(crate::widgets::DEFAULT_ON)
-                })
+                .is_some_and(|agent| !agent.is_operator())
     }
 
     pub(crate) async fn connection(&self, agent_id: &str) -> Result<TeamBusConnection> {
@@ -1519,11 +1530,15 @@ impl TeamBus {
         // still being written, so it is the one kept with the answer. A picture comes as the
         // agent's SVG and is drawn from the shapes read out of it. Beside the output, not in it:
         // the agent isn't told its widget again.
-        if status == "completed"
-            && name == crate::widgets::TOOL
-            && let Ok(widget) = crate::widgets::read(&arguments)
-        {
-            update["widget"] = json!(widget);
+        if status == "completed" {
+            let shown = match name {
+                crate::widgets::TOOL => crate::widgets::read(&arguments).ok(),
+                crate::widgets::skill::TOOL => crate::widgets::skill::read(&arguments).ok(),
+                _ => None,
+            };
+            if let Some(widget) = shown {
+                update["widget"] = json!(widget);
+            }
         }
         event_log
             .append(
@@ -1670,6 +1685,7 @@ impl TeamBus {
             "pending_messages" => self.pending_messages(session).await,
             "cancel_message" => self.cancel_message(session, arguments).await,
             crate::widgets::TOOL => self.show_widget(session, arguments),
+            crate::widgets::skill::TOOL => self.suggest_skill(session, arguments),
             "my_agents" => self.my_agents(session).await,
             "dispatch" => {
                 let reference = required_string(arguments, "agent")?;
@@ -3430,6 +3446,8 @@ pub(crate) struct BusSeat {
     /// Its reply is the answer the person reads, and its switch is on: it may put widgets under it
     /// (ADR 0114).
     pub(crate) answers: bool,
+    /// Its reply is the answer the person reads: it may suggest a skill under it (ADR 0118).
+    pub(crate) suggests_skills: bool,
 }
 
 impl TeamBus {
@@ -3494,6 +3512,10 @@ impl TeamBus {
                 && !holder.helper
                 && !holder.answering
                 && self.shows_widgets(&holder.agent_id),
+            suggests_skills: !copy
+                && !holder.helper
+                && !holder.answering
+                && self.gives_the_answer(&holder.agent_id),
         }
     }
 
@@ -3549,6 +3571,25 @@ impl TeamBus {
             .map_err(|error| refused("widget_refused", format!("It isn't shown: {error}.")))?;
         let place = session.widgets_shown.fetch_add(1, Ordering::Relaxed) + 1;
         Ok(crate::widgets::shown(&widget, place))
+    }
+
+    /// `suggest_skill` (ADR 0118): checked, and kept with the answer when the run ends. Nothing is
+    /// saved: the person does that from the card under the answer.
+    fn suggest_skill(&self, session: &AgentSession, arguments: &Value) -> Result<Value> {
+        if crate::helpers::lead_of(&session.agent_id).is_some()
+            || session.answering
+            || session.delegation_path.len() != 1
+            || !self.gives_the_answer(&session.agent_id)
+        {
+            return Err(refused(
+                "not_the_answer",
+                "only the agent whose reply is the answer the person reads may suggest a skill"
+                    .to_owned(),
+            ));
+        }
+        let widget = crate::widgets::skill::read(arguments)
+            .map_err(|error| refused("skill_refused", format!("It isn't suggested: {error}.")))?;
+        Ok(crate::widgets::skill::suggested(&widget))
     }
 
     /// `message_me_at`: keep the message for its time, and return at once.
@@ -3816,6 +3857,10 @@ pub(crate) fn offered_tools(seat: &BusSeat) -> Vec<Value> {
     // ADR 0114: the agent whose reply is the answer may put widgets under it.
     if seat.answers {
         tools.push(crate::widgets::tool_definition());
+    }
+    // ADR 0118: and may suggest a skill there, for the person to save.
+    if seat.suggests_skills {
+        tools.push(crate::widgets::skill::tool_definition());
     }
     if seat.notebook {
         tools.extend(memory_tool_definitions());
@@ -4430,12 +4475,104 @@ mod tests {
                 my_agents: true,
                 own_chat: true,
                 answers: true,
+                suggests_skills: true,
             };
             for tool in offered_tools(&seat) {
                 let text = tool.to_string();
                 assert!(!text.contains("  "), "{text}");
             }
         }
+    }
+
+    /// ADR 0118: the agent whose reply is the answer is offered `suggest_skill` with its widgets
+    /// switch off, and its call goes through with the suggestion on the live record. A teammate
+    /// isn't offered it, and its call is refused.
+    #[tokio::test]
+    async fn the_agent_whose_reply_is_the_answer_suggests_a_skill_with_widgets_off() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
+        let archive = EventArchive::new(pool);
+        let mut lead = test_agent("lead", OFFLINE);
+        lead.widgets = Some(false);
+        let team = Arc::new(TeamConfig {
+            project: None,
+            shares: None,
+            project_file: None,
+            schema_version: 1,
+            id: "notes".into(),
+            name: "Notes".into(),
+            entrypoint: "lead".into(),
+            responder: None,
+            schedule: None,
+            deliver: None,
+            conversation: ConversationConfig::default(),
+            permissions: crate::config::TeamPermissions::default(),
+            spend: crate::spend::SpendConfig::default(),
+            memory: None,
+            guards: GuardsConfig::default(),
+            agents: vec![lead, test_agent("helper", OFFLINE)],
+            edges: Vec::new(),
+        });
+        let bus = TeamBus::start(
+            team,
+            &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("notes.yaml"),
+            archive.clone(),
+            Duration::from_secs(2),
+            TeamBusMode::Team,
+            Arc::new(crate::memory::TeamMemory::default()),
+            Some(crate::runs::RunRegistry::default().operator_desk(Some(&archive))),
+        )?;
+        bus.answered_by("lead");
+        let names = |connection: &TeamBusConnection| {
+            connection
+                .tool_definitions(false)
+                .iter()
+                .filter_map(|tool| tool["name"].as_str().map(str::to_owned))
+                .collect::<Vec<_>>()
+        };
+        let skill = json!({
+            "name": "Tidy meeting notes",
+            "description": "Turns meeting notes into decisions and owners.",
+            "instructions": "1. List each decision.\n2. Give each action an owner."
+        });
+
+        let lead = bus.connection("lead").await?;
+        lead.register(EventLog::new(archive.clone(), "answering".into()))
+            .await;
+        let offered = names(&lead);
+        assert!(
+            offered.contains(&crate::widgets::skill::TOOL.to_owned()),
+            "{offered:?}"
+        );
+        assert!(
+            !offered.contains(&crate::widgets::TOOL.to_owned()),
+            "its widgets switch is off: {offered:?}"
+        );
+        let suggested = lead.call(crate::widgets::skill::TOOL, skill.clone()).await;
+        assert_eq!(suggested["isError"], false, "{suggested}");
+        assert_eq!(
+            suggested["structuredContent"]["suggested"],
+            "Tidy meeting notes"
+        );
+        let update = archive
+            .load_session("answering")
+            .await?
+            .into_iter()
+            .rfind(|event| event.kind == EventKind::ToolUpdate)
+            .context("the suggestion's update")?;
+        assert_eq!(
+            update.payload["widget"]["kind"], "skill",
+            "{}",
+            update.payload
+        );
+
+        let helper = bus.connection("helper").await?;
+        helper
+            .register(EventLog::new(archive.clone(), "helper".into()))
+            .await;
+        assert!(!names(&helper).contains(&crate::widgets::skill::TOOL.to_owned()));
+        let refused = helper.call(crate::widgets::skill::TOOL, skill).await;
+        assert_eq!(refused["isError"], true, "{refused}");
+        Ok(())
     }
 
     /// ADR 0114: only the agent whose reply is the answer, with its switch on, is offered
@@ -8382,8 +8519,9 @@ mod tests {
             my_agents: false,
             own_chat: false,
             answers: false,
+            suggests_skills: false,
         };
-        let cases: [(&str, BusSeat, &[&str]); 20] = [
+        let cases: [(&str, BusSeat, &[&str]); 21] = [
             (
                 "one agent, team mode",
                 seat(TeamBusMode::Team, 0, false),
@@ -8543,6 +8681,7 @@ mod tests {
                 "a lead whose reply is the answer",
                 BusSeat {
                     answers: true,
+                    suggests_skills: true,
                     ..seat(TeamBusMode::Team, 2, false)
                 },
                 &[
@@ -8552,13 +8691,24 @@ mod tests {
                     "handoff",
                     "ask_user",
                     "show_widget",
+                    "suggest_skill",
                 ],
+            ),
+            // ADR 0118: and may suggest a skill there, with its widgets switch off too.
+            (
+                "an agent whose reply is the answer, without widgets",
+                BusSeat {
+                    suggests_skills: true,
+                    ..seat(TeamBusMode::Team, 0, false)
+                },
+                &["ask_user", "suggest_skill"],
             ),
             (
                 "an agent in its own chat whose reply is the answer",
                 BusSeat {
                     own_chat: true,
                     answers: true,
+                    suggests_skills: true,
                     ..seat(TeamBusMode::Pipeline, 0, false)
                 },
                 &[
@@ -8567,6 +8717,7 @@ mod tests {
                     "pending_messages",
                     "cancel_message",
                     "show_widget",
+                    "suggest_skill",
                 ],
             ),
         ];
