@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-import { decideRunRequest, type AskContext } from '../../lib/ask/client'
-import type { ProposalCard, ReviewNoteCard, RunRequestCard } from '../../lib/ask/thread'
+import { decideRunRequest, reportProposalOutcome, type AskContext } from '../../lib/ask/client'
+import type { AgentProposalCard, ProposalCard, ReviewNoteCard, RunRequestCard } from '../../lib/ask/thread'
+import { agentProposalHref } from '../agents/route'
 import { useAsk } from '../../lib/ask/useAsk'
 import { newStartKey, startRun } from '../../lib/runs/client'
 import { teamHref } from '../../lib/team-file/teamHref'
@@ -66,6 +67,11 @@ export function RoomAsk({ project, name }: { project: string; name: string }) {
     onUseNote: (card: ReviewNoteCard) => {
       try { window.sessionStorage.setItem('loomwatch:ask:note', JSON.stringify({ runId: card.runId, text: card.text })) } catch { /* the note is still in the card */ }
       window.location.assign(teamPage(card.file, { run: card.runId }))
+    },
+    // An agent goes on its own page, where its Save keeps it (ADR 0119).
+    onOpenAgent: (card: AgentProposalCard) => window.location.assign(agentProposalHref(card.agent, card.id)),
+    onDiscardAgent: (card: AgentProposalCard) => {
+      void reportProposalOutcome(card.id, 'discarded').catch((caught: unknown) => setCardError({ id: card.id, message: caught instanceof Error ? caught.message : String(caught) }))
     },
   }
   return (

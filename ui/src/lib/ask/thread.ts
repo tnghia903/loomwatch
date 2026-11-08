@@ -10,6 +10,7 @@
 import builtInJobs from '../../../../schemas/built-in-jobs.json'
 import { ACTIVITY_KINDS, ReplyText } from '../watch/replyText'
 import { eventText, type RunEvent } from '../watch/events'
+import type { JobSpec } from '../library/jobs'
 import type { AskState, ProposalOutcome, ProposedProject } from './client'
 
 export type StepStatus = 'running' | 'done' | 'failed'
@@ -45,6 +46,27 @@ export interface ProposalCard {
   superseded: boolean
 }
 
+/** One of My agents Ask proposed on its own, new or changed (ADR 0119). */
+export interface AgentProposalCard {
+  kind: 'agent-proposal'
+  id: string
+  at: string
+  /** The agent it changes, by id; null for a new one. */
+  agent: string | null
+  name: string
+  isNew: boolean
+  summary: string
+  /** The whole agent as it would be saved. */
+  spec: JobSpec
+  /** The version it was changed from. */
+  baseVersion: number | null
+  /** The teams that use it, by name. */
+  inTeams: string[]
+  outcome: ProposalOutcome | null
+  /** A later proposal for the same agent replaced this one. */
+  superseded: boolean
+}
+
 export interface RunRequestCard {
   kind: 'run-request'
   id: string
@@ -74,7 +96,7 @@ export interface ReviewNoteCard {
   text: string
 }
 
-export type AskCard = ProposalCard | RunRequestCard | RunStartedCard | ReviewNoteCard
+export type AskCard = ProposalCard | AgentProposalCard | RunRequestCard | RunStartedCard | ReviewNoteCard
 
 export interface PersonTurn {
   kind: 'person'
@@ -118,6 +140,8 @@ const STEP_WORDS: Record<string, { running: string; done: string; failed: string
   list_jobs: { running: 'Looking at LoomWatch’s jobs', done: 'Looked at LoomWatch’s jobs', failed: 'Couldn’t look at LoomWatch’s jobs' },
   read_job: { running: 'Reading a job', done: 'Read a job', failed: 'Couldn’t read the job' },
   list_my_agents: { running: 'Looking at My agents', done: 'Looked at My agents', failed: 'Couldn’t list My agents' },
+  read_my_agent: { running: 'Looking at your agent', done: 'Looked at your agent', failed: 'Couldn’t look at your agent' },
+  propose_agent: { running: 'Drafting the agent', done: 'Drafted the agent', failed: 'Found a problem in the draft', fixed: 'Fixed a problem in its draft' },
   list_tools: { running: 'Looking at your tools', done: 'Looked at your tools', failed: 'Couldn’t list your tools' },
   find_files: { running: 'Looking for a folder or file', done: 'Looked for a folder or file', failed: 'Couldn’t look for it' },
   propose_team: { running: 'Drafting the team', done: 'Drafted the team', failed: 'Found a problem in the draft', fixed: 'Fixed a problem in its draft' },
@@ -213,6 +237,7 @@ export function projectAskThread(events: readonly RunEvent[]): AskThread {
   let model: string | null = null
   let current: Building | null = null
   const proposals = new Map<string, ProposalCard>()
+  const agentProposals = new Map<string, AgentProposalCard>()
   const requests = new Map<string, RunRequestCard>()
 
   const open = (id: string): Building => {
@@ -258,8 +283,25 @@ export function projectAskThread(events: readonly RunEvent[]): AskThread {
           for (const earlier of proposals.values()) if (earlier.file === card.file) earlier.superseded = true
           proposals.set(card.id, card)
           active(event.id).turn.cards.push(card)
+        } else if (phase === 'ask_agent_proposal') {
+          const spec = object(payload.spec) ? payload.spec as unknown as JobSpec : null
+          if (!spec) break
+          const agent = text(payload.agent) || null
+          const card: AgentProposalCard = {
+            kind: 'agent-proposal', id: text(payload.proposalId), at: event.ts, agent, name: text(payload.name) || text(spec.name),
+            isNew: payload.isNew === true, summary: text(payload.summary), spec,
+            baseVersion: typeof payload.baseVersion === 'number' ? payload.baseVersion : null,
+            inTeams: Array.isArray(payload.inTeams) ? payload.inTeams.filter((team): team is string => typeof team === 'string') : [],
+            outcome: null, superseded: false,
+          }
+          // A later draft of the same agent, or of the same new one, replaces the earlier.
+          for (const earlier of agentProposals.values()) {
+            if (agent ? earlier.agent === agent : !earlier.agent && earlier.name.toLowerCase() === card.name.toLowerCase()) earlier.superseded = true
+          }
+          agentProposals.set(card.id, card)
+          active(event.id).turn.cards.push(card)
         } else if (phase === 'ask_proposal_outcome') {
-          const card = proposals.get(text(payload.proposalId))
+          const card = proposals.get(text(payload.proposalId)) ?? agentProposals.get(text(payload.proposalId))
           const outcome = text(payload.outcome)
           if (card && (outcome === 'applied' || outcome === 'discarded' || outcome === 'undone')) card.outcome = outcome
         } else if (phase === 'ask_run_request') {

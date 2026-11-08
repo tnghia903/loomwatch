@@ -97,6 +97,10 @@ fn calling(step: usize, text: &str, tool: &str, arguments: &Value) -> Completion
 /// sentence that says "from the <name> page" loses those words, every other sentence naming what
 /// was removed is dropped, and the edits come back as JSON in a code fence, as a real model tends
 /// to send them. Something removed whose name says "unreadable" gets an answer with no JSON in it.
+///
+/// - "assistant for": proposes one agent on its own ([`one_agent`], ADR 0119).
+/// - "how sure": changes one of My agents by its lines ([`change_an_agent`]).
+#[allow(clippy::too_many_lines)]
 fn assistant() -> Demo {
     Demo::responder(|request| {
         let prompt = request.prompt();
@@ -110,7 +114,11 @@ fn assistant() -> Demo {
             .to_lowercase();
         let answers = answers(&request.messages);
         let step = answers.len();
-        let reply = if message.contains("folder") {
+        let reply = if message.contains("assistant for") {
+            one_agent(step, &answers)
+        } else if message.contains("how sure") {
+            change_an_agent(step, &answers)
+        } else if message.contains("folder") {
             build_from_what_they_have(step, &answers)
         } else if message.contains("note") {
             match step {
@@ -248,6 +256,80 @@ fn build_from_what_they_have(step: usize, answers: &[&str]) -> Completion {
         _ => Completion::text(
             "I used your Researcher as it is, started the Writer from LoomWatch's Writer, and gave \
              the Writer your Client notes folder. Apply it on the canvas, or tell me what to change.",
+        ),
+    }
+}
+
+/// "An assistant for my customer emails" (ADR 0119): the stand-in looks at My agents and reads
+/// `LoomWatch`'s Writer, then proposes one agent from it on its own, with no team.
+fn one_agent(step: usize, answers: &[&str]) -> Completion {
+    let answer = |at: usize| serde_json::from_str::<Value>(answers[at]).unwrap_or_default();
+    match step {
+        0 => calling(step, "", "list_my_agents", &json!({})),
+        1 => calling(step, "", "read_job", &json!({"job": "writer"})),
+        2 => {
+            let writer = answer(1);
+            calling(
+                step,
+                "",
+                "propose_agent",
+                &json!({
+                    "summary": "An agent that drafts replies to customer emails.",
+                    "new": {
+                        "name": "Email helper",
+                        "does": "Drafts replies to customer emails",
+                        "instructions": writer["role"],
+                        "model": writer["model"],
+                        "thinkingEffort": writer["thinkingEffort"],
+                        "doneWhen": writer["doneWhen"],
+                    },
+                }),
+            )
+        }
+        _ => Completion::text(
+            "I started your Email helper from LoomWatch's Writer. Open it to check it, then press \
+             Save. You can talk to it on its page in My agents.",
+        ),
+    }
+}
+
+/// "Make my Researcher say how sure it is" (ADR 0119): the stand-in reads the agent, then proposes
+/// one line added after its "How to work:" line and one more `doneWhen`, naming no other line.
+fn change_an_agent(step: usize, answers: &[&str]) -> Completion {
+    let answer = |at: usize| serde_json::from_str::<Value>(answers[at]).unwrap_or_default();
+    match step {
+        0 => calling(step, "", "read_my_agent", &json!({"agent": "researcher"})),
+        1 => {
+            let read = answer(0);
+            let lines = read["instructions"].as_str().unwrap_or_default();
+            let after = lines
+                .lines()
+                .find(|line| line.ends_with("How to work:"))
+                .and_then(|line| line.strip_prefix('['))
+                .and_then(|rest| rest.split_once(']'))
+                .and_then(|(n, _)| n.parse::<u64>().ok())
+                .unwrap_or(99);
+            let mut done = read["doneWhen"].as_array().cloned().unwrap_or_default();
+            done.push(json!("Says how sure it is of each fact"));
+            calling(
+                step,
+                "",
+                "propose_agent",
+                &json!({
+                    "summary": "Says how sure it is of each fact.",
+                    "change": {
+                        "agent": "researcher",
+                        "version": read["version"],
+                        "edits": [{"after": after, "add": "- Say how sure you are of each fact, and why."}],
+                        "set": {"doneWhen": done},
+                    },
+                }),
+            )
+        }
+        _ => Completion::text(
+            "I drafted the change: your Researcher says how sure it is of each fact. Nothing \
+             changes until you open the card and press Save; then Market brief gets it from its \
+             next run.",
         ),
     }
 }
@@ -528,6 +610,8 @@ async fn a_conversation_proposes_asks_before_running_and_drafts_a_review_note() 
             "list_my_agents",
             "list_tools",
             "find_files",
+            "read_my_agent",
+            "propose_agent",
             "propose_team",
             "start_run",
             "get_run",
@@ -1779,5 +1863,328 @@ fn a_run_of_an_agents_own_chat_opens_that_agents_chat() {
     assert_eq!(
         super::run_address(origin, "trip.yaml", "r1"),
         "http://127.0.0.1:3000/?path=trip.yaml&run=r1"
+    );
+}
+
+/// ADR 0119: asked for an agent to keep, Ask proposes that one agent on its own, from
+/// `LoomWatch`'s Writer, with no team around it. Nothing is written until the person saves it on
+/// its page, and what they did with it is recorded under the proposal.
+#[tokio::test]
+async fn ask_proposes_one_agent_on_its_own_with_no_team() {
+    let pool = crate::db::Db::temp().await;
+    let demo = assistant();
+    let fixture = Fixture::start(
+        Some(EventArchive::new(pool)),
+        Some(crate::engine::demo_model(demo.clone())),
+    )
+    .await;
+    let (status, started) = fixture.post("/api/ask/conversations", &json!({})).await;
+    assert_eq!(status, 201, "{started}");
+    let id = started["id"].as_str().expect("id").to_owned();
+    fixture
+        .say(&id, "I'd like an assistant for my customer emails.")
+        .await;
+    let events = fixture.events(&id).await;
+
+    assert!(
+        phases(&events, "ask_proposal").is_empty(),
+        "no team: {}",
+        dump(&events)
+    );
+    let proposed = phases(&events, "ask_agent_proposal");
+    assert_eq!(proposed.len(), 1, "{}", dump(&events));
+    let proposal = proposed[0];
+    let writer = super::jobs::named("writer").expect("the writer job");
+    assert_eq!(proposal["isNew"], true);
+    assert_eq!(proposal["name"], "Email helper");
+    assert!(
+        proposal.get("agent").is_none_or(Value::is_null),
+        "{proposal}"
+    );
+    assert_eq!(proposal["spec"]["instructions"], writer.role().trim());
+    assert_eq!(proposal["spec"]["doneWhen"], json!(writer.done_when));
+    assert!(
+        !fixture.root.0.join(".jobs").exists(),
+        "nothing is saved until the person presses Save"
+    );
+
+    let proposal_id = proposal["proposalId"].as_str().expect("an id");
+    let (status, stored) = fixture
+        .get(&format!("/api/ask/proposals/{proposal_id}"))
+        .await;
+    assert_eq!(status, 200, "{stored}");
+    assert_eq!(
+        stored["kind"], "agent",
+        "the agent page tells it from a team's"
+    );
+    assert_eq!(stored["spec"], proposal["spec"]);
+    assert!(stored.get("baseVersion").is_none(), "{stored}");
+
+    let (status, _) = fixture
+        .post(
+            &format!("/api/ask/proposals/{proposal_id}/outcome"),
+            &json!({"outcome": "applied"}),
+        )
+        .await;
+    assert_eq!(status, 204);
+    let events = fixture.events(&id).await;
+    let outcomes = phases(&events, "ask_proposal_outcome");
+    assert_eq!(outcomes.len(), 1, "{}", dump(&events));
+    assert_eq!(outcomes[0]["proposalId"], proposal_id);
+    assert_eq!(outcomes[0]["name"], "Email helper");
+    assert_eq!(outcomes[0]["outcome"], "applied");
+}
+
+/// The assistant is told every team that gets a change once it is saved, in words that fit how many
+/// there are (ADR 0119).
+#[tokio::test]
+async fn ask_is_told_every_team_a_change_reaches() {
+    let fixture = Fixture::start(None, None).await;
+    let tools = ControlTools::new(
+        fixture.control.clone(),
+        Caller::Conversation("ask-test".to_owned()),
+    );
+    save_agent(
+        &fixture.root.0,
+        "researcher",
+        "name: Researcher\ninstructions: Find the facts.\nmodel: fake/offline\n",
+    );
+    let change = json!({
+        "summary": "Finds more.",
+        "change": {"agent": "researcher", "version": 1, "edits": [{"n": 1, "replace": "Find more facts."}]},
+    });
+    let told = |answer: &str| {
+        serde_json::from_str::<Value>(answer).expect("json")["message"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned()
+    };
+    let (answer, failed) = tools.call("propose_agent", change.clone()).await;
+    assert!(!failed, "{answer}");
+    assert!(!told(&answer).contains("next run"), "no team: {answer}");
+    for (file, name) in [
+        ("brief.yaml", "Market brief"),
+        ("review.yaml", "Client review"),
+    ] {
+        std::fs::write(
+            fixture.root.0.join(file),
+            format!(
+                "schemaVersion: 1\nid: {}\nname: {name}\nentrypoint: r\nagents:\n  - id: r\n    from: {{agent: researcher}}\nedges: []\n",
+                file.trim_end_matches(".yaml")
+            ),
+        )
+        .expect("a team that uses it");
+    }
+    let (answer, failed) = tools.call("propose_agent", change).await;
+    assert!(!failed, "{answer}");
+    assert!(
+        told(&answer).contains(
+            "Once saved, Market brief and Client review get the change from their next run."
+        ),
+        "{answer}"
+    );
+}
+
+/// ADR 0119: asked to change one of My agents itself, Ask reads it, then proposes edits to the
+/// lines that change and the settings that change, against the version it read. Every other line
+/// stays byte for byte, the file on disk is untouched, and the teams that use it are named.
+#[tokio::test]
+async fn ask_changes_one_of_my_agents_by_its_lines() {
+    let pool = crate::db::Db::temp().await;
+    let demo = assistant();
+    let fixture = Fixture::start(
+        Some(EventArchive::new(pool)),
+        Some(crate::engine::demo_model(demo.clone())),
+    )
+    .await;
+    let saved = "name: Researcher\ninstructions: |-\n  You find facts for others to write up.\n  How to work:\n  -   Use primary sources:  company posts, papers.\n  Reply with each fact and its link.\nmodel: fake/offline\ndoneWhen: [Every fact has a link]\nversion: 3\n";
+    save_agent(&fixture.root.0, "researcher", saved);
+    std::fs::write(
+        fixture.root.0.join("brief.yaml"),
+        "schemaVersion: 1\nid: brief\nname: Market brief\nentrypoint: r\nagents:\n  - id: r\n    from: {agent: researcher}\nedges: []\n",
+    )
+    .expect("a team that uses it");
+
+    let (status, started) = fixture.post("/api/ask/conversations", &json!({})).await;
+    assert_eq!(status, 201, "{started}");
+    let id = started["id"].as_str().expect("id").to_owned();
+    fixture
+        .say(&id, "Make my Researcher say how sure it is of each fact.")
+        .await;
+    let events = fixture.events(&id).await;
+
+    let proposed = phases(&events, "ask_agent_proposal");
+    assert_eq!(proposed.len(), 1, "{}", dump(&events));
+    let proposal = proposed[0];
+    assert_eq!(proposal["agent"], "researcher");
+    assert_eq!(proposal["isNew"], false);
+    assert_eq!(
+        proposal["baseVersion"], 3,
+        "the save names the version it was made from"
+    );
+    assert_eq!(proposal["inTeams"], json!(["Market brief"]));
+    assert_eq!(
+        proposal["spec"]["instructions"],
+        "You find facts for others to write up.\nHow to work:\n- Say how sure you are of each fact, and why.\n-   Use primary sources:  company posts, papers.\nReply with each fact and its link.",
+        "one line added; the lines it didn't name are as they were, odd spaces and all"
+    );
+    assert_eq!(
+        proposal["spec"]["doneWhen"],
+        json!(["Every fact has a link", "Says how sure it is of each fact"])
+    );
+    assert_eq!(
+        proposal["spec"]["model"], "fake/offline",
+        "what it didn't set stays"
+    );
+    assert_eq!(
+        proposal["spec"]["note"],
+        "Says how sure it is of each fact."
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.root.0.join(".jobs/researcher.yaml")).expect("the file"),
+        saved,
+        "nothing is saved until the person presses Save"
+    );
+    let result = events
+        .iter()
+        .filter(|event| event.kind == crate::EventKind::ToolUpdate)
+        .map(|event| event.payload.to_string())
+        .find(|text| text.contains("waiting_for_the_person"))
+        .unwrap_or_default();
+    assert!(
+        result.contains("Market brief gets the change from its next run"),
+        "the assistant is told which teams to name: {result}\n{}",
+        dump(&events)
+    );
+}
+
+/// A proposed agent names only what is there (ADR 0119), as a team does (ADR 0096): an agent of
+/// theirs to change, a name none of theirs has, skills they have, connected tools and folders on
+/// this computer. A Notion page is chosen in `LoomWatch`, and what the agent already has is kept.
+#[tokio::test]
+#[allow(clippy::too_many_lines)]
+async fn a_proposed_agent_names_only_what_is_there() {
+    let fixture = Fixture::start(None, None).await;
+    let tools = ControlTools::new(
+        fixture.control.clone(),
+        Caller::Conversation("ask-test".to_owned()),
+    );
+    save_agent(
+        &fixture.root.0,
+        "researcher",
+        "name: Researcher\ninstructions: Find the facts.\nskills: [gone-skill]\ntools: [Linear]\nreads:\n  - {name: Old, path: /moved/away}\n",
+    );
+    let new = |extra: &Value| {
+        let mut agent = json!({"name": "Editor", "instructions": "Tidy what you are handed."});
+        if let (Some(agent), Some(extra)) = (agent.as_object_mut(), extra.as_object()) {
+            agent.extend(extra.clone());
+        }
+        json!({"summary": "An editor.", "new": agent})
+    };
+    let refused = |arguments: Value, says: &'static str| {
+        let tools = &tools;
+        async move {
+            let (message, failed) = tools.call("propose_agent", arguments.clone()).await;
+            assert!(failed && message.contains(says), "{arguments}: {message}");
+        }
+    };
+
+    refused(
+        json!({"summary": "x"}),
+        "Give `new` for a new agent, or `change`",
+    )
+    .await;
+    refused(
+        json!({"summary": "x", "new": {"name": "A", "instructions": "B"}, "change": {"agent": "researcher", "version": 1}}),
+        "one of them",
+    )
+    .await;
+    refused(
+        new(&json!({"name": "researcher"})),
+        "already have an agent called Researcher (`researcher`)",
+    )
+    .await;
+    refused(new(&json!({"instructions": " "})), "its `instructions`").await;
+    refused(
+        new(&json!({"skills": ["house-style"]})),
+        "house-style isn't one of their skills",
+    )
+    .await;
+    refused(
+        new(&json!({"tools": ["Linear"]})),
+        "Linear isn't connected yet",
+    )
+    .await;
+    refused(
+        new(&json!({"reads": [{"name": "Gone", "path": "/no/such/folder"}]})),
+        "There is no folder or file at /no/such/folder on this computer",
+    )
+    .await;
+    refused(
+        new(&json!({"reads": [{"name": "Wiki", "notion": {"page": "abc"}}]})),
+        "A Notion page is chosen in LoomWatch",
+    )
+    .await;
+    refused(
+        json!({"summary": "x", "change": {"agent": "nobody", "version": 1, "edits": []}}),
+        "There is no agent `nobody` in My agents",
+    )
+    .await;
+
+    std::fs::create_dir_all(fixture.skills.0.join("house-style")).expect("a skill");
+    std::fs::write(
+        fixture.skills.0.join("house-style/SKILL.md"),
+        "---\nname: house-style\ndescription: How we write.\n---\nShort sentences.\n",
+    )
+    .expect("its file");
+    let notes = fixture.home.0.join("notes");
+    std::fs::create_dir_all(&notes).expect("a folder");
+    let (answer, failed) = tools
+        .call(
+            "propose_agent",
+            new(&json!({
+                "skills": ["house-style"],
+                "reads": [{"name": "Notes", "path": notes.to_string_lossy()}],
+            })),
+        )
+        .await;
+    assert!(!failed, "{answer}");
+
+    // A change that keeps a skill, a tool and a folder the agent already has is let through,
+    // though none of them is there now.
+    let (answer, failed) = tools
+        .call(
+            "propose_agent",
+            json!({
+                "summary": "Finds more.",
+                "change": {"agent": "researcher", "version": 1, "edits": [{"n": 1, "replace": "Find the facts, and more."}]},
+            }),
+        )
+        .await;
+    assert!(!failed, "{answer}");
+    let answer: Value = serde_json::from_str(&answer).expect("json");
+    let proposals = fixture.control.inner.agent_proposals.read().await;
+    let kept = serde_json::to_value(&proposals[answer["proposalId"].as_str().expect("an id")])
+        .expect("json");
+    assert_eq!(kept["spec"]["skills"], json!(["gone-skill"]));
+    assert_eq!(kept["spec"]["tools"], json!(["Linear"]));
+    assert_eq!(kept["spec"]["instructions"], "Find the facts, and more.");
+}
+
+/// Ask is told when to make one agent on its own and when to change one of My agents (ADR 0119),
+/// and still never to change one to suit a team.
+#[test]
+fn ask_is_told_when_one_agent_is_the_answer() {
+    let told = super::mcp::INSTRUCTIONS;
+    assert!(
+        told.contains("propose that one agent with `propose_agent` `new`, and no team")
+            && told.contains(
+                "When they want a piece of work done, or done on a schedule, propose a team"
+            )
+            && told.contains(
+                "Change one of My agents only when the person asks to change that agent itself"
+            )
+            && told.contains("never change one to suit this request"),
+        "{told}"
     );
 }

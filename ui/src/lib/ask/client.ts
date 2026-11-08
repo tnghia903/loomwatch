@@ -2,6 +2,7 @@
 // conversation with LoomWatch's assistant, on the person's OpenRouter key and the model they chose,
 // the proposals it makes and the runs it asks to start.
 import { daemonFetch } from '../daemonFetch'
+import type { JobSpec } from '../library/jobs'
 
 export type AskState = 'starting' | 'ready' | 'working' | 'ended' | 'failed'
 
@@ -121,6 +122,36 @@ export async function decideRunRequest(id: string, requestId: string, decision: 
 
 export async function fetchProposal(id: string, signal?: AbortSignal): Promise<Proposal> {
   return read(await daemonFetch(`/api/ask/proposals/${encodeURIComponent(id)}`, { signal, cache: 'no-store' }))
+}
+
+/**
+ * One of My agents Ask proposed on its own, new or changed (ADR 0119). Nothing is saved until the
+ * person presses Save on the agent's page, which sends `baseVersion`, so a save made after the agent
+ * moved on is refused.
+ */
+export interface AgentProposal {
+  id: string
+  /** The conversation that proposed it. */
+  source: string
+  kind: 'agent'
+  /** The agent it changes, by id. A new one has none until its page saves it. */
+  agent?: string
+  name: string
+  isNew: boolean
+  /** The whole agent as it would be saved. */
+  spec: JobSpec
+  baseVersion?: number
+  summary: string
+  /** The teams that use it, by name: each gets the change from its next run. */
+  inTeams: string[]
+  createdAt: string
+}
+
+/** An agent proposal by id; one that is a team's, or gone, is an error that says so. */
+export async function fetchAgentProposal(id: string, signal?: AbortSignal): Promise<AgentProposal> {
+  const proposal = await read<AgentProposal | Proposal>(await daemonFetch(`/api/ask/proposals/${encodeURIComponent(id)}`, { signal, cache: 'no-store' }))
+  if ((proposal as AgentProposal).kind !== 'agent') throw new AskApiError('This proposal is for a team, not an agent.', 400)
+  return proposal as AgentProposal
 }
 
 export async function reportProposalOutcome(id: string, outcome: ProposalOutcome): Promise<void> {

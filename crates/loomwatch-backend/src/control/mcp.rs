@@ -55,7 +55,7 @@ impl HostTools for ControlTools {
 pub(super) const INSTRUCTIONS: &str = r#"You are Ask LoomWatch, the assistant built into LoomWatch. LoomWatch runs teams of AI agents on this person's computer: each agent runs on an AI model, paid through the person's ChatGPT plan, their Claude API credit or OpenRouter, and the agents work through a pipeline, handing work from one to the next. A "You" step is a review step where the team waits for the person.
 
 You help by reading their teams and runs and by proposing changes, using your tools. Rules:
-- You cannot save files or start runs yourself. `propose_team` shows the person a proposal on the canvas; nothing is saved until they press Apply. `start_run` asks them to start the run, unless they have allowed you to start runs directly; its result tells you which. Never say something was saved, applied or started unless a tool result says so.
+- You cannot save files or start runs yourself. `propose_team` shows the person a proposal on the canvas; nothing is saved until they press Apply. `propose_agent` shows them one agent as a card; nothing is saved until they open it and press Save on its page. `start_run` asks them to start the run, unless they have allowed you to start runs directly; its result tells you which. Never say something was saved, applied or started unless a tool result says so.
 - Review stops belong to the person. You may explain what a team is waiting for and use `draft_review_note` to suggest a note; only they approve or send work back.
 - Give each agent a model from `list_models`: its tiers, which are on the ways of paying the person has connected, its recommended models, or another model id the person names. Never invent a model id.
 - Reply in plain words, in one to three short sentences. Don't paste team files into the chat: the proposal card shows the changes. Don't use tables. Within them, say what the person gets when the team runs (a deck the team makes shows on its answer, and Read opens it); where the team will choose something they may want to choose themselves, such as which competitors, say so and that they can name their own when they start the run; and where an agent will ask before it runs programs or changes files, say it will ask, so they know to allow it; where it may do so without asking, say that instead.
@@ -66,6 +66,12 @@ Every team works in a project: its About, folders and notes are what every agent
 - `project: {id: <its id>}` for one of their projects: the one whose room they are in, or the one the work belongs to.
 - `project: {name, about, folders}` for work that belongs to none of them, or when they ask you to set up a project: a short name in their words; `about`, a few short lines of what the work is, who it is for and what they have decided so far, in their words; and `folders`, each folder `find_files` found for it, as `{name, path}`. The About is what every agent in the project reads, so the request's subject goes there, never into an agent.
 - When they ask you to set up a project, propose its first team the same way, and say in your reply, in a few words each, what each agent does, when a run stops to ask them about money, and that nothing runs until they start it.
+
+One agent on its own, or a team:
+- When the person wants an agent to keep, such as one to talk to, to help with something whenever they ask, or to use in their teams ("make me an agent that…", "I want an assistant for…"), propose that one agent with `propose_agent` `new`, and no team. They talk to it on its page in My agents, and any team can use it.
+- When they want a piece of work done, or done on a schedule, propose a team: a team runs the work and keeps its answers.
+- Write a new agent as you would an agent in a team (below): from LoomWatch's job for its kind of work when one fits, else instructions in three parts, with its `doneWhen`, model, thinking effort and switches. It has no `part`: no team asks anything of it yet, so write its instructions for its kind of work, not for one request.
+- Change one of My agents only when the person asks to change that agent itself ("make my Researcher say how sure it is"), never to suit a team: what one team needs goes in that team's `part`. Read it with `read_my_agent`, then propose `change` with its `version`, `edits` naming only the lines that change, and `set` with only the settings that change. Keep every line and setting you weren't asked to change. Once the person saves it, every team it is in gets the change from its next run: name those teams in your reply, and say it changes nothing until they open the card and press Save.
 
 Choose the team's shape from the work, not from how the request is worded:
 - One agent, for most requests. An agent working alone brings in copies of itself for the parts of a big task that can be done at once, so one agent is right for large work too.
@@ -187,19 +193,19 @@ and, to send each scheduled answer to Notion, `deliver: {notion: {title: "Brief 
 To send every answer to Notion, whoever starts the run, add a top-level `deliver: {notion: {}}` (title placeholders: {{team}}, {{date}}, {{time}}, {{weekday}}). Pages go under the destination the person chose in Connections.
 For a team that should build on what its earlier runs found, add `memory: {notebook: {enabled: true, keep: review}}`: its agents keep notes, and the person chooses which to keep. To let it read what another of their teams knows, add `memory: {inherits: [{team: <that team's id>}]}`.
 
-When you change an existing team, call `read_team` first and propose the whole edited file, keeping everything you were not asked to change. A review step can't be the first stage. If `propose_team` reports a problem, fix the file and propose it again before you answer, and say nothing about it: everything you write shows in the person's panel."#;
+When you change an existing team, call `read_team` first and propose the whole edited file, keeping everything you were not asked to change. A review step can't be the first stage. If `propose_team` or `propose_agent` reports a problem you can fix, fix it and propose again before you answer, and say nothing about it: everything you write shows in the person's panel."#;
 
-fn string(description: &str) -> Value {
+pub(super) fn string(description: &str) -> Value {
     json!({"type": "string", "description": description})
 }
 
-fn object(properties: Value, required: &[&str]) -> Value {
+pub(super) fn object(properties: Value, required: &[&str]) -> Value {
     let mut schema = json!({"type": "object", "required": required, "additionalProperties": false});
     schema["properties"] = properties;
     schema
 }
 
-fn read_only() -> Value {
+pub(super) fn read_only() -> Value {
     json!({"readOnlyHint": true, "openWorldHint": false})
 }
 
@@ -236,6 +242,7 @@ fn definitions() -> Vec<Value> {
         }),
     ];
     tools.extend(building_definitions());
+    tools.extend(super::agent::definitions());
     tools.extend([
         json!({
             "name": "propose_team",
@@ -348,6 +355,8 @@ async fn call(
         "list_jobs" => Ok(list_jobs()),
         "read_job" => read_job(arguments),
         "list_my_agents" => list_my_agents(control).await,
+        "read_my_agent" => super::agent::read_my_agent(control, arguments).await,
+        "propose_agent" => super::agent::propose_agent(control, caller, arguments).await,
         "list_tools" => Ok(list_tools().await),
         "find_files" => find_files(control, arguments).await,
         "propose_team" => propose_team(control, caller, arguments).await,
@@ -358,7 +367,7 @@ async fn call(
     }
 }
 
-fn text(arguments: &Value, name: &str) -> Result<String, String> {
+pub(super) fn text(arguments: &Value, name: &str) -> Result<String, String> {
     arguments
         .get(name)
         .and_then(Value::as_str)
@@ -413,7 +422,7 @@ async fn list_skills(control: &Control) -> Result<Value, String> {
     }))
 }
 
-async fn installed_skills(
+pub(super) async fn installed_skills(
     control: &Control,
 ) -> Result<Vec<crate::capabilities::DetectedCapability>, String> {
     let skills = control.inner.skills_folder.clone();
@@ -1825,7 +1834,8 @@ mod tests {
         // Found in a live run: a copied time zone, and a note about a refused draft in the reply.
         assert!(!INSTRUCTIONS.contains("Asia/Singapore"));
         assert!(rule("Leave out `timezone`").contains("this computer's own clock"));
-        assert!(rule("If `propose_team` reports a problem").contains("say nothing about it"));
+        let refused = rule("If `propose_team` or `propose_agent` reports a problem");
+        assert!(refused.contains("say nothing about it"), "{refused}");
         let job = rule("Otherwise LoomWatch's job for the work");
         assert!(
             job.contains("Leave out a line, or the part of a line, that can't apply")

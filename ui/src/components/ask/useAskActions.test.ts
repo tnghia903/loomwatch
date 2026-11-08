@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { Proposal } from '../../lib/ask/client'
-import type { ProposalCard } from '../../lib/ask/thread'
+import type { AgentProposalCard, ProposalCard } from '../../lib/ask/thread'
 import { proposalSource, sameTeamFile, teamFileForAsk, useAskActions } from './useAskActions'
 
 const client = vi.hoisted(() => ({
@@ -349,5 +349,28 @@ describe('team file names', () => {
   it('credits Ask LoomWatch with a proposal, and names what an AI app connected earlier proposed', () => {
     expect(proposalSource('ask-123')).toBe('Ask LoomWatch')
     expect(proposalSource('connection:opencode')).toBe('opencode')
+  })
+
+  // ADR 0119: one agent on its own opens on its page; Discard tells Ask, and says when it couldn't.
+  it('opens an agent Ask proposed on its page, and discards one', async () => {
+    const assign = vi.fn()
+    const real = window.location
+    Object.defineProperty(window, 'location', { configurable: true, value: { ...real, assign } })
+    try {
+      const hook = setup()
+      const card: AgentProposalCard = { kind: 'agent-proposal', id: 'a1', at: '', agent: 'writer', name: 'Writer', isNew: false, summary: '', spec: { name: 'Writer', instructions: 'x' }, baseVersion: 1, inTeams: [], outcome: null, superseded: false }
+      act(() => hook.result.current.actions.openAgent(card))
+      expect(assign).toHaveBeenCalledWith('/agents/writer?proposal=a1')
+      act(() => hook.result.current.actions.openAgent({ ...card, id: 'a2', agent: null, isNew: true }))
+      expect(assign).toHaveBeenLastCalledWith('/agents/new?proposal=a2')
+
+      await act(async () => { await hook.result.current.actions.discardAgent(card) })
+      expect(client.reportProposalOutcome).toHaveBeenCalledWith('a1', 'discarded')
+      client.reportProposalOutcome.mockRejectedValueOnce(new Error('The daemon isn’t answering.'))
+      await act(async () => { await hook.result.current.actions.discardAgent(card) })
+      expect(hook.result.current.actions.cardError).toEqual({ id: 'a1', message: 'The daemon isn’t answering.' })
+    } finally {
+      Object.defineProperty(window, 'location', { configurable: true, value: real })
+    }
   })
 })

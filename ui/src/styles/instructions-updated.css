@@ -37,27 +37,30 @@ textarea.instructions-marked {
 .instructions-updated {
   margin: 8px 0 0; padding: 10px 12px; border-radius: var(--r-sm);
   border: 1px solid color-mix(in srgb, var(--color-accent) 40%, var(--color-hairline)); background: var(--color-accent-tint);
-  color: var(--color-ink-2); font: 400 12px/1.5 var(--font-sans);
+  color: var(--color-ink); font: 400 12px/1.5 var(--font-sans);
 }
 /* Inside the agent panel, `.inspector-fields p` would make each paragraph a gold flex row and set
-   every word apart: these read as prose. */
-.instructions-updated p, p.instructions-updated { display: block; margin: 0; color: var(--color-ink-2); font-size: 12px; line-height: 1.5; }
+   every word apart: these read as prose. Text on the accent tint is always ink (DESIGN_LANGUAGE §4). */
+.instructions-updated p, p.instructions-updated { display: block; margin: 0; color: var(--color-ink); font-size: 12px; line-height: 1.5; }
 .instructions-updated ul { margin: 6px 0 0; padding-left: 18px; color: var(--color-ink); }
 .instructions-updated li + li { margin-top: 3px; }
-.instructions-diff {
-  margin-top: 8px !important; max-height: 220px; overflow: auto; padding: 8px 10px; border-radius: var(--r-sm);
+.instructions-updated .instructions-diff {
+  margin-top: 8px; max-height: 220px; overflow: auto; padding: 8px 10px; border-radius: var(--r-sm);
   background: var(--color-panel-solid); color: var(--color-ink); white-space: pre-wrap; overflow-wrap: anywhere;
 }
-.instructions-updated del {
-  color: var(--color-alert); text-decoration: line-through; text-decoration-thickness: 1px;
-  background: color-mix(in srgb, var(--color-alert) 10%, transparent);
-}
+/* Taken out and put in are a change waiting for the person, not wrong and not saved: a struck line
+   and a gold underline, each a mark of its own as well as a colour (§5, §8). */
+.instructions-updated del { color: var(--color-ink-2); text-decoration: line-through 1.5px; background: none; }
 .instructions-updated ins {
-  color: var(--color-ink); text-decoration: none; background: color-mix(in srgb, var(--color-ok) 18%, transparent);
-  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--color-ok) 60%, transparent);
+  color: var(--color-ink); text-decoration: underline 1.5px var(--color-accent); text-underline-offset: 2px;
+  background: none; box-shadow: none;
 }
 .instructions-updated-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-.instructions-updated-actions .btn { height: 26px; padding: 0 10px; font-size: 12px; }
+.instructions-updated-actions .btn { height: 26px; padding: 0 10px; font-size: 12px; color: var(--color-ink); }
+/* A finger needs the narrow screens' 44 px, which this file's own height would otherwise beat. */
+@media (max-width: 767px) {
+  .instructions-updated-actions .btn { height: 44px; padding: 0 var(--sp-4); font-size: 13px; }
+}
 
 /* ---------------------------------------------------------------------------
    TURNED OFF (ADR 0060) — skills and tools taken off the canvas, even the agent's app's own copy.

@@ -1,8 +1,10 @@
 import { ArrowRight, Check, PenLine, Play } from '../ui/icon'
 import { useMemo } from 'react'
 
+import { agentProposalLines, savedSinceAsk } from '../../lib/ask/agentProposal'
 import { proposalChanges } from '../../lib/ask/proposal'
-import type { AskCard, ProposalCard, ReviewNoteCard, RunRequestCard, RunStartedCard } from '../../lib/ask/thread'
+import type { AgentProposalCard, AskCard, ProposalCard, ReviewNoteCard, RunRequestCard, RunStartedCard } from '../../lib/ask/thread'
+import { useSavedJobs } from '../../lib/library/jobs'
 import { SaidText } from '../chat/SaidText'
 import { InlineMarkdown } from '../ui/Markdown'
 
@@ -21,6 +23,9 @@ export interface CardActions {
   onDeclineRun: (card: RunRequestCard) => void
   onOpenRun: (runId: string, file: string) => void
   onUseNote: (card: ReviewNoteCard) => void
+  /** An agent Ask proposed (ADR 0119): open it on its page, where Save keeps it. */
+  onOpenAgent: (card: AgentProposalCard) => void
+  onDiscardAgent: (card: AgentProposalCard) => void
 }
 
 /** The dashed edge a proposal wears until it is applied, drawn so the dashes can travel. */
@@ -64,6 +69,47 @@ function ProposalView({ card, actions }: { card: ProposalCard; actions: CardActi
         <div className="ask-card-acts">
           <button type="button" className="btn btn-act" onClick={() => actions.onShowProposal(card.id, card)}>Show on canvas<ArrowRight size={14} aria-hidden="true" /></button>
           <span className="ask-card-hint">Nothing is saved until you apply it.</span>
+        </div>
+      )}
+    </article>
+  )
+}
+
+/**
+ * One agent Ask proposed on its own (ADR 0119): what it starts with, or what the change changes and
+ * which teams get it. Open shows it on its page as a draft, where the page's own Save keeps it.
+ */
+function AgentProposalView({ card, actions }: { card: AgentProposalCard; actions: CardActions }) {
+  const { jobs } = useSavedJobs()
+  const saved = card.agent ? jobs.find((job) => job.id === card.agent) ?? null : null
+  // Saved again since Ask read it: the change was made from another version and can't be saved.
+  const stale = !card.outcome && savedSinceAsk(card, saved)
+  const lines = useMemo(() => (card.outcome || stale ? [] : agentProposalLines(card, saved)), [card, saved, stale])
+  if (card.superseded && !card.outcome) {
+    return <div className="ask-card ask-card-quiet t-meta">An earlier draft of “{card.name}”, replaced by the one below.</div>
+  }
+  const settledText = card.outcome === 'applied' ? 'Saved' : card.outcome === 'discarded' ? 'Discarded' : null
+  const error = actions.cardError?.id === card.id ? actions.cardError.message : null
+  return (
+    <article className={`ask-card ask-proposal ask-agent-proposal ${card.outcome ? `is-${card.outcome}` : 'is-open'}`} aria-label={`${card.isNew ? 'Proposed agent' : 'Proposed change to'} ${card.name}`}>
+      {!card.outcome && <DashedEdge />}
+      <header className="ask-card-head"><span className="t-micro">{card.isNew ? 'New agent' : 'Changes'}</span></header>
+      <strong className="ask-card-title">{card.name}</strong>
+      {card.summary && <p className="ask-card-text"><InlineMarkdown>{card.summary}</InlineMarkdown></p>}
+      {lines.length > 0 && <ul className="ask-card-lines">{lines.map((line) => <li key={line}>{line}</li>)}</ul>}
+      {error && <p role="alert" className="ask-card-error">{error}</p>}
+      {settledText ? (
+        <p className={`ask-card-outcome ${card.outcome === 'applied' ? 'ok' : ''}`}>{card.outcome === 'applied' && <Check size={14} aria-hidden="true" />}{settledText}</p>
+      ) : stale ? (
+        <div className="ask-card-acts">
+          <span className="ask-card-hint">{card.name} was saved again after Ask read it. Ask again for a new change.</span>
+          <button type="button" className="btn" disabled={actions.busyCard === card.id} onClick={() => actions.onDiscardAgent(card)}>Discard</button>
+        </div>
+      ) : (
+        <div className="ask-card-acts">
+          <button type="button" className="btn btn-act" onClick={() => actions.onOpenAgent(card)}>Open<ArrowRight size={14} aria-hidden="true" /></button>
+          <button type="button" className="btn" disabled={actions.busyCard === card.id} onClick={() => actions.onDiscardAgent(card)}>Discard</button>
+          <span className="ask-card-hint">Nothing is saved until you press {card.isNew ? 'Save to My agents' : 'Save'} on its page.</span>
         </div>
       )}
     </article>
@@ -122,6 +168,7 @@ function ReviewNoteView({ card, actions }: { card: ReviewNoteCard; actions: Card
 export function AskCardView({ card, actions }: { card: AskCard; actions: CardActions }) {
   switch (card.kind) {
     case 'proposal': return <ProposalView card={card} actions={actions} />
+    case 'agent-proposal': return <AgentProposalView card={card} actions={actions} />
     case 'run-request': return <RunRequestView card={card} actions={actions} />
     case 'run-started': return <RunStartedView card={card} actions={actions} />
     case 'review-note': return <ReviewNoteView card={card} actions={actions} />

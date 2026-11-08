@@ -10,9 +10,11 @@
 //! so the panel renders it from the same stream as the assistant's own words and tool calls, and a
 //! reload shows exactly what was proposed.
 
+mod agent;
 mod find;
 mod instructions;
 mod jobs;
+mod line_edits;
 mod mcp;
 #[cfg(test)]
 mod tests;
@@ -87,6 +89,8 @@ struct Inner {
     home: Option<PathBuf>,
     conversations: RwLock<BTreeMap<String, Arc<Conversation>>>,
     proposals: RwLock<BTreeMap<String, Proposal>>,
+    /// One of My agents on its own, new or changed (ADR 0119), by the same kind of id.
+    agent_proposals: RwLock<BTreeMap<String, agent::AgentProposal>>,
 }
 
 /// Who a tool call is from: an Ask conversation, by id.
@@ -214,6 +218,7 @@ impl Control {
                 home: options.home.filter(|home| home.is_absolute()),
                 conversations: RwLock::default(),
                 proposals: RwLock::default(),
+                agent_proposals: RwLock::default(),
             }),
         }
     }
@@ -1053,7 +1058,10 @@ async fn get_proposal(
     State(control): State<Control>,
     RoutePath(id): RoutePath<String>,
 ) -> Response {
-    match control.inner.proposals.read().await.get(&id) {
+    if let Some(proposal) = control.inner.proposals.read().await.get(&id) {
+        return Json(proposal).into_response();
+    }
+    match control.inner.agent_proposals.read().await.get(&id) {
         Some(proposal) => Json(proposal).into_response(),
         None => error(
             StatusCode::NOT_FOUND,
@@ -1084,18 +1092,30 @@ async fn proposal_outcome(
             "outcome must be applied, discarded or undone.",
         );
     }
-    let Some(proposal) = control.inner.proposals.read().await.get(&id).cloned() else {
+    let team = control.inner.proposals.read().await.get(&id).cloned();
+    let (source, what) = if let Some(proposal) = team {
+        (proposal.source, json!({"file": proposal.file}))
+    } else if let Some(proposal) = control.inner.agent_proposals.read().await.get(&id).cloned() {
+        // A new agent has no id until its page saves it; its name says which it was.
+        (
+            proposal.source,
+            json!({"agent": proposal.agent, "name": proposal.name}),
+        )
+    } else {
         return error(
             StatusCode::NOT_FOUND,
             "This proposal is no longer available.",
         );
     };
-    let caller = Caller::Conversation(proposal.source.clone());
+    let mut payload = json!({"proposalId": id, "outcome": outcome.outcome});
+    if let (Some(payload), Some(what)) = (payload.as_object_mut(), what.as_object()) {
+        payload.extend(what.clone());
+    }
     control
         .record(
-            &caller,
+            &Caller::Conversation(source),
             "ask_proposal_outcome",
-            json!({"proposalId": id, "file": proposal.file, "outcome": outcome.outcome}),
+            payload,
         )
         .await;
     StatusCode::NO_CONTENT.into_response()
