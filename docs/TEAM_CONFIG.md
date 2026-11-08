@@ -244,8 +244,9 @@ depend on the document as a whole:
   of My agents, its lessons go with it.
 - Optional `Agent.widgets` says whether the agent may put widgets in its answer when its reply
   is the answer the person reads (ADR 0114): choices to tap, a checklist to tick, a calculator
-  LoomWatch works out, steps to tap through, a chart LoomWatch draws to scale, a graph of bars or a
-  line, a row of things marked yes or no, or a diagram of boxes and arrows. Absent means
+  LoomWatch works out, questions to tap through to the outcome for the person's own case, a quiz,
+  steps to tap through, a chart LoomWatch draws to scale, a graph of bars or a line, a scale of
+  named ranges, a timeline, a row of things marked yes or no, or a diagram of boxes and arrows. Absent means
   LoomWatch's default, which is on; `false` keeps it off for that agent. One of My agents keeps it
   as its own (`widgets` in its file), and every team that uses it follows. Not for an operator node.
 - **Notes set aside from the answer.** Some sections an agent ends its reply with are for the
