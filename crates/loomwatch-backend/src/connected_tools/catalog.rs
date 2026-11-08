@@ -27,9 +27,9 @@ use super::Auth;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) enum Topic {
-    /// This Mac's own apps (ADR 0121), listed only on a Mac.
+    /// This Mac's own apps (ADR 0122), listed only on a Mac.
     OnThisMac,
-    /// What the `LoomWatch` iPhone app sends: Apple Health (ADR 0121).
+    /// What the `LoomWatch` iPhone app sends: Apple Health (ADR 0122).
     FromPhone,
     Tasks,
     Notes,
@@ -63,7 +63,7 @@ pub(super) struct Entry {
 }
 
 pub(super) const CATALOG: &[Entry] = &[
-    // On this Mac: its own apps, which the daemon reaches itself (ADR 0121).
+    // On this Mac: its own apps, which the daemon reaches itself (ADR 0122).
     Entry {
         name: "Apple Calendar",
         site: "loomwatch:apple-calendar",
@@ -104,7 +104,7 @@ pub(super) const CATALOG: &[Entry] = &[
         example: "What's Lan's phone number?",
         token_help: None,
     },
-    // From your iPhone: Apple Health, which the LoomWatch iPhone app sends (ADR 0121).
+    // From your iPhone: Apple Health, which the LoomWatch iPhone app sends (ADR 0122).
     Entry {
         name: "Apple Health",
         site: "loomwatch:apple-health",

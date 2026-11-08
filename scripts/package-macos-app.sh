@@ -8,7 +8,7 @@
 # `loomwatch-osascript` from crates/loomwatch-osascript, which loomwatchd signs a copy of for agents'
 # commands (ADR 0087), and LOOMWATCH_MAC_APPS the built `loomwatch-mac-apps` from
 # crates/loomwatch-mac-apps, which runs agents' actions in Calendar, Reminders, Contacts and Notes
-# (ADR 0121); all may be universal. Writes OUT_DIR/LoomWatch-macos.dmg and
+# (ADR 0122); all may be universal. Writes OUT_DIR/LoomWatch-macos.dmg and
 # OUT_DIR/LoomWatch-macos.dmg.sha256.
 #
 # Signing, from the environment:
@@ -68,7 +68,7 @@ if [ -n "${MACOS_SIGN_IDENTITY:-}" ]; then
   app_entitlements=$root/packaging/macos/LoomWatch-app.entitlements
   codesign --force --options runtime --timestamp --sign "$MACOS_SIGN_IDENTITY" \
     "$app/Contents/MacOS/loomwatch-osascript"
-  # Calendar, Reminders and Contacts are refused to a hardened program without these (ADR 0121).
+  # Calendar, Reminders and Contacts are refused to a hardened program without these (ADR 0122).
   codesign --force --options runtime --timestamp \
     --entitlements "$root/packaging/macos/LoomWatch-mac-apps.entitlements" \
     --sign "$MACOS_SIGN_IDENTITY" "$app/Contents/MacOS/loomwatch-mac-apps"

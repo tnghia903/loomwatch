@@ -1,4 +1,4 @@
-//! `LoomWatch`'s helper for agents' actions in the Mac's own apps (ADR 0121).
+//! `LoomWatch`'s helper for agents' actions in the Mac's own apps (ADR 0122).
 //!
 //! loomwatchd runs it once for each action an agent was allowed to take:
 //!

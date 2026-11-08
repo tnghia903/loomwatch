@@ -110,7 +110,7 @@ jobs:
             target/x86_64-apple-darwin/release/loomwatch-osascript
           lipo -info build/loomwatch-osascript
           build/loomwatch-osascript -e 'return 1 + 1'
-      # What runs agents' actions in Calendar, Reminders, Contacts and Notes (ADR 0121).
+      # What runs agents' actions in Calendar, Reminders, Contacts and Notes (ADR 0122).
       - name: Build the Mac apps helper for Apple silicon and Intel
         run: |
           cargo build --release --locked -p loomwatch-mac-apps --target aarch64-apple-darwin

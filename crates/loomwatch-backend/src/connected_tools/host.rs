@@ -40,14 +40,14 @@ struct Offered {
     cant_undo: bool,
 }
 
-/// The Mac app `tool` is, when it is one (ADR 0121).
+/// The Mac app `tool` is, when it is one (ADR 0122).
 fn mac_app(tool: &ConnectedTool) -> Option<App> {
     (tool.auth == Auth::OnThisMac)
         .then(|| App::at(&tool.url))
         .flatten()
 }
 
-/// Whether `tool` is Apple Health, read from what a paired iPhone sent (ADR 0121).
+/// Whether `tool` is Apple Health, read from what a paired iPhone sent (ADR 0122).
 fn is_health(tool: &ConnectedTool) -> bool {
     tool.auth == Auth::FromPhone && tool.url == crate::health::URL
 }
@@ -168,7 +168,7 @@ impl HostTools for OutsideTools {
                 };
             }
             if let Some(app) = mac_app(given) {
-                // A Mac app's action runs here, never through a server (ADR 0121).
+                // A Mac app's action runs here, never through a server (ADR 0122).
                 let answer = self.tools.mac().call(app, &offered.call, input).await;
                 return mac_apps::for_the_agent(answer);
             }

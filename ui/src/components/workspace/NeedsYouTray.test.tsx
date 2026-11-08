@@ -44,7 +44,7 @@ describe('a permission ticket in the tray (ADR 0040)', () => {
     expect(await screen.findByText('Researcher: Allowed for the rest of the run.')).toBeInTheDocument()
   })
 
-  // ADR 0121: deleting an event or a contact can't be undone, so it is allowed one at a time.
+  // ADR 0122: deleting an event or a contact can't be undone, so it is allowed one at a time.
   it('allows what can’t be undone once only, and says so', async () => {
     const deleting: Ticket = { ...ticket, team: true, cantUndo: true, text: 'Researcher wants to use Apple Calendar', context: 'Apple Calendar: Delete event · {"id":"e1"}' }
     const onPermission = vi.fn(() => Promise.resolve())

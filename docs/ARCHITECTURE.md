@@ -167,7 +167,7 @@ instructions and tools.
   folder first on commands' `PATH`. `loomwatch-osascript` (`crates/loomwatch-osascript`) is
   LoomWatch's own `osascript`: the same command line and output, through macOS's OpenScripting. A
   command can then work in Calendar, Mail or any other app once the person allows LoomWatch in
-  System Settings → Privacy & Security → Automation (ADR 0121 gives Calendar, Reminders, Notes and
+  System Settings → Privacy & Security → Automation (ADR 0122 gives Calendar, Reminders, Notes and
   Contacts tools of their own, below). Calendar, Reminders, Contacts and Photos also
   ask macOS whether LoomWatch may have their data before they answer, so the app's `Info.plist`
   (`packaging/macos/Info.plist`) carries a line for each, shown under macOS's question: without
@@ -762,7 +762,7 @@ passes the call on as a local program's. The phone never asks the site itself.
 
 ### The Mac's own apps as tools
 
-Calendar, Reminders, Notes and Contacts connect in Connections like any other tool (ADR 0121), with
+Calendar, Reminders, Notes and Contacts connect in Connections like any other tool (ADR 0122), with
 `auth: onThisMac` and a fixed address (`loomwatch:apple-calendar`) in `tools.json`. Their actions
 are LoomWatch's own list (`mac_apps.rs`), never what `tools.json` says, and an agent given one is
 offered them as `apple_calendar__find_events` and so on, asking first like every connected tool's.
@@ -782,7 +782,7 @@ run" and "Allow for the whole team". `LOOMWATCH_MAC_APPS_PROGRAM` swaps in a sta
 ### Apple Health from the iPhone
 
 A Mac has no Health store, so the LoomWatch iPhone app sends the kinds the person switched on
-(ADR 0121). It sends `PUT /phone/v0/health` through the door: one figure a day for each kind, plus
+(ADR 0122). It sends `PUT /phone/v0/health` through the door: one figure a day for each kind, plus
 sleep and workouts as events, each filed under the day it started where the person was (its own offset, or this computer's time zone for a time sent in UTC). The door answers the route itself, as it does the push token,
 because only the door knows which phone is calling. It keeps the batch in `health_days` and
 `health_events` (`health.rs`, migration `20261108120000_health.sql`) under that phone's id, so a

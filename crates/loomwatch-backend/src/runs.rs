@@ -932,7 +932,7 @@ impl std::fmt::Debug for RunRegistry {
     }
 }
 
-/// Deleting an event or a contact can't be taken back, so each one is its own yes (ADR 0121):
+/// Deleting an event or a contact can't be taken back, so each one is its own yes (ADR 0122):
 /// never allowed for the run or the whole team.
 fn once_only(
     decision: crate::permissions::PermissionDecision,
@@ -5382,7 +5382,7 @@ pub(crate) mod tests {
         assert!(!registry.allowed_for_run(&run_id, "a", "execute"));
     }
 
-    /// What can't be undone is allowed one at a time (ADR 0121): never for the run or the team.
+    /// What can't be undone is allowed one at a time (ADR 0122): never for the run or the team.
     #[tokio::test]
     async fn what_cant_be_undone_is_allowed_once_only() {
         use crate::permissions::PermissionDecision;

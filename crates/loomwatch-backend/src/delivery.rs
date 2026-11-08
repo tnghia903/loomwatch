@@ -92,7 +92,7 @@ pub struct WiredTool {
     /// `LoomWatch` has a connected tool by this name.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub connected: bool,
-    /// It is one of this Mac's own apps, such as Calendar (ADR 0121).
+    /// It is one of this Mac's own apps, such as Calendar (ADR 0122).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub on_this_mac: bool,
     /// Its calls the operator always allows this agent to make without asking.

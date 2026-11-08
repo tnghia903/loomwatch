@@ -133,7 +133,7 @@ describe('the permission card (ADR 0040)', () => {
     expect(JSON.parse(String(init.body))).toEqual({ requestId: 'p1', decision: 'allow_team' })
   })
 
-  // ADR 0121: deleting an event or a contact can't be undone, so it is allowed one at a time.
+  // ADR 0122: deleting an event or a contact can't be undone, so it is allowed one at a time.
   it('allows what can’t be undone only once, and says it can’t be undone', async () => {
     const fetch = vi.fn(() => Promise.resolve(json({ runId: 'r1' })))
     vi.stubGlobal('fetch', fetch)

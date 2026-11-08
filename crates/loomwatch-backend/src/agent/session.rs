@@ -195,7 +195,7 @@ pub struct HostAsk {
     pub server: String,
     /// The tool's own name for the call: `create_issue`.
     pub call: String,
-    /// It can't be taken back, such as deleting an event: it asks every time (ADR 0121).
+    /// It can't be taken back, such as deleting an event: it asks every time (ADR 0122).
     pub cant_undo: bool,
 }
 

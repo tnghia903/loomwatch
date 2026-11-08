@@ -246,7 +246,7 @@ export function NeedsYouTray({ tickets, working, onAnswer, onPermission, onSpend
                     {ticket.kind === 'permission' && onPermission && <>
                       <button type="button" className={main(index)} disabled={busy === ticket.id} onClick={() => void decide(ticket, 'allow_once')}><Check size={13} aria-hidden="true" />Allow<kbd>A</kbd></button>
                       {/* A yes to the web is already for the rest of the run (ADR 0104). */}
-                      {/* What can't be undone is allowed one at a time (ADR 0121). */}
+                      {/* What can't be undone is allowed one at a time (ADR 0122). */}
                       {ticket.switch !== 'web' && !ticket.cantUndo && <button type="button" className="btn" disabled={busy === ticket.id} onClick={() => void decide(ticket, 'allow_run')}>Allow for this run</button>}
                       {ticket.team && !ticket.cantUndo && <button type="button" className="btn" disabled={busy === ticket.id} onClick={() => void decide(ticket, 'allow_team')}>Allow for the whole team</button>}
                       <button type="button" className="btn" disabled={busy === ticket.id} onClick={() => void decide(ticket, 'deny')}>Deny<kbd>D</kbd></button>

@@ -618,7 +618,7 @@ impl ComposedPrompt {
         }
         for tool in &delivery.tools {
             let text = if tool.connected && tool.on_this_mac {
-                // ADR 0121: one of the Mac's own apps, reached through these calls, not a command.
+                // ADR 0122: one of the Mac's own apps, reached through these calls, not a command.
                 format!(
                     "The operator gave you {name} on this Mac: its calls are your tools whose descriptions start \"From {name}\". Use them for {name}, not osascript or another command. Each call waits for the operator to allow it unless they always allow that call, and what can't be undone always waits. Use one when the task needs it; if one is declined, carry on without it and say what it would have done.",
                     name = tool.name
@@ -3815,7 +3815,7 @@ mod tests {
         }
     }
 
-    /// ADR 0121: an agent given one of the Mac's apps is told to use its calls, not a command,
+    /// ADR 0122: an agent given one of the Mac's apps is told to use its calls, not a command,
     /// and that deleting always waits; an agent given an online tool isn't told about commands.
     #[test]
     fn an_agent_given_a_mac_app_uses_its_calls_not_a_command() {

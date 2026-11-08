@@ -63,10 +63,10 @@ pub enum Auth {
     Token,
     /// A sign-in through the tool's own site.
     SignIn,
-    /// One of this Mac's own apps (ADR 0121): macOS's own permission lets it in, and the daemon
+    /// One of this Mac's own apps (ADR 0122): macOS's own permission lets it in, and the daemon
     /// runs its actions itself (`crate::mac_apps`).
     OnThisMac,
-    /// Apple Health, from the readings a paired iPhone sends (ADR 0121, `crate::health`).
+    /// Apple Health, from the readings a paired iPhone sends (ADR 0122, `crate::health`).
     FromPhone,
 }
 
@@ -113,7 +113,7 @@ pub struct ToolCall {
     /// The server says it only reads. A hint, shown to the operator; it never skips asking.
     #[serde(default)]
     pub read_only: bool,
-    /// What it does can't be taken back, such as deleting an event (ADR 0121). It asks every
+    /// What it does can't be taken back, such as deleting an event (ADR 0122). It asks every
     /// time: never allowed for a whole run or always.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub cant_undo: bool,

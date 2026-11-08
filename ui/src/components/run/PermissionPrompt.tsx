@@ -106,7 +106,7 @@ export function PermissionActions({ runId, request, team = false, onAlwaysAllow,
   const [text, setText] = useState('')
   const fieldId = useId()
   const webAsk = !request.tool && request.switch === 'web'
-  // What can't be undone, such as deleting an event, is allowed one at a time (ADR 0121).
+  // What can't be undone, such as deleting an event, is allowed one at a time (ADR 0122).
   const once = Boolean(request.tool?.cantUndo)
 
   const answer = async (decision: PermissionDecision, words?: string) => {

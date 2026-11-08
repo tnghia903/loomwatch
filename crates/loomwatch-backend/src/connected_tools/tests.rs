@@ -801,7 +801,7 @@ fn slugs_and_names_stay_inside_their_limits() {
     assert_eq!(unique_name("  Docs   site ", &taken), "Docs site");
 }
 
-/// ADR 0121: one of this Mac's apps connects once macOS lets `LoomWatch` have it, and an agent
+/// ADR 0122: one of this Mac's apps connects once macOS lets `LoomWatch` have it, and an agent
 /// given it is offered its actions, which the daemon runs itself. Deleting is marked as what can't
 /// be undone, so it asks every time.
 #[cfg(target_os = "macos")]
@@ -951,7 +951,7 @@ async fn the_mac_apps_are_only_on_a_mac() {
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 
-/// ADR 0121: Apple Health waits until a paired iPhone has sent readings, then connects; an agent
+/// ADR 0122: Apple Health waits until a paired iPhone has sent readings, then connects; an agent
 /// given it reads them; removing it forgets them.
 #[tokio::test]
 async fn apple_health_connects_once_the_phone_has_sent_readings() {
