@@ -5,7 +5,8 @@ import { briefFileNameFor, fetchMemory, writeMemoryFile } from '../../lib/memory
 import { addProjectNote, fetchProjects, projectsChanged, saveProject } from '../../lib/projects/client'
 import { decideRunRequest, fetchProposal, reportProposalOutcome, type Proposal } from '../../lib/ask/client'
 import { proposalChanges, type ProposalChanges } from '../../lib/ask/proposal'
-import type { ProposalCard, ReviewNoteCard, RunRequestCard } from '../../lib/ask/thread'
+import type { AgentProposalCard, ProposalCard, ReviewNoteCard, RunRequestCard } from '../../lib/ask/thread'
+import { agentProposalHref } from '../agents/route'
 import { newStartKey, startRun, type RunRecord } from '../../lib/runs/client'
 import { goToTeam } from '../../lib/team-file/teamPage'
 import type { useTeamDocument } from '../../lib/team-file/useTeamDocument'
@@ -362,6 +363,24 @@ export function useAskActions({ doc, conversationId, activeRunId, waiting, toBui
     }
   }, [conversationId, busyCard])
 
+  /** An agent Ask proposed opens on its own page, where the page's Save keeps it (ADR 0119). */
+  const openAgent = useCallback((card: AgentProposalCard) => {
+    window.location.assign(agentProposalHref(card.agent, card.id))
+  }, [])
+
+  const discardAgent = useCallback(async (card: AgentProposalCard) => {
+    if (busyCard) return
+    setBusyCard(card.id)
+    setCardError(null)
+    try {
+      await reportProposalOutcome(card.id, 'discarded')
+    } catch (caught) {
+      setCardError({ id: card.id, message: caught instanceof Error ? caught.message : String(caught) })
+    } finally {
+      setBusyCard(null)
+    }
+  }, [busyCard])
+
   const openRun = useCallback((runId: string, file: string) => {
     if (sameTeamFile(doc.path, file)) showRun(runId)
     else goToTeam(teamUrl(file, { run: runId }))
@@ -404,5 +423,6 @@ export function useAskActions({ doc, conversationId, activeRunId, waiting, toBui
   return {
     preview, notice, dismissNotice: () => setNotice(null), marks, busyCard, cardError,
     showProposal, applyProposal, discardProposal, startRequestedRun, declineRequestedRun, openRun, takeNote,
+    openAgent, discardAgent,
   }
 }

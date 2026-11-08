@@ -8,17 +8,19 @@ export type AgentView = 'build' | 'chat'
 /**
  * Where Your agents is: the list, one saved agent, or a new one (from a built-in job, maybe). `team`
  * is the team the operator came from, so the way back is one click. `run` is a piece of its chat a
- * link opens, with its Details (`historyRunUrl`).
+ * link opens, with its Details (`historyRunUrl`). `proposal` is an agent Ask proposed (ADR 0119): the
+ * page opens it as its draft, saved only with Save.
  */
-export type AgentsRoute = { kind: 'list' } | { kind: 'agent'; id: string; team: string | null; view: AgentView; run: string | null } | { kind: 'new'; from: string | null; team: string | null; view: AgentView }
+export type AgentsRoute = { kind: 'list' } | { kind: 'agent'; id: string; team: string | null; view: AgentView; run: string | null; proposal: string | null } | { kind: 'new'; from: string | null; team: string | null; view: AgentView; proposal: string | null }
 
 export function parseAgentsRoute(pathname: string, search: string): AgentsRoute {
   const rest = pathname.replace(/^\/agents\/?/, '')
   if (!rest) return { kind: 'list' }
   const query = new URLSearchParams(search)
   const view: AgentView = query.get('view') === 'chat' ? 'chat' : 'build'
-  if (rest === 'new') return { kind: 'new', from: query.get('from'), team: query.get('team'), view }
-  return { kind: 'agent', id: decodeURIComponent(rest.split('/')[0]), team: query.get('team'), view, run: query.get('run') }
+  const proposal = query.get('proposal')
+  if (rest === 'new') return { kind: 'new', from: query.get('from'), team: query.get('team'), view, proposal }
+  return { kind: 'agent', id: decodeURIComponent(rest.split('/')[0]), team: query.get('team'), view, run: query.get('run'), proposal }
 }
 
 /** The page's own address with `view` set, keeping everything else it says. */
@@ -33,6 +35,11 @@ export function withView(view: AgentView, location: { pathname: string; search: 
 /** The page of one of My agents, on the tab `view`. */
 export function agentHref(id: string, view: AgentView): string {
   return `/agents/${encodeURIComponent(id)}${view === 'chat' ? '?view=chat' : ''}`
+}
+
+/** The page an agent Ask proposed opens on (ADR 0119): the agent it changes, or a new one. */
+export function agentProposalHref(agent: string | null | undefined, proposal: string): string {
+  return `/agents/${agent ? encodeURIComponent(agent) : 'new'}?${new URLSearchParams({ proposal })}`
 }
 
 const CHANGED = 'loomwatch:agents-route'

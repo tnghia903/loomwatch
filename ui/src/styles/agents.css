@@ -110,6 +110,14 @@
 .agent-builder-save .btn { min-height: 32px; }
 .agent-save-state { flex-basis: 100%; text-align: right; min-height: 16px; color: var(--color-ink-3); }
 .agent-save-error { color: var(--color-alert); }
+/* What Ask changed (ADR 0119), over the settings until it is saved or put back: the same note the
+   canvas shows for instructions LoomWatch rewrote, with room between its list and the diff's key. */
+.agent-ask-change { margin: 0; }
+.agent-ask-change > :is(p, ul) + p { margin-top: var(--sp-2); }
+/* In the Chat tab's column: inset like the notices above it, its own height, and only its first
+   line and Put back, so the chat keeps its room; Build shows the rest. */
+.byhand.framed .byhand-chat > :is(.agent-ask-change, .agent-save-error) { margin: var(--sp-3) var(--sp-4) 0; flex: none; }
+.byhand-chat > .agent-ask-change :is(ul, ul + p, p:has(+ .instructions-diff), .instructions-diff) { display: none; }
 /* Under the bench (its chat is a tab): the ID card, where it is used and its versions on the left,
    and its figure beside them. */
 .agent-builder-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-5); align-items: start; }

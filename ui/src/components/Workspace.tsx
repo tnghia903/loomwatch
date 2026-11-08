@@ -641,6 +641,8 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     onOpenRun: askActions.openRun,
     // The note goes into the run's own answer box; the panel steps aside so the whole box shows.
     onUseNote: (card) => { ask.setOpen(false); askActions.takeNote(card) },
+    onOpenAgent: askActions.openAgent,
+    onDiscardAgent: (card) => void askActions.discardAgent(card),
   }
   // A proposal made in answer to a message sent from this page goes straight onto the canvas when
   // nothing of the person's would be in the way; otherwise its card waits for "Show on canvas".

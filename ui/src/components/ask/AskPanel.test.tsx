@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_MODEL } from '../../lib/ai/modelIds'
 import { forgetKeyStatus } from '../../lib/ai/useKeyStatus'
 import { forgetModels } from '../../lib/ai/useModels'
-import { EMPTY_THREAD, type AskThread, type ProposalCard, type ReviewNoteCard, type RunRequestCard, type RunStartedCard } from '../../lib/ask/thread'
+import { EMPTY_THREAD, type AgentProposalCard, type AskCard, type AskThread, type ProposalCard, type ReviewNoteCard, type RunRequestCard, type RunStartedCard } from '../../lib/ask/thread'
 import type { AskController } from '../../lib/ask/useAsk'
 import type { CardActions } from './AskCards'
 import { AskPanel } from './AskPanel'
@@ -13,12 +13,13 @@ const model = (id: string, name: string) => ({ id, name, contextLength: 200_000,
 const opus = model(DEFAULT_MODEL, 'Anthropic: Claude Opus 5.5')
 const haiku = model('anthropic/claude-haiku-5.5', 'Anthropic: Claude Haiku 5.5')
 const catalog = { fetchedAt: '2026-10-17T00:00:00Z', defaultModel: opus.id, recommended: [opus, haiku], models: [opus, haiku] }
+const writer = { id: 'writer', file: '.jobs/writer.yaml', name: 'Writer', instructions: 'Write a short draft.', model: 'fake/offline', version: 2 }
 
 beforeEach(() => {
   forgetModels()
   forgetKeyStatus()
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
-    const body = String(input) === '/api/ai' ? { openrouter: { connected: true } } : catalog
+    const body = String(input) === '/api/ai' ? { openrouter: { connected: true } } : String(input) === '/api/jobs' ? { folder: '.jobs', jobs: [writer], problems: [] } : catalog
     return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
   }))
 })
@@ -41,6 +42,7 @@ function cards(overrides: Partial<CardActions> = {}): CardActions {
   return {
     previewingId: null, savedYamlFor: () => null, busyCard: null, cardError: null,
     onShowProposal: vi.fn(), onApply: vi.fn(), onDiscard: vi.fn(), onStartRun: vi.fn(), onDeclineRun: vi.fn(), onOpenRun: vi.fn(), onUseNote: vi.fn(),
+    onOpenAgent: vi.fn(), onDiscardAgent: vi.fn(),
     ...overrides,
   }
 }
@@ -50,7 +52,7 @@ const proposal: ProposalCard = { kind: 'proposal', id: 'p1', at: '2026-10-02T09:
 const request: RunRequestCard = { kind: 'run-request', id: 'r1', file: 'brief.yaml', name: 'Brief', request: 'Today’s news', steps: 2, decision: null, runId: null }
 const note: ReviewNoteCard = { kind: 'review-note', id: 'n1', runId: 'run-1', file: 'brief.yaml', name: 'You', question: 'Approve the brief?', text: 'Approved. Keep it short.' }
 
-function threadWith(...cardsInTurn: (ProposalCard | RunRequestCard | ReviewNoteCard | RunStartedCard)[]): AskThread {
+function threadWith(...cardsInTurn: AskCard[]): AskThread {
   return {
     state: 'ready', error: null, appName: 'LoomWatch', appId: 'loomwatch', model: DEFAULT_MODEL,
     items: [
@@ -160,6 +162,58 @@ describe('AskPanel', () => {
     rerender(<AskPanel ask={controller({ thread: threadWith({ ...request, decision: 'started', runId: 'run-7' }) })} view="build" cards={actions} />)
     fireEvent.click(screen.getByRole('button', { name: /Watch the run/ }))
     expect(actions.onOpenRun).toHaveBeenCalledWith('run-7', 'brief.yaml')
+  })
+
+  // ADR 0119: one agent on its own opens on its page, where Save keeps it; Discard says no.
+  it('offers an agent Ask proposed to open on its page, says what changes and who gets it, or discard it', async () => {
+    const actions = cards()
+    const change: AgentProposalCard = {
+      kind: 'agent-proposal', id: 'a1', at: '2026-11-08T09:00:00Z', agent: 'writer', name: 'Writer', isNew: false, summary: 'Gives each draft a title.',
+      spec: { ...writer, instructions: 'Write a short draft.\nGive it a title.', doneWhen: ['Has a title'] }, baseVersion: 2, inTeams: ['Blog'], outcome: null, superseded: false,
+    }
+    const { rerender } = render(<AskPanel ask={controller({ thread: threadWith(change) })} view="home" cards={actions} />)
+    const card = screen.getByRole('article', { name: 'Proposed change to Writer' })
+    expect(within(card).getByText('Gives each draft a title.')).toBeInTheDocument()
+    expect(await within(card).findByText('Instructions: 1 line put in')).toBeInTheDocument()
+    expect(within(card).getByText('Adds to Done when: “Has a title”')).toBeInTheDocument()
+    expect(within(card).getByText('Saving also changes it in Blog')).toBeInTheDocument()
+    expect(within(card).getByText('Nothing is saved until you press Save on its page.')).toBeInTheDocument()
+    fireEvent.click(within(card).getByRole('button', { name: /Open/ }))
+    expect(actions.onOpenAgent).toHaveBeenCalledWith(change)
+    fireEvent.click(within(card).getByRole('button', { name: 'Discard' }))
+    expect(actions.onDiscardAgent).toHaveBeenCalledWith(change)
+
+    rerender(<AskPanel ask={controller({ thread: threadWith({ ...change, outcome: 'applied' }) })} view="home" cards={actions} />)
+    const settled = screen.getByRole('article', { name: 'Proposed change to Writer' })
+    expect(within(settled).getByText('Saved')).toBeInTheDocument()
+    expect(within(settled).queryByRole('button')).toBeNull()
+
+    const fresh: AgentProposalCard = { ...change, id: 'a2', agent: null, name: 'Email helper', isNew: true, spec: { name: 'Email helper', instructions: 'Draft replies.', model: 'fake/offline', allow: { web: true } }, baseVersion: null, inTeams: [], outcome: null }
+    rerender(<AskPanel ask={controller({ thread: threadWith(fresh) })} view="home" cards={actions} />)
+    const made = screen.getByRole('article', { name: 'Proposed agent Email helper' })
+    expect(within(made).getByText('New agent')).toBeInTheDocument()
+    expect(within(made).getByText('Searches the web without asking')).toBeInTheDocument()
+    expect(within(made).getByText('Nothing is saved until you press Save to My agents on its page.')).toBeInTheDocument()
+  })
+
+  it('says a change can’t be saved once its agent was saved again, and shows an earlier draft quietly', async () => {
+    const actions = cards()
+    // Ask read the Writer at version 1; My agents has it at version 2 now.
+    const stale: AgentProposalCard = {
+      kind: 'agent-proposal', id: 'a3', at: '2026-11-08T09:00:00Z', agent: 'writer', name: 'Writer', isNew: false, summary: 'Gives each draft a title.',
+      spec: { ...writer, instructions: 'Write a short draft with a title.' }, baseVersion: 1, inTeams: ['Blog'], outcome: null, superseded: false,
+    }
+    const { rerender } = render(<AskPanel ask={controller({ thread: threadWith(stale) })} view="home" cards={actions} />)
+    const card = screen.getByRole('article', { name: 'Proposed change to Writer' })
+    expect(await within(card).findByText('Writer was saved again after Ask read it. Ask again for a new change.')).toBeInTheDocument()
+    expect(within(card).queryByRole('button', { name: /Open/ })).toBeNull()
+    expect(within(card).queryByRole('listitem')).toBeNull()
+    fireEvent.click(within(card).getByRole('button', { name: 'Discard' }))
+    expect(actions.onDiscardAgent).toHaveBeenCalledWith(stale)
+
+    rerender(<AskPanel ask={controller({ thread: threadWith({ ...stale, baseVersion: 2, superseded: true }) })} view="home" cards={actions} />)
+    expect(screen.getByText('An earlier draft of “Writer”, replaced by the one below.')).toBeInTheDocument()
+    expect(screen.queryByRole('article', { name: 'Proposed change to Writer' })).toBeNull()
   })
 
   it('puts a drafted review note in the review box rather than sending it', () => {

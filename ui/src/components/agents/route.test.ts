@@ -1,17 +1,26 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { goToRun, parseAgentsRoute, withView } from './route'
+import { agentProposalHref, goToRun, parseAgentsRoute, withView } from './route'
 
 describe('My agents’ addresses', () => {
   it('opens an agent on Build unless the address asks for its Chat', () => {
     expect(parseAgentsRoute('/agents', '')).toEqual({ kind: 'list' })
-    expect(parseAgentsRoute('/agents/reader', '')).toEqual({ kind: 'agent', id: 'reader', team: null, view: 'build', run: null })
-    expect(parseAgentsRoute('/agents/reader', '?view=chat&team=news.yaml')).toEqual({ kind: 'agent', id: 'reader', team: 'news.yaml', view: 'chat', run: null })
+    expect(parseAgentsRoute('/agents/reader', '')).toEqual({ kind: 'agent', id: 'reader', team: null, view: 'build', run: null, proposal: null })
+    expect(parseAgentsRoute('/agents/reader', '?view=chat&team=news.yaml')).toEqual({ kind: 'agent', id: 'reader', team: 'news.yaml', view: 'chat', run: null, proposal: null })
     // A link to a piece of its chat (`historyRunUrl`) names the run whose Details it opens.
-    expect(parseAgentsRoute('/agents/reader', '?view=chat&run=r1')).toEqual({ kind: 'agent', id: 'reader', team: null, view: 'chat', run: 'r1' })
-    expect(parseAgentsRoute('/agents/new', '?from=writer&view=chat')).toEqual({ kind: 'new', from: 'writer', team: null, view: 'chat' })
+    expect(parseAgentsRoute('/agents/reader', '?view=chat&run=r1')).toEqual({ kind: 'agent', id: 'reader', team: null, view: 'chat', run: 'r1', proposal: null })
+    expect(parseAgentsRoute('/agents/new', '?from=writer&view=chat')).toEqual({ kind: 'new', from: 'writer', team: null, view: 'chat', proposal: null })
     // Anything else is Build: a mistyped tab never opens an empty page.
     expect(parseAgentsRoute('/agents/reader', '?view=weird')).toMatchObject({ view: 'build' })
+  })
+
+  // ADR 0119: Ask's card opens the agent it changes, or a new one, with the proposal as its draft.
+  it('opens an agent Ask proposed on its page', () => {
+    expect(agentProposalHref('reader', 'proposal-1')).toBe('/agents/reader?proposal=proposal-1')
+    expect(agentProposalHref(null, 'proposal-2')).toBe('/agents/new?proposal=proposal-2')
+    expect(agentProposalHref('a b/c', 'p&1')).toBe('/agents/a%20b%2Fc?proposal=p%261')
+    expect(parseAgentsRoute('/agents/reader', '?proposal=proposal-1')).toMatchObject({ kind: 'agent', id: 'reader', proposal: 'proposal-1' })
+    expect(parseAgentsRoute('/agents/new', '?proposal=proposal-2')).toEqual({ kind: 'new', from: null, team: null, view: 'build', proposal: 'proposal-2' })
   })
 
   it('switches tab in place, keeping what else the address says', () => {

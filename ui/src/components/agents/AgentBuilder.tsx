@@ -20,6 +20,9 @@ import { listNames, relativeTime } from '../../lib/format'
 import { isMac } from '../../lib/platform'
 import { PINNED_SHORTCUT_WORDS } from '../../island/bridge'
 import type { RunRecord } from '../../lib/runs/client'
+import { AskApiError, fetchAgentProposal, reportProposalOutcome, type AgentProposal } from '../../lib/ask/client'
+import { agentProposalLines, savedSinceAsk } from '../../lib/ask/agentProposal'
+import { wordDiff } from '../../lib/wordDiff'
 import type { LeaveGuard } from './leave'
 import { holdPage } from '../../lib/team-file/inPlace'
 import type { ChipState } from '../ui/glyphs'
@@ -60,6 +63,11 @@ export interface AgentBuilderProps {
   /** Kept up to date with what closing this workbench would lose (a team's page asks it first). */
   leaveRef?: MutableRefObject<LeaveGuard | null>
   /**
+   * An agent Ask proposed (ADR 0119), by its proposal's id: the page opens it as its draft, says
+   * what Ask changed, and Save keeps it against the version Ask changed.
+   */
+  proposal?: string | null
+  /**
    * On its own page in My agents: the places in the page's header (AgentFrame) for its name chip
    * and its tabs, as a team's page has them. Absent inside a team, where the agent keeps its own
    * head under the team's.
@@ -81,7 +89,17 @@ type SaveState = { kind: 'idle' } | { kind: 'saving' } | { kind: 'saved' } | { k
  * Inside a team (`inTeam`) it has the same two tabs, and its Chat is the one it has in Your agents:
  * talking to one agent on its own is a different thing from giving the team work in the team's chat.
  */
-export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, cameFrom = null, view: asked = 'build', run = null, inTeam, leaveRef, bar }: AgentBuilderProps) {
+type FromAsk = { state: 'loading' } | { state: 'ready'; proposal: AgentProposal } | { state: 'failed'; message: string }
+
+/** The page's address without the proposal it was opened with, once that is saved or put back. */
+function withoutProposal(location: { pathname: string; search: string } = window.location): string {
+  const query = new URLSearchParams(location.search)
+  query.delete('proposal')
+  const rest = query.toString()
+  return `${location.pathname}${rest ? `?${rest}` : ''}`
+}
+
+export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, cameFrom = null, view: asked = 'build', run = null, inTeam, leaveRef, bar, proposal = null }: AgentBuilderProps) {
   // Inside a team the address is the team's, so the page keeps which tab is open.
   const [teamView, setTeamView] = useState<AgentView>('build')
   const view: AgentView = inTeam ? teamView : asked
@@ -101,28 +119,60 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
   // A file its answers name, read over the bench too (ADR 0077).
   const benchFile = useBenchFile()
 
+  // An agent Ask proposed (ADR 0119): read once, then the page starts from it. One for another
+  // agent than the page's, or gone (the daemon restarted), is said, and the page starts as it is.
+  const [fromAsk, setFromAsk] = useState<FromAsk | null>(() => (proposal ? { state: 'loading' } : null))
+  // Saved or put back: the page no longer says what Ask changed.
+  const [askSettled, setAskSettled] = useState(false)
+  useEffect(() => {
+    if (!proposal) return
+    const controller = new AbortController()
+    fetchAgentProposal(proposal, controller.signal).then(
+      (found) => setFromAsk((found.agent ?? null) === id ? { state: 'ready', proposal: found } : { state: 'failed', message: 'it is for another agent. Ask again for a new one.' }),
+      (caught: unknown) => {
+        if (controller.signal.aborted) return
+        // Gone: proposals live only while LoomWatch runs. One for a team opens on the team's page.
+        const message = caught instanceof AskApiError && caught.status === 404 ? 'LoomWatch restarted since Ask made it. Ask again for a new one.'
+          : caught instanceof AskApiError && caught.status === 400 ? 'it is for a team, not an agent. Open it from Ask’s card.'
+          : caught instanceof Error ? caught.message : String(caught)
+        setFromAsk({ state: 'failed', message })
+      },
+    )
+    return () => controller.abort()
+  }, [proposal, id])
+  const askDraft = fromAsk?.state === 'ready' ? fromAsk.proposal : null
+  const pendingAsk = askDraft && !askSettled ? askDraft : null
+  // Put back, said where a save is, until something else is said there.
+  const [putBack, setPutBack] = useState(false)
+
   // Start once per agent: from the saved version, from a built-in job, or blank on the default model.
   // Later reloads of the list (every save anywhere) must never overwrite edits on screen.
   const [startedFor, setStartedFor] = useState<string | null>(null)
   // What a new agent started as, so moving away from it asks only once something was changed.
   const [startedAs, setStartedAs] = useState<AgentDraft | null>(null)
   const startKey = id ?? `new:${startFrom ?? ''}`
-  if (startedFor !== startKey) {
+  if (startedFor !== startKey && fromAsk?.state !== 'loading') {
     if (id && saved) {
       setStartedFor(startKey)
       const from = draftFromJob(saved)
       setBase(from)
-      setDraft(from)
+      // Saved again after Ask read it: its change was made from another version, so the page opens
+      // the agent as it is saved and says so, rather than a draft its Save would refuse.
+      const stale = askDraft !== null && savedSinceAsk(askDraft, saved)
+      if (stale) setFromAsk({ state: 'failed', message: `${saved.name} was saved again after Ask read it, so this change can’t be saved. Ask again for a new change.` })
+      // What Ask proposed is a draft over the saved agent, which it wears as it is.
+      setDraft(askDraft && !stale ? { ...draftFromJob(askDraft.spec), figure: from.figure } : from)
     } else if (!id && loaded && ai) {
       // A new agent waits for what is connected, so its model is one it can run on (ADR 0073).
       setStartedFor(startKey)
       const preset = ROLE_PRESETS.find((candidate) => candidate.id === startFrom)
-      const from = preset ? draftFromPreset(preset) : blankDraft()
+      const from = askDraft ? draftFromJob(askDraft.spec) : preset ? draftFromPreset(preset) : blankDraft()
       // A new agent wears a figure none of your agents wears yet, so it is easy to tell apart.
       const worn = jobs.map((job) => figureFor(job.id, job.figure))
       const started = { ...from, figure: freshFigure(`${startKey}:${jobs.length}`, worn) }
       setBase(null)
-      setStartedAs(started)
+      // Ask's draft isn't saved, so leaving it asks first, as a changed new agent does.
+      setStartedAs(askDraft ? { ...blankDraft(), figure: started.figure } : started)
       setDraft(started)
     }
   }
@@ -157,14 +207,22 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
     if (problem) return false
     setSave({ kind: 'saving' })
     try {
-      const spec = specFromDraft(draft, '')
+      // Ask's change says what changed in this version, and is saved against the version Ask
+      // changed: one saved since, in another window, is never written over.
+      const spec = specFromDraft(draft, pendingAsk ? pendingAsk.spec.note ?? pendingAsk.summary : '')
+      const expectedVersion = pendingAsk && !pendingAsk.isNew ? pendingAsk.baseVersion ?? (saved ? versionOf(saved) : undefined) : saved ? versionOf(saved) : undefined
       const result: SavedJob = saved
-        ? await saveJob(saved.id, spec, { replace: true, expectedVersion: versionOf(saved) })
+        ? await saveJob(saved.id, spec, { replace: true, expectedVersion })
         : await saveJob(jobIdFor(draft.name), spec)
       const next = draftFromJob(result)
       setBase(next)
       setDraft(next)
       setSave({ kind: 'saved' })
+      if (pendingAsk) {
+        setAskSettled(true)
+        void reportProposalOutcome(pendingAsk.id, 'applied').catch(() => {})
+        if (saved) navigate(withoutProposal(), true)
+      }
       inTeam?.onSaved(result)
       if (!saved) {
         setStartedFor(result.id)
@@ -175,7 +233,8 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
       return true
     } catch (failed) {
       const message = failed instanceof JobApiError && failed.status === 412
-        ? saved ? failed.message : `You already have an agent called “${draft.name.trim()}”. Give this one another name, or open that one from My agents.`
+        ? saved && pendingAsk ? `${saved.name} was saved again after Ask read it, so this change can’t be saved. Press Put back what you had, then ask for it again in Ask.`
+        : saved ? failed.message : `You already have an agent called “${draft.name.trim()}”. Give this one another name, or open that one from My agents.`
         : failed instanceof JobApiError && failed.status === 404 ? 'This LoomWatch server is older than My agents. Restart it, then save again.'
         : failed instanceof Error ? failed.message : String(failed)
       setSave({ kind: 'error', message })
@@ -247,7 +306,35 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
   const backToTeam = cameFrom && <a className="link agent-back" href={`/?path=${encodeURIComponent(cameFromUse?.teamPath ?? cameFrom)}`}>Back to {cameFromUse?.teamName ?? 'the team'}</a>
   // The way back to a team, and what a save did. Always there, so a save is announced; on its own
   // page it heads the column, so its coming and going never moves the bench.
-  const notices = <div className="agent-notices">{backToTeam}<span className={`agent-save-state t-meta${saveSaid === 'Saved.' ? ' quiet' : ''}`} role="status">{saveSaid ?? (changed && mine.length > 0 ? `Saving changes it in ${listNames(mine.map((use) => use.teamName))} too.` : pinSaid && (pinSaid.ok ? pinSaid.text : <span className="agent-save-error">{pinSaid.text}</span>))}</span></div>
+  const putBackSaid = putBack && !changed ? `Put back. ${name} is as you saved it.` : null
+  const notices = <div className="agent-notices">{backToTeam}<span className={`agent-save-state t-meta${saveSaid === 'Saved.' ? ' quiet' : ''}`} role="status">{saveSaid ?? (changed && mine.length > 0 ? `Saving changes it in ${listNames(mine.map((use) => use.teamName))} too.` : putBackSaid ?? (pinSaid && (pinSaid.ok ? pinSaid.text : <span className="agent-save-error">{pinSaid.text}</span>)))}</span></div>
+  // What Ask changed, until it is saved or put back (ADR 0119): what its change differs in, the
+  // instructions word by word, and the way back to what was there. It says Ask's change, not the
+  // draft as the person goes on editing it. Save, beside the name, is what keeps it.
+  const putBackAsk = () => {
+    if (!pendingAsk) return
+    setAskSettled(true)
+    void reportProposalOutcome(pendingAsk.id, 'discarded').catch(() => {})
+    if (base) {
+      setDraft(base)
+      setPutBack(true)
+      navigate(withoutProposal(), true)
+    } else navigate('/agents')
+  }
+  const askLines = pendingAsk && !pendingAsk.isNew && saved ? agentProposalLines({ isNew: false, spec: pendingAsk.spec, inTeams: [] }, saved) : []
+  const askHead = pendingAsk?.isNew ? 'Ask’s new agent, not saved yet' : 'Ask’s changes, not saved yet'
+  const askNote = pendingAsk ? (
+    <section className="instructions-updated agent-ask-change" aria-label={askHead}>
+      <p>{askHead}. {pendingAsk.isNew ? 'Check it' : 'Check them'}, then press {saveLabel}.</p>
+      {askLines.length > 0 && <ul>{askLines.map((line) => <li key={line}>{line}</li>)}</ul>}
+      {base && base.instructions !== pendingAsk.spec.instructions && <>
+        <p>In its instructions, taken out <del>like this</del>, put in <ins>like this</ins>:</p>
+        <p className="instructions-diff">{wordDiff(base.instructions, pendingAsk.spec.instructions).map((part, index) =>
+          part.kind === 'removed' ? <del key={index}>{part.text}</del> : part.kind === 'added' ? <ins key={index}>{part.text}</ins> : <span key={index}>{part.text}</span>)}</p>
+      </>}
+      <div className="instructions-updated-actions"><button type="button" className="btn" onClick={putBackAsk}>{pendingAsk.isNew ? 'Discard' : 'Put back what you had'}</button></div>
+    </section>
+  ) : fromAsk?.state === 'failed' ? <p className="agent-save-error" role="status">Couldn’t open Ask’s change: {fromAsk.message}</p> : null
   const side = view === 'build' && (
     <div className="agent-builder-grid">
       <aside className="agent-builder-side">
@@ -295,7 +382,7 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
         detailsRunId={details.asked?.runId ?? null} onDetails={(asked) => { details.open(asked); setAnswerRun(null); benchFile.close() }} reveal={details.reveal} landAt={run} /> : undefined}
       onBuild={() => showView('build')}
       framed={Boolean(bar)}
-      lead={bar ? notices : undefined}
+      lead={bar ? <>{notices}{askNote}</> : undefined}
       after={bar ? side : undefined}
       cover={view === 'chat' && benchFile.reading ? <AgentFile bench={benchFile} chatId={chatId} name={name} figure={figure} />
         : view === 'chat' && details.asked ? <AgentDetails key={details.asked.at} asked={details.asked} draft={draft} model={draft.model} chatId={chatId} figure={figure} onClose={details.close} onAllow={(key) => set('allow', { ...draft.allow, [key]: true })} onRevealMessage={details.revealMessage} />
@@ -311,7 +398,10 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
     const state: ChipState = save.kind === 'saving' ? 'saving' : save.kind === 'error' ? 'failed' : problem ? 'incomplete' : !saved ? 'new' : changed ? 'dirty' : save.kind === 'saved' ? 'saved' : 'clean'
     // A saved agent can be kept at the notch of a Mac (ADR 0083): only the island there shows it.
     const pin = saved && isMac() ? { pinned: pinned.pinned === saved.id, notchShown: pinned.notchShown, onToggle: () => void togglePin(saved.id, name) } : undefined
-    const detail = save.kind === 'saving' ? 'Saving…' : save.kind === 'error' ? 'Couldn’t save' : problem ?? (!saved ? 'Not saved yet' : changed ? 'Unsaved changes' : saved.savedAt ? `Saved ${relativeTime(new Date(saved.savedAt))}` : 'Saved')
+    // Ask's change says so in the name chip, beside Save, so it is seen before the note is (on a
+    // phone the bench comes first).
+    const unsavedWords = pendingAsk ? (pendingAsk.isNew ? 'Ask’s new agent, not saved' : 'Ask’s changes, not saved') : null
+    const detail = save.kind === 'saving' ? 'Saving…' : save.kind === 'error' ? 'Couldn’t save' : problem ?? (!saved ? unsavedWords ?? 'Not saved yet' : changed ? unsavedWords ?? 'Unsaved changes' : saved.savedAt ? `Saved ${relativeTime(new Date(saved.savedAt))}` : 'Saved')
     return (
       <div className="agent-builder framed" data-tour="agent-builder" data-tour-saved={saved && !changed ? true : undefined}>
         {bar.chip && createPortal(<AgentChip name={name} state={state} detail={detail} action={changed || save.kind === 'saving' ? saveButton : undefined} onRemove={saved ? () => setRemoving(true) : undefined} pin={pin}

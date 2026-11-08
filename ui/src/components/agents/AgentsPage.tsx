@@ -38,13 +38,14 @@ export function AgentsPage(props: AgentsPageProps) {
   const [slots, setSlots] = useState<AgentBarSlots>(NO_SLOTS)
   if (route.kind !== 'list') {
     // An agent's page, or a new one's: the header, then the page, beside the dock.
-    const starting = route.kind === 'new' && !route.from
+    // A new agent Ask drafted (ADR 0119) opens as its draft, not on the jobs to start from.
+    const starting = route.kind === 'new' && !route.from && !route.proposal
     return (
       <AgentFrame tray={tray} chip={starting ? <AgentChip name="New agent" state="new" detail="Start from a job" /> : undefined} onSlots={setSlots}>
         <main className="home-main agents-main">
           {starting
             ? <AgentTemplates team={route.team} />
-            : <AgentBuilder key={route.kind === 'agent' ? route.id : `new-${route.from ?? ''}`} id={route.kind === 'agent' ? route.id : null} startFrom={route.kind === 'new' ? route.from : null} cameFrom={route.team} view={route.view} run={route.kind === 'agent' ? route.run : null} bar={slots} {...builder} />}
+            : <AgentBuilder key={route.kind === 'agent' ? route.id : `new-${route.from ?? ''}`} id={route.kind === 'agent' ? route.id : null} startFrom={route.kind === 'new' ? route.from : null} cameFrom={route.team} view={route.view} run={route.kind === 'agent' ? route.run : null} proposal={route.proposal} bar={slots} {...builder} />}
         </main>
       </AgentFrame>
     )

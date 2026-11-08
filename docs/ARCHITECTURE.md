@@ -909,9 +909,27 @@ Ask (`control/`) is the same agent, on the operator's key and the model they cho
 any run. It is kept open across turns and archived as its own session. It gets the LoomWatch
 Control tools and nothing else: no files, no commands, no web. The tools are `list_teams`,
 `read_team`, `list_models`, `list_skills`, `list_jobs`, `read_job`, `list_my_agents`,
-`list_tools`, `find_files`, `propose_team`, `start_run`, `get_run` and `draft_review_note`, all
-direct calls in the daemon. They read and propose. None of them writes a team file or answers a
-review stop: a proposed team is shown on the canvas and saved only when the person presses Apply.
+`list_tools`, `find_files`, `read_my_agent`, `propose_agent`, `propose_team`, `start_run`,
+`get_run` and `draft_review_note`, all direct calls in the daemon. They read and propose. None of
+them writes a team file, saves an agent or answers a review stop: a proposed team is shown on the
+canvas and saved only when the person presses Apply, and a proposed agent opens on its own page and
+is saved only with that page's Save.
+
+One agent on its own (ADR 0119, `control/agent.rs`). When the person wants an agent to keep, to
+talk to or to use in their teams, Ask proposes that agent alone with `propose_agent` `new`, and no
+team. When they ask to change one of My agents itself, it reads it with `read_my_agent`, which
+numbers its instructions line by line, and proposes `change`: the version it read, edits to the
+lines that change (`control/line_edits.rs`: `{n, replace}`, `{n, drop}`, `{after, add}`, the same
+shape the skill writer uses), and the settings that change, given whole. Every line it doesn't name
+stays as the person wrote it (ADR 0078). The proposal is checked as a team's is: an agent to change
+must be there and at that version, a new one's name not taken, a skill installed, a tool connected,
+a folder on this computer; what the agent already has is let through. It is archived as
+`ask_agent_proposal` with the whole agent and the teams that use it, kept in `agent_proposals`, and
+served by `GET /api/ask/proposals/{id}` with `kind: agent`. The panel's card opens
+`/agents/<id>?proposal=<id>` (`/agents/new?proposal=` for a new one): the page starts its draft from
+the proposal, marks what Ask changed over its settings, and its Save sends `If-Match` with the
+version Ask read, so a change saved since is never written over, then records the outcome. Ask still
+never changes one of My agents to suit a team: what a team needs goes in its `part`.
 
 Ask builds from what the person has (ADR 0096). Its first turn names their teams, My agents (with
 the ids a team points at), skills, connected tools and ways of paying. `list_jobs` and `read_job`

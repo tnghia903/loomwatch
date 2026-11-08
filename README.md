@@ -335,7 +335,8 @@ Run a team every morning and send the answer to Notion. A review stop still wait
 
 Describe the team you want in a sentence, or, on Home, say what you're working on and click **Set
 up project**. Ask proposes the team on the canvas from your own agents, folders, skills and tools,
-on the models you've connected. Nothing is saved until you click **Apply**.
+on the models you've connected. Nothing is saved until you click **Apply**. Ask it for one agent, or
+to change one of yours, and it drafts that agent on its page for you to save.
 
 </td>
 <td valign="top">
@@ -914,6 +915,12 @@ first team. New and changed agents are marked, and nothing is saved until you cl
   in your folders (on a Mac, iCloud Drive and cloud drives too) and gives it to the agent that
   reads it. It gives a skill you added, or a tool you connected, to
   the agent that uses it. It looks only at names to find a folder, never inside your files.
+- **It makes one agent when that's what you want.** Ask for an agent to keep, such as _"make me an
+  assistant for my customer emails"_, and Ask drafts that agent on its own, with no team. Ask it to
+  change one of yours, such as _"make my Writer give each piece a title"_, and it changes only what
+  you asked. Click **Open** on its card: the agent's page shows what Ask changed, and nothing is
+  saved until you click **Save** there. **Put back what you had** drops the change. Teams that use
+  the agent get the change from their next run.
 - **It picks the team's shape.** One agent for most work; agents that hand work on in turn when it
   needs different jobs, such as research then writing; a lead that hands parts to teammates
   working at the same time; a review step where the work should wait for you; and a check step

@@ -218,3 +218,46 @@ describe('toolOf', () => {
     expect(toolOf('Write README.md')).toBeNull()
   })
 })
+
+// ADR 0119: an agent Ask proposed on its own is a card of its own, settled by what the person did
+// with it on the agent's page, and replaced by a later draft of the same agent.
+describe('an agent Ask proposed', () => {
+  const spec = { name: 'Writer', instructions: 'Write a short draft.\nGive it a title.', doneWhen: ['Has a title'] }
+  function agentTurn(): RunEvent[] {
+    seq = 0
+    return [
+      status('ready'), status('working'),
+      meta('ask_message', { text: 'Make my Writer give each draft a title', context: { view: 'home' } }),
+      call('c1', 'read_my_agent', { agent: 'writer' }), done('c1', {}),
+      meta('ask_agent_proposal', { proposalId: 'a1', agent: 'writer', name: 'Writer', isNew: false, summary: 'Gives each draft a title.', spec, baseVersion: 2, inTeams: ['Blog'] }),
+      call('c2', 'propose_agent', { change: { agent: 'writer' } }), done('c2', { proposalId: 'a1' }),
+      meta('ask_agent_proposal', { proposalId: 'a2', agent: 'writer', name: 'Writer', isNew: false, summary: 'Gives each draft a short title.', spec, baseVersion: 2, inTeams: ['Blog'] }),
+      meta('ask_agent_proposal', { proposalId: 'a3', name: 'Email helper', isNew: true, summary: 'Drafts replies.', spec: { name: 'Email helper', instructions: 'Draft replies.' } }),
+      meta('ask_proposal_outcome', { proposalId: 'a2', agent: 'writer', name: 'Writer', outcome: 'applied' }),
+      say('Done.', 'm1'), event('turn_end', { stopReason: 'end_turn' }), status('ready'),
+    ]
+  }
+
+  it('is a card with what it changes, against the version it changed', () => {
+    const turn = projectAskThread(agentTurn()).items[1] as AssistantTurn
+    expect(turn.steps.map((step) => step.label)).toEqual(['Looked at your agent', 'Drafted the agent'])
+    expect(turn.cards).toEqual([
+      expect.objectContaining({ kind: 'agent-proposal', id: 'a1', agent: 'writer', isNew: false, baseVersion: 2, inTeams: ['Blog'], spec, outcome: null, superseded: true }),
+      expect.objectContaining({ kind: 'agent-proposal', id: 'a2', agent: 'writer', outcome: 'applied', superseded: false }),
+      expect.objectContaining({ kind: 'agent-proposal', id: 'a3', agent: null, name: 'Email helper', isNew: true, baseVersion: null, inTeams: [], outcome: null, superseded: false }),
+    ])
+  })
+
+  it('replaces an earlier draft of a new agent by its name, whatever its case, and no other', () => {
+    seq = 0
+    const draft = (proposalId: string, name: string) => meta('ask_agent_proposal', { proposalId, name, isNew: true, summary: '', spec: { name, instructions: 'Draft replies.' } })
+    const turn = projectAskThread([status('ready'), meta('ask_message', { text: 'x' }), draft('n1', 'Email helper'), draft('n2', 'Notes helper'), draft('n3', 'email helper'), say('Done.', 'm1')]).items[1] as AssistantTurn
+    expect(turn.cards.map((card) => [card.id, card.kind === 'agent-proposal' && card.superseded])).toEqual([['n1', true], ['n2', false], ['n3', false]])
+  })
+
+  it('leaves out a record with no agent in it', () => {
+    seq = 0
+    const turn = projectAskThread([status('ready'), meta('ask_message', { text: 'x' }), meta('ask_agent_proposal', { proposalId: 'a9', name: 'Broken' }), say('Hm.', 'm1')]).items[1] as AssistantTurn
+    expect(turn.cards).toEqual([])
+  })
+})
