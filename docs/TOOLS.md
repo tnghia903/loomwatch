@@ -16,6 +16,7 @@ Open an agent's **Tools it can use** row and click **Connect a new tool**, or op
 
 | Topic | Tools | How it connects |
 |---|---|---|
+| On this Mac | Apple Calendar, Apple Reminders, Apple Notes, Apple Contacts | Your Mac asks you first |
 | Tasks | Todoist, Linear, Jira and Confluence, monday.com, ClickUp, Airtable | Sign in |
 | Notes and files | Notion | Sign in |
 | Meetings | Cal.com, Granola, Fireflies | Sign in |
@@ -36,7 +37,15 @@ Each tool shows its own icon. LoomWatch fetches it from the service's own websit
 it's shown and keeps a copy for a week. The icons belong to their makers and aren't part of
 LoomWatch. A site that won't hand one over shows the tool's first letter instead.
 
-There are three ways a tool connects:
+There are four ways a tool connects:
+
+- **On this Mac.** Calendar, Reminders, Notes and Contacts are your Mac's own apps, so they show
+  only when LoomWatch runs on a Mac. Connecting one asks macOS: the first time, macOS asks you
+  whether LoomWatch may use that app. If you said no, or you missed the question, Connections says so
+  and opens the right page of System Settings (Privacy & Security, then Calendars, Reminders,
+  Contacts, or Automation for Notes). Allow LoomWatch there (for Calendar and Reminders, with Full Access) and click **Check again**.
+  LoomWatch reaches the app itself; nothing goes over the internet, and the agent runs no
+  command to get there. Deleting a note moves it to Notes' Recently Deleted.
 
 - **No sign-in.** The tool answers anyone, so it connects at once.
 - **Sign in.** The tool's site opens in a new tab, so whatever you were writing stays put. Sign in
@@ -50,6 +59,8 @@ There are three ways a tool connects:
 **Any other tool.** A service that works with AI assistants usually lists an "MCP server" address,
 which often ends in `/mcp`. Paste it in the box at the top of the list. LoomWatch connects over
 `https://` only.
+
+Apple Health isn't here yet: its data lives on your iPhone, not your Mac.
 
 LoomWatch keeps sign-ins and tokens in your Mac's Keychain (or Windows Credential Manager), never in
 team files, and agents never get them.
@@ -76,6 +87,9 @@ You can answer in three ways:
 - **Always allow this** lets that one action through for that agent from now on. Its other actions
   still ask. The agent's Tools row lists what it always may do, with a × to take each back.
 
+What can't be undone, such as deleting an event, a reminder or a contact, asks every time. (A deleted note stays in Notes' Recently Deleted, so it asks like any other action.) Its card
+says "This can't be undone" and offers only **Allow** and **Deny**.
+
 On a schedule the run still asks you, and waits 12 hours for your answer. If nobody answers by
 then, the action is declined and the agent carries on without it.
 
@@ -85,6 +99,8 @@ then, the action is declined and the agent carries on without it.
   Connections.
 - **Not connected in LoomWatch.** The team names a tool LoomWatch doesn't have (perhaps one you
   removed). The agent is told it doesn't have it and works without it. Connect it, or take it away.
+- **Your Mac hasn't let LoomWatch use it.** For Calendar, Reminders, Notes or Contacts, click
+  **Open System Settings** in Connections, turn LoomWatch on, then **Check again**.
 - **That address isn't a tool's address.** Check that you pasted the "MCP server" address the
   service lists, not its website.
 

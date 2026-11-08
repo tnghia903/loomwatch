@@ -92,6 +92,9 @@ pub struct WiredTool {
     /// `LoomWatch` has a connected tool by this name.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub connected: bool,
+    /// It is one of this Mac's own apps, such as Calendar (ADR 0121).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub on_this_mac: bool,
     /// Its calls the operator always allows this agent to make without asking.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub always_allow: Vec<String>,
@@ -269,11 +272,14 @@ pub fn prepare_for(
             }
             CapabilityKind::Tool => {
                 if !delivery.tools.iter().any(|tool| tool.name == name) {
-                    let connected = crate::connected_tools::installed()
-                        .is_some_and(|tools| tools.named_now(name).is_some());
+                    let found =
+                        crate::connected_tools::installed().and_then(|tools| tools.named_now(name));
                     delivery.tools.push(WiredTool {
                         name: name.to_owned(),
-                        connected,
+                        connected: found.is_some(),
+                        on_this_mac: found.is_some_and(|tool| {
+                            tool.auth == crate::connected_tools::Auth::OnThisMac
+                        }),
                         always_allow: capability
                             .always_allow
                             .iter()
@@ -431,6 +437,7 @@ mod tests {
             [WiredTool {
                 name: "Agent Memory".to_owned(),
                 connected: false,
+                on_this_mac: false,
                 always_allow: Vec::new(),
             }],
             "a wired tool is named, not delivered: no app's settings are read for it"

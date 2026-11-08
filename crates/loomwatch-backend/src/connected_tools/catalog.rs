@@ -27,6 +27,8 @@ use super::Auth;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) enum Topic {
+    /// This Mac's own apps (ADR 0121), listed only on a Mac.
+    OnThisMac,
     Tasks,
     Notes,
     Meetings,
@@ -43,7 +45,8 @@ pub(super) enum Topic {
 #[serde(rename_all = "camelCase")]
 pub(super) struct Entry {
     pub name: &'static str,
-    /// The service's home page, where its icon is found (`icons.rs`).
+    /// The service's home page, where its icon is found (`icons.rs`). For one of this Mac's apps,
+    /// its own address, and its icon is the app's.
     pub site: &'static str,
     pub url: &'static str,
     /// What it lets an agent do, in a few words.
@@ -58,6 +61,47 @@ pub(super) struct Entry {
 }
 
 pub(super) const CATALOG: &[Entry] = &[
+    // On this Mac: its own apps, which the daemon reaches itself (ADR 0121).
+    Entry {
+        name: "Apple Calendar",
+        site: "loomwatch:apple-calendar",
+        url: "loomwatch:apple-calendar",
+        does: "See, add, change and delete your events",
+        auth: Auth::OnThisMac,
+        topic: Topic::OnThisMac,
+        example: "Am I free on Thursday afternoon? If so, add a dentist visit at 3 pm.",
+        token_help: None,
+    },
+    Entry {
+        name: "Apple Reminders",
+        site: "loomwatch:apple-reminders",
+        url: "loomwatch:apple-reminders",
+        does: "See, add and tick off your reminders",
+        auth: Auth::OnThisMac,
+        topic: Topic::OnThisMac,
+        example: "What's left on my Groceries list? Add oat milk.",
+        token_help: None,
+    },
+    Entry {
+        name: "Apple Notes",
+        site: "loomwatch:apple-notes",
+        url: "loomwatch:apple-notes",
+        does: "Find, read and write your notes",
+        auth: Auth::OnThisMac,
+        topic: Topic::OnThisMac,
+        example: "Find my note about the Tokyo trip and add the hotel's address to it.",
+        token_help: None,
+    },
+    Entry {
+        name: "Apple Contacts",
+        site: "loomwatch:contacts",
+        url: "loomwatch:contacts",
+        does: "Find, add and change people in your contacts",
+        auth: Auth::OnThisMac,
+        topic: Topic::OnThisMac,
+        example: "What's Lan's phone number?",
+        token_help: None,
+    },
     // Tasks: the lists and boards work is planned on.
     Entry {
         name: "Todoist",
@@ -516,8 +560,14 @@ mod tests {
     #[test]
     fn every_entry_is_https_named_once_and_says_what_to_try() {
         for (index, entry) in CATALOG.iter().enumerate() {
-            assert!(entry.url.starts_with("https://"), "{}", entry.name);
-            assert!(entry.site.starts_with("https://"), "{}", entry.name);
+            if entry.auth == Auth::OnThisMac {
+                // The Mac's own apps are reached here, never on the internet.
+                let app = crate::mac_apps::App::at(entry.url).expect("one of the Mac's apps");
+                assert_eq!((entry.url, entry.site), (app.url(), app.url()));
+            } else {
+                assert!(entry.url.starts_with("https://"), "{}", entry.name);
+                assert!(entry.site.starts_with("https://"), "{}", entry.name);
+            }
             assert!(
                 !entry.does.is_empty() && !entry.example.is_empty(),
                 "{}",
@@ -553,7 +603,8 @@ mod tests {
     /// together, and no topic left empty.
     #[test]
     fn every_topic_holds_its_entries_together_in_order() {
-        const ORDER: [Topic; 10] = [
+        const ORDER: [Topic; 11] = [
+            Topic::OnThisMac,
             Topic::Tasks,
             Topic::Notes,
             Topic::Meetings,

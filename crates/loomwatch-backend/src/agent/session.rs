@@ -195,6 +195,8 @@ pub struct HostAsk {
     pub server: String,
     /// The tool's own name for the call: `create_issue`.
     pub call: String,
+    /// It can't be taken back, such as deleting an event: it asks every time (ADR 0121).
+    pub cant_undo: bool,
 }
 
 /// No daemon tools.
@@ -1426,12 +1428,16 @@ impl Session {
         if let Some(ask) = ask {
             // A connected tool's call reaches the operator's own accounts: it asks first (ADR 0069),
             // with what it would send. The operator's change, offered for a command, isn't here.
+            let mut asked = json!({"server": ask.server, "tool": ask.call, "arguments": input});
+            if ask.cant_undo {
+                asked["cantUndo"] = json!(true);
+            }
             let request = PermissionRequest {
                 session_id: self.config.session_id.clone(),
                 tool_call_id: call.id.clone(),
                 title: ask.title,
                 kind: ToolKind::Other,
-                input: json!({"server": ask.server, "tool": ask.call, "arguments": input}),
+                input: asked,
                 locations: Vec::new(),
                 failed_contained: false,
             };

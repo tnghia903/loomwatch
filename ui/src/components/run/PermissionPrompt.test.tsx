@@ -132,4 +132,19 @@ describe('the permission card (ADR 0040)', () => {
     const [, init] = fetch.mock.calls[0] as unknown as [string, RequestInit]
     expect(JSON.parse(String(init.body))).toEqual({ requestId: 'p1', decision: 'allow_team' })
   })
+
+  // ADR 0121: deleting an event or a contact can't be undone, so it is allowed one at a time.
+  it('allows what can’t be undone only once, and says it can’t be undone', async () => {
+    const fetch = vi.fn(() => Promise.resolve(json({ runId: 'r1' })))
+    vi.stubGlobal('fetch', fetch)
+    const deleting = request({ title: 'Apple Calendar: Delete event', kind: 'other', switch: null, detail: '{"id":"e1"}', tool: { server: 'Apple Calendar', call: 'delete_event', cantUndo: true } })
+    render(<PermissionPrompt team run={{ runId: 'r1', permissionRequests: [deleting] }} onAlwaysAllow={vi.fn()} />)
+    expect(screen.getByText(/This can’t be undone\. Researcher is paused until you answer\./)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Allow for this run' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Allow for the whole team' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Always allow this' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Allow' }))
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1))
+    expect(JSON.parse(String((fetch.mock.calls[0] as unknown as [string, RequestInit])[1].body))).toEqual({ requestId: 'p1', decision: 'allow_once' })
+  })
 })

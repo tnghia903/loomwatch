@@ -58,7 +58,7 @@ export interface PermissionRequest {
   switch?: 'web' | 'commands' | 'edits' | null
   /** A connected tool's call (ADR 0069): which tool and which of its calls, which "Always allow"
       lets through for this agent from then on. */
-  tool?: { server: string; call: string } | null
+  tool?: { server: string; call: string; cantUndo?: boolean } | null
   /** The query, command, address or path, when there is one. */
   detail?: string | null
   since: string

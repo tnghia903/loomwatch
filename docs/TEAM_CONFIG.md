@@ -674,6 +674,9 @@ capabilities:
     alwaysAllow: [list_teams]   # every other Linear action asks first
 ```
 
+An action that can't be undone, such as `delete_event` in Apple Calendar, asks every time:
+`alwaysAllow` naming it has no effect.
+
 A name with no connected tool, such as an MCP server from another AI app's settings, still loads
 and runs: the agent is told it doesn't have that tool and asked to say in its reply what the tool
 would have let it do, and the run records the tool as unavailable.
@@ -721,7 +724,9 @@ Every agent in a run works with LoomWatch's own tools:
   the sandbox; the agent is told so, and to use `pgrep`. A command can still work in your Mac's apps, such as Calendar, Mail or
   Notes, through `osascript`. macOS asks you the first time an agent works in each app (for now,
   again after each LoomWatch update); you can change your answer later in System Settings → Privacy
-  & Security → Automation → LoomWatch. For Calendar, Reminders, Contacts and Photos, macOS then
+  & Security → Automation → LoomWatch. (To give an agent Calendar, Reminders, Notes or Contacts
+  without commands, connect them as tools; see [TOOLS.md](TOOLS.md).) For Calendar, Reminders,
+  Contacts and Photos, macOS then
   asks a second question: whether LoomWatch may read and change what's in them. You can change
   that answer in System Settings → Privacy & Security → Calendars (or Reminders, Contacts,
   Photos). An app you allow can do what the sandbox stops a command

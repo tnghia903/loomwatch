@@ -42,6 +42,9 @@ static HREF: LazyLock<Regex> =
 
 /// The address the app loads `site`'s icon from.
 pub(super) fn path(site: &str) -> Option<String> {
+    if let Some(app) = crate::mac_apps::App::at(site) {
+        return Some(format!("/api/tools/icon/{}", app.icon_name()));
+    }
     host_of(site).map(|host| format!("/api/tools/icon/{host}"))
 }
 
@@ -95,6 +98,9 @@ pub(super) async fn icon(tools: &Tools, host: &str) -> Option<(Vec<u8>, &'static
     {
         return None;
     }
+    if let Some(app) = crate::mac_apps::App::of_icon(&host) {
+        return mac_icon(tools, app).await;
+    }
     let site = known_site(tools, &host).await?;
     let folder = tools.inner.icons.clone();
     let kept = folder.join(file_name(&host));
@@ -122,6 +128,49 @@ async fn known_site(tools: &Tools, host: &str) -> Option<String> {
     listed
         .chain(connected)
         .find(|site| host_of(site).as_deref() == Some(host))
+}
+
+/// One of this Mac's apps' own icon, as macOS draws it (ADR 0121), turned into a PNG once by
+/// `sips` and kept. It is the app's own mark, never redrawn.
+async fn mac_icon(tools: &Tools, app: crate::mac_apps::App) -> Option<(Vec<u8>, &'static str)> {
+    if !cfg!(target_os = "macos") {
+        return None;
+    }
+    let folder = tools.inner.icons.clone();
+    let kept = folder.join(format!("{}.png", app.icon_name()));
+    if let Ok(bytes) = std::fs::read(&kept)
+        && !bytes.is_empty()
+    {
+        return Some((bytes, "image/png"));
+    }
+    let bundle = std::path::Path::new(app.bundle());
+    let named = tokio::process::Command::new("/usr/bin/plutil")
+        .args(["-extract", "CFBundleIconFile", "raw", "-o", "-"])
+        .arg(bundle.join("Contents/Info.plist"))
+        .output()
+        .await
+        .ok()?;
+    let name = String::from_utf8_lossy(&named.stdout).trim().to_owned();
+    if !named.status.success() || name.is_empty() || name.contains('/') {
+        return None;
+    }
+    let icns = std::path::Path::new(&name)
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("icns"));
+    let name = if icns { name } else { format!("{name}.icns") };
+    std::fs::create_dir_all(&folder).ok()?;
+    let made = tokio::process::Command::new("/usr/bin/sips")
+        .args(["-s", "format", "png", "-Z", "128"])
+        .arg(bundle.join("Contents/Resources").join(name))
+        .arg("--out")
+        .arg(&kept)
+        .output()
+        .await
+        .ok()?;
+    if !made.status.success() {
+        return None;
+    }
+    std::fs::read(&kept).ok().map(|bytes| (bytes, "image/png"))
 }
 
 fn file_name(host: &str) -> String {

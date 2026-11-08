@@ -31,6 +31,7 @@ mod intent;
 mod jobs;
 pub mod kept;
 pub mod lessons;
+pub(crate) mod mac_apps;
 pub(crate) mod made;
 pub mod marketplace;
 pub mod memory;

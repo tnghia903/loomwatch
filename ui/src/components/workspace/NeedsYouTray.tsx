@@ -225,7 +225,7 @@ export function NeedsYouTray({ tickets, working, onAnswer, onPermission, onSpend
                   <span className="ticket-where">{ticket.teamName} · {ago(ticket.since)}</span>
                 </div>
                 <p className="ticket-text">
-                  {ticket.kind === 'question' ? <><b>{ticket.asker}</b> asks: “<InlineMarkdown clickable={false}>{ticket.text}</InlineMarkdown>”</> : ticket.kind === 'permission' ? <>{ticket.text}. It is paused until you answer.</> : ticket.kind === 'spend' ? <>{ticket.text}</> : ticket.kind === 'review' ? <>{ticket.text ? <InlineMarkdown clickable={false}>{ticket.text}</InlineMarkdown> : `${ticket.asker} is waiting for your approval.`}</> : <>{ticket.text}</>}
+                  {ticket.kind === 'question' ? <><b>{ticket.asker}</b> asks: “<InlineMarkdown clickable={false}>{ticket.text}</InlineMarkdown>”</> : ticket.kind === 'permission' ? <>{ticket.text}. {ticket.cantUndo && <>This can’t be undone. </>}It is paused until you answer.</> : ticket.kind === 'spend' ? <>{ticket.text}</> : ticket.kind === 'review' ? <>{ticket.text ? <InlineMarkdown clickable={false}>{ticket.text}</InlineMarkdown> : `${ticket.asker} is waiting for your approval.`}</> : <>{ticket.text}</>}
                 </p>
                 {ticket.context && <blockquote className="ticket-context" title={agentWrote(ticket) ? plainWords(ticket.context) : ticket.context}>{agentWrote(ticket) ? <InlineMarkdown clickable={false}>{ticket.context}</InlineMarkdown> : ticket.context}</blockquote>}
                 {ticket.until && <p className="ticket-until t-meta">{ticket.until}</p>}
@@ -246,8 +246,9 @@ export function NeedsYouTray({ tickets, working, onAnswer, onPermission, onSpend
                     {ticket.kind === 'permission' && onPermission && <>
                       <button type="button" className={main(index)} disabled={busy === ticket.id} onClick={() => void decide(ticket, 'allow_once')}><Check size={13} aria-hidden="true" />Allow<kbd>A</kbd></button>
                       {/* A yes to the web is already for the rest of the run (ADR 0104). */}
-                      {ticket.switch !== 'web' && <button type="button" className="btn" disabled={busy === ticket.id} onClick={() => void decide(ticket, 'allow_run')}>Allow for this run</button>}
-                      {ticket.team && <button type="button" className="btn" disabled={busy === ticket.id} onClick={() => void decide(ticket, 'allow_team')}>Allow for the whole team</button>}
+                      {/* What can't be undone is allowed one at a time (ADR 0121). */}
+                      {ticket.switch !== 'web' && !ticket.cantUndo && <button type="button" className="btn" disabled={busy === ticket.id} onClick={() => void decide(ticket, 'allow_run')}>Allow for this run</button>}
+                      {ticket.team && !ticket.cantUndo && <button type="button" className="btn" disabled={busy === ticket.id} onClick={() => void decide(ticket, 'allow_team')}>Allow for the whole team</button>}
                       <button type="button" className="btn" disabled={busy === ticket.id} onClick={() => void decide(ticket, 'deny')}>Deny<kbd>D</kbd></button>
                     </>}
                     {ticket.kind === 'spend' && onSpend && ticket.spendActions && <>

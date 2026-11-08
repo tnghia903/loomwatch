@@ -39,6 +39,8 @@ export interface Ticket {
   switch?: string | null
   /** A permission ticket's run has more than one agent, so "Allow for the whole team" means more. */
   team?: boolean
+  /** A permission ticket's action can't be undone, such as deleting an event: allowed once only (ADR 0121). */
+  cantUndo?: boolean
   /** A spend ticket's stop, which its answer names, and the words of its two answers. */
   stopId?: string
   spendActions?: { add: string; finish: string }
@@ -87,6 +89,7 @@ export function ticketsFrom(records: readonly RunRecord[], names: ReadonlyMap<st
         requestId: request.id,
         switch: request.switch ?? null,
         team: record.agentIds.length > 1,
+        cantUndo: Boolean(request.tool?.cantUndo),
         until: ifNobodyAnswers(request.expiresAt, 'it is declined', now),
       })
     }

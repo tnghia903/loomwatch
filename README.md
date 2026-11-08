@@ -691,7 +691,7 @@ instead of **Update and restart**.
 
 ```sh
 (cd ui && npx --yes pnpm@12 install --frozen-lockfile && npx --yes pnpm@12 run build)
-cargo build --release --locked --bin loomwatchd --bin loomwatch-osascript
+cargo build --release --locked --bin loomwatchd --bin loomwatch-osascript --bin loomwatch-mac-apps
 mkdir -p "$HOME/LoomWatch/teams"
 ./target/release/loomwatchd serve --teams-root "$HOME/LoomWatch/teams" --listen 127.0.0.1:3000 \
   --database .loomwatch/loomwatch.db
@@ -699,7 +699,8 @@ mkdir -p "$HOME/LoomWatch/teams"
 
 The browser app is built before the program because it is packed into it. On a Mac,
 `loomwatch-osascript` is what agents' commands run as `osascript`, so they can work in your other
-apps from inside the sandbox; `loomwatchd` finds it beside itself. `loomwatchd backup <file>`
+apps from inside the sandbox, and `loomwatch-mac-apps` runs agents' actions in Calendar, Reminders,
+Contacts and Notes once you connect them; `loomwatchd` finds both beside itself. `loomwatchd backup <file>`
 saves a copy of the run history, safely while it runs.
 
 </details>
