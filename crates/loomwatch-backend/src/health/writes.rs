@@ -112,9 +112,12 @@ fn listed(row: &sqlx::sqlite::SqliteRow) -> Value {
     })
 }
 
-/// What the agent is told about an entry's state.
-fn in_words(state: &str, said: Option<&str>) -> String {
+/// What the agent is told about where an entry, or a remove, stands.
+fn in_words(action: &str, state: &str, said: Option<&str>) -> String {
     match state {
+        "saved" if action == "remove" => {
+            "Taken out of Apple Health on the person's iPhone.".to_owned()
+        }
         "saved" => "Saved in Apple Health on the person's iPhone.".to_owned(),
         "removed" => "Taken out of Apple Health again.".to_owned(),
         "refused" => format!(
@@ -168,7 +171,7 @@ impl Health {
     }
 
     /// Waits up to [`PHONE_WAIT`] for the phone to answer for `id`, then says where it stands.
-    async fn answer_for(&self, id: &str) -> Result<Value, String> {
+    pub(super) async fn answer_for(&self, id: &str) -> Result<Value, String> {
         let started = tokio::time::Instant::now();
         loop {
             let row = self.row(id).await?.ok_or_else(|| {
@@ -178,6 +181,7 @@ impl Health {
             if state != "waiting" || started.elapsed() >= self.phone_wait {
                 let mut answer = listed(&row);
                 answer["inWords"] = json!(in_words(
+                    &row.get::<String, _>("action"),
                     &state,
                     row.get::<Option<String>, _>("said").as_deref()
                 ));

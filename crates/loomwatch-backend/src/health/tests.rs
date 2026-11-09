@@ -455,6 +455,15 @@ async fn removing_takes_out_only_what_was_logged_here() {
     let removing = called(&health, "remove_logged", json!({"id": meal["id"]})).await;
     assert_eq!(removing["state"], "waiting");
     let taken = phone_saves(&health, "phone-a").await;
+    // The agent hears it was taken out, not saved.
+    let removed = health
+        .answer_for(removing["id"].as_str().unwrap())
+        .await
+        .unwrap();
+    assert_eq!(
+        removed["inWords"],
+        "Taken out of Apple Health on the person's iPhone."
+    );
     assert_eq!(
         (
             taken[0]["action"].as_str(),
