@@ -7,6 +7,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Value, json};
 
+use crate::engine::{ReplyText, commentary};
+
 fn text_of(event: &Value) -> &str {
     event
         .pointer("/payload/content/text")
@@ -25,7 +27,23 @@ fn phase_of(event: &Value) -> Option<&str> {
 
 struct Turn {
     at: String,
-    text: String,
+    /// Its messages a paragraph apart, the words on the way left out, as the Mac's chat reads them.
+    text: ReplyText,
+}
+
+/// The notes an agent's answer ended with went to the run's record, not the answer (ADR 0062):
+/// its last line leaves them out too, so it reads as the answer and holds its widgets.
+fn leave_out_notes(lines: &mut [Value], agent: &str) {
+    let last = lines
+        .iter_mut()
+        .rev()
+        .find(|line| line["kind"] == "said" && line["agent"] == agent);
+    if let Some(line) = last {
+        let text = line["text"].as_str().unwrap_or_default();
+        if let Some((work, _)) = crate::split_answer_notes(text) {
+            line["text"] = json!(work.trim());
+        }
+    }
 }
 
 /// The lines of a run's talk, oldest first.
@@ -40,7 +58,8 @@ pub fn talk(events: &[Value]) -> Vec<Value> {
                  lines: &mut Vec<Value>,
                  live: bool| {
         if let Some(turn) = turns.remove(agent) {
-            let text = turn.text.trim();
+            let reply = turn.text.reply();
+            let text = reply.trim();
             if !text.is_empty() {
                 lines.push(json!({"kind": "said", "agent": agent, "at": turn.at, "text": text, "live": live}));
             }
@@ -64,9 +83,16 @@ pub fn talk(events: &[Value]) -> Vec<Value> {
                 }
                 let turn = turns.entry(agent.to_owned()).or_insert_with(|| Turn {
                     at: at.to_owned(),
-                    text: String::new(),
+                    text: ReplyText::default(),
                 });
-                turn.text.push_str(text_of(event));
+                let id = event.pointer("/payload/messageId").and_then(Value::as_str);
+                turn.text.push(text_of(event), id);
+            }
+            // The agent did something other than talk: what it says next is a new message.
+            ("tool_call" | "tool_update" | "plan" | "permission", _) => {
+                if let Some(turn) = turns.get_mut(agent) {
+                    turn.text.note_activity();
+                }
             }
             ("message", Some("user"))
                 if event.pointer("/raw/phase").and_then(Value::as_str)
@@ -79,6 +105,10 @@ pub fn talk(events: &[Value]) -> Vec<Value> {
             ("turn_end", _) => flush(&mut turns, agent, &mut lines, false),
             ("session_meta", _) => {
                 let payload = event.get("payload").unwrap_or(&Value::Null);
+                // Words written alongside tool calls were said on the way, not the answer.
+                if let (Some(id), Some(turn)) = (commentary(payload), turns.get_mut(agent)) {
+                    turn.text.set_aside(id);
+                }
                 match payload.get("phase").and_then(Value::as_str) {
                     Some("turn_purpose") => {
                         let purpose = payload.get("purpose").and_then(Value::as_str);
@@ -107,6 +137,7 @@ pub fn talk(events: &[Value]) -> Vec<Value> {
                         "from": payload.get("handoverFrom"),
                         "text": payload.get("question").and_then(Value::as_str).unwrap_or_default(),
                     })),
+                    Some("answer_notes") => leave_out_notes(&mut lines, agent),
                     _ => {}
                 }
             }
@@ -186,6 +217,88 @@ mod tests {
                 json!({"kind": "handover", "from": ["researcher"], "agent": "writer", "at": "2026-10-28T10:00:09Z"}),
                 json!({"kind": "said", "agent": "writer", "at": "2026-10-28T10:00:10Z", "text": "The shortlist.", "live": true}),
             ]
+        );
+    }
+
+    /// A daily brief, 2026-11-09: "Now the Vietnamese market pages." before a web read, then the
+    /// answer, reached the phone as "pages.## Summary", so the heading showed as words.
+    #[test]
+    fn messages_sit_a_paragraph_apart_and_words_on_the_way_are_left_out() {
+        let message = |seq, id: &str, text: &str| {
+            event(
+                seq,
+                "researcher",
+                "message",
+                json!({"role": "agent", "messageId": id, "content": {"type": "text", "text": text}}),
+            )
+        };
+        let tool = |seq| event(seq, "researcher", "tool_call", json!({"toolCallId": "t"}));
+        let on_the_way = |seq, id: &str| {
+            event(
+                seq,
+                "researcher",
+                "session_meta",
+                json!({"sessionUpdate": "agent_message_phase", "phase": "commentary", "messageId": id}),
+            )
+        };
+        let end = |seq| event(seq, "researcher", "turn_end", json!({}));
+
+        // Words on the way, set aside: only the answer stays.
+        let lines = talk(&[
+            message(1, "m1", "Now the Vietnamese market pages."),
+            on_the_way(2, "m1"),
+            tool(3),
+            message(4, "m2", "## Summary\nFor Vietnam"),
+            message(5, "m2", ", the biggest story."),
+            end(6),
+        ]);
+        assert_eq!(
+            lines[0]["text"],
+            "## Summary\nFor Vietnam, the biggest story."
+        );
+
+        // Two messages, neither set aside: a paragraph apart, by their ids.
+        let lines = talk(&[
+            message(1, "m1", "First."),
+            message(2, "m2", "## Second"),
+            end(3),
+        ]);
+        assert_eq!(lines[0]["text"], "First.\n\n## Second");
+
+        // No ids: a tool call between them is the boundary.
+        let lines = talk(&[
+            said(1, "researcher", "First."),
+            tool(2),
+            said(3, "researcher", "## Second"),
+            end(4),
+        ]);
+        assert_eq!(lines[0]["text"], "First.\n\n## Second");
+    }
+
+    /// The same brief: its answer ended with "## Not met", which the run's record keeps apart, so
+    /// the phone couldn't tell the Writer's line was the answer and drew its widgets on a copy.
+    #[test]
+    fn the_notes_an_answer_ended_with_leave_its_line() {
+        let events = vec![
+            said(
+                1,
+                "writer",
+                "# Brief\n\nThree stories.\n\n## Not met\n- No startup news",
+            ),
+            event(2, "writer", "turn_end", json!({})),
+            event(
+                3,
+                "writer",
+                "session_meta",
+                json!({"phase": "answer_notes", "not_met": ["No startup news"]}),
+            ),
+        ];
+        assert_eq!(talk(&events)[0]["text"], "# Brief\n\nThree stories.");
+
+        // Without the record's note, a closing section is the agent's own words.
+        assert_eq!(
+            talk(&events[..2])[0]["text"],
+            "# Brief\n\nThree stories.\n\n## Not met\n- No startup news"
         );
     }
 
