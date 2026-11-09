@@ -368,6 +368,25 @@ describe('writing to the box’s agent', () => {
     // that piece (the owner, 2026-10-26: a one-to-one chat opens in My agents).
     expect(shown(islandReducer(s, { type: 'pinned', pinned: null, now: at(1) }))?.[0]).toEqual(['Maya · chat', '/agents/maya?view=chat&run=c1', false])
   })
+
+  // The owner (2026-11-09): the agent worked on a second message while its figure at the notch
+  // glowed green, because its first answer, read in the chat and not at the notch, was still news.
+  it('shows only its newest turn: at work on your next message, not the answer before it', () => {
+    const pinnedOf = (state: IslandState) => state.teams?.filter((team) => team.pinned).map((team) => [team.runId, team.moment, team.result])
+    const answered = pinnedChat('c1', { status: 'succeeded', startedAt: iso(1), finishedAt: iso(2), reply: 'Two meetings' })
+    let s = play([[at(0), placed], [at(0), pinned], [at(0), runs()], [at(1), runs(pinnedChat('c1', { startedAt: iso(1), working: ['maya'] }))], [at(2), runs(answered)]])
+    expect(tucked(s.teams ?? []).pinned?.moment).toBe('done')
+    s = islandReducer(s, { ...runs(answered, pinnedChat('c2', { startedAt: null, status: 'queued' })), now: at(3) })
+    expect([pinnedOf(s), tucked(s.teams ?? []).pinned?.moment]).toEqual([[['c2', 'work', null]], 'work'])
+    s = islandReducer(s, { ...runs(answered, pinnedChat('c2', { startedAt: iso(3), working: ['maya'] })), now: at(3) })
+    expect([pinnedOf(s), tucked(s.teams ?? []).pinned?.moment]).toEqual([[['c2', 'work', null]], 'work'])
+    // Once that turn ends, its answer is the one shown, not the one before it.
+    s = islandReducer(s, { ...runs(answered, pinnedChat('c2', { status: 'succeeded', startedAt: iso(3), finishedAt: iso(4), reply: 'Three meetings' })), now: at(4) })
+    expect(pinnedOf(s)).toEqual([['c2', 'done', 'Three meetings']])
+    // Another team's answer is its own: it stays.
+    s = islandReducer(s, { ...runs(answered, run('r1', { status: 'succeeded', finishedAt: iso(4), reply: 'Kyoto' }), pinnedChat('c3', { startedAt: iso(5), working: ['maya'] })), now: at(5) })
+    expect(s.teams?.map((team) => [team.runId, team.moment])).toEqual([['r1', 'done'], ['c3', 'work']])
+  })
 })
 
 describe('the pinned agent’s slot, crew and requests for your teams', () => {

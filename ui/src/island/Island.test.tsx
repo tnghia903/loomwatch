@@ -669,6 +669,22 @@ describe('beside the notch at rest, on every screen', () => {
     expect(heads[1].getAttribute('data-moment')).toBe('work')
   })
 
+  // The owner (2026-11-09): the pinned agent worked on a second message while it glowed green
+  // beside the notch, because its first answer, read in the chat and not here, was still news.
+  it('while the pinned agent works on your next message it glows as at work, not as answered', async () => {
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    const { container } = render(<Island />)
+    place()
+    const glow = () => leftEar(container).querySelector('.island-pinned-head')?.getAttribute('data-moment')
+    await waitFor(() => expect(glow()).toBe('ready'))
+    const answered = pinnedChat('c1', { status: 'succeeded', reply: 'Two meetings', startedAt: new Date().toISOString(), finishedAt: new Date().toISOString() })
+    runs = [answered]
+    await waitFor(() => expect(glow()).toBe('done'), { timeout: ISLAND_WAITS.poll + 3_000 })
+    runs = [answered, pinnedChat('c2', { working: ['maya'], startedAt: new Date(Date.now() + 1_000).toISOString() })]
+    await waitFor(() => expect(glow()).toBe('work'), { timeout: ISLAND_WAITS.poll + 3_000 })
+  }, 15_000)
+
   it('keeps the teams’ news out at the notch while the pointer is on another screen; the list opens only where the pointer is', async () => {
     runs = [run('r1', { permissionRequests: [permission('p1')] })]
     const { container } = render(<Island />)

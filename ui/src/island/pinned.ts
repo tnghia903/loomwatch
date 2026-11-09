@@ -55,17 +55,26 @@ export function pinnedNow(id: string | null, jobs: readonly SavedJob[]): PinnedN
  *   stopped stays, as a stop.
  * - A team you pressed Start on that could not start says why, as a stop, while that is news: it
  *   ended after the island started watching (`since`) and you have not looked yet (`seen`).
+ * - Its chat shows its newest turn: an answer or a stop leaves once a later turn starts there, as
+ *   the agent has moved on. An answer you read in the chat, not at the notch, stayed news, and its
+ *   figure glowed as answered while it worked on your next message.
  */
 export function withPinned(teams: TeamNow[], pinned: PinnedNow | null, requests: readonly TeamRequest[] = [], since = 0, seen: ReadonlySet<string> = new Set()): TeamNow[] {
   if (!pinned) return teams
+  const started = (team: TeamNow) => Date.parse(team.startedAt ?? '') || 0
+  const ended = (team: TeamNow) => team.moment === 'done' || team.moment === 'fail'
   const mine = requests.filter((request) => request.askedBy.chatPath === pinned.chatPath)
   const asked = new Set(mine.map((request) => request.askedBy.runId))
   const crew = new Set(mine.flatMap((request) => (request.runId ? [request.runId] : [])))
   const waiting = mine.filter((request) => request.status === 'waiting')
+  // Its newest turn: one still going, else the one that started last. A turn at work may not have
+  // started yet (queued), so it is newest without a time.
+  const own = teams.filter((team) => team.teamPath === pinned.chatPath)
+  const newest = own.find((team) => !ended(team)) ?? own.reduce<TeamNow | null>((last, team) => (last && started(last) > started(team) ? last : team), null)
   const out: TeamNow[] = []
   for (const team of teams) {
     if (team.teamPath === pinned.chatPath) {
-      if (asked.has(team.runId) && (team.moment === 'done' || team.moment === 'fail')) continue
+      if (ended(team) && (team !== newest || asked.has(team.runId))) continue
       out.push({ ...team, teamName: pinned.name, agentName: pinned.name, link: pinned.link, pinned: true })
     } else if (crew.has(team.runId)) {
       if (team.moment !== 'done') out.push({ ...team, crewFor: pinned.name })
@@ -118,7 +127,6 @@ export function withPinned(teams: TeamNow[], pinned: PinnedNow | null, requests:
       })
     }
   }
-  const started = (team: TeamNow) => Date.parse(team.startedAt ?? '') || 0
   return out.sort((a, b) => URGENCY[a.moment] - URGENCY[b.moment] || started(a) - started(b))
 }
 
