@@ -133,7 +133,9 @@ impl Sender for Apns {
                 };
                 (token, format!("{}.push-type.widgets", self.key.topic))
             }
-            Push::Notice(_) | Push::Changed { .. } => (&to.token, self.key.topic.clone()),
+            Push::Notice(_) | Push::Changed { .. } | Push::Health => {
+                (&to.token, self.key.topic.clone())
+            }
         };
         let mut request = self
             .client

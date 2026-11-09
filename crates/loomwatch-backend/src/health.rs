@@ -7,9 +7,11 @@
 //! write and forget only its own readings.
 //!
 //! An agent given the Apple Health tool reads them through its calls, which ask the person first
-//! like every connected tool's. Nothing here writes to Health. Removing the tool, or the phone,
-//! deletes the readings.
-use std::sync::OnceLock;
+//! like every connected tool's. It can also log a meal, water or a weight, which the phone saves in
+//! Health ([`writes`], ADR 0123). Removing the tool, or the phone, deletes the readings and what
+//! was logged.
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use axum::Json;
 use axum::body::to_bytes;
@@ -23,6 +25,9 @@ use sqlx::Row as _;
 
 use crate::connected_tools::ToolCall;
 use crate::db::Db;
+
+mod writes;
+pub use writes::WRITES_ROUTE;
 
 /// Where a phone sends its readings (`PUT`) or takes them back (`DELETE`), at the door.
 pub const ROUTE: &str = "/phone/v0/health";
@@ -179,6 +184,10 @@ fn short(text: Option<&str>) -> Option<String> {
 #[derive(Clone)]
 pub struct Health {
     db: Db,
+    /// Phones to wake because something waits for them to save in Health.
+    wake: Arc<Mutex<HashSet<String>>>,
+    /// How long a log call waits for the phone's answer.
+    phone_wait: std::time::Duration,
 }
 
 static INSTALLED: OnceLock<Health> = OnceLock::new();
@@ -200,7 +209,11 @@ fn failed(error: &sqlx::Error) -> String {
 impl Health {
     #[must_use]
     pub fn new(db: Db) -> Self {
-        Self { db }
+        Self {
+            db,
+            wake: Arc::default(),
+            phone_wait: writes::PHONE_WAIT,
+        }
     }
 
     /// Keep `batch` from phone `device`, replacing what it sent for the same days and starts.
@@ -258,13 +271,13 @@ impl Health {
         Ok(batch.days.len() + batch.events.len())
     }
 
-    /// Delete phone `device`'s readings, or every phone's.
+    /// Delete phone `device`'s readings and what was logged for it, or every phone's.
     ///
     /// # Errors
     /// The database couldn't delete them.
     pub async fn forget(&self, device: Option<&str>) -> Result<(), String> {
         let mut writing = self.db.writer().begin().await.map_err(|e| failed(&e))?;
-        for table in ["health_days", "health_events"] {
+        for table in ["health_days", "health_events", "health_writes"] {
             sqlx::query(&format!(
                 "DELETE FROM {table} WHERE $1 IS NULL OR device = $1"
             ))
@@ -465,6 +478,9 @@ impl Health {
                 }
                 Err(said) => Err(said),
             },
+            "log_meal" | "log_water" | "log_weight" => self.log(call, arguments).await,
+            "logged" => self.logged(arguments).await,
+            "remove_logged" => self.remove(arguments).await,
             _ => Err(format!("There's no action called {call} here.")),
         };
         match answer {
@@ -514,7 +530,7 @@ fn range(arguments: &Value, weekly: bool) -> Result<(String, String), String> {
     Ok((from.to_string(), to.to_string()))
 }
 
-/// What the Apple Health tool offers: reading only.
+/// What the Apple Health tool offers: reading, and logging a meal, water or a weight.
 pub(crate) fn calls() -> Vec<ToolCall> {
     let range = json!({
         "from": {"type": "string", "description": "A day, 2026-10-01. Without it, 30 days before `to` (12 weeks for weekly)."},
@@ -535,7 +551,7 @@ pub(crate) fn calls() -> Vec<ToolCall> {
         read_only: true,
         cant_undo: false,
     };
-    vec![
+    let mut all = vec![
         call(
             "list_kinds",
             "List what's there",
@@ -572,11 +588,33 @@ pub(crate) fn calls() -> Vec<ToolCall> {
             "Each workout that started in the days asked about: its activity, when, and the energy burned when known.",
             json!({"type": "object", "properties": range}),
         ),
-    ]
+    ];
+    all.extend(writes::calls(&call));
+    all
 }
 
-/// `PUT` (readings) or `DELETE` (forget them) [`ROUTE`] from phone `device`, which the door let
-/// in.
+/// Whether the door hands `path` to [`route`]: the readings, or the entries to log.
+#[must_use]
+pub fn is_route(path: &str) -> bool {
+    path == ROUTE
+        || path == WRITES_ROUTE
+        || path
+            .strip_prefix(WRITES_ROUTE)
+            .and_then(|rest| rest.strip_prefix('/'))
+            .is_some_and(|id| !id.is_empty() && !id.contains('/'))
+}
+
+/// What a phone says about one entry it was given.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Settled {
+    saved: bool,
+    #[serde(default)]
+    said: Option<String>,
+}
+
+/// `PUT` (readings) or `DELETE` (forget them) [`ROUTE`], or `GET` the entries waiting to be
+/// logged ([`WRITES_ROUTE`]) and `POST` how one went, from phone `device`, which the door let in.
 pub async fn route(health: Option<&Health>, device: &str, request: Request) -> Response {
     let problem =
         |status: StatusCode, said: &str| (status, Json(json!({ "error": said }))).into_response();
@@ -586,6 +624,37 @@ pub async fn route(health: Option<&Health>, device: &str, request: Request) -> R
             "This computer can't keep Health readings right now.",
         );
     };
+    let path = request.uri().path().to_owned();
+    if let Some(rest) = path.strip_prefix(WRITES_ROUTE) {
+        return match (request.method().clone(), rest.strip_prefix('/')) {
+            (Method::GET, None) => match health.waiting_for(device).await {
+                Ok(writes) => Json(json!({ "writes": writes })).into_response(),
+                Err(said) => problem(StatusCode::INTERNAL_SERVER_ERROR, &said),
+            },
+            (Method::POST, Some(id)) => {
+                let Ok(body) = to_bytes(request.into_body(), 16 * 1024).await else {
+                    return problem(StatusCode::PAYLOAD_TOO_LARGE, "That answer is too long.");
+                };
+                let Ok(settled) = serde_json::from_slice::<Settled>(&body) else {
+                    return problem(
+                        StatusCode::BAD_REQUEST,
+                        "Say {\"saved\": true}, or false with what went wrong in \"said\".",
+                    );
+                };
+                match health
+                    .settle(device, id, settled.saved, settled.said.as_deref())
+                    .await
+                {
+                    Ok(changed) => Json(json!({ "settled": changed })).into_response(),
+                    Err(said) => problem(StatusCode::INTERNAL_SERVER_ERROR, &said),
+                }
+            }
+            _ => problem(
+                StatusCode::METHOD_NOT_ALLOWED,
+                "GET the entries, or POST how one went.",
+            ),
+        };
+    }
     match *request.method() {
         Method::PUT => {
             let Ok(body) = to_bytes(request.into_body(), MAX_BODY_BYTES).await else {

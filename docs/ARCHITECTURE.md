@@ -787,10 +787,21 @@ sleep and workouts as events, each filed under the day it started where the pers
 because only the door knows which phone is calling. It keeps the batch in `health_days` and
 `health_events` (`health.rs`, migration `20261108120000_health.sql`) under that phone's id, so a
 phone writes and forgets only its own (`DELETE` the same route). The Apple Health tool
-(`auth: fromPhone`, `loomwatch:apple-health`) connects once any readings exist. Its calls only read:
-`list_kinds`, `daily`, `weekly`, `latest`, `sleep` and `workouts`. When phones' days overlap, a
-day's total is the larger one and an average is averaged. Removing the tool deletes every
-reading, and removing a phone under Your devices deletes its readings.
+(`auth: fromPhone`, `loomwatch:apple-health`) connects once any readings exist. Its reading calls
+are `list_kinds`, `daily`, `weekly`, `latest`, `sleep`, `workouts` and `logged`. When phones' days
+overlap, a day's total is the larger one and an average is averaged.
+
+It can also log into Health (ADR 0123, `health/writes.rs`, migration
+`20261109120000_health_writes.sql`): `log_meal`, `log_water` and `log_weight` keep an entry in
+`health_writes` for the phone that sent readings last, and `remove_logged` (can't undo, so it asks
+every time) takes out one logged here. The push loop wakes that phone with a background push that
+carries no words (`Push::Health`). The phone takes what waits at `GET /phone/v0/health/writes`,
+saves it in Health under the entry's id so a second save keeps one, and answers
+`POST /phone/v0/health/writes/{id}` with `{"saved": true}` or `false` and why. The door answers
+these for the phone the key names, like the readings. The agent's call waits up to 20 seconds for
+that answer, then says the entry waits for the phone, which takes it when next opened or
+refreshed. Removing the tool deletes every reading and entry, and removing a phone under Your
+devices deletes its own.
 
 ### Permissions
 

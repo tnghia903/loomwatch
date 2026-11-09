@@ -109,7 +109,7 @@ pub(super) const CATALOG: &[Entry] = &[
         name: "Apple Health",
         site: "loomwatch:apple-health",
         url: "loomwatch:apple-health",
-        does: "Read your steps, sleep, heart rate and workouts",
+        does: "Read your steps, sleep, heart rate and workouts, and log meals, water and weight",
         auth: Auth::FromPhone,
         topic: Topic::FromPhone,
         example: "How did I sleep this week compared with last week?",
