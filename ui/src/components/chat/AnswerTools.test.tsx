@@ -5,6 +5,7 @@ import { answerFileName } from '../../lib/chat/format'
 import type { RunRecord } from '../../lib/runs/client'
 import type { AnswerCheck } from '../../lib/story/answerCheck'
 import type { ReceiptLine } from '../../lib/story/receipt'
+import { cascaded, DESKTOP, PHONE } from '../../test/cascade'
 import { AnswerTools } from './AnswerTools'
 
 vi.mock('../../lib/notion/useNotionSend', () => ({ useNotionSend: () => ({ hidden: false }) }))
@@ -124,6 +125,17 @@ describe('under a team’s answer in the chat', () => {
     expect(menu.getByRole('button', { name: 'Send to Notion' })).toBeInTheDocument()
     fireEvent.keyDown(share, { key: 'Escape' })
     expect(screen.queryByRole('group', { name: 'Share this answer' })).toBeNull()
+  })
+
+  // The owner (2026-11-09): in an agent's chat, beside its bench, the menu hung from Share's left
+  // edge ran past the column and was cut off. Share ends the row, so it opens toward the chat.
+  it('opens Share’s menu toward the chat, from the button’s right edge', () => {
+    setup()
+    fireEvent.click(screen.getByRole('button', { name: 'Share' }))
+    const menu = screen.getByRole('group', { name: 'Share this answer' })
+    for (const viewport of [DESKTOP, PHONE]) {
+      expect([cascaded(menu, 'right', viewport), cascaded(menu, 'left', viewport)]).toEqual(['0', null])
+    }
   })
 
   it('offers nothing to copy, save or send until the answer is finished', () => {
