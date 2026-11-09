@@ -985,13 +985,15 @@ a mark.tc-find-hit { box-shadow: none; }
   .tc-files .file-card-more { transition: none; }
 }
 
-/* Share: saving and sending behind one button. */
+/* Share: saving and sending behind one button. Share ends the answer's row, so its menu hangs from
+   the button's right edge and opens into the chat: hung from the left, in an agent's chat beside
+   its bench it ran past the column and was cut off. */
 .tc-share { position: relative; display: inline-flex; }
 .tc-share-menu {
   position: absolute;
   z-index: 20;
   bottom: calc(100% + 6px);
-  left: 0;
+  right: 0;
   display: grid;
   min-width: 220px;
   padding: 4px;
