@@ -255,6 +255,13 @@ describe('Team chat', () => {
     expect(screen.getByText(/this run did not record it/)).toBeInTheDocument()
   })
 
+  // The chat can't open what a stage was given: Info stood under every handover there, and opened
+  // an empty box.
+  it('shows Info under a handover only when there is something for it to open', () => {
+    setup([handover], { onInspectHandover: undefined })
+    expect(within(msg(/Researcher to Writer: handover/)).queryByRole('button', { name: 'Info' })).toBeNull()
+  })
+
   it('shows the message the timeline points at, even one folded into your review', () => {
     setup([reviewed(answer('review', 'Keep it short.', 30)), passedOn], { reveal: { id: 'handover:e31', at: 1 } })
     expect(msg(/Writer to you: handover/)).toHaveClass('flash')
@@ -394,11 +401,53 @@ describe('a check step in the chat', () => {
   it('shows LoomWatch’s own check as LoomWatch, under its face', () => {
     setup([message({ ...sentBack, from: 'loomwatch:check' })])
     const back = msg(/LoomWatch to Writer: sent back/)
-    expect(within(back).getByRole('img', { name: 'LoomWatch' })).toHaveAttribute('title', 'LoomWatch checks the work itself when no checker is on the team.')
+    expect(within(back).getByRole('img', { name: 'LoomWatch' })).toHaveAttribute('title', 'Your team has no checker, so LoomWatch checks the work against your message.')
     // Its face alone, as every sender in the chat is: not the app's tile.
     expect(within(back).getByRole('img', { name: 'LoomWatch' }).querySelector('svg.lw-face')).not.toBeNull()
     expect(within(back).queryByText('Lo')).toBeNull()
     expect(screen.queryByText(/loomwatch:check/)).toBeNull()
+    // Nobody's colour, as LoomWatch's answer in your place: a teammate's read as an agent.
+    expect(back).toHaveClass('hue-quiet')
+  })
+
+  // The owner (2026-11-09): the work handed to LoomWatch's own check carried the check's whole
+  // brief under the writer's name and an @LoomWatch chip, so it read as the writer tagging someone
+  // called LoomWatch with orders.
+  it('says only the work in a handover to a check, with its brief under Info and LoomWatch as LoomWatch', () => {
+    const brief = "### What Writer was given\n\nOnly the request: nothing was handed to Writer.\n\nTrace each claim in the work to what Writer was given first.\n\n### What Writer's work must satisfy\n1. at most 40 words\n2. Does what the request asked\n\nAn item with a number is Met only on what you measured.\n\nYour folder is the one the work was done in. The work is also in the file `/tmp/answer.md`, to count and measure.\n"
+    const work = message({ id: 'handover:e5', kind: 'handover', to: 'loomwatch:check', text: `### Work from Writer\n\nFirst draft.\n\n${brief}`, handedBy: { from: ['writer'], via: [] }, seq: 5, offsetMs: 30_000, ts: at(30) })
+    const onReply = vi.fn()
+    setup([work], { onReply })
+    const handedOver = msg(/Writer to LoomWatch: handover/)
+    expect(handedOver.querySelector('.chat-bubble .chat-text')?.textContent).toBe('First draft.')
+    expect(handedOver.querySelector('.chat-bubble')?.textContent).not.toMatch(/was given|Trace each claim|must satisfy|at most 40 words/)
+    // LoomWatch's face and, on hover, what it is: not an agent's weave and an @.
+    const chip = within(handedOver).getByTitle('Your team has no checker, so LoomWatch checks the work against your message.')
+    expect(chip.textContent).toBe('LoomWatch')
+    expect(chip.querySelector('svg.lw-face')).not.toBeNull()
+    expect([...chip.classList]).toEqual(['tc-mention', 'is-loomwatch'])
+    // The brief is LoomWatch's words to its check, under Info, said as LoomWatch's: what Writer was
+    // given and what it is checked against, not the method every check is told.
+    fireEvent.click(within(handedOver).getByRole('button', { name: 'Info' }))
+    const info = handedOver.querySelector('.chat-details')!
+    expect(within(handedOver).getByText('LoomWatch sent this to the check with Writer’s work.')).toBeInTheDocument()
+    expect(within(handedOver).getByText('What Writer was given')).toBeInTheDocument()
+    expect(within(handedOver).getByText('Only the request: nothing was handed to Writer.')).toBeInTheDocument()
+    expect([...info.querySelectorAll('li')].map((item) => item.textContent)).toEqual(['at most 40 words', 'Does what the request asked'])
+    expect(info.textContent).not.toMatch(/Trace each claim|measured|Your folder|answer\.md/)
+    // A reply quotes the work, not the brief.
+    fireEvent.click(within(handedOver).getByRole('button', { name: 'Reply to Writer: handover' }))
+    expect(onReply).toHaveBeenCalledWith(expect.objectContaining({ text: 'First draft.' }))
+  })
+
+  it('leaves out the brief of a check from before it said what the writer was given', () => {
+    setup([message({ id: 'handover:e5', kind: 'handover', to: 'editor', text: "### Work from Writer\n\nFirst draft.\n\n### What Writer's work must satisfy\n1. Every claim has a link\n", handedBy: { from: ['writer'], via: [] }, seq: 5 })])
+    const handedOver = msg(/Writer to Editor: handover/)
+    expect(handedOver.querySelector('.chat-bubble .chat-text')?.textContent).toBe('First draft.')
+    fireEvent.click(within(handedOver).getByRole('button', { name: 'Info' }))
+    // A team's own check step is named.
+    expect(within(handedOver).getByText('LoomWatch sent this to Editor with Writer’s work.')).toBeInTheDocument()
+    expect(within(handedOver).getByText('Every claim has a link')).toBeInTheDocument()
   })
 
   // ADR 0090: when nobody answered a routine's question in time, LoomWatch answered for you, under

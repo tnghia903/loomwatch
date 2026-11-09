@@ -1,10 +1,12 @@
 import { useCallback, useMemo } from 'react'
 
 import { useChatMentions } from '../../lib/chat/faces'
+import { LOOMWATCH_CHECK_ID, LOOMWATCH_CHECK_TITLE } from '../../lib/chat/helpers'
 import { mentionsIn, type ChatAgent, type Mention } from '../../lib/chat/route'
 import { FigureStill } from '../agents/FigureStill'
 import { useTeamFigure } from '../agents/figureContext'
 import { AgentMark } from '../ui/AgentMark'
+import { LoomFace } from '../ui/glyphs'
 import { Markdown } from '../ui/Markdown'
 import { SaidMention, type SaidMarks } from '../ui/saidMention'
 import { FoundText } from './FoundText'
@@ -57,9 +59,21 @@ function keptMentions(words: string, found: readonly Mention[]) {
  * An agent mentioned: its figure's head and its name in its colour, the whole name on hover when
  * cut short. The @ stays in the words, for screen readers; `bare` leaves it out, for an agent named
  * in a sentence rather than written to.
+ *
+ * LoomWatch's own check (ADR 0098) is no agent, and nobody writes to it: it wears LoomWatch's face,
+ * as where it speaks, in no teammate's colour, with no @, and says on hover what it is. A weave in
+ * a teammate's colour read as an agent tagged.
  */
 export function MentionChip({ id, name, hue, bare = false }: { id: string; name: string; hue: number; bare?: boolean }) {
   const figure = useTeamFigure(id)
+  if (id === LOOMWATCH_CHECK_ID) {
+    return (
+      <span className="tc-mention is-loomwatch" title={LOOMWATCH_CHECK_TITLE}>
+        <span className="tc-mention-face" aria-hidden="true"><LoomFace size={14} /></span>
+        <span className="tc-mention-name"><FoundText text={name} /></span>
+      </span>
+    )
+  }
   return (
     <span className={`tc-mention hue-${hue}`} title={name}>
       <span className="tc-mention-face" aria-hidden="true">{figure ? <FigureStill figure={figure} headOnly alt="" draggable={false} /> : <AgentMark id={id} size={14} />}</span>

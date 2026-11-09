@@ -84,7 +84,10 @@ after 5 tries"), a few seconds after you send it **Done when** shows under it, w
 read, in your own words, and "Up to N tries" when you named a number: the tries the run will use,
 the first work one of them (ADR 0098). The work is checked against them before it becomes the
 answer, by the team's check step when it checks the agent that answers, or else by LoomWatch
-itself, whose rounds show in the replies under LoomWatch's face alone, in the text colour. While
+itself, whose rounds show in the replies under LoomWatch's face alone, in the text colour. The
+work handed to a check says only the work, beside the check's chip (LoomWatch's face, for its own
+check); what the check was told besides, what the writer was given and what its work must
+satisfy, opens under that message's **Info**. While
 the check can still change, each item has one mark that takes it off the check from the next round
 on; a dropped item stays, struck through, and the same mark puts it back. An item taken off is
 neither sent back nor counted in the answer's badge, even when it is taken off while the run waits
