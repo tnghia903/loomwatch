@@ -153,6 +153,7 @@ impl Watch {
             }
             Push::Start { run, .. } => phone.starting = Starting::Next(run.clone()),
             Push::Widgets => phone.widgets = None,
+            Push::Health => {}
         }
     }
 }

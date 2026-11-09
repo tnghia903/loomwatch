@@ -109,8 +109,9 @@ async fn through(State(door): State<Arc<Door>>, mut request: Request) -> Respons
     if device.kind == Kind::Phone && request.uri().path() == push::ROUTE {
         return push::route(&door.devices, &door.push_key, &device, request).await;
     }
-    // So are its Health readings (ADR 0122): a phone writes and forgets only its own.
-    if device.kind == Kind::Phone && request.uri().path() == crate::health::ROUTE {
+    // So are its Health readings (ADR 0122) and the entries it logs into Health (ADR 0123): a
+    // phone sees, writes and forgets only its own.
+    if device.kind == Kind::Phone && crate::health::is_route(request.uri().path()) {
         return crate::health::route(crate::health::installed(), &device.id, request).await;
     }
     match device.kind {

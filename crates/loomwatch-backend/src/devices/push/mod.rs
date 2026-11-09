@@ -260,6 +260,9 @@ pub enum Push {
     },
     /// What the phone's widgets show changed: they read this computer again, closed app or not.
     Widgets,
+    /// An agent logged something for the phone to save in Apple Health (ADR 0123): the app is woken
+    /// in the background to take it. Nothing about the entry goes through Apple.
+    Health,
 }
 
 impl Push {
@@ -301,6 +304,7 @@ impl Push {
                 },
             }),
             Self::Widgets => json!({ "aps": { "content-changed": true } }),
+            Self::Health => json!({ "aps": { "content-available": 1 }, "health": "log" }),
         }
     }
 
@@ -310,6 +314,7 @@ impl Push {
         match self {
             Self::Activity { .. } | Self::Start { .. } => "liveactivity",
             Self::Widgets => "widgets",
+            Self::Health => "background",
             Self::Notice(_) | Self::Changed { .. } => "alert",
         }
     }
@@ -319,7 +324,8 @@ impl Push {
     #[must_use]
     pub fn priority(&self) -> u8 {
         match self {
-            Self::Activity { urgent: false, .. } => 5,
+            // Apple takes a background push only at 5.
+            Self::Activity { urgent: false, .. } | Self::Health => 5,
             _ => 10,
         }
     }
@@ -331,6 +337,7 @@ impl Push {
             Self::Notice(notice) => Some(notice.collapse_id()),
             Self::Changed { .. } => Some("changed".to_owned()),
             Self::Widgets => Some("widgets".to_owned()),
+            Self::Health => Some("health".to_owned()),
             Self::Activity { .. } | Self::Start { .. } => None,
         }
     }
@@ -430,6 +437,7 @@ pub fn spawn(devices: Arc<Devices>, keys: KeyPlace, home: &str) {
             let Some(send) = sender.clone() else {
                 continue;
             };
+            wake_for_health(&devices, &phones, send.as_ref()).await;
             let (runs, requests) = tokio::join!(
                 daemon.get_json("/api/runs?finishedWithin=86400&preview=true"),
                 daemon.get_json("/api/team-requests"),
@@ -483,6 +491,26 @@ pub fn spawn(devices: Arc<Devices>, keys: KeyPlace, home: &str) {
             }
         }
     });
+}
+
+/// Wakes each phone something waits for in Apple Health (ADR 0123). One that isn't woken, with no
+/// token or no network, takes it when it is next opened or refreshes.
+async fn wake_for_health(devices: &Devices, phones: &[(String, PushTarget)], send: &dyn Sender) {
+    let Some(health) = crate::health::installed() else {
+        return;
+    };
+    for id in health.take_wakes() {
+        let Some((_, target)) = phones.iter().find(|(phone, _)| *phone == id) else {
+            continue;
+        };
+        match send.send(target, &Push::Health).await {
+            Sent::Gone => devices.forget_push_token(&id, &target.token),
+            Sent::Failed(why) | Sent::KeyRefused(why) => {
+                eprintln!("warning: couldn't wake the phone for Health: {why}");
+            }
+            Sent::Done => {}
+        }
+    }
 }
 
 #[cfg(test)]

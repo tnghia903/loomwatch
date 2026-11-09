@@ -45,8 +45,11 @@ There are five ways a tool connects:
   exercise minutes, heart rate, resting heart rate, heart rate variability, weight, sleep and
   workouts. The iPhone sends one figure a day for each, plus each night's sleep and each workout,
   to the computer it's connected to. Apple Health connects once the first readings arrive. Agents
-  only read them. Removing Apple Health in Connections, or removing the iPhone under Your devices,
-  deletes the readings from this computer.
+  read them, and can log a meal, water or a weight, each asking you first. To let them, turn on
+  "Let agents log to Health" in the same place on your iPhone; the iPhone saves each entry in
+  Health, and an agent can take back only what it logged. Removing Apple Health in Connections, or
+  removing the iPhone under Your devices, deletes the readings, and the list of what was logged,
+  from this computer.
 
 - **On this Mac.** Calendar, Reminders, Notes and Contacts are your Mac's own apps, so they show
   only when LoomWatch runs on a Mac. Connecting one asks macOS: the first time, macOS asks you

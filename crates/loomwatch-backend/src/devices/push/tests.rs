@@ -1006,6 +1006,25 @@ async fn a_widget_push_goes_to_the_widgets_token() {
     );
 }
 
+/// The push that wakes the phone for Apple Health (ADR 0123) is a background push to the app,
+/// with nothing about the entry in it.
+#[tokio::test]
+async fn a_health_push_wakes_the_app_in_the_background_with_no_words() {
+    let seen: Seen = Arc::default();
+    let apns = Apns::at(push_key(), &apple(seen.clone()).await);
+    assert_eq!(apns.send(&target(), &Push::Health).await, Sent::Done);
+    let seen = seen.lock().unwrap();
+    assert_eq!(seen[0]["token"], target().token);
+    assert_eq!(seen[0]["topic"], "loomwatch.phone");
+    assert_eq!(seen[0]["type"], "background");
+    assert_eq!(seen[0]["priority"], "5");
+    assert_eq!(seen[0]["collapse"], "health");
+    assert_eq!(
+        seen[0]["body"],
+        json!({ "aps": { "content-available": 1 }, "health": "log" })
+    );
+}
+
 #[test]
 fn quiet_hours_within_one_day_and_across_midnight() {
     let at = |hour, minute| Utc.with_ymd_and_hms(2026, 11, 1, hour, minute, 0).unwrap();
@@ -1054,6 +1073,38 @@ fn a_phones_push_target_is_kept_with_it_and_old_files_still_open() {
     reopened.forget_push_token("p", TOKEN);
     assert!(Devices::open(&folder).push_targets().is_empty());
     let _ = std::fs::remove_dir_all(&folder);
+}
+
+/// The door answers a phone's Health paths itself, naming the phone (ADR 0123): the entries to
+/// log and how one went never reach the phone's other routes, which don't know them.
+#[tokio::test]
+async fn the_door_answers_a_phones_health_entries_itself() {
+    let devices = Devices::memory();
+    devices.connect_for_test(Kind::Phone, "phone-key");
+    let door = serve(door_router(
+        devices,
+        KeyPlace::memory(),
+        "http://127.0.0.1:9",
+    ))
+    .await;
+    let client = reqwest::Client::new();
+    for request in [
+        client.get(format!("{door}/phone/v0/health/writes")),
+        client
+            .post(format!("{door}/phone/v0/health/writes/lw-1"))
+            .json(&json!({"saved": true})),
+    ] {
+        let reply = request.bearer_auth("phone-key").send().await.unwrap();
+        let status = reply.status().as_u16();
+        let body: Value = reply.json().await.unwrap();
+        // Another test may have set this computer's Health store up; either way it is Health
+        // that answers, not a 404 from the phone's routes.
+        assert!(
+            (status == 200 && (body.get("writes").is_some() || body.get("settled").is_some()))
+                || (status == 503 && body["error"].as_str().unwrap().contains("Health")),
+            "{status} {body}"
+        );
+    }
 }
 
 #[tokio::test]
