@@ -1029,8 +1029,8 @@ a mark.tc-find-hit { box-shadow: none; }
 }
 /* A finger's worth to press, with the row drawn as it is. */
 @media (pointer: coarse) {
-  .chat-reply { position: relative; }
-  .chat-reply::after { content: ''; position: absolute; inset: -14px -4px; }
+  .chat-reply, .chat-info { position: relative; }
+  .chat-reply::after, .chat-info::after { content: ''; position: absolute; inset: -14px -4px; }
 }
 .tc-replying {
   display: flex;
@@ -1366,6 +1366,9 @@ button.tc-reply-quote:hover, button.tc-reply-quote:focus-visible { border-left-c
 /* LoomWatch's own check speaks under its face alone, in the text colour: no tile, no ring. */
 .chat-loomwatch { display: inline-flex; flex: none; align-items: center; justify-content: center; color: var(--color-ink-2); }
 .tc-react-head .lw-face { color: var(--color-ink-2); }
+/* Named in a chip, as where work is handed to it: no teammate's colour, its face as above. */
+.tc-mention.is-loomwatch { --hue: var(--color-ink); }
+.tc-mention.is-loomwatch .lw-face { color: var(--color-ink-2); }
 /* An answer at a stop quotes its question on one line, cut with an ellipsis: without this the grid
    column takes the whole unwrapped line and runs off the chat's edge. The line itself is held to
    the column too: set to the right, it would otherwise run off the chat's left edge, and its time

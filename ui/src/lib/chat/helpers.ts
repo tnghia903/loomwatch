@@ -22,6 +22,8 @@ export const HELPER_SEPARATOR = '~'
  */
 export const LOOMWATCH_CHECK_ID = 'loomwatch:check'
 export const LOOMWATCH_NAME = 'LoomWatch'
+/** What LoomWatch's own check is, on hover wherever its face stands for it. */
+export const LOOMWATCH_CHECK_TITLE = `Your team has no checker, so ${LOOMWATCH_NAME} checks the work against your message.`
 
 /** Whose helper `id` is, and its number; `null` for an agent of the team or you. */
 export function helperOf(id: string): { lead: string; number: number } | null {

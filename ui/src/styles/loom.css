@@ -260,7 +260,8 @@ span.story-schedule { cursor: default; }
   .chat-msg:hover .chat-info, .chat-msg:focus-within .chat-info { opacity: 1; }
 }
 .chat-details { display: grid; gap: 6px; margin-top: 6px; padding: 8px 11px; border: 1px solid var(--color-hairline); border-radius: 10px; background: var(--color-panel-solid); font-size: 12px; line-height: 1.45; color: var(--color-ink-2); }
-.chat-details p { margin: 0; }
+/* Its own lines sit tight; paragraphs in what it shows of a message (a check's brief) keep theirs. */
+.chat-details > p { margin: 0; }
 .chat-details b { font-weight: 600; color: var(--color-ink); }
 .chat-links { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 14px; }
 .chat-links .delivery-link { gap: 5px; font-size: 12px; }

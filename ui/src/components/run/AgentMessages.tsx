@@ -19,7 +19,7 @@ import { AvatarFace } from '../agents/AvatarFace'
 import { GuestNamesContext, TeamFiguresContext } from '../agents/figureContext'
 import { FIGURE_HUES, figureHue, type FigureChoice } from '../../lib/library/figures'
 import { InlineMarkdown, Markdown } from '../ui/Markdown'
-import { LOOMWATCH_CHECK_ID, LOOMWATCH_NAME, helperOf, wearerOf } from '../../lib/chat/helpers'
+import { LOOMWATCH_CHECK_ID, LOOMWATCH_CHECK_TITLE, LOOMWATCH_NAME, helperOf, wearerOf } from '../../lib/chat/helpers'
 import { LoomFace } from '../ui/glyphs'
 
 interface AgentMessagesProps {
@@ -383,7 +383,7 @@ function ChatMessage({ bubble, member, mentionable, alone, continued, open, flas
   const failed = part === 'said' && message.state === 'failed'
   const handover = isHandover(bubble)
   const asking = part === 'said' && message.kind === 'permission'
-  const words = spoken(bubble, member)
+  const { words, brief } = handed(bubble, member)
   const long = words.length > LONG.chars || words.split('\n').length > LONG.lines
   const [more, setMore] = useState(false)
   const reply = message.reply
@@ -392,14 +392,16 @@ function ChatMessage({ bubble, member, mentionable, alone, continued, open, flas
   const label = `${when(bubble)}, ${speaker ? name(speaker) : 'Someone'}${mentions.length ? ` to ${mentions.map((person) => (person.you ? 'you' : person.name)).join(' and ')}` : ''}: ${bubble.word}`
   // What the message's info holds: the record behind it, what a stage was given in full.
   const handedTo = handover ? mentions.filter((person) => !person.you) : part === 'reply' ? item.passedOn.map((passed) => member(passed.to)) : []
-  const info = part !== 'waiting' && (part === 'reply' ? Boolean(reply) : Boolean(message.evidenceId || message.context || handedTo.length > 0 || item.line.derived))
+  // Info is there only with something to open: a screen that can't open what a stage was given
+  // (the chat's own) showed it on every handover, and it opened empty.
+  const info = part !== 'waiting' && (part === 'reply' ? Boolean(reply) : Boolean(message.evidenceId || message.context || brief || (onInspectHandover && handedTo.length > 0) || item.line.derived))
   // A reply quotes what it answers, as yours do: a question back by what it asks, anything else by
   // its first words.
   const quoted = quote ? { what: quoteWhat(quote, member), text: quote.part === 'reply' && quote.item.line.message.reply?.asksBack ? questionBackOf(quote.text) : spoken(quote, member) } : null
   // What you can reply to: anything an agent said, other than a permission request (answered with
   // its own buttons) and a message that never arrived.
   // Nor LoomWatch's own answer in your place (ADR 0090): there is nobody there to reach.
-  const toReply = onReply && speaker && !mine && speaker.id !== LOOMWATCH_ID && part !== 'waiting' && !asking && !failed && text.trim() ? replyFor(bubble, speaker.id, mentions) : null
+  const toReply = onReply && speaker && !mine && speaker.id !== LOOMWATCH_ID && part !== 'waiting' && !asking && !failed && text.trim() ? replyFor(bubble, speaker.id, mentions, words) : null
   // A reply's quote already says whom it answers; it names someone only when it goes elsewhere, as
   // your approval does when it passes the work on.
   const addressed = quote ? mentions.filter((person) => !quote.from.includes(person.id)) : mentions
@@ -429,7 +431,7 @@ function ChatMessage({ bubble, member, mentionable, alone, continued, open, flas
       </li>
     )}
     <li
-      className={`chat-msg ${mine ? 'mine' : ''} ${continued ? 'continued' : ''} ${flash ? 'flash' : ''} ${failed ? 'failed' : ''} hue-${speaker?.id === LOOMWATCH_ID ? 'quiet' : speaker?.hue ?? 0}`}
+      className={`chat-msg ${mine ? 'mine' : ''} ${continued ? 'continued' : ''} ${flash ? 'flash' : ''} ${failed ? 'failed' : ''} hue-${speaker?.id === LOOMWATCH_ID || speaker?.id === LOOMWATCH_CHECK_ID ? 'quiet' : speaker?.hue ?? 0}`}
       data-bubble={bubble.key}
       tabIndex={-1}
       aria-label={label}
@@ -495,6 +497,12 @@ function ChatMessage({ bubble, member, mentionable, alone, continued, open, flas
               </p>
             )}
             {part === 'said' && message.context && <Context text={message.context} />}
+            {brief && speaker && (
+              <>
+                <p>{LOOMWATCH_NAME} sent this to {mentions[0] && mentions[0].id !== LOOMWATCH_CHECK_ID ? mentions[0].name : 'the check'} with {name(speaker)}’s work.</p>
+                <div className="chat-text selectable"><Markdown>{brief}</Markdown></div>
+              </>
+            )}
             {part === 'said' && message.reached && mentions[0] && <p>{reachedLine(message.reached, name(mentions[0]))}</p>}
             {calls.length > 0 && (
               <details className="chat-calls">
@@ -529,9 +537,10 @@ function replyKind(bubble: Bubble): ReplyKind {
   return 'message'
 }
 
-/** A reply to this bubble: who said it, to which agent (none when it was to you), and its words. */
-function replyFor(bubble: Bubble, from: string, mentions: readonly Member[]): Omit<ReplyTo, 'runId'> {
-  return { messageId: bubble.key, from, to: mentions.find((person) => !person.you)?.id ?? null, kind: replyKind(bubble), text: bubble.text }
+/** A reply to this bubble: who said it, to which agent (none when it was to you), and its words as
+    the bubble shows them (`spoken`). */
+function replyFor(bubble: Bubble, from: string, mentions: readonly Member[], words: string): Omit<ReplyTo, 'runId'> {
+  return { messageId: bubble.key, from, to: mentions.find((person) => !person.you)?.id ?? null, kind: replyKind(bubble), text: words }
 }
 
 /**
@@ -579,14 +588,52 @@ function quoteWhat(quoted: Bubble, member: (id: string) => Member): string {
   return `${who ? (who.you ? 'your' : `${who.name}’s`) : 'the'} ${thing}`
 }
 
-/**
- * A message's words as its speaker says them. A handover a check step is given opens on "Work from"
- * its writer, which the name above it already says.
- */
+/** A message's words as its speaker says them (`handed`). */
 function spoken(bubble: Bubble, member: (id: string) => Member): string {
-  if (!isHandover(bubble) || bubble.from.length !== 1) return bubble.text
+  return handed(bubble, member).words
+}
+
+/**
+ * A message's words as its speaker says them, and for a handover a check step is given, the check's
+ * brief. That handover opens on "Work from" its writer, which the name above it already says, and
+ * the work is followed by what the writer was given and what its work must satisfy (the daemon's
+ * `check_material`). The brief is LoomWatch's words to the checker, not the writer's: read as the
+ * writer's, it looked like the writer tagging LoomWatch with instructions. So the bubble says the
+ * work, and its Info opens the brief.
+ */
+function handed(bubble: Bubble, member: (id: string) => Member): { words: string; brief: string | null } {
+  const said = { words: bubble.text, brief: null }
+  if (!isHandover(bubble) || bubble.from.length !== 1) return said
+  const name = member(bubble.from[0]).name
+  const heading = (line: string) => (/^#+\s/.test(line) ? line.replace(/^#+\s*/, '').trim() : null)
   const [first, ...rest] = bubble.text.trimStart().split('\n')
-  return first.replace(/^#+\s*/, '').trim() === `Work from ${member(bubble.from[0]).name}` ? rest.join('\n').trimStart() : bubble.text
+  if (first.replace(/^#+\s*/, '').trim() !== `Work from ${name}`) return said
+  // The brief's first heading, in runs from before it began with what the writer was given too.
+  const opens = new Set([`What ${name} was given`, `What ${name}'s work must satisfy`])
+  const at = rest.findIndex((line) => opens.has(heading(line) ?? ''))
+  if (at < 0) return { words: rest.join('\n').trim(), brief: null }
+  return { words: rest.slice(0, at).join('\n').trim(), brief: briefFacts(rest.slice(at), name) || null }
+}
+
+/**
+ * Of a check's brief, what is about this work: what the writer was given, and the items its work
+ * is checked against. The method the check is told after each (trace each claim, measure a number,
+ * read an item that can't apply, where the work's file is) is the same in every check, and read in
+ * the chat it was 150 words of instructions to nobody there.
+ */
+function briefFacts(lines: readonly string[], name: string): string {
+  const heading = (line: string) => line.replace(/^#+\s*/, '').trim()
+  const items = lines.findIndex((line) => /^#+\s/.test(line) && heading(line) === `What ${name}'s work must satisfy`)
+  if (items < 0) return lines.join('\n').trim()
+  // What it was given ends on how to trace a claim to it.
+  const given = lines.slice(0, items).join('\n').trim().split(/\n{2,}/)
+  if (given.at(-1)?.startsWith('Trace each claim')) given.pop()
+  const listed = []
+  for (const line of lines.slice(items + 1)) {
+    if (/^\d+\.\s/.test(line)) listed.push(line)
+    else if (listed.length || line.trim()) break
+  }
+  return [given.join('\n\n'), [lines[items], ...listed].join('\n')].filter(Boolean).join('\n\n').trim()
 }
 
 /** What a message still owed says: who is writing it, or that it waits on you; or that none came. */
@@ -632,7 +679,7 @@ function Avatar({ member, size, plain = false }: { member: Member; size: number;
   // LoomWatch's own check (ADR 0098) wears LoomWatch's face: it is no agent, so it has no card.
   if (member.id === LOOMWATCH_CHECK_ID) {
     return (
-      <span className="chat-loomwatch" role="img" aria-label={LOOMWATCH_NAME} title={`${LOOMWATCH_NAME} checks the work itself when no checker is on the team.`}>
+      <span className="chat-loomwatch" role="img" aria-label={LOOMWATCH_NAME} title={LOOMWATCH_CHECK_TITLE}>
         <LoomFace size={size} />
       </span>
     )
@@ -658,8 +705,9 @@ function membersOf(lanes: readonly Party[], order: readonly Party[], figures: Re
     // A helper (ADR 0079) wears its agent's figure and colour, and its own number.
     const helper = helperOf(lane.id)
     const figure = figures.get(lane.id) ?? figures.get(wearerOf(lane.id))
-    // LoomWatch's own answer (ADR 0090) wears no teammate's colour, nor takes one from a helper.
-    const own = lane.operator || lane.id === LOOMWATCH_ID
+    // LoomWatch's own answer (ADR 0090) and its own check (ADR 0098) wear no teammate's colour, nor
+    // take one from a helper.
+    const own = lane.operator || lane.id === LOOMWATCH_ID || lane.id === LOOMWATCH_CHECK_ID
     members.set(lane.id, { id: lane.id, name: lane.operator ? 'You' : lane.name, you: lane.operator, number: helper ? helper.number : number.get(lane.id) ?? null, initials: initialsOf(lane.name), hue: own ? 0 : figure ? figureHue(figure) : (hue++ % FIGURE_HUES) + 1 })
   }
   return members
