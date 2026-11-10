@@ -1363,8 +1363,8 @@ pub(crate) const SHOW_WIDGET: Block = Block::new(
      score is good or a speed is safe: scale\n\
      - things that happened or are due on dates, such as a history, a life or a plan with \
      deadlines: timeline\n\
-     - places to go or where things are, such as cafés near them, a trip's stops or where to \
-     stay: map\n\
+     - places the person may go to or where things are, such as cafés near them, a trip's stops \
+     or where to stay: map\n\
      - something to see, drawn by you: how a machine, a body or nature works, where a thing's \
      parts are, what happens in steps or rounds, such as how it moves or a message passing \
      through a network, or how one thing changes another, which play: picture\n\
@@ -1380,7 +1380,8 @@ pub(crate) const SHOW_WIDGET: Block = Block::new(
      beside the rest, that check they took it in: quiz\n\
      A finder answers them at once from what you set out; choices send their reply to you and \
      wait for another answer. When things in order have dates, show a timeline, which spaces \
-     them by the time between them, rather than a flow. \
+     them by the time between them, rather than a flow. When you name places to go, show them \
+     on a map: a comparison of their hours or prices may stand beside it, never in its place. \
      A flow's line says that one thing leads to the next, so two or three parts that sit side by \
      side, such as a shop's sales and support teams, are shown with compare, not flow. When what \
      you explain can be seen, such as how an engine or a lung works or how a tide moves, draw it \
@@ -1554,12 +1555,13 @@ pub(crate) const SHOW_WIDGET_EVENTS: Block = Block::new(
 /// A map's `places` (ADR 0114, amended 10 November).
 pub(crate) const SHOW_WIDGET_PLACES: Block = Block::new(
     "bus.show_widget.places",
-    "map: 1 to 8 places, each its name as the place writes it, where it is (lat and lng as you \
-     found them, such as in a map link or on the place's page; leave out a place you found no \
-     position for, never guess one), its category, and a note of a sentence on why it suits \
-     them. Give its rating out of 5, its price from 1 ($) to 4 ($$$$) and its own website when \
-     you found them. LoomWatch puts a pin on a map for each, and the person opens it in a maps \
-     app for directions.",
+    "map: 1 to 8 places, each its name as the place writes it, its address, and where it is: lat \
+     and lng from a map link or the place's page, or as you know them for a place or building \
+     you know well. Near is enough, since its name and address lead the person's maps app to the \
+     place itself; leave out a place you can't put on the map at all. Then its category and a \
+     sentence on why it suits them, and its rating out of 5, its price from 1 ($) to 4 ($$$$) \
+     and its own website when you found them. LoomWatch puts a pin on a map for each, and the \
+     person opens it in a maps app for directions.",
 );
 
 /// A map's `from` (ADR 0114, amended 10 November).

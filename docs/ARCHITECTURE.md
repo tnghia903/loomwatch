@@ -599,7 +599,7 @@ a line per kind) pick the kind by the shape of what the agent tells: things side
 parts of one thing a comparison, figures a chart, figures over time a graph, one thing leading to
 the next a flow, a process to follow steps, something to see (a machine, a living thing, how
 something moves) a picture, where a figure stands among ranges a scale, things on dates a timeline,
-places to go a map, an answer that turns on the person's own case a finder, a check after an explanation a quiz, and so
+places to go a map (beside any comparison of them, never replaced by one), an answer that turns on the person's own case a finder, a check after an explanation a quiz, and so
 on; a flow's arrows mean order, so parts side by side are a comparison, and things in order with
 dates are a timeline. A finder answers at once from what the agent set out, where choices send the
 person's reply to the agent. A quick answer's last ask (`intent::SHOW_IN_REPLY`) names the same,
@@ -652,7 +652,8 @@ time between them, says how long the gaps worth noticing are at the coarser of t
 and puts today among them when one is still to come. Scales and timelines keep nothing.
 
 A map (`widgets/map.rs`, ADR 0114, amended 10 November) has 1 to 8 `places`, each its name, `lat`
-and `lng` as the agent found them (it is told never to guess one), and what it found of it: a
+and `lng` from what the agent found, or as it knows a place it knows well (near is enough: the
+name and address lead a maps app to the place), and what it found of it: a
 `category` of nine (food, cafe, bar, shop, hotel, sight, park, transit, other), a `note`, an
 `address`, a `rating` out of 5 kept to one decimal, a `price` from 1 to 4 and its own website
 (`link`, a public `http(s)` address). An optional `from` is where the person starts. The daemon
