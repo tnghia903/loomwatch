@@ -1013,9 +1013,14 @@
 .wg-map-card .wg-place-facts { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wg-map-card-more { font: 400 12px/16px var(--font-sans); color: var(--color-ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* MapLibre's own parts: the credit small and quiet, and the ⌘-scroll hint in the app's type. */
-.wg-map-canvas .maplibregl-ctrl-attrib { font: 400 10px/14px var(--font-sans); background: var(--map-glass); color: var(--color-ink-2); }
+/* MapLibre's own parts: the credit small and quiet on the map's glass, its (i) light on a dark
+   map, and the ⌘-scroll hint in the app's type. */
+.wg-map-canvas .maplibregl-ctrl-attrib,
+.wg-map-canvas .maplibregl-ctrl-attrib.maplibregl-compact { font: 400 10px/14px var(--font-sans); background: var(--map-glass); color: var(--color-ink-2); backdrop-filter: blur(12px); }
 .wg-map-canvas .maplibregl-ctrl-attrib a { color: inherit; }
+.wg-map-canvas .maplibregl-ctrl-attrib-button,
+.wg-map-canvas .maplibregl-compact-show .maplibregl-ctrl-attrib-button { background-color: transparent; }
+[data-theme="dark"] .wg-map-canvas .maplibregl-ctrl-attrib-button { filter: invert(1); }
 .wg-map-canvas .maplibregl-cooperative-gesture-screen { font: 500 14px/20px var(--font-sans); }
 
 /* The large map, across the window. */

@@ -27,6 +27,9 @@ export interface MapCanvasProps {
   credit?: 'top-left' | 'bottom-right'
 }
 
+/** How long the maps' credit shows open before it folds into its (i). */
+const CREDIT_SHOWS_MS = 5_000
+
 const quiet = () => typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
 
 /** The map's layers in the theme's colours (`mapLook.ts`). */
@@ -99,9 +102,16 @@ export default function WidgetMapCanvas({ places, from, picked, onPick, room, sm
     }
     drawn.touchZoomRotate.disableRotation()
     drawn.addControl(new AttributionControl({ compact: true }), credit)
-    // The maps' credit shows when the map first draws and folds into its (i) once you move the
-    // map, as OpenStreetMap's credit rules ask: MapLibre's own way, left as it is.
-    drawn.on('load', () => declutter(pins.current, shown.current))
+    // The maps' credit shows when the map first draws and folds into its (i) once you move the map
+    // (MapLibre's own way) or after five seconds, as OpenStreetMap's credit rules allow; the (i)
+    // opens it again. It can't be left out: the map's data and tiles ask for it.
+    let folding = 0
+    drawn.on('load', () => {
+      declutter(pins.current, shown.current)
+      folding = window.setTimeout(() => {
+        box.current?.querySelector('.maplibregl-ctrl-attrib.maplibregl-compact')?.classList.remove('maplibregl-compact-show')
+      }, CREDIT_SHOWS_MS)
+    })
     drawn.on('moveend', () => declutter(pins.current, shown.current))
     // Before the tiles come, the pins already stand where they belong.
     const placed = requestAnimationFrame(() => declutter(pins.current, shown.current))
@@ -131,6 +141,7 @@ export default function WidgetMapCanvas({ places, from, picked, onPick, room, sm
       new Marker({ element: start, anchor: 'top', offset: [0, -8] }).setLngLat([from.lng, from.lat]).addTo(drawn)
     }
     return () => {
+      window.clearTimeout(folding)
       cancelAnimationFrame(placed)
       drawn.remove()
       map.current = null
