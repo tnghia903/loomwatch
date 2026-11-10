@@ -37,7 +37,8 @@ import { SaidMention, type SaidMarks } from './saidMention'
  *
  * Research answers mark each claim and cite it: "[Sourced] … [Paper](https://…)". The mark reads
  * as a small tag and the links after the claim as its sources, not as bracketed text and a run of
- * underlined titles. The private citation marks a ChatGPT model wrote into answers saved before the
+ * underlined titles. Every other web link is a chip too, where it stands, and a web address is never
+ * shown as an address: it is read by its page, or its site ([`linkAddresses`]). The private citation marks a ChatGPT model wrote into answers saved before the
  * daemon took them out are dropped ([`withoutCitationMarks`]).
  *
  * `inline` keeps it inside a sentence: bold, code and links are shown, and a paragraph, heading or
@@ -195,6 +196,7 @@ const BETWEEN_SOURCES = /^[\s.,;·|()[\]]*$/
 const OPENS_SOURCES = /\s*[([]\s*$/
 
 function markClaimsAndSources(tree: { children: HastChild[] }) {
+  linkAddresses(tree)
   const visit = (nodes: HastChild[]) => {
     for (const node of nodes) {
       if (node.type !== 'element') continue
@@ -203,6 +205,36 @@ function markClaimsAndSources(tree: { children: HastChild[] }) {
         markSources(node)
       }
       if (node.tagName !== 'pre' && node.tagName !== 'code') visit(node.children)
+    }
+  }
+  visit(tree.children)
+}
+
+/** A web address alone: `https://…` with nothing else in it. */
+const ADDRESS = /^https?:\/\/[^\s<>"`]+$/i
+
+/**
+ * Every web address is a link the person reads by its page, never as an address: an address an
+ * agent wrote alone in inline code, "`https://…`", is the link it means (code with anything else in
+ * it stays code), and a link whose words are its own address, a bare address included, says its
+ * site instead (`breadyard.com`). Its chip then names the page when the run's search found it.
+ * Fenced code is left as it is.
+ */
+function linkAddresses(tree: { children: HastChild[] }) {
+  const visit = (nodes: HastChild[]) => {
+    for (const node of nodes) {
+      if (node.type !== 'element' || node.tagName === 'pre') continue
+      const only = node.children.length === 1 && node.children[0].type === 'text' ? node.children[0] : null
+      if (node.tagName === 'code' && only && ADDRESS.test(only.value.trim())) {
+        node.tagName = 'a'
+        node.properties = { href: only.value.trim() }
+      }
+      if (node.tagName === 'a' && /^https?:\/\//i.test(String(node.properties.href ?? ''))) {
+        const words = only?.value.trim() ?? ''
+        if (only && /^(https?:\/\/|www\.)/i.test(words)) only.value = hostOf(String(node.properties.href)) ?? words
+        continue
+      }
+      visit(node.children)
     }
   }
   visit(tree.children)
@@ -279,10 +311,12 @@ function markSources(block: HastElement) {
 }
 
 /**
- * A source a claim cites (ADR 0116): its site's own icon, which LoomWatch fetches once from the
- * site's root and keeps (the page never loads anything from the link itself), then its page's title
- * as the run's web search found it, else the link's own words; the title and site on hover. Without
- * an icon it is its words and the arrow, as before.
+ * A web link (ADR 0116, amended 10 November: every one, not only a claim's sources): its site's
+ * own icon, which LoomWatch fetches once from the site's root and keeps (the page never loads
+ * anything from the link itself), then its page's title as the run's web search found it, else the
+ * link's own words, which are its site when they were its address ([`linkAddresses`]); the title
+ * and site on hover. Without an icon it is its words and the arrow. A claim's sources stand after
+ * its words ([`markSources`]); any other link is a chip where it stands.
  */
 function SourceChip({ href, label }: { href: string | undefined; label: ReactNode }) {
   const titles = useContext(SourceTitlesContext)
@@ -326,7 +360,7 @@ const COMPONENTS: Components = {
     const path = filePathFromLink(href)
     if (path) return <FileChip path={path} />
     if (href && !/^([a-z][a-z0-9+.-]*:|#)/i.test(href)) return <span className="md-unlinked">{label}</span>
-    if (className === 'md-source') return <SourceChip href={href} label={label} />
+    if (className === 'md-source' || siteOf(href)) return <SourceChip href={href} label={label} />
     return <a href={href} target="_blank" rel="noreferrer">{label}</a>
   },
   code: ({ children: text, className }) => {
