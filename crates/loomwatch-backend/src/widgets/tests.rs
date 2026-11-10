@@ -54,7 +54,7 @@ fn each_kind_reads_with_only_its_own_fields() {
 #[test]
 fn a_bad_widget_says_what_to_change() {
     let cases = [
-        (json!({"kind": "map", "title": "x"}), "isn't a widget"),
+        (json!({"kind": "table", "title": "x"}), "isn't a widget"),
         (
             json!({"kind": "chart", "title": "x", "bars": [{"label": "a", "value": 1}]}),
             "bars has 1; give 2 to 12",
@@ -895,7 +895,7 @@ fn every_kind_the_tool_offers_has_its_place_in_the_guide() {
         .iter()
         .map(|kind| kind.as_str().unwrap())
         .collect();
-    assert_eq!(kinds.len(), 14);
+    assert_eq!(kinds.len(), 15);
     let guide = SHOW_WIDGET.default_text();
     let habit = crate::agent::prompt::WIDGETS.default_text();
     let kind_line = SHOW_WIDGET_KIND.default_text();

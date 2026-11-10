@@ -391,6 +391,7 @@ The stand-in also answers the Skills page's Write it and Change it, from the wor
 `MOCK-BRIEF` in a message makes it show two charts, a checklist and choices at once, then answer
 with a long brief that places the charts between its bullets and the checklist under a heading.
 `MOCK-KINDS` makes it show a finder, a scale, a timeline and a quiz, each under its own words.
+`MOCK-MAP` makes it show a map of three lunch places near an office in Singapore's one-north.
 A message ending in "?" is read as a question and answered without work, so no tool is called.
 
 ## Evidence transport

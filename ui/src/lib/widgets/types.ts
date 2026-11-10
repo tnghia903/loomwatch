@@ -103,6 +103,27 @@ export interface WidgetPin { label: string; value: number }
     `-500` for 500 BC), what happened or is due, and a few words more. */
 export interface WidgetEvent { date: string; label: string; note?: string }
 
+/** What sort of place a map's place is, for its pin's mark. */
+export type PlaceCategory = 'food' | 'cafe' | 'bar' | 'shop' | 'hotel' | 'sight' | 'park' | 'transit' | 'other'
+
+/** One place on a map: its name, where the agent found it, and what it found of it: a few words
+    on why it suits you, its street address, its rating out of 5, how dear it is (1 to 4) and its
+    own website. */
+export interface WidgetPlace {
+  name: string
+  lat: number
+  lng: number
+  category?: PlaceCategory
+  note?: string
+  address?: string
+  rating?: number
+  price?: number
+  link?: string
+}
+
+/** Where you are or start: a map's distances are from here. */
+export interface WidgetStart { name: string; lat: number; lng: number }
+
 export type WidgetSpec =
   | { kind: 'choices'; title: string; options: WidgetChoice[] }
   | { kind: 'checklist'; title: string; items: WidgetItem[] }
@@ -118,6 +139,7 @@ export type WidgetSpec =
   | { kind: 'quiz'; title: string; checks: WidgetCheck[] }
   | { kind: 'scale'; title: string; ranges: WidgetRange[]; pins: WidgetPin[]; unit?: string; prefix?: string; decimals?: number }
   | { kind: 'timeline'; title: string; events: WidgetEvent[] }
+  | { kind: 'map'; title: string; places: WidgetPlace[]; from?: WidgetStart }
   /** A skill the agent suggested with `suggest_skill` (ADR 0118): its name in words, when to use
       it, and what to do. Nothing is saved until the person saves it. */
   | { kind: 'skill'; title: string; description: string; instructions: string }

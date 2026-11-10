@@ -6,11 +6,12 @@
 //! reply became the answer are kept with it ([`of_answer`], [`store`]); what the person ticks or
 //! changes is kept beside them, and the next run's conversation says so ([`showed`], [`changes`]).
 //!
-//! Fourteen kinds, drawn by the app (`ui/src/components/chat/widgets/`): choices the person taps to
+//! Fifteen kinds, drawn by the app (`ui/src/components/chat/widgets/`): choices the person taps to
 //! reply, a checklist they tick, a calculator whose results `LoomWatch` works out as they change its
 //! inputs ([`formula`]), a finder whose questions they answer to reach the outcome for their own
 //! case ([`finder`]), a quiz that checks they took in what was explained ([`quiz`]), steps they
-//! tap through, a picture whose numbered parts they step through, and seven to look at: a
+//! tap through, a picture whose numbered parts they step through, a map of places they open in a
+//! maps app ([`map`]), and seven to look at: a
 //! comparison of two or three things side by side (or the parts of one thing) with facts read
 //! across, a chart whose bars `LoomWatch` draws to scale from the figures the agent gives, a graph
 //! of bars or a line over labels, a scale of named ranges with figures pinned where they fall
@@ -31,6 +32,7 @@
 pub(crate) mod finder;
 pub(crate) mod formula;
 pub(crate) mod host;
+pub(crate) mod map;
 pub(crate) mod picture;
 pub(crate) mod quiz;
 pub(crate) mod scale;
@@ -145,6 +147,16 @@ pub(crate) mod limits {
     pub(crate) const EVENTS: (usize, usize) = (2, 12);
     pub(crate) const EVENT_LABEL_CHARS: usize = 60;
     pub(crate) const EVENT_NOTE_CHARS: usize = 160;
+    /// A map's places, and what each may say.
+    pub(crate) const PLACES: (usize, usize) = (1, 8);
+    pub(crate) const PLACE_NAME_CHARS: usize = 60;
+    pub(crate) const PLACE_NOTE_CHARS: usize = 200;
+    pub(crate) const PLACE_ADDRESS_CHARS: usize = 120;
+    pub(crate) const PLACE_LINK_CHARS: usize = 300;
+    pub(crate) const FROM_NAME_CHARS: usize = 40;
+    /// The farthest two places on one map may be apart: a city, a region or a road trip, and a
+    /// place given on the wrong side of the world is caught.
+    pub(crate) const MAP_SPREAD_KM: f64 = 2_000.0;
 }
 
 /// One widget, as the agent asked for it and `LoomWatch` checked it.
@@ -295,6 +307,14 @@ pub(crate) enum Widget {
     Timeline {
         title: String,
         events: Vec<timeline::Event>,
+    },
+    /// Places on a map, each a pin where the agent found it, with how far each is from where the
+    /// person starts ([`map`]). Each opens in a maps app for directions; nothing is kept.
+    Map {
+        title: String,
+        places: Vec<map::Place>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        from: Option<map::Start>,
     },
 }
 
@@ -471,7 +491,8 @@ impl Widget {
             | Self::Finder { title, .. }
             | Self::Quiz { title, .. }
             | Self::Scale { title, .. }
-            | Self::Timeline { title, .. } => title,
+            | Self::Timeline { title, .. }
+            | Self::Map { title, .. } => title,
         }
     }
 
@@ -492,6 +513,7 @@ impl Widget {
             Self::Quiz { .. } => "quiz",
             Self::Scale { .. } => "scale",
             Self::Timeline { .. } => "timeline",
+            Self::Map { .. } => "map",
         }
     }
 
@@ -521,6 +543,7 @@ impl Widget {
             Self::Quiz { .. } => "a quiz",
             Self::Scale { .. } => "a scale",
             Self::Timeline { .. } => "a timeline",
+            Self::Map { .. } => "a map",
         };
         format!("{what} \"{}\"", self.title())
     }
@@ -608,10 +631,11 @@ pub(crate) fn read(arguments: &Value) -> Result<Widget, String> {
         "quiz" => quiz::read(arguments, title)?,
         "scale" => scale::read(arguments, title)?,
         "timeline" => timeline::read(arguments, title)?,
+        "map" => map::read(arguments, title)?,
         other => {
             return Err(format!(
                 "kind \"{other}\" isn't a widget: use compare, chart, graph, scale, timeline, \
-                 flow, steps, picture, calculator, checklist, finder, quiz, marks or choices"
+                 map, flow, steps, picture, calculator, checklist, finder, quiz, marks or choices"
             ));
         }
     };
@@ -1339,6 +1363,8 @@ pub(crate) const SHOW_WIDGET: Block = Block::new(
      score is good or a speed is safe: scale\n\
      - things that happened or are due on dates, such as a history, a life or a plan with \
      deadlines: timeline\n\
+     - places the person may go to or where things are, such as cafés near them, a trip's stops \
+     or where to stay: map\n\
      - something to see, drawn by you: how a machine, a body or nature works, where a thing's \
      parts are, what happens in steps or rounds, such as how it moves or a message passing \
      through a network, or how one thing changes another, which play: picture\n\
@@ -1354,7 +1380,8 @@ pub(crate) const SHOW_WIDGET: Block = Block::new(
      beside the rest, that check they took it in: quiz\n\
      A finder answers them at once from what you set out; choices send their reply to you and \
      wait for another answer. When things in order have dates, show a timeline, which spaces \
-     them by the time between them, rather than a flow. \
+     them by the time between them, rather than a flow. When you name places to go, show them \
+     on a map: a comparison of their hours or prices may stand beside it, never in its place. \
      A flow's line says that one thing leads to the next, so two or three parts that sit side by \
      side, such as a shop's sales and support teams, are shown with compare, not flow. When what \
      you explain can be seen, such as how an engine or a lung works or how a tide moves, draw it \
@@ -1372,9 +1399,9 @@ pub(crate) const SHOW_WIDGET: Block = Block::new(
 /// `show_widget`'s `kind`.
 pub(crate) const SHOW_WIDGET_KIND: Block = Block::new(
     "bus.show_widget.kind",
-    "compare, chart, graph, scale, timeline, flow, steps, picture, calculator, checklist, finder, \
-     quiz, marks or choices, picked by the shape of what you are telling. Fill in only that \
-     kind's fields.",
+    "compare, chart, graph, scale, timeline, map, flow, steps, picture, calculator, checklist, \
+     finder, quiz, marks or choices, picked by the shape of what you are telling. Fill in only \
+     that kind's fields.",
 );
 
 /// A picture's `drawing` (ADR 0117).
@@ -1523,6 +1550,25 @@ pub(crate) const SHOW_WIDGET_EVENTS: Block = Block::new(
      note of a few more. A date is a year such as 1997, a month such as 1997-06 or a day such \
      as 1997-06-26; a year before year 1 is below zero, -500 for 500 BC. LoomWatch puts them in \
      date order and spaces them by the time between them.",
+);
+
+/// A map's `places` (ADR 0114, amended 10 November).
+pub(crate) const SHOW_WIDGET_PLACES: Block = Block::new(
+    "bus.show_widget.places",
+    "map: 1 to 8 places, each its name as the place writes it, its address, and where it is: lat \
+     and lng from a map link or the place's page, or as you know them for a place or building \
+     you know well. Near is enough, since its name and address lead the person's maps app to the \
+     place itself; leave out a place you can't put on the map at all. Then its category and a \
+     sentence on why it suits them, and its rating out of 5, its price from 1 ($) to 4 ($$$$) \
+     and its own website when you found them. LoomWatch puts a pin on a map for each, and the \
+     person opens it in a maps app for directions.",
+);
+
+/// A map's `from` (ADR 0114, amended 10 November).
+pub(crate) const SHOW_WIDGET_FROM: Block = Block::new(
+    "bus.show_widget.from",
+    "map: where the person is or starts, when the places are near it, such as their office: its \
+     name, lat and lng. LoomWatch tells you how far each place is from it.",
 );
 
 /// A calculator result's `note`.
@@ -1688,6 +1734,48 @@ pub(crate) fn tool_definition() -> Value {
             "additionalProperties": false
         }
     });
+    let position = |what: &str| {
+        json!({
+            "lat": {"type": "number", "description": format!("Where {what} is: degrees north, below zero south"), "minimum": -90, "maximum": 90},
+            "lng": {"type": "number", "description": format!("Where {what} is: degrees east, below zero west"), "minimum": -180, "maximum": 180}
+        })
+    };
+    let mut place = json!({
+        "name": {"type": "string", "description": "Its name, as the place writes it", "minLength": 1},
+        "category": {"type": "string", "description": "What sort of place it is", "enum": map::Category::names().collect::<Vec<_>>()},
+        "note": {"type": "string", "description": "A sentence on what it is and why it suits them"},
+        "address": {"type": "string", "description": "Its street address, as written there"},
+        "rating": {"type": "number", "description": "Its rating out of 5, as its reviews give it", "minimum": 1, "maximum": 5},
+        "price": {"type": "integer", "description": "1 cheap ($) to 4 dear ($$$$)", "minimum": 1, "maximum": 4},
+        "link": {"type": "string", "description": "Its own website"}
+    });
+    if let (Some(fields), Value::Object(at)) = (place.as_object_mut(), position("the place")) {
+        fields.extend(at);
+    }
+    let places = json!({
+        "type": "array",
+        "description": SHOW_WIDGET_PLACES.text(),
+        "maxItems": limits::PLACES.1,
+        "items": {
+            "type": "object",
+            "properties": place,
+            "required": ["name", "lat", "lng"],
+            "additionalProperties": false
+        }
+    });
+    let mut start = json!({
+        "name": {"type": "string", "description": "A word or two, such as Your office", "minLength": 1}
+    });
+    if let (Some(fields), Value::Object(at)) = (start.as_object_mut(), position("it")) {
+        fields.extend(at);
+    }
+    let from = json!({
+        "type": "object",
+        "description": SHOW_WIDGET_FROM.text(),
+        "properties": start,
+        "required": ["name", "lat", "lng"],
+        "additionalProperties": false
+    });
     let mut tool = json!({
         "name": TOOL,
         "description": SHOW_WIDGET.text(),
@@ -1697,7 +1785,7 @@ pub(crate) fn tool_definition() -> Value {
                 "kind": {
                     "type": "string",
                     "description": SHOW_WIDGET_KIND.text(),
-                    "enum": ["compare", "chart", "graph", "scale", "timeline", "flow", "steps", "picture", "calculator", "checklist", "finder", "quiz", "marks", "choices"]
+                    "enum": ["compare", "chart", "graph", "scale", "timeline", "map", "flow", "steps", "picture", "calculator", "checklist", "finder", "quiz", "marks", "choices"]
                 },
                 "title": {
                     "type": "string",
@@ -1961,6 +2049,8 @@ pub(crate) fn tool_definition() -> Value {
             ("ranges", ranges),
             ("pins", pins),
             ("events", events),
+            ("places", places),
+            ("from", from),
         ] {
             properties.insert(name.to_owned(), field);
         }
@@ -2005,6 +2095,9 @@ pub(crate) fn shown(widget: &Widget, place: u32) -> Value {
     }
     if let Widget::Timeline { events, .. } = widget {
         out["order"] = json!(timeline::line(events));
+    }
+    if let Widget::Map { places, from, .. } = widget {
+        out["distances"] = json!(map::distances_line(places, from.as_ref()));
     }
     out["next"] = json!(SHOW_WIDGET_SHOWN.text());
     out
@@ -2315,7 +2408,8 @@ pub(crate) fn read_state(widget: &Widget, state: &Value) -> Result<Value, String
         | Widget::Picture { .. }
         | Widget::Graph { .. }
         | Widget::Scale { .. }
-        | Widget::Timeline { .. } => Err(format!("{} keep nothing", widget.kind())),
+        | Widget::Timeline { .. }
+        | Widget::Map { .. } => Err(format!("{} keep nothing", widget.kind())),
     }
 }
 
@@ -2416,7 +2510,8 @@ pub(crate) fn showed(widgets: &[Kept]) -> Option<String> {
             Widget::Finder { .. }
             | Widget::Quiz { .. }
             | Widget::Scale { .. }
-            | Widget::Timeline { .. } => {
+            | Widget::Timeline { .. }
+            | Widget::Map { .. } => {
                 format!("{} ({})", kept.spec.named(), in_brief(&kept.spec))
             }
         })
@@ -2424,8 +2519,9 @@ pub(crate) fn showed(widgets: &[Kept]) -> Option<String> {
     Some(format!("[Under this answer: {}.]", each.join("; ")))
 }
 
-/// A finder, a quiz, a scale or a timeline in a few words, for the next run: its questions and
-/// outcomes, how many questions, its ranges and where each figure falls, or its first events.
+/// A finder, a quiz, a scale, a timeline or a map in a few words, for the next run: its questions
+/// and outcomes, how many questions, its ranges and where each figure falls, its first events, or
+/// its places.
 fn in_brief(widget: &Widget) -> String {
     match widget {
         Widget::Finder {
@@ -2451,6 +2547,7 @@ fn in_brief(widget: &Widget) -> String {
             scale::pins_line(ranges, pins, prefix.as_deref(), unit.as_deref(), *decimals)
         ),
         Widget::Timeline { events, .. } => timeline::line(events),
+        Widget::Map { places, from, .. } => map::line(places, from.as_ref()),
         _ => String::new(),
     }
 }
@@ -2540,7 +2637,8 @@ fn change(widget: &Widget, state: &Value) -> Option<String> {
         | Widget::Picture { .. }
         | Widget::Graph { .. }
         | Widget::Scale { .. }
-        | Widget::Timeline { .. } => None,
+        | Widget::Timeline { .. }
+        | Widget::Map { .. } => None,
     }
 }
 

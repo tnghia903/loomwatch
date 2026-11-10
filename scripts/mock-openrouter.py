@@ -18,6 +18,8 @@ Replies are scripted from what the request says, so a run exercises real tool ca
   heading, and leaves the choices to the end (ADR 0114: a long answer's widgets stand in it)
 - "MOCK-KINDS" in the task           -> four show_widget calls at once (a finder, a quiz, a scale
   and a timeline), then an answer that places each under the words it goes with
+- "MOCK-MAP" in the task             -> a show_widget call with a map of three lunch places near an
+  office in Singapore's one-north, then an answer that places it under its words
 - "MOCK-FAIL-402" in the task         -> a 402 out-of-credits answer
 - the chat's read of an @ message     -> TALK for a greeting, thanks or a question ("hi", "thanks",
                                          "Explain …", "… ?"), so the agents answer it in the chat;
@@ -202,6 +204,46 @@ def kinds_with(places):
     ])
 
 
+# ADR 0114, amended 10 November: a map of places near where the person starts.
+MAP_WIDGET = {
+    "kind": "map",
+    "title": "Lunch near Galaxis",
+    "from": {"name": "Galaxis", "lat": 1.29947, "lng": 103.78753},
+    "places": [
+        {
+            "name": "Bread Yard", "lat": 1.29875, "lng": 103.78761, "category": "cafe",
+            "note": "A bakery-café that started on the SUTD campus: pasta and brunch, quick but unhurried.",
+            "rating": 4.8, "price": 2, "link": "https://breadyard.sg",
+        },
+        {
+            "name": "One Fattened Calf Burgers", "lat": 1.29812, "lng": 103.78702, "category": "food",
+            "note": "The best burgers around here; go early, they often sell out by 2 pm.",
+            "rating": 4.6, "price": 2,
+        },
+        {
+            "name": "Wok Palace", "lat": 1.30561, "lng": 103.79213, "category": "food",
+            "note": "Chinese food with room for a group: dim sum and zi char stir-fries.",
+            "address": "1 Fusionopolis Way", "rating": 4.2, "price": 1,
+        },
+    ],
+}
+
+
+def map_with(places):
+    """An answer that places the map after the words that lead to it."""
+    place = (places + [""])[0]
+    return "\n".join([
+        "Lunch near Galaxis without going out in the rain: all three are a short walk under cover.",
+        "",
+        "**Bread Yard** is the closest, for pasta and brunch; **One Fattened Calf** has the burgers; "
+        "**Wok Palace** fits a group.",
+        "",
+        place,
+        "",
+        "Tap a place for its website and directions.",
+    ])
+
+
 def brief_with(places):
     """A long brief, the charts' place lines between its bullets, the checklist's under a heading."""
     place = (places + ["", "", "", ""])[:4]
@@ -296,7 +338,7 @@ def plan(body):
         if call_name.endswith("dispatch"):
             # Both dispatches answered with "accepted": end this turn; the results come back later.
             return ("text", "I handed the two parts of the question to the Researcher. Their findings come back next.")
-        if call_name.endswith("show_widget") and ("MOCK-BRIEF" in latest_task(messages) or "MOCK-KINDS" in latest_task(messages)):
+        if call_name.endswith("show_widget") and any(word in latest_task(messages) for word in ("MOCK-BRIEF", "MOCK-KINDS", "MOCK-MAP")):
             # Every widget shown this turn answered with its place line, in the order shown.
             places = []
             for message in reversed(messages):
@@ -306,7 +348,10 @@ def plan(body):
                     places.insert(0, json.loads(text_of(message.get("content"))).get("place", ""))
                 except (ValueError, AttributeError):
                     places.insert(0, "")
-            return ("text", kinds_with(places) if "MOCK-KINDS" in latest_task(messages) else brief_with(places))
+            task = latest_task(messages)
+            if "MOCK-MAP" in task:
+                return ("text", map_with(places))
+            return ("text", kinds_with(places) if "MOCK-KINDS" in task else brief_with(places))
         if call_name.endswith("show_widget"):
             # ADR 0114: write the place line on a line of its own, between words that lead to the
             # widget and words that say what to try, as the tool asks.
@@ -425,6 +470,8 @@ def plan(body):
         return ("calls", [(find_tool(names, "show_widget"), spec) for spec in BRIEF_WIDGETS])
     if "MOCK-KINDS" in task and find_tool(names, "show_widget"):
         return ("calls", [(find_tool(names, "show_widget"), spec) for spec in KINDS_WIDGETS])
+    if "MOCK-MAP" in task and find_tool(names, "show_widget"):
+        return ("calls", [(find_tool(names, "show_widget"), MAP_WIDGET)])
     if "MOCK-TOOL:" in task:
         line = task.rsplit("MOCK-TOOL:", 1)[1].strip().splitlines()[0]
         call, _, arguments = line.partition(" ")

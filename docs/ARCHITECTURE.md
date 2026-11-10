@@ -586,7 +586,7 @@ questions lead to the outcome for the person's own case, a quiz that checks what
 explained, steps to tap through, a comparison of two or three things side by side, a chart whose
 bars LoomWatch draws to scale from the agent's figures, a graph of bars or a line over labels, a
 scale of named ranges with figures pinned where they fall, a timeline of events on their dates, a
-row of marks, a flow, or a picture the agent draws (ADR 0117). The bus offers it only to that agent
+map of places, a row of marks, a flow, or a picture the agent draws (ADR 0117). The bus offers it only to that agent
 (`BusSeat.answers`): the run's responder, told to the bus once per run (`TeamBus::answered_by`), not
 a helper or an agent started by another, with a person there, and with its `widgets` switch on.
 Absent, the switch is `widgets::DEFAULT_ON`, which is on: an agent asked for a chart or something
@@ -599,7 +599,7 @@ a line per kind) pick the kind by the shape of what the agent tells: things side
 parts of one thing a comparison, figures a chart, figures over time a graph, one thing leading to
 the next a flow, a process to follow steps, something to see (a machine, a living thing, how
 something moves) a picture, where a figure stands among ranges a scale, things on dates a timeline,
-an answer that turns on the person's own case a finder, a check after an explanation a quiz, and so
+places to go a map (beside any comparison of them, never replaced by one), an answer that turns on the person's own case a finder, a check after an explanation a quiz, and so
 on; a flow's arrows mean order, so parts side by side are a comparison, and things in order with
 dates are a timeline. A finder answers at once from what the agent set out, where choices send the
 person's reply to the agent. A quick answer's last ask (`intent::SHOW_IN_REPLY`) names the same,
@@ -650,6 +650,25 @@ a day that exists; the daemon puts them in date order and writes each date one w
 answers with that order (`order`). The app (`ui/src/lib/widgets/timeline.ts`) spaces events by the
 time between them, says how long the gaps worth noticing are at the coarser of their two dates,
 and puts today among them when one is still to come. Scales and timelines keep nothing.
+
+A map (`widgets/map.rs`, ADR 0114, amended 10 November) has 1 to 8 `places`, each its name, `lat`
+and `lng` from what the agent found, or as it knows a place it knows well (near is enough: the
+name and address lead a maps app to the place), and what it found of it: a
+`category` of nine (food, cafe, bar, shop, hotel, sight, park, transit, other), a `note`, an
+`address`, a `rating` out of 5 kept to one decimal, a `price` from 1 to 4 and its own website
+(`link`, a public `http(s)` address). An optional `from` is where the person starts. The daemon
+refuses a position off the Earth or at 0, 0, a name given twice, and places more than 2,000 km
+apart (a place given on the wrong side of the world), and the call answers with each place's
+distance from `from`, or how far apart the places are (`distances`), written one way in three
+twins: `map::distance`, `distance` in `ui/src/lib/widgets/map.ts` and the iPhone's
+`MapDistance.written` (`350 m`, `1.2 km`, `1,240 km`). The Mac's page draws it with MapLibre
+(loaded only when a map shows) on OpenFreeMap's OpenStreetMap map, recoloured for light and dark
+(`mapLook.ts`): a pin for each place in its sort's colour, a card for each over the map's bottom,
+and, opened, the map across the window with the place's card beside it, its website and Directions,
+which asks whether to open Apple Maps or Google Maps (`directions`: by name and address when there
+is one, else by position). The iPhone draws it with Apple Maps and looks each place up in Apple's
+own listing, by its name within 1.5 km of the agent's position (`PlaceMatch`), for its exact
+position, phone number and Look Around view. Maps keep nothing.
 
 A picture (ADR 0117) is the one kind the agent draws: its `drawing` is SVG, read by
 `widgets/picture.rs`, which keeps only shapes (`path`, `circle`, `ellipse`, `rect`, `line`,
@@ -758,7 +777,10 @@ included), asks only `https://<site>/favicon.ico`, else the icon the site's home
 its first 256 KB (never an SVG), keeps only an ICO, PNG, GIF, JPEG or WebP of at most 512 KB, and
 keeps it in `<state dir>/site-icons/` for 30 days. Only `LoomWatch`'s own page on this computer's address can
 ask (`watch_api::local_evidence`), and a paired iPhone through the door (`phone::ALLOWED`), which
-passes the call on as a local program's. The phone never asks the site itself.
+passes the call on as a local program's. The phone never asks the site itself. A map in an
+answer is the other thing the page loads from outside LoomWatch: the map itself, from one fixed
+host (`MAP_STYLE` in `ui/src/lib/widgets/map.ts`, OpenFreeMap), which learns the area shown; it
+never loads a place's own website or a picture an agent names.
 
 ### The Mac's own apps as tools
 
@@ -1057,7 +1079,7 @@ drawn on the canvas.
 | `ask_user(question, context?)` | A question for the person running the team. Returns at once; the answer arrives as the agent's next turn | none — the run waits on the operator |
 | `memory_search`, `memory_read`, `memory_write`, `checkpoint` | The team's Notebook, when the team turns it on (see [TEAM_MEMORY.md](TEAM_MEMORY.md)) | none |
 | `earlier_work(work)` | Read one earlier piece of the team's work in full. Offered in runs started from the app, which have a team chat to read | none |
-| `show_widget(kind, title, …)` | Put a widget in the answer: a comparison, a chart, a graph, a scale, a timeline, a flow, steps, a picture it draws, a calculator, a checklist, a finder, a quiz, marks or choices, picked by the shape of what it tells, placed by the line it answers with (ADR 0114). Offered only to the agent whose reply is the answer, with its switch on (on unless `widgets: false`) | none — kept with the answer when the run succeeds |
+| `show_widget(kind, title, …)` | Put a widget in the answer: a comparison, a chart, a graph, a scale, a timeline, a map, a flow, steps, a picture it draws, a calculator, a checklist, a finder, a quiz, marks or choices, picked by the shape of what it tells, placed by the line it answers with (ADR 0114). Offered only to the agent whose reply is the answer, with its switch on (on unless `widgets: false`) | none — kept with the answer when the run succeeds |
 
 The bus grants the *ability* to delegate. The *judgment* of when to comes with it:
 
