@@ -12,6 +12,7 @@ import { WidgetCompare } from './WidgetCompare'
 import { WidgetFinder } from './WidgetFinder'
 import { WidgetFlow } from './WidgetFlow'
 import { WidgetGraph } from './WidgetGraph'
+import { WidgetMap } from './WidgetMap'
 import { WidgetMarks } from './WidgetMarks'
 import { WidgetPicture } from './WidgetPicture'
 import { WidgetQuiz } from './WidgetQuiz'
@@ -52,8 +53,8 @@ export function AnswerWidgets(props: AnswerWidgetsProps) {
  * One widget in an answer (ADR 0114): choices to tap, a checklist to tick, a calculator LoomWatch
  * works out, a finder whose questions lead you to the outcome for your case, a quiz that checks
  * what the answer explained, steps to tap through, a picture the agent drew whose parts you step
- * through, or a comparison, a chart, a graph, a scale, a timeline, a row of marks or a flow to look
- * at. What you tick, answer or change is kept, and the next work's conversation says so. When it
+ * through, a map of places to open in a maps app, or a comparison, a chart, a graph, a scale, a
+ * timeline, a row of marks or a flow to look at. What you tick, answer or change is kept, and the next work's conversation says so. When it
  * arrives as news (ADR 0051) and this window hasn't drawn it before, its marks grow in once
  * (`wg-fresh`); history and a widget drawn again are simply there.
  */
@@ -120,6 +121,7 @@ function drawn({ kept, onChange, onChoose, chosen = null, live = false, by }: Om
     case 'quiz': return <HeldQuiz kept={kept} onChange={onChange} live={live} />
     case 'scale': return <WidgetScale spec={kept.spec} />
     case 'timeline': return <WidgetTimeline spec={kept.spec} />
+    case 'map': return <WidgetMap spec={kept.spec} />
     case 'skill': return <WidgetSkill kept={kept} onChange={onChange} live={live} by={by} />
   }
   return null

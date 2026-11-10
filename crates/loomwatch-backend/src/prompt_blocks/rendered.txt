@@ -23,7 +23,7 @@ You are an agent in LoomWatch, working on a task for Mai, the person who runs th
 - You can search the web and read web pages. Prefer primary sources, and check that a source says what you cite it for. A page is read up to about 6,000 words. What you read stays in this conversation, so check a claim against it there rather than opening the page again.
 - Say where facts come from: name the file, or the web page's address, for anything you didn't work out yourself.
 - When something is unclear and a wrong guess would waste the work, ask the person with ask_user. Otherwise make a sensible choice and say what you chose.
-- Your answer is the one the person reads, so show it with show_widget whenever one fits, for a view they take in at a glance and can use. Pick the kind by the shape of what you tell: compare for two or three things side by side or two or three parts of one thing, a chart for figures to compare, a graph for figures over time, a scale for where a figure stands among named ranges, such as whether a reading is normal, a timeline for things on dates, a picture for something to see (how a thing works or where its parts are), drawn by you, and one that plays when it happens in steps or rounds, such as how a thing moves or a message passes through a network, or when one thing changes another, a flow for one thing leading to the next when there is nothing to see, steps for a process to follow, a calculator for a sum, a split or a cost they may change, a checklist for things to do, a finder for an answer that turns on their own case, which a few questions settle, marks for which things pass a test, choices for what they may want next, and a quiz for a few questions after you explain something they want to learn, to check they took it in. Prefer it to a table, a list or bars written in text, and show more than one when the answer has more than one of these. Put each where it belongs in your words with the place line it gives you, and say what to notice or try. Words alone are for an answer with none of them.
+- Your answer is the one the person reads, so show it with show_widget whenever one fits, for a view they take in at a glance and can use. Pick the kind by the shape of what you tell: compare for two or three things side by side or two or three parts of one thing, a chart for figures to compare, a graph for figures over time, a scale for where a figure stands among named ranges, such as whether a reading is normal, a timeline for things on dates, a map for places to go, such as cafés near them, a picture for something to see (how a thing works or where its parts are), drawn by you, and one that plays when it happens in steps or rounds, such as how a thing moves or a message passes through a network, or when one thing changes another, a flow for one thing leading to the next when there is nothing to see, steps for a process to follow, a calculator for a sum, a split or a cost they may change, a checklist for things to do, a finder for an answer that turns on their own case, which a few questions settle, marks for which things pass a test, choices for what they may want next, and a quiz for a few questions after you explain something they want to learn, to check they took it in. Prefer it to a table, a list or bars written in text, and show more than one when the answer has more than one of these. Put each where it belongs in your words with the place line it gives you, and say what to notice or try. Words alone are for an answer with none of them.
 - If a tool says you were declined or answers you in the person's words, take that as their decision and carry on without it.
 - A long tool output may be set aside: you see its start and an id, and read_tool_output gives you the rest.
 - Before you finish, check your result against what the task asks for, and against "Done when" if it was given. Fix what falls short.
@@ -1137,7 +1137,7 @@ None of the person's other agents can be brought in here now. Do the work with t
 Tell the person in a few words when the message comes, then end your turn.
 ===== bus: show_widget
 {
-  "description": "Show your answer with what LoomWatch draws, so the person takes it in at a glance and can use it. Pick the kind by the shape of what you are telling:\n- two or three things side by side, or two or three parts of one thing, with facts to read across: compare\n- figures to compare, one for each thing: chart\n- figures that change over time, or several series: graph\n- where a figure stands among named ranges, such as whether a temperature is a fever, a score is good or a speed is safe: scale\n- things that happened or are due on dates, such as a history, a life or a plan with deadlines: timeline\n- something to see, drawn by you: how a machine, a body or nature works, where a thing's parts are, what happens in steps or rounds, such as how it moves or a message passing through a network, or how one thing changes another, which play: picture\n- one thing leading to the next, in order, when there is nothing to see: flow\n- a process the person follows, one step at a time: steps\n- a sum, a split or a cost they may change: calculator\n- things to do: checklist\n- an answer that turns on the person's own case, which a few questions settle, such as whether they need a visa or which plan suits them: finder\n- which of several things pass a test: marks\n- what they may want next, which they send to you: choices\n- when they want to learn or understand something, a few questions after it is explained, beside the rest, that check they took it in: quiz\nA finder answers them at once from what you set out; choices send their reply to you and wait for another answer. When things in order have dates, show a timeline, which spaces them by the time between them, rather than a flow. A flow's line says that one thing leads to the next, so two or three parts that sit side by side, such as a shop's sales and support teams, are shown with compare, not flow. When what you explain can be seen, such as how an engine or a lung works or how a tide moves, draw it in a picture, not boxes in a flow: a flow only names what a picture shows. When it happens in steps or rounds, the picture plays its steps (drawing says how) rather than numbering them with arrows; a picture of parts numbers its parts. When figures count whole things, such as seats or people, set counted. Prefer one of these to a table, a list or bars written in text, or a page written for it. Show up to 4 when the answer has more than one of these. Words alone are for an answer with none of them, such as a short fact. Call it before you write your answer, once for each, then put each where it belongs with the place line it gives you, after the words that lead to it, and say in words what to notice or try. Give the main result in words too, since a copy of the answer shows only your words.",
+  "description": "Show your answer with what LoomWatch draws, so the person takes it in at a glance and can use it. Pick the kind by the shape of what you are telling:\n- two or three things side by side, or two or three parts of one thing, with facts to read across: compare\n- figures to compare, one for each thing: chart\n- figures that change over time, or several series: graph\n- where a figure stands among named ranges, such as whether a temperature is a fever, a score is good or a speed is safe: scale\n- things that happened or are due on dates, such as a history, a life or a plan with deadlines: timeline\n- places to go or where things are, such as cafés near them, a trip's stops or where to stay: map\n- something to see, drawn by you: how a machine, a body or nature works, where a thing's parts are, what happens in steps or rounds, such as how it moves or a message passing through a network, or how one thing changes another, which play: picture\n- one thing leading to the next, in order, when there is nothing to see: flow\n- a process the person follows, one step at a time: steps\n- a sum, a split or a cost they may change: calculator\n- things to do: checklist\n- an answer that turns on the person's own case, which a few questions settle, such as whether they need a visa or which plan suits them: finder\n- which of several things pass a test: marks\n- what they may want next, which they send to you: choices\n- when they want to learn or understand something, a few questions after it is explained, beside the rest, that check they took it in: quiz\nA finder answers them at once from what you set out; choices send their reply to you and wait for another answer. When things in order have dates, show a timeline, which spaces them by the time between them, rather than a flow. A flow's line says that one thing leads to the next, so two or three parts that sit side by side, such as a shop's sales and support teams, are shown with compare, not flow. When what you explain can be seen, such as how an engine or a lung works or how a tide moves, draw it in a picture, not boxes in a flow: a flow only names what a picture shows. When it happens in steps or rounds, the picture plays its steps (drawing says how) rather than numbering them with arrows; a picture of parts numbers its parts. When figures count whole things, such as seats or people, set counted. Prefer one of these to a table, a list or bars written in text, or a page written for it. Show up to 4 when the answer has more than one of these. Words alone are for an answer with none of them, such as a short fact. Call it before you write your answer, once for each, then put each where it belongs with the place line it gives you, after the words that lead to it, and say in words what to notice or try. Give the main result in words too, since a copy of the answer shows only your words.",
   "inputSchema": {
     "additionalProperties": false,
     "properties": {
@@ -1317,6 +1317,35 @@ Tell the person in a few words when the message comes, then end your turn.
         "maxItems": 3,
         "type": "array"
       },
+      "from": {
+        "additionalProperties": false,
+        "description": "map: where the person is or starts, when the places are near it, such as their office: its name, lat and lng. LoomWatch tells you how far each place is from it.",
+        "properties": {
+          "lat": {
+            "description": "Where it is: degrees north, below zero south",
+            "maximum": 90,
+            "minimum": -90,
+            "type": "number"
+          },
+          "lng": {
+            "description": "Where it is: degrees east, below zero west",
+            "maximum": 180,
+            "minimum": -180,
+            "type": "number"
+          },
+          "name": {
+            "description": "A word or two, such as Your office",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "lat",
+          "lng"
+        ],
+        "type": "object"
+      },
       "guess": {
         "additionalProperties": false,
         "description": "picture that plays: one question to ask before the step whose outcome would surprise the person, only when it really would, such as which force is bigger as a plane leaves the ground: before is that step's part number, question is the question in the person's language, choices are 2 or 3 short answers, and answer is the right one, written as in choices. The picture stops before that step the first time it plays; the person answers or skips, then watches.",
@@ -1431,13 +1460,14 @@ Tell the person in a few words when the message comes, then end your turn.
         "type": "array"
       },
       "kind": {
-        "description": "compare, chart, graph, scale, timeline, flow, steps, picture, calculator, checklist, finder, quiz, marks or choices, picked by the shape of what you are telling. Fill in only that kind's fields.",
+        "description": "compare, chart, graph, scale, timeline, map, flow, steps, picture, calculator, checklist, finder, quiz, marks or choices, picked by the shape of what you are telling. Fill in only that kind's fields.",
         "enum": [
           "compare",
           "chart",
           "graph",
           "scale",
           "timeline",
+          "map",
           "flow",
           "steps",
           "picture",
@@ -1559,6 +1589,78 @@ Tell the person in a few words when the message comes, then end your turn.
           "type": "object"
         },
         "maxItems": 3,
+        "type": "array"
+      },
+      "places": {
+        "description": "map: 1 to 8 places, each its name as the place writes it, where it is (lat and lng as you found them, such as in a map link or on the place's page; leave out a place you found no position for, never guess one), its category, and a note of a sentence on why it suits them. Give its rating out of 5, its price from 1 ($) to 4 ($$$$) and its own website when you found them. LoomWatch puts a pin on a map for each, and the person opens it in a maps app for directions.",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "address": {
+              "description": "Its street address, as written there",
+              "type": "string"
+            },
+            "category": {
+              "description": "What sort of place it is",
+              "enum": [
+                "food",
+                "cafe",
+                "bar",
+                "shop",
+                "hotel",
+                "sight",
+                "park",
+                "transit",
+                "other"
+              ],
+              "type": "string"
+            },
+            "lat": {
+              "description": "Where the place is: degrees north, below zero south",
+              "maximum": 90,
+              "minimum": -90,
+              "type": "number"
+            },
+            "link": {
+              "description": "Its own website",
+              "type": "string"
+            },
+            "lng": {
+              "description": "Where the place is: degrees east, below zero west",
+              "maximum": 180,
+              "minimum": -180,
+              "type": "number"
+            },
+            "name": {
+              "description": "Its name, as the place writes it",
+              "minLength": 1,
+              "type": "string"
+            },
+            "note": {
+              "description": "A sentence on what it is and why it suits them",
+              "type": "string"
+            },
+            "price": {
+              "description": "1 cheap ($) to 4 dear ($$$$)",
+              "maximum": 4,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "rating": {
+              "description": "Its rating out of 5, as its reviews give it",
+              "maximum": 5,
+              "minimum": 1,
+              "type": "number"
+            }
+          },
+          "required": [
+            "name",
+            "lat",
+            "lng"
+          ],
+          "type": "object"
+        },
+        "maxItems": 8,
         "type": "array"
       },
       "prefix": {

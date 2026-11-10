@@ -217,6 +217,8 @@ const ALL: &[Block] = {
         widgets::SHOW_WIDGET_RANGES,
         widgets::SHOW_WIDGET_PINS,
         widgets::SHOW_WIDGET_EVENTS,
+        widgets::SHOW_WIDGET_PLACES,
+        widgets::SHOW_WIDGET_FROM,
         widgets::SHOW_WIDGET_SHOWN,
         widgets::skill::SUGGEST_SKILL,
         widgets::skill::SUGGEST_SKILL_NAME,

@@ -936,3 +936,138 @@
   /* The number stays small on the picture; its hit area is 44 points around it. */
   .wg-part-n::before { content: ''; position: absolute; inset: -8px; border-radius: var(--r-full); }
 }
+
+/* ---------------------------------------------------------------------------
+   A MAP (ADR 0114, amended 10 November): the places on OpenFreeMap's map, as a maps app shows
+   them. Each pin is a disc in its sort's colour with a white mark and its name under it; the one
+   in focus grows and wears the gold ring. Cards sit over the map's bottom on glass, one in focus
+   at a time. Opened, the map fills the window with the place's card beside it, and Directions
+   asks which maps app to open, as a phone does.
+   --------------------------------------------------------------------------- */
+.wg-map, .wg-mapview {
+  --cat-food: #ff9500; --cat-cafe: #a2845e; --cat-bar: #af52de; --cat-shop: #e0a100; --cat-hotel: #5e5ce6;
+  --cat-sight: #ff375f; --cat-park: #30b158; --cat-transit: #0a84ff; --cat-other: #8e8e93; --map-start: #0a84ff;
+  --map-glass: color-mix(in srgb, var(--color-panel-solid) 86%, transparent);
+}
+.cat-food { --cat: var(--cat-food); } .cat-cafe { --cat: var(--cat-cafe); } .cat-bar { --cat: var(--cat-bar); }
+.cat-shop { --cat: var(--cat-shop); } .cat-hotel { --cat: var(--cat-hotel); } .cat-sight { --cat: var(--cat-sight); }
+.cat-park { --cat: var(--cat-park); } .cat-transit { --cat: var(--cat-transit); } .cat-other { --cat: var(--cat-other); }
+
+.wg-map-stage { position: relative; height: 340px; border-radius: var(--r-lg); overflow: hidden; background: var(--color-ground); isolation: isolate; }
+.wg-map-canvas { position: absolute; inset: 0; background: var(--color-ground); }
+.wg-map-gl { width: 100%; height: 100%; }
+.wg-map-broken { display: grid; place-items: start center; padding-top: var(--sp-7); }
+.wg-map-broken p { margin: 0; font: 400 13px/18px var(--font-sans); color: var(--color-ink-2); }
+
+/* A round button on the map: larger, and closing the large map. */
+.wg-map-round {
+  position: absolute; z-index: 2; display: grid; place-items: center; width: 36px; height: 36px; padding: 0;
+  border: 1px solid var(--color-hairline); border-radius: var(--r-full); background: var(--map-glass);
+  backdrop-filter: blur(14px) saturate(1.4); color: var(--color-ink); cursor: pointer; box-shadow: 0 2px 10px rgb(0 0 0 / .14);
+}
+.wg-map-round:hover { background: var(--color-panel-solid); }
+.wg-map-round:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.wg-map-grow { top: 10px; right: 10px; }
+
+/* Pins, drawn by MapLibre as markers. */
+.wg-pin { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 0; border: 0; background: none; cursor: pointer; font: inherit; }
+.wg-pin-mark {
+  display: grid; place-items: center; width: 30px; height: 30px; border-radius: var(--r-full); background: var(--cat);
+  color: #fff; box-shadow: 0 0 0 2px #fff, 0 2px 8px rgb(0 0 0 / .28); transition: transform 160ms var(--ease-out);
+}
+.wg-pin-name, .wg-pin-start .wg-pin-name {
+  max-width: 140px; font: 600 12px/15px var(--font-sans); color: var(--color-ink); text-align: center; overflow-wrap: anywhere;
+  text-shadow: 0 0 2px var(--color-ground), 0 0 2px var(--color-ground), 0 0 4px var(--color-ground);
+}
+.wg-pin.picked { z-index: 2; }
+.wg-pin.picked .wg-pin-mark { transform: scale(1.3); box-shadow: 0 0 0 2px #fff, 0 0 0 5px var(--color-accent), 0 4px 12px rgb(0 0 0 / .3); }
+.wg-pin:focus-visible .wg-pin-mark { outline: 2px solid var(--color-accent); outline-offset: 4px; }
+.wg-pin-start { display: flex; flex-direction: column; align-items: center; gap: 3px; pointer-events: none; }
+.wg-pin-start-dot { width: 16px; height: 16px; border-radius: var(--r-full); background: var(--map-start); box-shadow: 0 0 0 3px #fff, 0 0 0 9px color-mix(in srgb, var(--map-start) 22%, transparent); }
+
+/* A place's mark on a card and in the large map's panel. */
+.wg-place-mark { flex: none; display: grid; place-items: center; width: 52px; height: 52px; border-radius: 12px; background: var(--cat); color: #fff; }
+.wg-place-mark svg { width: 24px; height: 24px; }
+.wg-place-mark.big { width: 48px; height: 48px; border-radius: var(--r-full); }
+.wg-place-facts { display: block; font: 400 13px/18px var(--font-sans); color: var(--color-ink-2); font-variant-numeric: tabular-nums; }
+.wg-place-rating i { font-style: normal; color: #ffb800; }
+
+/* The cards over the bottom of the small map, one place each, scrolled sideways. */
+.wg-map-cards {
+  position: absolute; z-index: 2; left: 0; right: 0; bottom: 10px; display: flex; gap: 10px; padding: 0 10px;
+  overflow-x: auto; scroll-snap-type: x mandatory; scroll-padding: 0 10px; scrollbar-width: none; overscroll-behavior-x: contain;
+}
+.wg-map-cards::-webkit-scrollbar { display: none; }
+.wg-map-card-slot { flex: 0 0 min(320px, calc(100% - 44px)); scroll-snap-align: start; }
+.wg-map-cards:has(> :only-child) .wg-map-card-slot { flex-basis: 100%; }
+.wg-map-card {
+  display: flex; align-items: center; gap: 12px; width: 100%; min-height: 76px; padding: 10px 14px 10px 10px; text-align: left;
+  border: 1px solid var(--color-hairline); border-radius: 18px; background: var(--map-glass); backdrop-filter: blur(16px) saturate(1.4);
+  color: var(--color-ink); cursor: pointer; box-shadow: 0 4px 16px rgb(0 0 0 / .14); font: inherit;
+}
+.wg-map-card.picked { border-color: color-mix(in srgb, var(--color-accent) 55%, transparent); }
+.wg-map-card:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.wg-map-card-words { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.wg-map-card-words b { font: 600 15px/20px var(--font-sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wg-map-card .wg-place-facts { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wg-map-card-more { font: 400 12px/16px var(--font-sans); color: var(--color-ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* MapLibre's own parts: the credit small and quiet, and the ⌘-scroll hint in the app's type. */
+.wg-map-canvas .maplibregl-ctrl-attrib { font: 400 10px/14px var(--font-sans); background: var(--map-glass); color: var(--color-ink-2); }
+.wg-map-canvas .maplibregl-ctrl-attrib a { color: inherit; }
+.wg-map-canvas .maplibregl-cooperative-gesture-screen { font: 500 14px/20px var(--font-sans); }
+
+/* The large map, across the window. */
+.wg-mapview { position: fixed; inset: 0; z-index: 400; background: var(--color-ground); }
+.wg-mapview-close { top: 16px; right: 16px; width: 40px; height: 40px; }
+.wg-mapview-place {
+  position: absolute; z-index: 2; top: 16px; left: 16px; bottom: 16px; width: 352px; overflow-y: auto; padding: var(--sp-5);
+  border: 1px solid var(--color-hairline); border-radius: 22px; background: var(--color-panel-solid);
+  box-shadow: 0 10px 40px rgb(0 0 0 / .22); display: flex; flex-direction: column; gap: var(--sp-4); align-self: start; height: fit-content; max-height: calc(100% - 32px);
+}
+.wg-mapview-head { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
+.wg-mapview-head h3 { margin: 0; font: 400 24px/30px var(--font-serif); letter-spacing: -.01em; color: var(--color-ink); overflow-wrap: anywhere; }
+.wg-mapview-head .wg-place-facts { font-size: 14px; line-height: 20px; }
+.wg-mapview-acts { display: flex; gap: var(--sp-2); }
+.wg-mapview-act {
+  flex: 1; display: grid; place-items: center; height: 44px; padding: 0 var(--sp-4); border: 0; border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--color-ink) 9%, transparent); color: var(--color-ink); font: 600 15px/1 var(--font-sans);
+  text-decoration: none; cursor: pointer;
+}
+.wg-mapview-act:hover { background: color-mix(in srgb, var(--color-ink) 14%, transparent); }
+.wg-mapview-act.primary { background: var(--color-accent-fill); color: var(--color-accent-on-fill); }
+.wg-mapview-act.primary:hover { filter: brightness(1.06); }
+.wg-mapview-act:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.wg-mapview-note { margin: 0; font: 400 15px/1.5 var(--font-sans); color: var(--color-ink); overflow-wrap: anywhere; }
+.wg-mapview-where { margin: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px var(--sp-3); font: 400 13px/18px var(--font-sans); }
+.wg-mapview-where dt { color: var(--color-ink-2); }
+.wg-mapview-where dd { margin: 0; color: var(--color-ink); overflow-wrap: anywhere; }
+.wg-mapview-others { display: flex; flex-direction: column; gap: 2px; padding-top: var(--sp-3); border-top: 1px solid var(--color-hairline); }
+.wg-mapview-others > p { margin: 0 0 var(--sp-1); font: 600 12px/16px var(--font-sans); color: var(--color-ink-2); }
+.wg-mapview-others button {
+  display: flex; align-items: center; gap: var(--sp-3); min-height: 44px; padding: 6px 8px; border: 0; border-radius: var(--r-md);
+  background: none; color: var(--color-ink); text-align: left; cursor: pointer; font: 400 14px/18px var(--font-sans);
+}
+.wg-mapview-others button:hover, .wg-mapview-others button.picked { background: color-mix(in srgb, var(--color-ink) 6%, transparent); }
+.wg-mapview-others button > span:not(.wg-place-mark) { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.wg-mapview-others .wg-place-mark { width: 28px; height: 28px; border-radius: var(--r-full); }
+.wg-mapview-others .wg-place-mark svg { width: 15px; height: 15px; }
+.wg-mapview-others small { font: 400 12px/16px var(--font-sans); color: var(--color-ink-2); font-variant-numeric: tabular-nums; }
+@media (max-width: 759px) {
+  .wg-mapview-place { top: auto; left: 0; right: 0; bottom: 0; width: auto; max-height: 55vh; border-radius: 22px 22px 0 0; height: auto; }
+}
+
+/* Directions' question, over the large map. */
+.wg-openin-scrim { position: fixed; inset: 0; z-index: 3; display: grid; place-items: center; padding: var(--sp-4); background: rgb(0 0 0 / .32); }
+.wg-openin {
+  display: flex; flex-direction: column; gap: 10px; width: min(320px, 100%); padding: 20px 18px 18px; border: 1px solid var(--color-hairline);
+  border-radius: 28px; background: var(--map-glass); backdrop-filter: blur(24px) saturate(1.5); box-shadow: 0 20px 60px rgb(0 0 0 / .3);
+}
+.wg-openin > p { margin: 0 0 6px; text-align: center; font: 500 17px/22px var(--font-sans); color: var(--color-ink); }
+.wg-openin > a, .wg-openin > button {
+  display: grid; place-items: center; height: 48px; border: 0; border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--color-ink) 9%, transparent); color: var(--color-ink); font: 500 16px/1 var(--font-sans); text-decoration: none; cursor: pointer;
+}
+.wg-openin > a:hover, .wg-openin > button:hover { background: color-mix(in srgb, var(--color-ink) 15%, transparent); }
+.wg-openin > a:focus-visible, .wg-openin > button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .wg-pin-mark { transition: none; } }
