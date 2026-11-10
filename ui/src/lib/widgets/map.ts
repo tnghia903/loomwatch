@@ -107,3 +107,33 @@ export function frame(places: readonly WidgetPlace[], from?: WidgetStart): [[num
     with no key, recoloured for the app's light and dark (`mapLook.ts`). The only thing the page
     loads from outside LoomWatch for an answer. */
 export const MAP_STYLE = 'https://tiles.openfreemap.org/styles/positron'
+
+/** How close two places may be, in metres, and still stand on one pin's spot: the shops of one
+    building, which an agent often places at the building. */
+export const SAME_SPOT_METRES = 15
+
+/** How far, in points, the pins of places on one spot stand from it. */
+const FAN_POINTS = 22
+
+/**
+ * Where each place's pin stands off its position, in points, so places on one spot each show and
+ * can be tapped: they fan round the spot, the first above it, the rest round the circle. A place
+ * with no other near it stays where it is. Twin of the iPhone's `PlaceSpread.offsets`.
+ */
+export function fanned(spots: readonly { lat: number; lng: number }[]): { dx: number; dy: number }[] {
+  const groups: number[][] = []
+  for (const [at, spot] of spots.entries()) {
+    const group = groups.find((members) => metres(spots[members[0]], spot) <= SAME_SPOT_METRES)
+    if (group) group.push(at)
+    else groups.push([at])
+  }
+  const out = spots.map(() => ({ dx: 0, dy: 0 }))
+  for (const group of groups) {
+    if (group.length < 2) continue
+    group.forEach((at, k) => {
+      const angle = -Math.PI / 2 + (2 * Math.PI * k) / group.length
+      out[at] = { dx: Math.round(FAN_POINTS * Math.cos(angle)), dy: Math.round(FAN_POINTS * Math.sin(angle)) }
+    })
+  }
+  return out
+}

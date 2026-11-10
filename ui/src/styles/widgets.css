@@ -998,7 +998,8 @@
   overflow-x: auto; scroll-snap-type: x mandatory; scroll-padding: 0 10px; scrollbar-width: none; overscroll-behavior-x: contain;
 }
 .wg-map-cards::-webkit-scrollbar { display: none; }
-.wg-map-card-slot { flex: 0 0 min(320px, calc(100% - 44px)); scroll-snap-align: start; }
+/* min-width 0: a card is its own width, and a long note is cut, not a reason to grow. */
+.wg-map-card-slot { flex: 0 0 min(320px, calc(100% - 44px)); min-width: 0; scroll-snap-align: start; }
 .wg-map-cards:has(> :only-child) .wg-map-card-slot { flex-basis: 100%; }
 .wg-map-card {
   display: flex; align-items: center; gap: 12px; width: 100%; min-height: 76px; padding: 10px 14px 10px 10px; text-align: left;

@@ -5,7 +5,7 @@ import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url'
 import { useEffect, useRef, useState } from 'react'
 
 import { useTheme } from '../../../lib/theme'
-import { frame, MAP_STYLE } from '../../../lib/widgets/map'
+import { fanned, frame, MAP_STYLE } from '../../../lib/widgets/map'
 import { groundOf, layerPaint, recolored, type MapTheme } from '../../../lib/widgets/mapLook'
 import type { WidgetPlace, WidgetStart } from '../../../lib/widgets/types'
 import { glyphMarkup } from './placeGlyphs'
@@ -106,6 +106,7 @@ export default function WidgetMapCanvas({ places, from, picked, onPick, room, sm
     // Before the tiles come, the pins already stand where they belong.
     const placed = requestAnimationFrame(() => declutter(pins.current, shown.current))
     map.current = drawn
+    const offsets = fanned(places)
     pins.current = places.map((place, at) => {
       const pin = document.createElement('button')
       pin.type = 'button'
@@ -116,7 +117,9 @@ export default function WidgetMapCanvas({ places, from, picked, onPick, room, sm
       const name = pin.querySelector('.wg-pin-name')
       if (name) name.textContent = place.name
       pin.addEventListener('click', (event) => { event.stopPropagation(); pick.current(at) })
-      new Marker({ element: pin, anchor: 'top', offset: [0, -17] }).setLngLat([place.lng, place.lat]).addTo(drawn)
+      // Places on one spot (shops of one building) fan round it, so each shows and can be tapped.
+      const { dx, dy } = offsets[at]
+      new Marker({ element: pin, anchor: 'top', offset: [dx, dy - 17] }).setLngLat([place.lng, place.lat]).addTo(drawn)
       return pin
     })
     if (from) {

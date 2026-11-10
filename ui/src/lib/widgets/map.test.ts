@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { away, directions, distance, facts, frame, metres, website } from './map'
+import { away, directions, distance, facts, fanned, frame, metres, website } from './map'
 import type { WidgetPlace } from './types'
 
 const bread: WidgetPlace = { name: 'Bread Yard', lat: 1.29875, lng: 103.78761, category: 'cafe', rating: 4.8, price: 2, link: 'https://breadyard.sg/' }
@@ -58,5 +58,21 @@ describe('a place’s facts and links', () => {
 
   it('frames every place and where you start', () => {
     expect(frame([bread, { ...bread, lat: 1.30561, lng: 103.79213 }], galaxis)).toEqual([[103.78753, 1.29875], [103.79213, 1.30561]])
+  })
+})
+
+describe('places on one spot', () => {
+  it('fan round it so each pin shows, and a place on its own stays put', () => {
+    const galaxis = { lat: 1.29979, lng: 103.78835 }
+    const three = [galaxis, { ...galaxis }, { lat: 1.29983, lng: 103.78838 }, { lat: 1.30561, lng: 103.79213 }]
+    expect(fanned(three)).toEqual([
+      { dx: 0, dy: -22 },
+      { dx: 19, dy: 11 },
+      { dx: -19, dy: 11 },
+      { dx: 0, dy: 0 },
+    ])
+    expect(fanned([galaxis])).toEqual([{ dx: 0, dy: 0 }])
+    // Two shops 40 m apart are two spots.
+    expect(fanned([galaxis, { lat: 1.30015, lng: 103.78835 }])).toEqual([{ dx: 0, dy: 0 }, { dx: 0, dy: 0 }])
   })
 })
