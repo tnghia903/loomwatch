@@ -45,12 +45,15 @@ describe('a document answer, read beside the chat', () => {
     expect(sources.map((link) => [link.textContent, link.getAttribute('title')])).toEqual([
       ['Anthropic, “Contextual Retrieval”', 'anthropic.com'],
       ['BEIR paper', 'arxiv.org'],
+      ['the guide', 'example.com'],
+      ['Reading list', 'example.com'],
     ])
-    // A bracketed placeholder is not a mark, a link mid-sentence is not a source, and a list of
-    // links alone stays a list of links.
+    // A bracketed placeholder is not a mark. A link mid-sentence and a list of links alone are not
+    // a claim's sources, so they stay where they are, but every web link is a chip.
     expect(screen.getByText(/\[Your name\] will review it/)).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'the guide' })).not.toHaveClass('md-source')
-    expect(screen.getByRole('link', { name: 'Reading list' })).not.toHaveClass('md-source')
+    expect(screen.getByRole('link', { name: /the guide/ })).toHaveClass('md-source')
+    expect(screen.getByText(/will review it/).textContent).toBe('[Your name] will review it; see the guide for more.')
+    expect(screen.getByRole('link', { name: /Reading list/ })).toHaveClass('md-source')
   })
 
   // The shape of a real answer (Coby, 6 November): each point closes on its source in brackets.
@@ -74,17 +77,51 @@ describe('a document answer, read beside the chat', () => {
       ['xaydungchinhsach.chinhphu.vn', 'xaydungchinhsach.chinhphu.vn'],
       ['usa.gov', 'usa.gov'],
       ['usa.gov', 'usa.gov'],
+      ['the guide', 'example.com'],
     ])
-    for (const source of sources) expect(source.parentElement?.textContent).not.toMatch(/[()[\]]/)
+    for (const source of sources.slice(0, -1)) expect(source.parentElement?.textContent).not.toMatch(/[()[\]]/)
     expect(screen.getByText(/Cả hai nước/).textContent).toBe('Cả hai nước đều có cơ quan làm luật, điều hành và xét xử. usa.gov')
     // After bold words the full stop stays the claim's.
     expect(screen.getByText(/Ở Việt Nam/).textContent).toBe('Điều hành: Ở Việt Nam, Thủ tướng đứng đầu Chính phủ. usa.gov')
     // A full stop after the bracket ends the claim before its chip, and is never lost.
     expect(screen.getByText(/three branches/).textContent).toBe('The US has three branches. usa.gov')
     expect(screen.getByText('Làm luật:').closest('li')?.textContent).toBe('Làm luật: Ở Mỹ, Hạ viện đại diện theo dân số. usa.gov')
-    // Brackets with more than the links in them stay as written, the link a link.
-    expect(screen.getByRole('link', { name: 'the guide' })).not.toHaveClass('md-source')
+    // Brackets with more than the links in them stay as written, the link a chip where it stands.
     expect(screen.getByText(/Read the rules first/).textContent).toBe('Read the rules first (see the guide).')
+  })
+
+  // ADR 0116, amended 10 November: a web address is never shown as one. An agent wrote its sources
+  // in code ("Source: `https://…`"), and a bare address is a link too: each is a chip named by its
+  // page when the run's search found it, else its site.
+  it('shows every web address as a chip by its page or site, never as an address', async () => {
+    const sources = new Map([['onefattenedcalf.com/contact-us', 'One Fattened Calf Burgers Locations & Opening Hours']])
+    const { container } = render(<AnswerDocument by="Scout" streaming={false} sources={sources} text={[
+      'Evidence: its own page gives the hours.',
+      'Source: `https://www.onefattenedcalf.com/contact-us`',
+      '',
+      'Bread Yard is on Level 1, see https://breadyard.com/menu for the menu.',
+      '',
+      'Run `curl https://api.example.com/v1` with your key.',
+      '',
+      '| Place | Site |',
+      '| --- | --- |',
+      '| DAEHWA | <https://thebonelesskitchen.com/too-far-from-tbk/> |',
+      '',
+      '```',
+      'https://example.com/in-a-block',
+      '```',
+    ].join('\n')} />)
+    await screen.findByText(/its own page gives the hours/)
+    const chips = [...container.querySelectorAll<HTMLAnchorElement>('a.md-source')]
+    expect(chips.map((chip) => [chip.textContent, chip.getAttribute('href')])).toEqual([
+      ['One Fattened Calf Burgers Locations & Opening Hours', 'https://www.onefattenedcalf.com/contact-us'],
+      ['breadyard.com', 'https://breadyard.com/menu'],
+      ['thebonelesskitchen.com', 'https://thebonelesskitchen.com/too-far-from-tbk/'],
+    ])
+    expect(container.textContent).not.toMatch(/https?:\/\/(www\.onefattenedcalf|breadyard|thebonelesskitchen)/)
+    // Code with more than an address in it stays code, and a code block stays as it is.
+    expect(screen.getByText('curl https://api.example.com/v1').tagName).toBe('CODE')
+    expect(container.querySelector('pre')?.textContent).toContain('https://example.com/in-a-block')
   })
 
   // ADR 0116: a source is named by its page, as the run's search found it, with its site's icon,

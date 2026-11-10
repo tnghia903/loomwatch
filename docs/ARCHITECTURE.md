@@ -766,7 +766,11 @@ through the same call (`phone::ALLOWED`).
 ### Sources in an answer
 
 A link that closes a claim is drawn as a source chip (`MarkdownRenderer.tsx`), named by its page's
-title and wearing its site's icon (ADR 0116). The title comes from what the run already holds: the
+title and wearing its site's icon (ADR 0116). Every other web link is a chip too, where it stands:
+mid-sentence, in a list or a table (ADR 0116, amended 10 November). A web address is never shown
+as one (`linkAddresses`): an address an agent wrote alone in inline code is the link it means (code
+with anything else in it, and fenced code, stay code), and a link whose words are its own address,
+a bare one included, says its site until its page's title is known. The title comes from what the run already holds: the
 output of its web searches, as each provider's route records it (`anthropic.rs` a page a line,
 `chatgpt.rs` a title over its address), read by `ui/src/lib/story/sourceTitles.ts`; OpenRouter's own
 search keeps no titles, and its sources say their site. The icon is the only thing LoomWatch
