@@ -95,7 +95,9 @@ You can answer in three ways:
 - **Allow** lets it through this once.
 - **Allow for this run** lets that action through until the run ends.
 - **Always allow this** lets that one action through for that agent from now on. Its other actions
-  still ask. The agent's Tools row lists what it always may do, with a × to take each back.
+  still ask. The agent's Tools row lists what it always may do, with a × to take each back. In the
+  LoomWatch iPhone app the same button shows when one of your agents asks in its own chat, after
+  Face ID or your passcode.
 
 What can't be undone, such as deleting an event, a reminder or a contact, asks every time. (A deleted note stays in Notes' Recently Deleted, so it asks like any other action.) Its card
 says "This can't be undone" and offers only **Allow** and **Deny**.
