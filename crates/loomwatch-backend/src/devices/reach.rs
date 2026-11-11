@@ -227,14 +227,19 @@ fn asks_for_ok(printed: &str) -> bool {
 
 /// What `program` printed as JSON, or what went wrong in Tailscale's own words.
 async fn read_json(program: &Path, args: &[&str]) -> Result<Value, String> {
-    let output = tokio::time::timeout(
-        READ_LIMIT,
-        Command::new(program)
-            .args(args)
-            .stdin(Stdio::null())
-            .kill_on_drop(true)
-            .output(),
-    )
+    let output = tokio::time::timeout(READ_LIMIT, async {
+        start(
+            Command::new(program)
+                .args(args)
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .kill_on_drop(true),
+        )
+        .await?
+        .wait_with_output()
+        .await
+    })
     .await
     .map_err(|_| format!("Tailscale didn't answer within {} s", READ_LIMIT.as_secs()))?
     .map_err(|error| format!("Couldn't start {}: {error}", program.display()))?;
@@ -250,6 +255,22 @@ async fn read_json(program: &Path, args: &[&str]) -> Result<Value, String> {
         .map_err(|_| last_line(&String::from_utf8_lossy(&output.stdout)))
 }
 
+/// Starts `command`, trying again for a moment while its program file is busy. Linux refuses to run
+/// a file that some process still holds open for writing ("text file busy"), and a process forked
+/// while the file was being written holds it until it execs. CI met this when a test wrote its
+/// stand-in Tailscale while other tests started processes.
+async fn start(command: &mut Command) -> std::io::Result<tokio::process::Child> {
+    for _ in 0..20 {
+        match command.spawn() {
+            Err(error) if error.kind() == std::io::ErrorKind::ExecutableFileBusy => {
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+            started => return started,
+        }
+    }
+    command.spawn()
+}
+
 struct Ran {
     succeeded: bool,
     /// What it printed, both streams.
@@ -259,13 +280,15 @@ struct Ran {
 /// Runs `program` for at most `limit`, or until what it printed is `enough`, keeping what it printed
 /// even when it has to be stopped.
 async fn run(program: &Path, args: &[&str], limit: Duration, enough: fn(&str) -> bool) -> Ran {
-    let spawned = Command::new(program)
-        .args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true)
-        .spawn();
+    let spawned = start(
+        Command::new(program)
+            .args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true),
+    )
+    .await;
     let mut child = match spawned {
         Ok(child) => child,
         Err(error) => {
