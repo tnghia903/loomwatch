@@ -67,7 +67,7 @@ const SHOW_IN_REPLY: &str = "Keep your words that short, and when one of the vie
      stages, drawn by you, a flow for how one thing leads to the next when there is nothing to \
      see, steps for how to do something, a chart for figures to compare, a scale for where a \
      figure stands among named ranges, such as whether a reading is normal, a timeline for \
-     things on dates, a map for places to go, a finder for an answer that turns on their own case, which a few \
+     things on dates, a map for places to go, a calendar for their bookings and free time, a finder for an answer that turns on their own case, which a few \
      questions settle, a calculator for a sum or a split they may change, a checklist for things \
      to do. Put its place line where it \
      belongs, and let your sentences say what to notice.";

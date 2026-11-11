@@ -586,7 +586,7 @@ questions lead to the outcome for the person's own case, a quiz that checks what
 explained, steps to tap through, a comparison of two or three things side by side, a chart whose
 bars LoomWatch draws to scale from the agent's figures, a graph of bars or a line over labels, a
 scale of named ranges with figures pinned where they fall, a timeline of events on their dates, a
-map of places, a row of marks, a flow, or a picture the agent draws (ADR 0117). The bus offers it only to that agent
+map of places, a calendar, a row of marks, a flow, or a picture the agent draws (ADR 0117). The bus offers it only to that agent
 (`BusSeat.answers`): the run's responder, told to the bus once per run (`TeamBus::answered_by`), not
 a helper or an agent started by another, with a person there, and with its `widgets` switch on.
 Absent, the switch is `widgets::DEFAULT_ON`, which is on: an agent asked for a chart or something
@@ -599,7 +599,7 @@ a line per kind) pick the kind by the shape of what the agent tells: things side
 parts of one thing a comparison, figures a chart, figures over time a graph, one thing leading to
 the next a flow, a process to follow steps, something to see (a machine, a living thing, how
 something moves) a picture, where a figure stands among ranges a scale, things on dates a timeline,
-places to go a map (beside any comparison of them, never replaced by one), an answer that turns on the person's own case a finder, a check after an explanation a quiz, and so
+places to go a map (beside any comparison of them, never replaced by one), what is booked or when the person is free a calendar, an answer that turns on the person's own case a finder, a check after an explanation a quiz, and so
 on; a flow's arrows mean order, so parts side by side are a comparison, and things in order with
 dates are a timeline. A finder answers at once from what the agent set out, where choices send the
 person's reply to the agent. A quick answer's last ask (`intent::SHOW_IN_REPLY`) names the same,
@@ -669,6 +669,30 @@ which asks whether to open Apple Maps or Google Maps (`directions`: by name and 
 is one, else by position). The iPhone draws it with Apple Maps and looks each place up in Apple's
 own listing, by its name within 1.5 km of the agent's position (`PlaceMatch`), for its exact
 position, phone number and Look Around view. Maps keep nothing.
+
+A calendar (`widgets/calendar.rs`, ADR 0114, amended 11 November) has 1 to 7 `days`
+(`2026-11-14`), a day with nothing booked too, and up to 40 `bookings`, each its `day` (one of
+`days`), its `start` and `end` (`09:30`, 24-hour, `24:00` for midnight; neither for one that lasts
+all day), a `label` and a `place`. An optional `hours` (`from`, `to`) is the part of each day it
+shows and finds free time in, 08:00 to 22:00 without it, widened to take in any booking outside
+them; an optional `zone` names the time it is in. The daemon refuses a day or time it can't read, an
+end before its start (one that runs past midnight is two days' bookings), a booking on a day not
+shown and a day given twice, puts the days and bookings in order, and the call answers with each
+day's bookings and its free time of half an hour or more (`free`), worked out the same way by
+`calendar::free` and `layOut` in `ui/src/lib/widgets/calendar.ts`. The Mac's page and the iPhone
+draw it as a calendar app does: a week of seven dates along the top, the calendar's days as near
+the middle as they allow, each date ringed by how much of its hours are free (in the ready green)
+with that free time under it, and the day picked below as a column of its hours beside a time
+gutter. Its bookings stand at their times in the card's mark, side by side where they overlap, the
+later one saying by how much; one longer than a couple of hours keeps that height and says how long
+it lasts. Free time of two hours or more folds to a striped band that says how long it is, so a
+whole day fits the card; a booking that lasts all day stands in the column's place. Tapping free
+time opens it into its hours with its first hour to hold, which the person drags to move and pulls
+by its handle to stretch, in quarter hours and never past the free time's ends (the arrow keys on
+the Mac, with Shift for its end; swipes up and down with VoiceOver on the iPhone). Then "Hold it"
+or "Ask … to book" sends the time as the person's reply, as a choice does, with the day written in
+full and its year (`Hold Saturday, 14 November 2026, 16:00–17:30 on my calendar.`), and only on
+the newest answer once nothing is at work. Calendars keep nothing.
 
 A picture (ADR 0117) is the one kind the agent draws: its `drawing` is SVG, read by
 `widgets/picture.rs`, which keeps only shapes (`path`, `circle`, `ellipse`, `rect`, `line`,
@@ -1083,7 +1107,7 @@ drawn on the canvas.
 | `ask_user(question, context?)` | A question for the person running the team. Returns at once; the answer arrives as the agent's next turn | none — the run waits on the operator |
 | `memory_search`, `memory_read`, `memory_write`, `checkpoint` | The team's Notebook, when the team turns it on (see [TEAM_MEMORY.md](TEAM_MEMORY.md)) | none |
 | `earlier_work(work)` | Read one earlier piece of the team's work in full. Offered in runs started from the app, which have a team chat to read | none |
-| `show_widget(kind, title, …)` | Put a widget in the answer: a comparison, a chart, a graph, a scale, a timeline, a map, a flow, steps, a picture it draws, a calculator, a checklist, a finder, a quiz, marks or choices, picked by the shape of what it tells, placed by the line it answers with (ADR 0114). Offered only to the agent whose reply is the answer, with its switch on (on unless `widgets: false`) | none — kept with the answer when the run succeeds |
+| `show_widget(kind, title, …)` | Put a widget in the answer: a comparison, a chart, a graph, a scale, a timeline, a map, a calendar, a flow, steps, a picture it draws, a calculator, a checklist, a finder, a quiz, marks or choices, picked by the shape of what it tells, placed by the line it answers with (ADR 0114). Offered only to the agent whose reply is the answer, with its switch on (on unless `widgets: false`) | none — kept with the answer when the run succeeds |
 
 The bus grants the *ability* to delegate. The *judgment* of when to comes with it:
 

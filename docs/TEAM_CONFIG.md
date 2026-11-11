@@ -246,7 +246,7 @@ depend on the document as a whole:
   is the answer the person reads (ADR 0114): choices to tap, a checklist to tick, a calculator
   LoomWatch works out, questions to tap through to the outcome for the person's own case, a quiz,
   steps to tap through, a chart LoomWatch draws to scale, a graph of bars or a line, a scale of
-  named ranges, a timeline, a map of places, a row of things marked yes or no, or a diagram of boxes and arrows. Absent means
+  named ranges, a timeline, a map of places, a calendar of bookings and free time, a row of things marked yes or no, or a diagram of boxes and arrows. Absent means
   LoomWatch's default, which is on; `false` keeps it off for that agent. One of My agents keeps it
   as its own (`widgets` in its file), and every team that uses it follows. Not for an operator node.
 - **Notes set aside from the answer.** Some sections an agent ends its reply with are for the
