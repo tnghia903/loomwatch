@@ -37,7 +37,8 @@ describe('the figures’ idle breath (step 5, the review’s motion rules)', () 
     const block = guarded.slice(guarded.indexOf('@media (prefers-reduced-motion: no-preference) {'), guarded.indexOf('@keyframes pose-settle'))
     expect(block).toContain('figure-breathe')
     expect(block).toContain('[data-moved][data-pose="waiting"]')
-    expect(block).toMatch(/html\.figures-still \.desk-figure > \*,\s*html:has\(\.ask-glass, \.inspector-glass, \.lw-modal-scrim\) \.desk-figure > \* \{ animation-play-state: paused; \}/)
+    // In the background the working glow holds still with the figure.
+    expect(block).toMatch(/html\.figures-still \.desk-figure > \*,\s*html\.figures-still \.desk-figure\[data-glow="working"\],\s*html:has\(\.ask-glass, \.inspector-glass, \.lw-modal-scrim\) \.desk-figure > \* \{ animation-play-state: paused; \}/)
     // The settles play once: none of them is infinite.
     for (const line of block.split('\n').filter((l) => l.includes('[data-moved]'))) expect(line.replace(/figure-breathe[^,;]*/g, '')).not.toContain('infinite')
   })

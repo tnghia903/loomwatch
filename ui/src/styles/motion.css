@@ -140,12 +140,38 @@
   .lw-mark[data-glance] .lw-mark-face { animation: mark-glance 5200ms ease-in-out infinite; }
   .lw-mark[data-blink] .lw-mark-eyes { animation: mark-blink 340ms ease-in-out 1; }
   /* Beats the entrance and Home's `animation: none` on .fr-mark. */
-  .fr-mark.lw-mark[data-breathe] { animation: mark-breathe var(--t-breathe) ease-in-out infinite; }
+  .fr-mark.lw-mark[data-breathe] { animation: mark-breathe var(--t-breathe) steps(1, jump-end) infinite; }
 }
 
 @keyframes mark-glance { 0%, 16% { translate: 0 0; } 28%, 46% { translate: -24px 0; } 58%, 76% { translate: 24px 0; } 88%, 100% { translate: 0 0; } }
 @keyframes mark-blink { 50% { scale: 1 .08; } }
-@keyframes mark-breathe { 50% { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 6px var(--glow)); } }
+/* The working glow breathes out from 3px to 6px and back, eased in and out. WebKit draws an animated
+   filter again every frame the screen shows: drawn smoothly, the glow held Home at 5–14% of a Mac's
+   core while a team worked, by how many figures were at work. Sampled on the same curve every 120 ms
+   (`steps(1, jump-end)` between these stops), it is drawn about 8 times a second, at 2–5%, and looks
+   the same (the outer glow moves half a pixel a step at most). */
+@keyframes mark-breathe {
+  0% { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 3px var(--glow)); }
+  5% { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 3.06px var(--glow)); }
+  10% { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 3.24px var(--glow)); }
+  15% { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 3.56px var(--glow)); }
+  20% { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 4px var(--glow)); }
+  25% { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 4.5px var(--glow)); }
+  30% { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 5px var(--glow)); }
+  35% { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 5.44px var(--glow)); }
+  40% { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 5.76px var(--glow)); }
+  45% { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 5.94px var(--glow)); }
+  50% { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 6px var(--glow)); }
+  55% { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 5.94px var(--glow)); }
+  60% { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 5.76px var(--glow)); }
+  65% { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 5.44px var(--glow)); }
+  70% { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 5px var(--glow)); }
+  75% { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 4.5px var(--glow)); }
+  80% { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 4px var(--glow)); }
+  85% { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 3.56px var(--glow)); }
+  90% { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 3.24px var(--glow)); }
+  95% { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 3.06px var(--glow)); }
+}
 
 /* ---- Round 3: the frame and its screens --------------------------------------------------
    Every place arrives with its parts in turn; what you point at and press answers you; the dock's
@@ -208,7 +234,7 @@
 
   /* Working: the figure's blue glow breathes; waiting, ready and stopped hold still. Not while
      Ask's glass floats over the page: Safari would redraw its blur every frame. */
-  .desk-figure[data-glow="working"] { animation: mark-breathe var(--t-breathe) ease-in-out infinite; }
+  .desk-figure[data-glow="working"] { animation: mark-breathe var(--t-breathe) steps(1, jump-end) infinite; }
   .lw-app:has(.ask-panel) .desk-figure[data-glow="working"] { animation: none; }
 
   /* What opens comes toward you. */
@@ -239,6 +265,7 @@
   .desk-figure:is([data-glow="ready"], [data-glow="working"]) > :is(img, .figure-still) { transform-origin: 50% 90%; animation: figure-breathe calc(var(--t-breathe) * 2) ease-in-out infinite; }
   .desk-figure:is([data-glow="ready"], [data-glow="working"]) > [data-moved] { animation: pose-settle var(--t-spring) var(--ease-out), figure-breathe calc(var(--t-breathe) * 2) ease-in-out var(--t-spring) infinite; }
   html.figures-still .desk-figure > *,
+  html.figures-still .desk-figure[data-glow="working"],
   html:has(.ask-glass, .inspector-glass, .lw-modal-scrim) .desk-figure > * { animation-play-state: paused; }
 }
 @keyframes pose-settle { from { translate: 0 2px; } }

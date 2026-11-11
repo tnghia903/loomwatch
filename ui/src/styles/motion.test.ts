@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { cascaded, DESKTOP, type Viewport } from '../test/cascade'
@@ -79,6 +81,68 @@ describe('round 3’s screens move', () => {
     expect(animation(at('#w'))).toMatch(/^mark-breathe .* infinite$/)
     expect(animation(at('#r'))).toBeNull()
     expect(animation(at('#q'))).toBeNull()
+  })
+
+  // WebKit draws an animated filter again on every frame the screen shows: eased smoothly, the
+  // glow kept a Mac at 5–14% of a core on Home for as long as a team worked.
+  it('breathe a working glow on the eased curve, drawn about 8 times a second, not every frame', () => {
+    const at = page('<span id="w" class="desk-figure" data-glow="working"></span><a id="m" class="fr-mark lw-mark" data-breathe></a>')
+    for (const id of ['#w', '#m']) expect(animation(at(id))).toBe('mark-breathe var(--t-breathe) steps(1, jump-end) infinite')
+    const css = readFileSync(resolve(process.cwd(), 'src/styles', 'motion.css'), 'utf8')
+    const block = /@keyframes mark-breathe \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? ''
+    const stops = [...block.matchAll(/(\d+)% \{ filter: drop-shadow\(0 0 1px var\(--glow\)\) drop-shadow\(0 0 ([\d.]+)px var\(--glow\)\); \}/g)].map((stop) => ({ at: Number(stop[1]), glow: Number(stop[2]) }))
+    // A stop every 5% of the 2.4 s breath (120 ms), each with the 1px rim, from the still 3px out to 6px and back.
+    expect(stops.map((stop) => stop.at)).toEqual(Array.from({ length: 20 }, (_, index) => index * 5))
+    expect(stops[0].glow).toBe(3)
+    expect(stops[10].glow).toBe(6)
+    for (let index = 1; index < stops.length; index += 1) {
+      const change = stops[index].glow - stops[index - 1].glow
+      expect(Math.abs(change)).toBeLessThanOrEqual(0.5)
+      expect(Math.sign(change)).toBe(index <= 10 ? 1 : -1)
+    }
+    // Eased: slow at the ends, quick in the middle.
+    expect(stops[1].glow - stops[0].glow).toBeLessThan(stops[6].glow - stops[5].glow)
+  })
+
+  // The same cost in the team chat, on the faces of whoever works. Its glow breathes from each face's
+  // own still look (pointed at, or without the baton), so it keeps its one keyframe and steps its ease.
+  it('breathe a working face’s glow in the chat on the eased curve, in six flat steps each way', () => {
+    const at = page('<div class="tc-replies-faces"><span class="chat-avatar working"><img id="c" class="chat-avatar-figure"></span></div><div class="tc-member working"><img id="h" class="chat-avatar-figure"></div>')
+    for (const id of ['#c', '#h']) {
+      // What a browser without `linear()` keeps: the ease it always had.
+      expect(cascaded(at(id), 'animation')).toBe('tc-glow var(--t-flow) ease-in-out infinite')
+      const timing = cascaded(at(id), 'animation-timing-function') ?? ''
+      expect(timing).toMatch(/^linear\(/)
+      const points = [...timing.matchAll(/([\d.]+) ([\d.]+)%/g)].map(([, value, place]) => ({ value: Number(value), place: Number(place) }))
+      // Pairs: each step holds its value flat from where it starts to where the next one starts.
+      const steps: { value: number; from: number; to: number }[] = []
+      for (let index = 0; index + 1 < points.length; index += 2) steps.push({ value: points[index].value, from: points[index].place, to: points[index + 1].place })
+      expect(steps.length).toBe(6)
+      expect(points.at(-1)).toEqual({ value: 1, place: 100 })
+      const levels = [...steps.map((step) => step.value), 1]
+      for (const [index, step] of steps.entries()) {
+        expect(points[index * 2 + 1].value).toBe(step.value)
+        expect(step.to - step.from).toBeLessThanOrEqual(16.67)
+        if (index > 0) expect(step.value).toBeGreaterThan(steps[index - 1].value)
+        // Eased in and out alike: a step this far from the start is as far below the top.
+        expect(step.value + levels[levels.length - 1 - index]).toBeCloseTo(1, 3)
+      }
+      // Slow at the ends, quick in the middle.
+      expect(levels[1] - levels[0]).toBeLessThan(levels[3] - levels[2])
+    }
+  })
+
+  // A loop no one is looking at is only work (figuresStill.ts): the glows hold still with the figures.
+  it('hold the working glows still while the window is in the background', () => {
+    const at = page('<span id="w" class="desk-figure" data-glow="working"></span><div class="tc-replies-faces"><span class="chat-avatar working"><img id="c" class="chat-avatar-figure"></span></div><div class="tc-member working"><img id="h" class="chat-avatar-figure"></div>')
+    const playing = (id: string) => cascaded(at(id), ['animation', 'animation-play-state'])
+    for (const id of ['#w', '#c', '#h']) expect(playing(id)).not.toBe('paused')
+    document.documentElement.classList.add('figures-still')
+    try {
+      for (const id of ['#w', '#c', '#h']) expect(playing(id)).toBe('paused')
+    } finally {
+      document.documentElement.classList.remove('figures-still')
+    }
   })
 
   it('hold a working glow still while Ask’s glass floats over the page', () => {

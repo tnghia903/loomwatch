@@ -760,7 +760,16 @@ a mark.tc-find-hit { box-shadow: none; }
   .tc-mention-glow { animation: tc-attention var(--t-settle) var(--ease-out) both; }
   /* Whoever is working breathes its blue glow, in the header and on the piece. */
   .tc-member.working .chat-avatar-figure,
-  .tc-replies-faces .chat-avatar.working .chat-avatar-figure { animation: tc-glow var(--t-flow) ease-in-out infinite; }
+  .tc-replies-faces .chat-avatar.working .chat-avatar-figure {
+    animation: tc-glow var(--t-flow) ease-in-out infinite;
+    /* The same ease, held in six flat steps each way: WebKit draws an animated filter again every
+       frame the screen shows, which kept its GPU process at 12% for as long as anyone worked; held
+       flat, it is drawn about 8 times a second, at 2%. Each glow still breathes from its own still
+       look (a face pointed at, one without the baton). A browser without `linear()` keeps the ease. */
+    animation-timing-function: linear(0 0%, 0 16.67%, 0.056 16.67%, 0.056 33.33%, 0.232 33.33%, 0.232 50%, 0.5 50%, 0.5 66.67%, 0.768 66.67%, 0.768 83.33%, 0.944 83.33%, 0.944 100%, 1 100%);
+  }
+  /* Nothing loops while the window is in the background (figuresStill.ts). */
+  html.figures-still :is(.tc-member.working, .tc-replies-faces .chat-avatar.working) .chat-avatar-figure { animation-play-state: paused; }
   /* The Details thread draws down the piece it ties to the record. */
   .tc-piece.in-details::before { animation: tc-draw-down var(--t-entrance) var(--ease-out) both; }
   /* An answer arrives woven in: a gold thread runs down its edge as the words settle, then rests. */
