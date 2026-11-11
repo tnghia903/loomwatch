@@ -60,6 +60,8 @@ describe('a map in an answer', () => {
     expect(within(place).getByText('A bakery-café that started at SUTD.')).toBeTruthy()
     expect(within(place).getByText('80 m from Galaxis, as the crow flies')).toBeTruthy()
     const site = within(place).getByRole('link', { name: 'Website' })
+    // Its globe before its words, read as its words alone.
+    expect(site.querySelector('svg')).toBeTruthy()
     expect(site.getAttribute('href')).toBe('https://breadyard.sg/')
     expect(site.getAttribute('rel')).toBe('noopener noreferrer')
     expect(document.activeElement).toBe(within(view).getByRole('button', { name: 'Close the map' }))
@@ -98,6 +100,8 @@ describe('a map in an answer', () => {
     fireEvent.click(within(card).getByRole('button'))
     const place = within(await screen.findByRole('dialog')).getByRole('complementary', { name: 'The fountain' })
     expect(within(place).getByRole('button', { name: 'Directions' }).className).toContain('primary')
+    // Each with its icon before its words, read as its words alone.
+    for (const name of ['Directions']) expect(within(place).getByRole('button', { name }).querySelector('svg')).toBeTruthy()
     expect(within(place).queryByRole('navigation')).toBeNull()
   })
 })
