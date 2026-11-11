@@ -239,7 +239,7 @@ export function CrewStage({ island, crew }: { island: Island; crew: TeamNow }) {
           return (
             <span key={agent} className="island-stage-member">
               <span className={`island-stage-figure${working ? ' glow' : ''}`} data-moment={working ? 'work' : 'rest'} aria-hidden="true">
-                <FigureStill figure={island.figure(crew.teamPath, agent)} alt="" />
+                <FigureStill figure={island.figure(crew.teamPath, agent)} state={working ? 'working' : 'ready'} alt="" />
               </span>
               <b>{crew.names?.[agent] ?? agent}</b>
               {doing ? <em>{doing}</em> : null}

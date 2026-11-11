@@ -1036,7 +1036,7 @@
 .wg-mapview-head .wg-place-facts { font-size: 14px; line-height: 20px; }
 .wg-mapview-acts { display: flex; gap: var(--sp-2); }
 .wg-mapview-act {
-  flex: 1; display: grid; place-items: center; height: 44px; padding: 0 var(--sp-4); border: 0; border-radius: var(--r-full);
+  flex: 1; display: flex; align-items: center; justify-content: center; gap: 7px; height: 44px; padding: 0 var(--sp-4); border: 0; border-radius: var(--r-full);
   background: color-mix(in srgb, var(--color-ink) 9%, transparent); color: var(--color-ink); font: 600 15px/1 var(--font-sans);
   text-decoration: none; cursor: pointer;
 }

@@ -155,8 +155,9 @@ function MapView({ spec, picked, onPick, onClose }: { spec: MapSpec; picked: num
           </div>
         </div>
         <div className="wg-mapview-acts">
-          {site && <a className="wg-mapview-act primary" href={site} target="_blank" rel="noopener noreferrer">Website</a>}
-          <button type="button" className={`wg-mapview-act${site ? '' : ' primary'}`} onClick={() => setAsking(true)}>Directions</button>
+          {/* Each with its icon before its words, as a maps app's buttons have. */}
+          {site && <a className="wg-mapview-act primary" href={site} target="_blank" rel="noopener noreferrer"><Icon name="web" size={16} />Website</a>}
+          <button type="button" className={`wg-mapview-act${site ? '' : ' primary'}`} onClick={() => setAsking(true)}><Icon name="compass" size={16} />Directions</button>
         </div>
         {place.note && <p className="wg-mapview-note">{place.note}</p>}
         {(distance || place.address) && (

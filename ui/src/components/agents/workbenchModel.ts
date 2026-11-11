@@ -57,9 +57,18 @@ export const LIVE = new Color('#6AB8FF')
  * fit, which resamples the whole picture and leaves it soft, worst on a 1x screen. So the canvas
  * takes exactly the size of its buffer: at most a fraction of a pixel short of its box. Shared with
  * the landing page's crew (src/site/crewScene.ts).
+ *
+ * It draws at the screen's own pixels up to 2x, and up to 3x while the canvas stays within
+ * CANVAS_PIXELS: zoomed in, a canvas held at 2x was stretched, and the velvet's strands went soft
+ * and grainy. A large canvas (the bench filling a window) stays at 2x.
  */
+/** The most device pixels a canvas is drawn with above 2x (fitCanvas): a crew's canvas at 3x. */
+export const CANVAS_PIXELS = 6_000_000
+
 export function fitCanvas(renderer: WebGLRenderer, width: number, height: number): { width: number; height: number } {
-  const ratio = Math.min(window.devicePixelRatio || 1, 2)
+  const screen = window.devicePixelRatio || 1
+  const room = Math.sqrt(CANVAS_PIXELS / Math.max(1, width * height))
+  const ratio = Math.min(screen, Math.max(2, Math.min(3, room)))
   const across = Math.max(1, Math.floor(width * ratio))
   const down = Math.max(1, Math.floor(height * ratio))
   // In device pixels, at a ratio of 1: three floors width × ratio itself, which can land a pixel short.
@@ -106,6 +115,15 @@ export function velvetColor(color: FigureColor): Color {
   return new Color(LIVE_HEX[color])
 }
 
+/**
+ * The pile's lattice (furCoat), turned so none of its planes lies along the figure's axes: rows
+ * (2, -1, -1), (0, 1, -1) and (1, 1, 1), each made a unit long. As GLSL, column by column.
+ */
+const PILE_TURN = 'mat3(0.8165, 0.0, 0.5774, -0.4082, 0.7071, 0.5774, -0.4082, -0.7071, 0.5774)'
+
+/** How far, in cells, the pile's lattice is bent (furCoat). */
+const PILE_BEND = 0.5
+
 /** How far a skin's sheen goes from its own colour toward white. */
 export const SHEEN_TOWARD_WHITE = 0.5
 
@@ -117,8 +135,13 @@ export const SHEEN_TOWARD_WHITE = 0.5
  * Color objects its material holds), so painting the part paints its pile. `roots` and `tips` shade
  * the strands from the lowest shell to the highest, near alike: further apart (0.62 to 1.08), strands
  * a pixel or two wide read as static, and the colour measured for the velvet (LIVE_HEX) is for these.
+ *
+ * Each strand stands in a cell of a lattice turned off the figure's axes and gently bent
+ * (PILE_TURN, PILE_BEND), thin enough (`width`) to stand well off its cell's middle. On a square lattice,
+ * with strands near their cells' middles, a part facing the camera showed the lattice as a fine
+ * woven grid when drawn up close.
  */
-export function furCoat(mesh: Mesh, { shells = 16, length = 0.03, density = 340, width = 0.42, roots = 0.7, tips = 1.17, comb = 1.1 } = {}): Mesh[] {
+export function furCoat(mesh: Mesh, { shells = 20, length = 0.03, density = 380, width = 0.3, roots = 0.7, tips = 1.17, comb = 1.1 } = {}): Mesh[] {
   const base = mesh.material as MeshPhysicalMaterial
   const made: Mesh[] = []
   for (let i = 1; i <= shells; i += 1) {
@@ -141,17 +164,19 @@ export function furCoat(mesh: Mesh, { shells = 16, length = 0.03, density = 340,
         .replace('#include <common>', '#include <common>\nuniform float pileHeight;\nuniform float pileLength;\nuniform float pileComb;\nattribute float pileCover;\nvarying vec3 vPileAt;\nvarying vec3 vPileUp;\nvarying float vPileCover;')
         .replace('#include <begin_vertex>', '#include <begin_vertex>\nvPileAt = position;\nvPileUp = objectNormal;\nvPileCover = pileCover;\nvec3 pileOut = normalize(objectNormal);\nvec3 pileDown = vec3(0.0, -1.0, 0.0) - pileOut * -pileOut.y;\npileDown *= min(1.0, length(pileDown) * 4.0) / max(length(pileDown), 1e-4);\ntransformed += (pileOut + pileDown * pileComb * pileHeight) * pileHeight * pileLength;')
       shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', '#include <common>\nuniform float pileHeight;\nuniform float pileDensity;\nuniform vec2 pileShade;\nuniform float pileMean;\nuniform float pileWidth;\nvarying vec3 vPileAt;\nvarying vec3 vPileUp;\nvarying float vPileCover;\nfloat pileHash(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }')
+        .replace('#include <common>', '#include <common>\nuniform float pileHeight;\nuniform float pileDensity;\nuniform vec2 pileShade;\nuniform float pileMean;\nuniform float pileWidth;\nvarying vec3 vPileAt;\nvarying vec3 vPileUp;\nvarying float vPileCover;\nfloat pileHash(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }\nconst mat3 pileTurn = ' + PILE_TURN + ';')
         .replace('#include <color_fragment>', `#include <color_fragment>
           // One strand per cell, round, of its own length; thinner the higher the shell.
-          vec3 at = vPileAt * pileDensity;
+          vec3 at = pileTurn * (vPileAt * pileDensity);
+          // Bent a little, slowly, so its rows run in soft waves, not straight lines.
+          at += ${PILE_BEND.toFixed(2)} * sin(at.yzx * 0.29 + 2.0 * sin(at.zxy * 0.17));
           vec3 cell = floor(at);
           // Each strand off its cell's middle by its own amount, so the pile shows no grid.
           vec3 jitter = vec3(pileHash(cell + 1.3), pileHash(cell + 2.7), pileHash(cell + 4.1)) - 0.5;
           vec3 inCell = fract(at) - 0.5 - (0.95 - 2.0 * pileWidth) * jitter;
           // Across the surface only: through the cells' layers, the strands thinned where a layer
           // ended, in rings round wherever the surface lay flat to them (the middle of the face).
-          vec3 up = normalize(vPileUp);
+          vec3 up = normalize(pileTurn * vPileUp);
           inCell -= up * dot(inCell, up);
           float reach = 0.35 + 0.65 * pileHash(cell);
           float radius = pileHeight < reach ? pileWidth * (1.0 - pileHeight / reach) : 0.0;
@@ -788,6 +813,69 @@ function meets(grid: ClothGrid, t: number, from: Vector3, way: Vector3, reach: n
   return along >= -COVER_BELOW && along <= reach
 }
 
+/** Where a figure's arms are going: each arm's turn about x and about z (three's Euler), as a garment's `bind_arm_*` give them. */
+export interface Arms {
+  left: readonly [number, number]
+  right: readonly [number, number]
+}
+
+/**
+ * Nod a figure's head by `nod` (a turn about x: below 0 it tips back, looking up) and turn it by
+ * `turn` (about y). Tipping back, it rocks on the front-most point of its own surface, so its front
+ * outline stays where it was and its chin tucks into its body. Turned about its middle, the head
+ * lifted its front off its body and showed the body's flat top under its chin, a pale shelf with a
+ * rim. Nodding down it turns about its middle, which lifts only its back, out of sight.
+ */
+export function nodHead(head: Object3D, nod: number, turn: number) {
+  const data = head.userData as { home?: Vector3; front?: Vector3 | null }
+  data.home ??= head.position.clone()
+  if (data.front === undefined) data.front = frontOfHead(head)
+  head.rotation.set(nod, turn, 0)
+  head.position.copy(data.home)
+  if (nod >= 0 || !data.front) return
+  // Where its front-most point would go, nodded about its middle, brought back.
+  head.position.add(data.front).sub(data.front.clone().applyAxisAngle(X_AXIS, nod))
+}
+
+const X_AXIS = new Vector3(1, 0, 0)
+
+/**
+ * The front-most point of a head's own surface, in the head's space: its `head_mesh`, else its
+ * largest mesh that isn't the sign on it; null with none.
+ */
+function frontOfHead(head: Object3D): Vector3 | null {
+  let largest: Mesh | null = null
+  for (const child of head.children) {
+    if (!(child instanceof Mesh) || onSign(child) || !child.geometry.getAttribute('position')) continue
+    if (child.name === 'head_mesh') { largest = child; break }
+    if (!largest || child.geometry.getAttribute('position').count > largest.geometry.getAttribute('position').count) largest = child
+  }
+  if (!largest) return null
+  const position = largest.geometry.getAttribute('position')
+  const point = new Vector3()
+  const front = new Vector3(0, 0, -Infinity)
+  largest.updateMatrix()
+  for (let i = 0; i < position.count; i += 1) {
+    point.fromBufferAttribute(position, i).applyMatrix4(largest.matrix)
+    if (point.z > front.z) front.copy(point)
+  }
+  return front.setX(0)
+}
+
+/** Whether `object` is part of the job's sign on a figure's head (`sign_<icon>`): smooth velvet, no pile. */
+export function onSign(object: Object3D): boolean {
+  for (let at: Object3D | null = object; at; at = at.parent) if (at.name.startsWith('sign_')) return true
+  return false
+}
+
+/** A pose's arms, for poseClothes. */
+export function armsOf(pose: { armLRX: number; armLRZ: number; armRRX: number; armRRZ: number }): Arms {
+  return { left: [pose.armLRX, pose.armLRZ], right: [pose.armRRX, pose.armRRZ] }
+}
+
+/** How near its target the arms are (in radians, all four turns together) for a figure to have arrived (poseClothes). */
+const ARRIVED = 0.06
+
 /**
  * Show each worn garment as it was made for the pose nearest the arms. The figure pipeline makes a
  * garment once for each pose the bench and the landing page hold (`wear_<item>_pose_<pose>`, each
@@ -796,12 +884,22 @@ function meets(grid: ClothGrid, t: number, from: Vector3, way: Vector3, reach: n
  * swung far. Each is bent a little with the arms (bendClothes), and the nearest is the one shown.
  * Call it each frame after the arms are set, with the figure's body (or any node holding its arms and
  * clothes). A garment marked not worn (`userData.worn === false`) stays hidden.
+ *
+ * With `toward`, where the arms are going, a figure on its way wears, bent to its arms, the garment
+ * of the pose it left or the one it is going to, whichever was made with its arms further out
+ * (furthest from the rest pose's), and the one it is going to once it is there. A paw raised to
+ * wave and lowered again wears the clothes made with that paw up, all the way up and back down.
+ * Shown the nearest on the way, an arm passed garments made for other poses (the paws at the
+ * sides), each bent far from its own, and a garment with no sleeve for that arm dragged the cloth
+ * at its shoulder out into a flap.
  */
-export function poseClothes(root: Object3D) {
+export function poseClothes(root: Object3D, toward?: Arms) {
   const armL = root.getObjectByName('arm_l')
   const armR = root.getObjectByName('arm_r')
   if (!armL || !armR) return
   const now = [armL.rotation.x, armL.rotation.z, armR.rotation.x, armR.rotation.z]
+  const goal = toward ? [toward.left[0], toward.left[1], toward.right[0], toward.right[1]] : now
+  const arrived = Math.hypot(...now.map((turn, i) => turn - goal[i])) < ARRIVED
   const garments = new Map<string, Mesh[]>()
   root.traverse((object) => {
     if (!(object instanceof Mesh) || typeof object.userData.pose !== 'string' || !Array.isArray(object.userData.bind_arm_l)) return
@@ -809,15 +907,27 @@ export function poseClothes(root: Object3D) {
     garments.set(item, [...(garments.get(item) ?? []), object])
   })
   for (const made of garments.values()) {
-    const distance = (mesh: Mesh) => {
+    const from = (arms: number[]) => (mesh: Mesh) => {
       const l = mesh.userData.bind_arm_l as number[]
       const r = mesh.userData.bind_arm_r as number[]
-      return Math.hypot(now[0] - l[0], now[1] - l[2], now[2] - r[0], now[3] - r[2])
+      return Math.hypot(arms[0] - l[0], arms[1] - l[2], arms[2] - r[0], arms[3] - r[2])
     }
-    const nearest = made.reduce((best, mesh) => (distance(mesh) < distance(best) ? mesh : best))
-    for (const mesh of made) mesh.visible = mesh.userData.worn !== false && mesh === nearest
+    const nearest = (arms: number[]) => made.reduce((best, mesh) => (from(arms)(mesh) < from(arms)(best) ? mesh : best))
+    const going = nearest(goal)
+    let shown = going
+    if (toward && !arrived) {
+      // The one it wore when it set off, still shown.
+      const left = made.find((mesh) => mesh.userData.shownForPose === true) ?? nearest(now)
+      const rest = made.find((mesh) => mesh.userData.pose === 'rest')
+      const out = (mesh: Mesh) => (rest ? from([rest.userData.bind_arm_l[0], rest.userData.bind_arm_l[2], rest.userData.bind_arm_r[0], rest.userData.bind_arm_r[2]])(mesh) : 0)
+      shown = out(left) > out(going) ? left : going
+    }
+    for (const mesh of made) {
+      mesh.userData.shownForPose = mesh === shown
+      mesh.visible = mesh.userData.worn !== false && mesh === shown
+    }
     // The pile clears under the one shown (coverPile).
-    if (nearest.visible) coverPile(root, nearest)
+    if (shown.visible) coverPile(root, shown)
   }
 }
 

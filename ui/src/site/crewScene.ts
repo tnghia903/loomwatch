@@ -1,6 +1,7 @@
 import {
   AdditiveBlending,
   Box3,
+  BufferGeometry,
   CatmullRomCurve3,
   Color,
   DirectionalLight,
@@ -28,7 +29,7 @@ import {
   type Texture,
   type Vector4,
 } from 'three'
-import { benchMaterial, bendClothes, clearFace, coveredBy, coverPile, drawn, garmentMesh, poseClothes, dressWear, fitCanvas, furCoat, paintSkin, readModel, readyToDraw, roomEnvironment, shineWithEyes, stripeHeights, velvetColor } from '../components/agents/workbenchModel'
+import { armsOf, benchMaterial, bendClothes, nodHead, onSign, clearFace, coveredBy, coverPile, drawn, garmentMesh, poseClothes, dressWear, fitCanvas, furCoat, paintSkin, readModel, readyToDraw, roomEnvironment, shineWithEyes, stripeHeights, velvetColor } from '../components/agents/workbenchModel'
 import { pegboardTexture, woundTexture } from '../components/agents/benchTextures'
 import type { FigureKind, FigureView } from '../lib/library/figures'
 import { isGarment } from '../lib/quests/catalog'
@@ -44,10 +45,17 @@ export interface CrewMember {
 /** Where the page keeps each build's figure (site/build.sh): the app's own, with only the pieces the page's crew wears. */
 export const CREW_FIGURES = 'assets/live/figure/'
 
-/** The crew's velvet pile (furCoat): fewer shells than the bench's, for six figures on one page. Its
-    strands' edges are soft, so fine ones draw as velvet rather than static; coarse (140 a unit),
-    each a few pixels wide, they read as a grainy towel. */
-export const CREW_PILE = { shells: 11, length: 0.026, density: 250 }
+/** The crew's velvet pile (furCoat): the bench's own. Lighter (11 shells, 250 strands a unit), it read
+    as grain drawn up close, and six figures at 3x still draw in about 2.5 ms on an M-series Mac.
+    Coarse (140 a unit), each strand a few pixels wide, it read as a grainy towel. */
+export const CREW_PILE = { shells: 20, length: 0.03, density: 380 }
+
+/**
+ * The gold thread the crew holds (cordGeometry): three strands laid round each other, a full turn in
+ * `lay`, each standing `depth` of the cord's radius proud of the grooves between them. Drawn as a
+ * plain six-sided tube, it showed its facets up close.
+ */
+export const CORD = { radius: 0.012, sides: 12, step: 0.004, lay: 0.05, depth: 0.16 }
 
 /** Each build's figure from `base`, loaded once for every member that is that build. */
 export function crewModels(base: string): (kind: FigureKind) => Promise<Object3D> {
@@ -95,6 +103,11 @@ interface Figure {
   armR: Object3D
   handL: Object3D
   handR: Object3D
+  /** Where each mitten holds the thread, in its hand's own space: the middle of its paw. */
+  gripL: Vector3
+  gripR: Vector3
+  /** How far forward its body and clothes reach below its head, in its body's space: the thread runs in front of it. */
+  front: number
   eyes: Object3D[]
   meshes: Mesh[]
   /** Its flat colour in the glow round it: what it is doing (crewGlow.ts). */
@@ -171,7 +184,7 @@ export class CrewScene {
   private headTop = 1
   /** Which figures stand in each row, front row first: one row of six, or two of three. */
   private rows: number[][] = []
-  private threads: Mesh<TubeGeometry, MeshStandardMaterial>[] = []
+  private threads: Mesh<BufferGeometry, MeshStandardMaterial>[] = []
   private threadMaterial: MeshStandardMaterial | null = null
   /** Each row's thread, and where along it each figure holds it (its curve's t, between the mittens). */
   private curves: CatmullRomCurve3[] = []
@@ -281,10 +294,12 @@ export class CrewScene {
       root.updateMatrixWorld(true)
       const box = new Box3().setFromObject(root, true)
       this.scene.add(root)
+      const handL = named('hand_l')
+      const handR = named('hand_r')
       this.figures.push({
         stand: -box.min.y, top: box.max.y - box.min.y, pile,
         root, body: named('body'), neck: named('neck'), head: named('head'), armL: named('arm_l'), armR: named('arm_r'),
-        handL: named('hand_l'), handR: named('hand_r'), eyes, meshes, tint: this.glow.material(), pose: { ...REST },
+        handL, handR, gripL: pawMiddle(handL), gripR: pawMiddle(handR), front: frontOf(named('body')), eyes, meshes, tint: this.glow.material(), pose: { ...REST },
         nextBlink: 1.5 + ((index * 1.37) % 2.6), phase: index * 1.618, hop: -10,
       })
     })
@@ -333,7 +348,7 @@ export class CrewScene {
     if (!same || this.threads.length === 0) {
       for (const thread of this.threads) { thread.geometry.dispose(); thread.removeFromParent() }
       this.threads = rows.map(() => {
-        const thread = new Mesh(new TubeGeometry(new CatmullRomCurve3([new Vector3(), new Vector3(0.1, 0, 0)]), 2, 0.012, 6), this.threadMaterial!)
+        const thread = new Mesh(cordGeometry(new CatmullRomCurve3([new Vector3(), new Vector3(0.1, 0, 0)])), this.threadMaterial!)
         thread.castShadow = true
         this.scene.add(thread)
         return thread
@@ -348,11 +363,11 @@ export class CrewScene {
     this.rows.forEach((row, r) => {
       const thread = this.threads[r]
       if (!thread) return
-      const { curve, held } = this.threadCurve(row.map((index) => this.figures[index]))
+      const { curve, held } = threadCurve(row.map((index) => this.figures[index]), this.now, this.reduced)
       this.curves[r] = curve
       row.forEach((index, at) => { this.held[index] = { row: r, t: held[at] } })
       thread.geometry.dispose()
-      thread.geometry = new TubeGeometry(curve, 40 * row.length, 0.012, 6)
+      thread.geometry = cordGeometry(curve)
     })
   }
 
@@ -564,10 +579,11 @@ export class CrewScene {
       figure.body.position.y = p.bodyY
       figure.body.rotation.set(0, p.bodyRY, 0)
       figure.neck.rotation.set(-p.lookY * 0.05, 0, -p.lookX * 0.06)
-      figure.head.rotation.set(-p.lookY * HEAD_NOD, p.lookX * HEAD_TURN, 0)
+      nodHead(figure.head, -p.lookY * HEAD_NOD, p.lookX * HEAD_TURN)
       figure.armL.rotation.set(p.armLRX, 0, p.armLRZ)
       figure.armR.rotation.set(p.armRRX, 0, p.armRRZ)
-      if (figure.armL.parent) poseClothes(figure.armL.parent)
+      // A wave wears the clothes made with a paw up, all the way up and back (poseClothes).
+      if (figure.armL.parent) poseClothes(figure.armL.parent, armsOf(target))
       figure.handR.rotation.x = -0.3 * p.wave
       this.blink(figure)
     })
@@ -634,34 +650,6 @@ export class CrewScene {
       this.bead.position.copy(start).lerp(end, s).add(new Vector3(0, lift * Math.sin(Math.PI * s), 0))
     }
     this.bead.scale.setScalar(this.talking ? 1 + 0.18 * Math.sin(this.now * 14) : 1)
-  }
-
-  /**
-   * Through every mitten that holds it, sagging between neighbours and trailing off at both ends.
-   * `held` is where along it each figure holds it, between its two mittens.
-   */
-  private threadCurve(figures: readonly Figure[]): { curve: CatmullRomCurve3; held: number[] } {
-    const points: Vector3[] = []
-    const grips: number[] = []
-    const mitten = (hand: Object3D) => hand.localToWorld(new Vector3(0, -0.05, 0.02))
-    const t = this.now
-    figures.forEach((figure, index) => {
-      const right = mitten(figure.handR)
-      const left = mitten(figure.handL)
-      if (index === 0) points.push(right.clone().add(new Vector3(-0.55, -0.1, 0.05)), right.clone().add(new Vector3(-0.28, -0.07 + 0.01 * Math.sin(t * 1.4), 0.03)))
-      else {
-        const before = mitten(figures[index - 1].handL)
-        const sag = 0.09 + 0.012 * Math.sin(t * 1.2 + index) * (this.reduced ? 0 : 1)
-        points.push(before.clone().lerp(right, 0.5).add(new Vector3(0, -sag, 0.04)))
-      }
-      // A waving figure holds it with one mitten only: the thread slides from its left to its right.
-      const waving = figure.pose.wave > 0.5
-      grips.push(points.length)
-      points.push(waving ? left.clone().lerp(right, 0.5).add(new Vector3(0, -0.05, 0.05)) : right, left)
-      if (index === figures.length - 1) points.push(left.clone().add(new Vector3(0.28, -0.07 + 0.01 * Math.sin(t * 1.1), 0.03)), left.clone().add(new Vector3(0.55, -0.12, 0.05)))
-    })
-    // A curve's t reaches its points evenly: point k is at k / (points - 1).
-    return { curve: new CatmullRomCurve3(points, false, 'centripetal'), held: grips.map((k) => (k + 0.5) / (points.length - 1)) }
   }
 
   private blink(figure: Figure) {
@@ -780,7 +768,8 @@ export function dressFigure(root: Object3D, member: CrewMember, wound: Texture, 
   // The crew's own pile (CREW_PILE): six figures share the page, each drawn small. None under its
   // shoes or gloves (coveredBy), where it would poke through.
   const covered = coveredBy(worn)
-  for (const mesh of meshes) if (mesh.userData.role === 'skin' && !covered.has(mesh.name)) for (const coat of furCoat(mesh, CREW_PILE)) own(coat.material as Material)
+  // None on the sign on its head (onSign), where a pile round its thin strokes stood out as spikes.
+  for (const mesh of meshes) if (mesh.userData.role === 'skin' && !covered.has(mesh.name) && !onSign(mesh)) for (const coat of furCoat(mesh, CREW_PILE)) own(coat.material as Material)
   // Short round its face's features, so they sit clear on the velvet (clearFace).
   clearFace(root)
   // None under the garment it wears, which lies close over the body.
@@ -805,3 +794,89 @@ export function figureEyes(root: Object3D): Object3D[] {
   return eyes
 }
 
+/** What the thread needs of a figure that holds it (threadCurve). */
+export type ThreadHolder = Pick<Figure, 'body' | 'handL' | 'handR' | 'gripL' | 'gripR' | 'front'> & { pose: Pick<Pose, 'wave'> }
+
+/**
+ * Through the middle of every paw that holds it, in front of each figure's belly between its two
+ * paws, sagging between neighbours and trailing off at both ends. `held` is where along it each
+ * figure holds it, between its two mittens. Threaded through a point fixed in each hand's space,
+ * it missed the paws on some builds (the small one's ran over its belly above them), and run
+ * straight from paw to paw it went through the body of a figure whose paws are at its sides.
+ */
+export function threadCurve(figures: readonly ThreadHolder[], t: number, reduced: boolean): { curve: CatmullRomCurve3; held: number[] } {
+  const points: Vector3[] = []
+  const grips: number[] = []
+  figures.forEach((figure, index) => {
+    const right = figure.handR.localToWorld(figure.gripR.clone())
+    const left = figure.handL.localToWorld(figure.gripL.clone())
+    // In front of its belly, in its body's space: clear of its body and clothes by a little more than the cord.
+    const before = (at: Vector3) => figure.body.localToWorld(at.setZ(Math.max(at.z, figure.front + CORD.radius * 1.5)))
+    const leftHere = figure.body.worldToLocal(left.clone())
+    // A waving figure holds it in its left mitten only: from its other side the thread runs across
+    // the front of its belly to it. Halfway between the mittens, with one up, was in its shoulder.
+    const waving = figure.pose.wave > 0.5
+    const enters = waving ? before(new Vector3(-leftHere.x, leftHere.y - 0.01, leftHere.z)) : right
+    const middle = waving
+      ? before(new Vector3(0, leftHere.y - 0.02, leftHere.z))
+      : before(figure.body.worldToLocal(right.clone()).lerp(leftHere, 0.5).add(new Vector3(0, -0.012, 0)))
+    if (index === 0) points.push(enters.clone().add(new Vector3(-0.55, -0.1, 0.05)), enters.clone().add(new Vector3(-0.28, -0.07 + 0.01 * Math.sin(t * 1.4), 0.03)))
+    else {
+      const previous = figures[index - 1]
+      const sag = 0.09 + 0.012 * Math.sin(t * 1.2 + index) * (reduced ? 0 : 1)
+      points.push(previous.handL.localToWorld(previous.gripL.clone()).lerp(enters, 0.5).add(new Vector3(0, -sag, 0.04)))
+    }
+    grips.push(points.length + 1)
+    points.push(enters, middle, left)
+    if (index === figures.length - 1) points.push(left.clone().add(new Vector3(0.28, -0.07 + 0.01 * Math.sin(t * 1.1), 0.03)), left.clone().add(new Vector3(0.55, -0.12, 0.05)))
+  })
+  // A curve's t reaches its points evenly: point k is at k / (points - 1).
+  return { curve: new CatmullRomCurve3(points, false, 'centripetal'), held: grips.map((k) => k / (points.length - 1)) }
+}
+
+/** The middle of the paw under `hand`, in the hand's own space: where its mitten holds the thread. */
+export function pawMiddle(hand: Object3D): Vector3 {
+  hand.updateWorldMatrix(true, true)
+  return hand.worldToLocal(new Box3().setFromObject(hand).getCenter(new Vector3()))
+}
+
+/**
+ * How far forward a figure's body and the clothes it shows reach, in its body's space: everything
+ * under `body` but its arms and its neck (with the head on it), which stand further out.
+ */
+export function frontOf(body: Object3D): number {
+  body.updateWorldMatrix(true, true)
+  const toBody = body.matrixWorld.clone().invert()
+  let front = 0
+  const visit = (object: Object3D) => {
+    if (!object.visible || /^(arm_[lr]|neck)$/.test(object.name)) return
+    if (object instanceof Mesh) front = Math.max(front, new Box3().setFromObject(object).applyMatrix4(toBody).max.z)
+    for (const child of object.children) visit(child)
+  }
+  for (const child of body.children) visit(child)
+  return front
+}
+
+/**
+ * The gold thread along `curve`, laid as a cord (CORD): a tube whose surface stands out over three
+ * strands twisted round its middle and sinks between them, shaded by its own normals.
+ */
+export function cordGeometry(curve: CatmullRomCurve3): BufferGeometry {
+  const length = curve.getLength()
+  const segments = Math.max(8, Math.ceil(length / CORD.step))
+  const tube = new TubeGeometry(curve, segments, CORD.radius, CORD.sides, false)
+  const position = tube.getAttribute('position')
+  const normal = tube.getAttribute('normal')
+  const ring = CORD.sides + 1
+  for (let i = 0; i <= segments; i += 1) {
+    const turned = (i / segments) * length * ((Math.PI * 2) / CORD.lay)
+    for (let j = 0; j < ring; j += 1) {
+      const k = i * ring + j
+      const around = (j / CORD.sides) * Math.PI * 2
+      const out = CORD.radius * CORD.depth * Math.cos(3 * (around - turned))
+      position.setXYZ(k, position.getX(k) + normal.getX(k) * out, position.getY(k) + normal.getY(k) * out, position.getZ(k) + normal.getZ(k) * out)
+    }
+  }
+  tube.computeVertexNormals()
+  return tube
+}

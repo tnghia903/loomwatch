@@ -303,7 +303,7 @@ function Balcony({ island }: { island: IslandState }) {
     <div className="island-balcony" aria-hidden="true">
       {agents.map((agent) => (
         <span key={agent} className={`island-slot glow${agent === current ? ' is-on' : ''}`} data-agent={agent} data-moment={shown.team.moment} data-phase={agent === current ? phase ?? undefined : undefined}>
-          <FigureStill figure={island.figure(shown.team.teamPath, agent)} alt="" />
+          <FigureStill figure={island.figure(shown.team.teamPath, agent)} state={agent === current ? stateOf(shown.team.moment) : 'ready'} alt="" />
         </span>
       ))}
     </div>
@@ -335,7 +335,7 @@ function Hang({ island, onPointerEnter, onPointerLeave }: { island: IslandState;
         {shown && teamAsk && (
           <>
             <span className="island-hang-figure glow" data-moment="ask">
-              <FigureStill figure={island.figure(shown.team.teamPath, shown.team.agent)} alt="" />
+              <FigureStill figure={island.figure(shown.team.teamPath, shown.team.agent)} state="waiting" alt="" />
             </span>
             <div className="island-card" role="group" aria-label={`${shown.team.teamName} wants ${teamAsk.team.name} to do this: ${teamAsk.request}`}>
               <TeamAskBody island={island} request={teamAsk} first start decline={false} />
@@ -345,7 +345,7 @@ function Hang({ island, onPointerEnter, onPointerLeave }: { island: IslandState;
         {shown && ticket && (
           <>
             <span className="island-hang-figure glow" data-moment="ask">
-              <FigureStill figure={island.figure(shown.team.teamPath, shown.team.askers?.[ticket.id] ?? shown.team.agent)} alt="" />
+              <FigureStill figure={island.figure(shown.team.teamPath, shown.team.askers?.[ticket.id] ?? shown.team.agent)} state="waiting" alt="" />
             </span>
             <div className="island-card" role="group" aria-label={`${shown.team.teamName}: ${ticket.text}`}>
               <AskBody island={island} team={shown.team} ticket={ticket} first />

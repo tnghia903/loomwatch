@@ -283,7 +283,8 @@ describe('the island page', () => {
     const { container } = render(<Island />)
     tellPage({ kind: 'place', notch: { width: 188, height: 32 }, menuBar: 32 })
     await waitFor(() => expect(container.querySelector('.island-card')).toBeTruthy())
-    expect(container.querySelector('.island-hang-figure img')?.getAttribute('src')).toBe(figureStill(figureFor('researcher')))
+    // In its waiting pose, as its glow says: one paw raised to you.
+    expect(container.querySelector('.island-hang-figure img')?.getAttribute('src')).toBe(figureStill(figureFor('researcher'), 'waiting'))
   })
 
   it('opens the list when the pointer reaches the island, one row per team', async () => {
@@ -335,6 +336,8 @@ describe('the island page', () => {
     notes = [answering('m1')]
     await waitFor(() => expect(island.getAttribute('data-view')).toBe('work'), { timeout: 5000 })
     expect(container.querySelector('.island-slot.is-on')?.getAttribute('data-agent')).toBe('writer')
+    // At work, as its glow says: its working pose.
+    expect(container.querySelector('.island-slot.is-on img')?.getAttribute('src')).toMatch(/-working\.webp$/)
     // An answer in the chat has no run to follow: the figure bobs rather than acting anything out.
     expect(container.querySelector('.island-slot.is-on')?.getAttribute('data-phase')).toBeNull()
     notes = [answering('m1', { answers: { waiting: [], said: [said('Every item keeps one number.')] }, finishedAt: new Date().toISOString() })]
@@ -1981,6 +1984,8 @@ describe('the notch as the pinned agent’s slot, and its crew', () => {
     expect(stage.getAttribute('aria-label')).toBe('Trip planner is working for Maya')
     expect([...stage.querySelectorAll('.island-stage-member b')].map((name) => name.textContent)).toEqual(['Researcher', 'Writer'])
     expect(stage.querySelector('.island-stage-figure.glow')?.closest('.island-stage-member')?.querySelector('b')?.textContent).toBe('Researcher')
+    // The one at work in its working pose, the one waiting its turn ready.
+    expect([...stage.querySelectorAll('.island-stage-figure img')].map((still) => /-working\.webp$/.test(still.getAttribute('src') ?? ''))).toEqual([true, false])
     // Its work is on Maya's stage, not a row of its own.
     expect(container.querySelectorAll('.island-row:not(.island-pinned)')).toHaveLength(0)
   }, 20_000)

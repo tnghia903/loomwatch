@@ -65,6 +65,13 @@ it('lays a light velvet pile on its velvet, in the velvet’s own colour', () =>
   expect((pile[0].material as MeshPhysicalMaterial).color).toBe((head.material as MeshPhysicalMaterial).color)
 })
 
+it('lays no pile on the sign on its head, where it stood out round the thin strokes as spikes', () => {
+  const root = figure()
+  dressFigure(root, { figure: { kind: 'wide', color: 'clay', sign: 'review' } }, new Texture(), (item) => item)
+  const sign = root.getObjectByName('sign_review')!
+  expect(sign.children.filter((child) => child instanceof Mesh && (child.material as MeshPhysicalMaterial).name === 'pile')).toEqual([])
+})
+
 it('lays no pile under its shoes or gloves, where it would poke through them', () => {
   const root = figure()
   for (const name of ['foot_l', 'hand_l_mitten']) {

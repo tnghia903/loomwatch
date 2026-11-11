@@ -13,7 +13,7 @@ import {
 } from 'three'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
 
-import { bendClothes, fitCanvas, poseClothes, readyToDraw } from '../components/agents/workbenchModel'
+import { armsOf, bendClothes, fitCanvas, nodHead, poseClothes, readyToDraw } from '../components/agents/workbenchModel'
 import { woundTexture } from '../components/agents/benchTextures'
 import { CREW_FIGURES, crewModels, dressFigure, figureEyes, figurePart, type CrewMember } from './crewScene'
 
@@ -188,10 +188,11 @@ export class CordScene {
     for (const channel of Object.keys(target) as (keyof Pose)[]) this.pose[channel] += (target[channel] - this.pose[channel]) * ease
     const p = this.pose
     parts.neck.rotation.set(-p.lookY * 0.05, 0, -p.lookX * 0.06)
-    parts.head.rotation.set(-p.lookY * 0.24, p.lookX * 0.5, 0)
+    nodHead(parts.head, -p.lookY * 0.24, p.lookX * 0.5)
     parts.armL.rotation.set(p.armLRX, 0, p.armLRZ)
     parts.armR.rotation.set(p.armRRX, 0, p.armRRZ)
-    if (parts.armL.parent) poseClothes(parts.armL.parent)
+    // Its clothes follow where its arms are going (poseClothes): up to wave or pulled, and back.
+    if (parts.armL.parent) poseClothes(parts.armL.parent, armsOf(target))
     parts.handR.rotation.x = -0.3 * p.wave
     this.blink(parts.eyes)
     root.updateMatrixWorld(true)
