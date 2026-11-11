@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { BoxGeometry, BufferAttribute, BufferGeometry, Color, CylinderGeometry, DirectionalLight, MeshPhysicalMaterial, MeshStandardMaterial, Object3D, Quaternion, Scene, SkinnedMesh, Texture, Vector3, WebGLRenderTarget, Mesh, SphereGeometry } from 'three'
 import { describe, expect, it, vi } from 'vitest'
-import { benchMaterial, bendClothes, CANVAS_PIXELS, clearFace, coveredBy, coverPile, dressWear, fitCanvas, pileMean, poseClothes, paintSkin, renewShadows, SHEEN_TOWARD_WHITE, furCoat, shineWithEyes, showPile, stripeHeights, velvetColor, wearMaterial } from './workbenchModel'
+import { benchMaterial, bendClothes, CANVAS_PIXELS, nodHead, onSign, clearFace, coveredBy, coverPile, dressWear, fitCanvas, pileMean, poseClothes, paintSkin, renewShadows, SHEEN_TOWARD_WHITE, furCoat, shineWithEyes, showPile, stripeHeights, velvetColor, wearMaterial } from './workbenchModel'
 
 const textures = { pegboard: () => new Texture(), wound: null }
 
@@ -653,5 +653,45 @@ describe('the pile’s strands (furCoat)', () => {
       for (const other of columns.slice(i + 1)) expect(column.dot(other)).toBeCloseTo(0, 3)
       expect(Math.max(Math.abs(column.x), Math.abs(column.y), Math.abs(column.z))).toBeLessThan(0.9)
     }
+  })
+})
+
+describe('a head that nods (nodHead)', () => {
+  // A head as the builds have them: a squashed ball over its pivot, wider than the body's top under it.
+  const head = () => {
+    const pivot = new Object3D()
+    const ball = new Mesh(new SphereGeometry(0.35, 32, 16).scale(1, 0.62, 1).translate(0, 0.19, 0), new MeshStandardMaterial())
+    ball.name = 'head_mesh'
+    const sign = new Mesh(new BoxGeometry(0.05, 0.3, 0.6).translate(0, 0.6, 0.4), new MeshStandardMaterial())
+    sign.name = 'sign_edit'
+    pivot.add(ball, sign)
+    return pivot
+  }
+  const front = new Vector3(0, 0.19, 0.35)
+
+  it('tips back on the front of its face, which stays where it was, so nothing under its chin shows', () => {
+    const one = head()
+    nodHead(one, -0.24, 0)
+    one.updateMatrix()
+    expect(front.clone().applyMatrix4(one.matrix).distanceTo(front)).toBeLessThan(0.002)
+    // Turned about its middle, its front would have gone up and back by several centimetres.
+    expect(front.clone().applyAxisAngle(new Vector3(1, 0, 0), -0.24).distanceTo(front)).toBeGreaterThan(0.05)
+  })
+
+  it('nods down about its middle, and comes back to where it was', () => {
+    const one = head()
+    nodHead(one, -0.2, 0.1)
+    nodHead(one, 0.15, 0)
+    expect(one.position.toArray()).toEqual([0, 0, 0])
+    expect(one.rotation.x).toBeCloseTo(0.15)
+  })
+
+  it('finds its face on its own head, never on the sign that stands on it (onSign)', () => {
+    const one = head()
+    expect(onSign(one.getObjectByName('sign_edit')!)).toBe(true)
+    expect(onSign(one.getObjectByName('head_mesh')!)).toBe(false)
+    nodHead(one, -0.24, 0)
+    one.updateMatrix()
+    expect(front.clone().applyMatrix4(one.matrix).distanceTo(front)).toBeLessThan(0.002)
   })
 })

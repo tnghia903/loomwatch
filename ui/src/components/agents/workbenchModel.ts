@@ -819,6 +819,55 @@ export interface Arms {
   right: readonly [number, number]
 }
 
+/**
+ * Nod a figure's head by `nod` (a turn about x: below 0 it tips back, looking up) and turn it by
+ * `turn` (about y). Tipping back, it rocks on the front-most point of its own surface, so its front
+ * outline stays where it was and its chin tucks into its body. Turned about its middle, the head
+ * lifted its front off its body and showed the body's flat top under its chin, a pale shelf with a
+ * rim. Nodding down it turns about its middle, which lifts only its back, out of sight.
+ */
+export function nodHead(head: Object3D, nod: number, turn: number) {
+  const data = head.userData as { home?: Vector3; front?: Vector3 | null }
+  data.home ??= head.position.clone()
+  if (data.front === undefined) data.front = frontOfHead(head)
+  head.rotation.set(nod, turn, 0)
+  head.position.copy(data.home)
+  if (nod >= 0 || !data.front) return
+  // Where its front-most point would go, nodded about its middle, brought back.
+  head.position.add(data.front).sub(data.front.clone().applyAxisAngle(X_AXIS, nod))
+}
+
+const X_AXIS = new Vector3(1, 0, 0)
+
+/**
+ * The front-most point of a head's own surface, in the head's space: its `head_mesh`, else its
+ * largest mesh that isn't the sign on it; null with none.
+ */
+function frontOfHead(head: Object3D): Vector3 | null {
+  let largest: Mesh | null = null
+  for (const child of head.children) {
+    if (!(child instanceof Mesh) || onSign(child) || !child.geometry.getAttribute('position')) continue
+    if (child.name === 'head_mesh') { largest = child; break }
+    if (!largest || child.geometry.getAttribute('position').count > largest.geometry.getAttribute('position').count) largest = child
+  }
+  if (!largest) return null
+  const position = largest.geometry.getAttribute('position')
+  const point = new Vector3()
+  const front = new Vector3(0, 0, -Infinity)
+  largest.updateMatrix()
+  for (let i = 0; i < position.count; i += 1) {
+    point.fromBufferAttribute(position, i).applyMatrix4(largest.matrix)
+    if (point.z > front.z) front.copy(point)
+  }
+  return front.setX(0)
+}
+
+/** Whether `object` is part of the job's sign on a figure's head (`sign_<icon>`): smooth velvet, no pile. */
+export function onSign(object: Object3D): boolean {
+  for (let at: Object3D | null = object; at; at = at.parent) if (at.name.startsWith('sign_')) return true
+  return false
+}
+
 /** A pose's arms, for poseClothes. */
 export function armsOf(pose: { armLRX: number; armLRZ: number; armRRX: number; armRRZ: number }): Arms {
   return { left: [pose.armLRX, pose.armLRZ], right: [pose.armRRX, pose.armRRZ] }

@@ -40,7 +40,7 @@ import { isGarment } from '../../lib/quests/catalog'
 import type { AllowSwitch } from '../../lib/team-file/types'
 import { cardTexture, keyLabelTexture, OBSIDIAN_PEGBOARD, pegboardTexture, toolTexture, woundTexture, type PegboardColors } from './benchTextures'
 import { SoftShading } from './softShading'
-import { armsOf, benchMaterial, bendClothes, clearFace, coveredBy, coverPile, dressWear, garmentMesh, poseClothes, fitCanvas, furCoat, LIVE, paintSkin, readModel, readyToDraw, renewShadows, shineWithEyes, showPile, stripeHeights, velvetColor, weaveCloth } from './workbenchModel'
+import { armsOf, benchMaterial, bendClothes, nodHead, onSign, clearFace, coveredBy, coverPile, dressWear, garmentMesh, poseClothes, fitCanvas, furCoat, LIVE, paintSkin, readModel, readyToDraw, renewShadows, shineWithEyes, showPile, stripeHeights, velvetColor, weaveCloth } from './workbenchModel'
 
 /** Everything the bench shows, from the agent on screen and the run in its chat. */
 export interface BenchView {
@@ -489,7 +489,7 @@ function posed(rig: Rig, p: Pose, t: number, motion: number, toward: Pose) {
   rig.body.position.y = p.bodyY
   rig.body.rotation.set(p.bodyRX, p.bodyRY, 0)
   rig.neck.rotation.set(p.neckRX - p.lookY * 0.05, 0, p.neckRZ - p.lookX * 0.06)
-  rig.head.rotation.set(-p.lookY * HEAD_NOD, p.lookX * HEAD_TURN, 0)
+  nodHead(rig.head, -p.lookY * HEAD_NOD, p.lookX * HEAD_TURN)
   rig.head.scale.setScalar(p.scale)
   rig.armL.rotation.set(p.armLRX, 0, p.armLRZ)
   rig.armR.rotation.set(p.armRRX, 0, p.armRRZ)
@@ -1179,7 +1179,8 @@ export class WorkbenchScene {
     })
     // Its velvet pile, on every velvet part (furCoat). The pile never moves, so reduced motion keeps it.
     for (const [mesh, role] of this.roles) {
-      if (role !== 'skin' || !this.node('figure').getObjectById(mesh.id)) continue
+      // None on the sign on its head (onSign): a pile round its thin strokes stood out as spikes.
+      if (role !== 'skin' || onSign(mesh) || !this.node('figure').getObjectById(mesh.id)) continue
       for (const coat of furCoat(mesh)) this.disposables.push(coat.material as Material)
     }
     this.rig = rigOf(figure)

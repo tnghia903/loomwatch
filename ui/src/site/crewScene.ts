@@ -29,7 +29,7 @@ import {
   type Texture,
   type Vector4,
 } from 'three'
-import { armsOf, benchMaterial, bendClothes, clearFace, coveredBy, coverPile, drawn, garmentMesh, poseClothes, dressWear, fitCanvas, furCoat, paintSkin, readModel, readyToDraw, roomEnvironment, shineWithEyes, stripeHeights, velvetColor } from '../components/agents/workbenchModel'
+import { armsOf, benchMaterial, bendClothes, nodHead, onSign, clearFace, coveredBy, coverPile, drawn, garmentMesh, poseClothes, dressWear, fitCanvas, furCoat, paintSkin, readModel, readyToDraw, roomEnvironment, shineWithEyes, stripeHeights, velvetColor } from '../components/agents/workbenchModel'
 import { pegboardTexture, woundTexture } from '../components/agents/benchTextures'
 import type { FigureKind, FigureView } from '../lib/library/figures'
 import { isGarment } from '../lib/quests/catalog'
@@ -579,7 +579,7 @@ export class CrewScene {
       figure.body.position.y = p.bodyY
       figure.body.rotation.set(0, p.bodyRY, 0)
       figure.neck.rotation.set(-p.lookY * 0.05, 0, -p.lookX * 0.06)
-      figure.head.rotation.set(-p.lookY * HEAD_NOD, p.lookX * HEAD_TURN, 0)
+      nodHead(figure.head, -p.lookY * HEAD_NOD, p.lookX * HEAD_TURN)
       figure.armL.rotation.set(p.armLRX, 0, p.armLRZ)
       figure.armR.rotation.set(p.armRRX, 0, p.armRRZ)
       // A wave wears the clothes made with a paw up, all the way up and back (poseClothes).
@@ -768,7 +768,8 @@ export function dressFigure(root: Object3D, member: CrewMember, wound: Texture, 
   // The crew's own pile (CREW_PILE): six figures share the page, each drawn small. None under its
   // shoes or gloves (coveredBy), where it would poke through.
   const covered = coveredBy(worn)
-  for (const mesh of meshes) if (mesh.userData.role === 'skin' && !covered.has(mesh.name)) for (const coat of furCoat(mesh, CREW_PILE)) own(coat.material as Material)
+  // None on the sign on its head (onSign), where a pile round its thin strokes stood out as spikes.
+  for (const mesh of meshes) if (mesh.userData.role === 'skin' && !covered.has(mesh.name) && !onSign(mesh)) for (const coat of furCoat(mesh, CREW_PILE)) own(coat.material as Material)
   // Short round its face's features, so they sit clear on the velvet (clearFace).
   clearFace(root)
   // None under the garment it wears, which lies close over the body.
