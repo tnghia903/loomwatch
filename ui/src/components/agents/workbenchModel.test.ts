@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { BoxGeometry, BufferAttribute, BufferGeometry, Color, CylinderGeometry, DirectionalLight, MeshPhysicalMaterial, MeshStandardMaterial, Object3D, Quaternion, Scene, SkinnedMesh, Texture, Vector3, WebGLRenderTarget, Mesh, SphereGeometry } from 'three'
 import { describe, expect, it, vi } from 'vitest'
-import { benchMaterial, bendClothes, clearFace, coveredBy, coverPile, dressWear, pileMean, poseClothes, paintSkin, renewShadows, SHEEN_TOWARD_WHITE, furCoat, shineWithEyes, showPile, stripeHeights, velvetColor, wearMaterial } from './workbenchModel'
+import { benchMaterial, bendClothes, CANVAS_PIXELS, clearFace, coveredBy, coverPile, dressWear, fitCanvas, pileMean, poseClothes, paintSkin, renewShadows, SHEEN_TOWARD_WHITE, furCoat, shineWithEyes, showPile, stripeHeights, velvetColor, wearMaterial } from './workbenchModel'
 
 const textures = { pegboard: () => new Texture(), wound: null }
 
@@ -398,6 +398,51 @@ describe('coverPile', () => {
     expect(lower.every((i) => cover(armMesh).getX(i) === 0)).toBe(true)
   })
 
+  it('wears the clothes made with a paw up all the way up to a wave and back down, never those of a pose it passes (poseClothes)', () => {
+    const root = new Object3D()
+    const body = new Object3D()
+    body.name = 'body'
+    root.add(body)
+    const arm = (side: 'l' | 'r') => Object.assign(new Object3D(), { name: `arm_${side}` })
+    const armL = arm('l')
+    const armR = arm('r')
+    body.add(armL, armR)
+    const made = (pose: string, right: number[]) => {
+      const mesh = new Mesh(new BoxGeometry(0.1, 0.1, 0.1), new MeshStandardMaterial())
+      mesh.name = `wear_cardigan_pose_${pose}`
+      mesh.userData = { pose, bind_arm_l: [-1.42, 0, -0.05], bind_arm_r: right }
+      body.add(mesh)
+      return mesh
+    }
+    const rest = made('rest', [-1.42, 0, 0.05])
+    const ask = made('ask', [-0.25, 0, -2.6])
+    const failed = made('failed', [-1.1, 0, -0.5])
+    const shown = () => [rest.visible, ask.visible, failed.visible]
+    const atRest = { left: [-1.42, -0.05], right: [-1.42, 0.05] } as const
+    const waving = { left: [-1.42, -0.05], right: [-0.25, -2.55] } as const
+    armL.rotation.set(-1.42, 0, -0.05)
+    armR.rotation.set(-1.42, 0, 0.05)
+    poseClothes(body, atRest)
+    expect(shown()).toEqual([true, false, false])
+    // On its way up, the right arm nearest the pose made with the paws at the sides.
+    armR.rotation.set(-1.1, 0, -0.6)
+    poseClothes(body)
+    expect(shown(), 'the nearest, with nowhere to go').toEqual([false, false, true])
+    poseClothes(body, waving)
+    expect(shown()).toEqual([false, true, false])
+    armR.rotation.set(-0.25, 0, -2.55)
+    poseClothes(body, waving)
+    expect(shown()).toEqual([false, true, false])
+    // On its way back down, past the paws-at-the-sides pose again: still the paw-up clothes.
+    armR.rotation.set(-1.1, 0, -0.6)
+    poseClothes(body, atRest)
+    expect(shown()).toEqual([false, true, false])
+    // Home: its own.
+    armR.rotation.set(-1.42, 0, 0.05)
+    poseClothes(body, atRest)
+    expect(shown()).toEqual([true, false, false])
+  })
+
   it('covers the parts a figure has now, when another build is shown in the same node', () => {
     const shown = new Object3D()
     const first = velvet()
@@ -564,5 +609,49 @@ describe('bendClothes', () => {
     coat.geometry.deleteAttribute('_arm_l')
     expect(bendClothes(root)).toEqual([])
     expect(root.getObjectByName('wear_trench_coat')).toBe(coat)
+  })
+})
+
+describe('fitCanvas', () => {
+  const sized = (ratio: number, width: number, height: number) => {
+    vi.stubGlobal('devicePixelRatio', ratio)
+    const renderer = { setDrawingBufferSize: vi.fn(), domElement: { style: {} as CSSStyleDeclaration } }
+    fitCanvas(renderer as never, width, height)
+    vi.unstubAllGlobals()
+    return renderer.setDrawingBufferSize.mock.calls[0].slice(0, 2)
+  }
+
+  it('draws a small canvas at a 3x screen’s own pixels, zoomed in too, so its velvet stays sharp', () => {
+    expect(sized(3, 1120, 240)).toEqual([3360, 720])
+    expect(sized(4, 1120, 240)).toEqual([3360, 720])
+  })
+
+  it('keeps a large canvas at 2x, and draws at the screen’s own pixels up to that', () => {
+    const [across, down] = sized(3, 1516, 1137)
+    expect(across * down).toBeLessThanOrEqual(CANVAS_PIXELS * 1.34)
+    expect([across, down]).toEqual([3032, 2274])
+    expect(sized(1, 1120, 240)).toEqual([1120, 240])
+    expect(sized(2, 1120, 240)).toEqual([2240, 480])
+  })
+})
+
+describe('the pile’s strands (furCoat)', () => {
+  it('stand on a lattice turned off the figure’s axes and gently bent, so no grid shows up close', () => {
+    const part = new Mesh(new SphereGeometry(0.1, 8, 6), new MeshPhysicalMaterial())
+    const [shell] = furCoat(part, { shells: 1 })
+    const shader = { uniforms: {}, vertexShader: '#include <common>\n#include <begin_vertex>', fragmentShader: '#include <common>\n#include <color_fragment>' }
+    ;(shell.material as MeshPhysicalMaterial).onBeforeCompile(shader as never, undefined as never)
+    expect(shader.fragmentShader).toContain('vec3 at = pileTurn * (vPileAt * pileDensity);')
+    expect(shader.fragmentShader).toMatch(/at \+= [0-9.]+ \* sin\(/)
+    const turn = /const mat3 pileTurn = mat3\(([^)]*)\)/.exec(shader.fragmentShader)
+    expect(turn).not.toBeNull()
+    const n = turn![1].split(',').map(Number)
+    const columns = [n.slice(0, 3), n.slice(3, 6), n.slice(6, 9)].map(([x, y, z]) => new Vector3(x, y, z))
+    // A turn: each column a unit long, square to the others, and none along an axis.
+    for (const [i, column] of columns.entries()) {
+      expect(column.length()).toBeCloseTo(1, 3)
+      for (const other of columns.slice(i + 1)) expect(column.dot(other)).toBeCloseTo(0, 3)
+      expect(Math.max(Math.abs(column.x), Math.abs(column.y), Math.abs(column.z))).toBeLessThan(0.9)
+    }
   })
 })

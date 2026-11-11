@@ -40,7 +40,7 @@ import { isGarment } from '../../lib/quests/catalog'
 import type { AllowSwitch } from '../../lib/team-file/types'
 import { cardTexture, keyLabelTexture, OBSIDIAN_PEGBOARD, pegboardTexture, toolTexture, woundTexture, type PegboardColors } from './benchTextures'
 import { SoftShading } from './softShading'
-import { benchMaterial, bendClothes, clearFace, coveredBy, coverPile, dressWear, garmentMesh, poseClothes, fitCanvas, furCoat, LIVE, paintSkin, readModel, readyToDraw, renewShadows, shineWithEyes, showPile, stripeHeights, velvetColor, weaveCloth } from './workbenchModel'
+import { armsOf, benchMaterial, bendClothes, clearFace, coveredBy, coverPile, dressWear, garmentMesh, poseClothes, fitCanvas, furCoat, LIVE, paintSkin, readModel, readyToDraw, renewShadows, shineWithEyes, showPile, stripeHeights, velvetColor, weaveCloth } from './workbenchModel'
 
 /** Everything the bench shows, from the agent on screen and the run in its chat. */
 export interface BenchView {
@@ -485,7 +485,7 @@ function lookToward(rig: Rig, target: Pose, look: Vector3 | 'viewer' | null, vie
  * taps on its own beat, open when it waves or stretches, the right one clicking the trackpad while
  * it uses a tool.
  */
-function posed(rig: Rig, p: Pose, t: number, motion: number) {
+function posed(rig: Rig, p: Pose, t: number, motion: number, toward: Pose) {
   rig.body.position.y = p.bodyY
   rig.body.rotation.set(p.bodyRX, p.bodyRY, 0)
   rig.neck.rotation.set(p.neckRX - p.lookY * 0.05, 0, p.neckRZ - p.lookX * 0.06)
@@ -493,8 +493,8 @@ function posed(rig: Rig, p: Pose, t: number, motion: number) {
   rig.head.scale.setScalar(p.scale)
   rig.armL.rotation.set(p.armLRX, 0, p.armLRZ)
   rig.armR.rotation.set(p.armRRX, 0, p.armRRZ)
-  // Its clothes settle as they would with its arms so (poseClothes).
-  poseClothes(rig.body)
+  // Its clothes settle as they would with its arms so, and follow where they are going (poseClothes).
+  poseClothes(rig.body, armsOf(toward))
   for (const [hand, phase, right] of [[rig.handL, 0, false], [rig.handR, 1.9, true]] as const) {
     const tap = Math.max(0, Math.sin(t * 11 + phase)) ** 3
     hand.rotation.x = p.hands + p.typing * 0.35 * tap * motion + (right ? p.click * 0.45 : 0)
@@ -1749,7 +1749,7 @@ export class WorkbenchScene {
     for (const channel of Object.keys(target) as Channel[]) this.pose[channel] += (target[channel] - this.pose[channel]) * ease
 
     const p = this.pose
-    posed(rig, p, t, motion)
+    posed(rig, p, t, motion, target)
     // Its face for the mood, eased as the pose is.
     const face = MOOD_FACES[view.mood]
     for (const key of Object.keys(face) as (keyof Face)[]) this.face[key] += (face[key] - this.face[key]) * ease
@@ -1866,7 +1866,7 @@ export class WorkbenchScene {
       }
       lookToward(seat.rig, target, look, this.camera.position, seat.group.rotation.y)
       for (const channel of Object.keys(target) as Channel[]) seat.pose[channel] += (target[channel] - seat.pose[channel]) * ease
-      posed(seat.rig, seat.pose, t, motion)
+      posed(seat.rig, seat.pose, t, motion, target)
       if (!this.reduced) seat.nextBlink = blinked(seat.eyes, t, seat.nextBlink)
       seat.band.emissive.copy(LIVE)
       seat.band.emissiveIntensity = seat.pose.band * (this.reduced ? 1 : 0.75 + 0.25 * Math.sin(t * 5 + seat.slot)) + seat.acting.flash * 0.8
