@@ -27,7 +27,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 function renderByHand(draft: Partial<AgentDraft>) {
   const set = vi.fn()
-  render(<ByHand draft={{ ...BLANK_DRAFT, ...draft }} set={set} skills={[]} skillsLoading={false} roleField={createRef()} figure={{ kind: 'yarn', color: 'sage' }} record={null} />)
+  render(<ByHand draft={{ ...BLANK_DRAFT, ...draft }} set={set} skills={[]} skillsLoading={false} roleField={createRef()} figure={{ kind: 'chubby', color: 'sage' }} record={null} />)
   return set
 }
 

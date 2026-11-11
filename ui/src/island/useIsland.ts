@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 
 import { fetchChatPage, fetchNotesAnswering } from '../lib/chat/client'
-import { agentFigure, figureFor, type FigureChoice } from '../lib/library/figures'
+import { agentFigure, figureFor, type FigureChoice, jobFigure, type FigureView } from '../lib/library/figures'
 import { benchChatOwner, fetchJobs, type SavedJob } from '../lib/library/jobs'
 import { fetchPinnedAgent, pinAgent } from '../lib/library/pinned'
 import { crewOf, type CrewAgent } from '../lib/rail/teamCrews'
@@ -65,7 +65,7 @@ export interface Island {
   busy: string | null
   failed: string | null
   said: { ticket: string; text: string } | null
-  figure: (teamPath: string, agent: string | null) => FigureChoice
+  figure: (teamPath: string, agent: string | null) => FigureView
   /** The figures of a team's agents, from its file: none until it is read. */
   crewFigures: (teamPath: string) => FigureChoice[]
   answer: (team: TeamNow, ticket: Ticket, decision: 'allow_once' | 'deny') => void
@@ -673,10 +673,10 @@ function useFigures(teams: readonly TeamNow[], saved: readonly SavedJob[], pinne
       }, () => {})
     }
   }, [teams])
-  const figure = useCallback((teamPath: string, agent: string | null): FigureChoice => {
+  const figure = useCallback((teamPath: string, agent: string | null): FigureView => {
     // The pinned agent wears its own figure in its chat too.
-    if (pinned && teamPath === pinned.chatPath) return figureFor(pinned.id, pinned.job.figure)
-    if (!agent) return figureFor(teamPath)
+    if (pinned && teamPath === pinned.chatPath) return jobFigure({ ...pinned.job, id: pinned.id })
+    if (!agent) return { ...figureFor(teamPath), sign: 'curl' }
     const placed = crews.get(teamPath)?.find((each) => each.id === agent)
     return agentFigure(placed ?? { id: agent }, saved, benchChatOwner(teamPath))
   }, [crews, saved, pinned])

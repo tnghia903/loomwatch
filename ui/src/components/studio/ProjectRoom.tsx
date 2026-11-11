@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 
 import { FileReaderContext, type FileToRead } from '../../lib/files/reader'
 import { listNames } from '../../lib/format'
-import { figureFor, type FigureChoice } from '../../lib/library/figures'
+import { jobFigure, type FigureView } from '../../lib/library/figures'
 import { fetchJobs, saveJob, type SavedJob } from '../../lib/library/jobs'
 import { addProjectNote, addTeamToProject, NOTE_CHARS, ABOUT_CHARS, projectFile, projectsChanged, saveProject, takeTeamOut, useProjects, type Project, type ProjectEntry } from '../../lib/projects/client'
 import { crewOf, doneByOf, lastFinished, madeHere, monthCost, monthSpend, monthSpenders, needsYou, nextWork, workingNow, type MadeFile } from '../../lib/projects/glance'
@@ -166,7 +166,7 @@ function AddAnAgent({ jobs, project, teams, initial, onClose }: { jobs: readonly
           {jobs.map((job) => (
             <label key={job.id} className={`add-agent-option${agent === job.id ? ' on' : ''}`}>
               <input type="radio" name="agent" checked={agent === job.id} onChange={() => setAgent(job.id)} />
-              <FigureStill figure={figureFor(job.id, job.figure)} alt="" width={26} height={34} decoding="async" />
+              <FigureStill figure={jobFigure(job)} alt="" width={26} height={34} decoding="async" />
               {job.name}
             </label>
           ))}
@@ -220,7 +220,7 @@ export function ProjectRoom({ id }: { id: string }) {
   const [deletingTeam, setDeletingTeam] = useState<RoomTeam | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const project = list?.projects.find((candidate) => candidate.id === id) ?? null
-  const figures = useMemo(() => new Map<string, FigureChoice | undefined>(jobs.map((job) => [job.id, job.figure])), [jobs])
+  const figures = useMemo(() => new Map<string, FigureView | undefined>(jobs.map((job) => [job.id, jobFigure(job)])), [jobs])
   const figureOf = useMemo(() => defaultFigureOf(figures), [figures])
   const room = useMemo(() => (project && shapes && list ? roomsOf([project], shapes, runs ?? [], root, list.projects)[0] : null), [project, shapes, runs, root, list])
   // A team's places in other projects (ADR 0103): Delete team deletes it there too.

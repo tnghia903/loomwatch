@@ -84,7 +84,7 @@ describe('The first run', () => {
     const { container } = render(<FirstRun onLookAround={vi.fn()} onDone={vi.fn()} />)
     expect(screen.getByText('What shall we make first?')).toBeInTheDocument()
     // The first agent greets them in the crew figure it keeps in My agents.
-    expect(container.querySelector('img.fr-figure')).toHaveAttribute('src', '/agent/figures/spool-butter.webp')
+    expect(container.querySelector('img.fr-figure')).toHaveAttribute('src', '/agent/figures/tall-clay.webp')
     fireEvent.click(screen.getByRole('button', { name: 'Plan a 30-minute lesson about animals' }))
     expect(screen.getByLabelText('What shall we make?')).toHaveValue('Plan a 30-minute lesson about animals')
     await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/ai')).toBe(true))
@@ -173,7 +173,7 @@ describe('The first run', () => {
     expect(keep).toBeDefined()
     expect(keep![1].headers).toMatchObject({ 'If-None-Match': '*' })
     // Kept in the figure that greeted them, so My agents shows the same crew member.
-    expect(JSON.parse(String(keep![1].body))).toMatchObject({ name: 'Helper', figure: { kind: 'spool', color: 'butter' } })
+    expect(JSON.parse(String(keep![1].body))).toMatchObject({ name: 'Helper', figure: { kind: 'tall', color: 'clay' } })
     expect(sessionStorage.getItem('loomwatch:first-run')).toBe('done')
   })
 

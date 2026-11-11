@@ -327,15 +327,17 @@ async fn the_studio_has_each_team_with_its_agents_in_order_wearing_their_figures
         .map(|agent| agent["id"].as_str().unwrap())
         .collect();
     assert_eq!(ids, ["researcher", "writer", "check"]);
-    // Placed from My agents: wears the saved agent's figure.
+    // Placed from My agents: wears the saved agent's figure, and its job's sign. The saved agent
+    // names no job and has no name, so a curl, whatever the team calls it.
     assert_eq!(
         floor["agents"][1]["figure"],
-        json!({"kind": "bobbin", "color": "rose"})
+        // Saved under an earlier name, as the Mac draws it today.
+        json!({"kind": "tall", "color": "sunset", "sign": "curl"})
     );
-    // A team's own agent wears the one its id picks, as on the Mac.
+    // A team's own agent wears the one its id picks, as on the Mac, with the sign its name suggests.
     assert_eq!(
         floor["agents"][0]["figure"],
-        json!({"kind": "cone", "color": "sky"})
+        json!({"kind": "slim", "color": "sky", "sign": "research"})
     );
     assert_eq!(floor["agents"][2]["operator"], true);
 }

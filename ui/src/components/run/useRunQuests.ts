@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { questFor, type Quest, type QuestItem } from '../../lib/quests/catalog'
-import { BOBBIN_LINE, questsEarned, wholeCraft, type Award } from '../../lib/quests/rules'
+import { WHOLE_CRAFT_LINE, questsEarned, wholeCraft, type Award } from '../../lib/quests/rules'
 import { earnItem, fetchWardrobe, useWardrobe } from '../../lib/quests/wardrobe'
 import { fetchRuns, type RunRecord } from '../../lib/runs/client'
 import { fetchTeamFile } from '../../lib/team-file/client'
@@ -111,7 +111,7 @@ export function useRunQuests({ record, projection, phase }: {
         if (held === null) return
         const earn = (item: QuestItem, agentId: string | null) => earnItem(item, { runId: record.runId, teamPath: record.teamPath, agentId })
         for (const award of list) if (!held[award.item]) await earn(award.item, award.agentId)
-        if (!held.bobbin && wholeCraft([...Object.keys(held), ...list.map((award) => award.item)])) await earn('bobbin', null)
+        if (!held.sunset && wholeCraft([...Object.keys(held), ...list.map((award) => award.item)])) await earn('sunset', null)
       } catch {
         // The run list or the wardrobe is out of reach: this run earns nothing now, and is judged
         // again the next time its receipt is opened.
@@ -129,7 +129,7 @@ export function useRunQuests({ record, projection, phase }: {
       const quest = questFor(item)
       if (!quest || entry?.runId !== record.runId) return []
       const award = list.find((candidate) => candidate.item === item)
-      return [{ quest, agentId: award?.agentId ?? entry.agentId ?? null, line: award?.line ?? (item === 'bobbin' ? BOBBIN_LINE : quest.earnedWhen) }]
+      return [{ quest, agentId: award?.agentId ?? entry.agentId ?? null, line: award?.line ?? (item === 'sunset' ? WHOLE_CRAFT_LINE : quest.earnedWhen) }]
     })
   }, [record, awards, wardrobe])
 }

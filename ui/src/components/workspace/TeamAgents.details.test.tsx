@@ -82,10 +82,10 @@ describe('a team’s own agent’s chat', () => {
 
 describe('an agent’s own chat, opened as a team', () => {
   it('shows its agent in the figure it wears in My agents', () => {
-    const reader: SavedJob = { id: 'reader', file: '.jobs/reader.yaml', name: 'Reader', instructions: 'Read.', figure: { kind: 'button', color: 'sage' } }
+    const reader: SavedJob = { id: 'reader', file: '.jobs/reader.yaml', name: 'Reader', instructions: 'Read.', figure: { kind: 'wide', color: 'sage' } }
     expect(figureStill(figureFor('reader'))).not.toBe(figureStill(reader.figure!))
     renderTeamAgents({ agents: [{ id: 'reader', name: 'Reader', role: 'Read.' }], selected: 'reader', teamPath: '/teams/.jobs/.bench/reader.yaml', savedJobs: [reader] })
     const strip = screen.getByRole('navigation', { name: 'Digest’s agents' })
-    expect(strip.querySelector('.team-agents-figure')).toHaveAttribute('src', figureStill(reader.figure!))
+    expect(strip.querySelector('.team-agents-figure > img')).toHaveAttribute('src', figureStill(reader.figure!))
   })
 })

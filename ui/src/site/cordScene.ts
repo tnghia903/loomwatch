@@ -13,9 +13,9 @@ import {
 } from 'three'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
 
-import { fitCanvas, readModel, readyToDraw } from '../components/agents/workbenchModel'
+import { bendClothes, fitCanvas, poseClothes, readyToDraw } from '../components/agents/workbenchModel'
 import { woundTexture } from '../components/agents/benchTextures'
-import { dressFigure, figureEyes, figurePart, type CrewMember } from './crewScene'
+import { CREW_FIGURES, crewModels, dressFigure, figureEyes, figurePart, type CrewMember } from './crewScene'
 
 /** How the page's cord is moving this frame, for the figure hanging on it to answer. */
 export interface CordMotion {
@@ -57,13 +57,16 @@ export class CordScene {
   /** Where the thread is tied: the top of its head. */
   private readonly tie = new Object3D()
   private readonly box = new Box3()
+  /** Where each build's figure is (CREW_FIGURES). */
+  private readonly figureBase: string
   /** It turns on the thread: how far, and how fast. */
   private twist = 0
   private twistSpeed = 0
   private nextBlink = 1.6
   private shutUntil = -1
 
-  constructor(canvas: HTMLCanvasElement, member: CrewMember, reduced: boolean) {
+  constructor(canvas: HTMLCanvasElement, member: CrewMember, reduced: boolean, figureBase = CREW_FIGURES) {
+    this.figureBase = figureBase
     this.member = member
     this.reduced = reduced
     this.renderer = new WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: 'low-power' })
@@ -85,23 +88,22 @@ export class CordScene {
     this.scene.add(key, rim)
   }
 
-  /** Build the figure from workbench.glb: its URL, or its bytes when the page has fetched them already. */
-  async load(model: string | ArrayBuffer): Promise<void> {
-    const gltf = await readModel(model)
-    const root = gltf.scene.getObjectByName('figure')
-    if (!root) throw new Error('The model has no figure.')
-    root.removeFromParent()
-    root.position.set(0, 0, 0)
+  /** Build the figure in its own build (`figures`). `_bench` is workbench.glb, which it no longer draws from. */
+  async load(_bench?: string | ArrayBuffer): Promise<void> {
+    const root = (await crewModels(this.figureBase)(this.member.figure.kind)).clone(true)
+    // Its clothes bend with its arms (bendClothes).
+    bendClothes(root)
     const own = <T extends { dispose: () => void }>(item: T): T => { this.disposables.push(item); return item }
     const meshes = dressFigure(root, this.member, own(woundTexture()), own)
+    poseClothes(root)
     for (const geometry of new Set(meshes.map((mesh) => mesh.geometry))) this.disposables.push(geometry)
     const named = figurePart(root)
     const head = named('head')
     this.parts = { neck: named('neck'), head, armL: named('arm_l'), armR: named('arm_r'), handR: named('hand_r'), eyes: figureEyes(root) }
 
-    // Tie the thread to the top of the head it wears, and hang the figure from it.
+    // Tie the cord to the top of the sign on its head, and hang the figure from it.
     root.updateMatrixWorld(true)
-    const crown = new Box3().setFromObject(named(`head_${this.member.figure.kind}`), true)
+    const crown = new Box3().setFromObject(named(`sign_${this.member.figure.sign ?? 'curl'}`), true)
     head.add(this.tie)
     this.tie.position.copy(head.worldToLocal(new Vector3((crown.min.x + crown.max.x) / 2, crown.max.y, (crown.min.z + crown.max.z) / 2)))
     root.position.y = -crown.max.y
@@ -189,6 +191,7 @@ export class CordScene {
     parts.head.rotation.set(-p.lookY * 0.24, p.lookX * 0.5, 0)
     parts.armL.rotation.set(p.armLRX, 0, p.armLRZ)
     parts.armR.rotation.set(p.armRRX, 0, p.armRRZ)
+    if (parts.armL.parent) poseClothes(parts.armL.parent)
     parts.handR.rotation.x = -0.3 * p.wave
     this.blink(parts.eyes)
     root.updateMatrixWorld(true)

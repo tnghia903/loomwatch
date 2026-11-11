@@ -42,10 +42,14 @@ cp "$root"/site/google*.html "$out/"
 cp "$root"/docs/assets/readme/*.png "$out/assets/readme/"
 # The app's own screenshots for the page, the crew in the cold open, and the agent figures, read
 # from the app so the page shows the same faces the app does.
-mkdir -p "$out/assets/app" "$out/assets/crew" "$out/assets/figures"
+mkdir -p "$out/assets/app" "$out/assets/crew" "$out/assets/figures" "$out/assets/signs" "$out/assets/wear"
 cp "$root"/site/assets/app/*.webp "$out/assets/app/"
 cp "$root"/site/assets/crew/*.webp "$out/assets/crew/"
 cp "$root"/ui/public/agent/figures/*.webp "$out/assets/figures/"
+# The job signs a figure wears on its head, in grey: the page tints them to the figure's colour.
+cp "$root"/ui/public/agent/signs/*.webp "$out/assets/signs/"
+# What a figure wears, a layer per build and piece, laid over its still.
+for build in chubby tall wide little egg slim; do cp "$root"/ui/public/agent/wear/"$build"-*.webp "$out/assets/wear/"; done
 # The live figures: the app's own 3D figure code (ui/src/site/landingLive.ts), built with three.js
 # into live.js and a module of the bench's own, and the model it draws. Needs ui's packages (pnpm
 # install in ui/).
@@ -54,8 +58,17 @@ cp "$root"/ui/public/agent/figures/*.webp "$out/assets/figures/"
 # Positions and UVs stay floats (-vpf -vtf): quantized positions move each mesh under a new unnamed
 # node, and quantized UVs come out at 1/16 scale in a model with no textures to scale them back.
 # -kn -km -ke -kv keep the node names, materials, extras and UVs the scenes look things up by.
-# ui/public/agent/workbench.glb stays as made: the app reads it, and scripts/figures/merge.py edits it.
+# ui/public/agent/workbench.glb stays as made: the app reads it as it is.
 (cd "$root/ui" && pnpm exec gltfpack -i public/agent/workbench.glb -o "$out/assets/live/workbench.glb" -cc -vpf -vtf -kn -km -ke -kv > /dev/null)
+# Each build's figure for the crew and the cord: the app's own with only the pieces they wear,
+# compressed with meshopt as the bench's model is (site/assets/figure, made with the figures' stills).
+# For the demo bench, where you can dress your agent as any build, the app's own with every piece,
+# compressed here (-kn -km -ke: the names, materials and the striped top's stripes the bench reads).
+mkdir -p "$out/assets/live/figure" "$out/assets/live/wardrobe"
+cp "$root"/site/assets/figure/*.glb "$out/assets/live/figure/"
+for glb in "$root"/ui/public/agent/figure/*.glb; do
+  (cd "$root/ui" && pnpm exec gltfpack -i "$glb" -o "$out/assets/live/wardrobe/$(basename "$glb")" -cc -vpf -vtf -kn -km -ke -kv > /dev/null)
+done
 # The app's own font files and @font-face rules, so the page and the app set type in the same fonts.
 # The fonts' license (SIL OFL) has to travel with every copy of them.
 cp "$root"/ui/public/fonts/fonts.css "$root"/ui/public/fonts/*.woff2 "$root"/ui/public/fonts/OFL.txt "$out/assets/fonts/"

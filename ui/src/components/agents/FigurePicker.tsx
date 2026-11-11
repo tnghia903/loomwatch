@@ -1,13 +1,13 @@
 import { useId } from 'react'
 import { ArrowRight, Lock } from '../ui/icon'
 
-import { COLOR_HEX, COLOR_NAMES, FIGURE_COLORS, FIGURE_KINDS, FIGURE_NAMES, figureStill, STARTER_KINDS, wornBy, type FigureChoice, type FigureKind } from '../../lib/library/figures'
+import { colorSwatch, COLOR_NAMES, FIGURE_COLORS, FIGURE_KINDS, FIGURE_NAMES, figureStill, STARTER_COLORS, wornBy, type FigureChoice, type FigureColor } from '../../lib/library/figures'
 import { ACCESSORIES, GARMENTS, isGarment, QUESTS, questFor, type Accessory } from '../../lib/quests/catalog'
 import { useWardrobe, type Wardrobe } from '../../lib/quests/wardrobe'
 import { IN_CHAT } from '../../lib/library/accessorySpots'
 import { AccessoryIcon } from './AccessoryArt'
 
-const starter = (kind: FigureKind) => (STARTER_KINDS as readonly string[]).includes(kind)
+const starter = (color: FigureColor) => (STARTER_COLORS as readonly string[]).includes(color)
 const TRIMMINGS = ACCESSORIES.filter((item) => !isGarment(item))
 
 /**
@@ -65,30 +65,31 @@ export function FigurePicker({ figure, onChange, wardrobe: given }: { figure: Fi
       <fieldset className="figure-picker-part">
         <legend>Shape</legend>
         <div className="figure-picker-kinds">
-          {FIGURE_KINDS.map((kind) => {
-            const open = starter(kind) || has(kind) || figure.kind === kind
-            const quest = questFor(kind)
-            return (
-              <label key={kind} className={`figure-picker-kind${open ? '' : ' locked'}`} title={open ? FIGURE_NAMES[kind] : `Locked. ${quest?.hint ?? ''}`}>
-                <input type="radio" className="visually-hidden" name={`${name}-kind`} checked={figure.kind === kind} disabled={!open} onChange={() => onChange({ ...figure, kind })} />
-                <img src={figureStill({ kind, color: figure.color })} alt="" width={56} height={56} loading="lazy" decoding="async" />
-                <span>{FIGURE_NAMES[kind]}{!open && <span className="visually-hidden">, locked: {quest?.hint}</span>}</span>
-                {!open && <Lock className="figure-picker-lock" size={11} aria-hidden="true" />}
-              </label>
-            )
-          })}
+          {FIGURE_KINDS.map((kind) => (
+            <label key={kind} className="figure-picker-kind" title={FIGURE_NAMES[kind]}>
+              <input type="radio" className="visually-hidden" name={`${name}-kind`} checked={figure.kind === kind} onChange={() => onChange({ ...figure, kind })} />
+              <img src={figureStill({ kind, color: figure.color })} alt="" width={56} height={56} loading="lazy" decoding="async" />
+              <span>{FIGURE_NAMES[kind]}</span>
+            </label>
+          ))}
         </div>
       </fieldset>
       <fieldset className="figure-picker-part">
         <legend>Color</legend>
         <div className="figure-picker-colors">
-          {FIGURE_COLORS.map((color) => (
-            <label key={color} className="figure-picker-color" title={COLOR_NAMES[color]}>
-              <input type="radio" className="visually-hidden" name={`${name}-color`} checked={figure.color === color} onChange={() => onChange({ ...figure, color })} />
-              <span style={{ background: COLOR_HEX[color] }} aria-hidden="true" />
-              <span className="visually-hidden">{COLOR_NAMES[color]}</span>
-            </label>
-          ))}
+          {FIGURE_COLORS.map((color) => {
+            // Plum and sunset are earned on quests; once earned, any build can be one.
+            const open = starter(color) || has(color) || figure.color === color
+            const quest = questFor(color)
+            return (
+              <label key={color} className={`figure-picker-color${open ? '' : ' locked'}`} title={open ? COLOR_NAMES[color] : `Locked. ${quest?.hint ?? ''}`}>
+                <input type="radio" className="visually-hidden" name={`${name}-color`} checked={figure.color === color} disabled={!open} onChange={() => onChange({ ...figure, color })} />
+                <span style={{ background: colorSwatch(color) }} aria-hidden="true" />
+                <span className="visually-hidden">{COLOR_NAMES[color]}{!open && <>, locked: {quest?.hint}</>}</span>
+                {!open && <Lock className="figure-picker-lock" size={11} aria-hidden="true" />}
+              </label>
+            )
+          })}
         </div>
       </fieldset>
       <div className="figure-picker-part">

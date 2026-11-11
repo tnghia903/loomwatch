@@ -28,15 +28,46 @@ import {
   type Texture,
   type Vector4,
 } from 'three'
-import { benchMaterial, drawn, fitCanvas, paintSkin, pileColor, readModel, readyToDraw, roomEnvironment } from '../components/agents/workbenchModel'
+import { benchMaterial, bendClothes, clearFace, coveredBy, coverPile, drawn, garmentMesh, poseClothes, dressWear, fitCanvas, furCoat, paintSkin, readModel, readyToDraw, roomEnvironment, shineWithEyes, stripeHeights, velvetColor } from '../components/agents/workbenchModel'
 import { pegboardTexture, woundTexture } from '../components/agents/benchTextures'
-import { COLOR_HEX, FIGURE_KINDS, type FigureChoice } from '../lib/library/figures'
+import type { FigureKind, FigureView } from '../lib/library/figures'
+import { isGarment } from '../lib/quests/catalog'
 import { CrewGlow, easeTint, glowColor } from './crewGlow'
 import { glowAt, talkAt, type Glow, type TalkLine, type TalkState } from './crewTalk'
 
 /** One figure in the crew: what it wears. */
 export interface CrewMember {
-  figure: FigureChoice
+  /** Its build, colour, job sign and what it wears, as the app draws its agents. */
+  figure: FigureView
+}
+
+/** Where the page keeps each build's figure (site/build.sh): the app's own, with only the pieces the page's crew wears. */
+export const CREW_FIGURES = 'assets/live/figure/'
+
+/** The crew's velvet pile (furCoat): fewer shells than the bench's, for six figures on one page. Its
+    strands' edges are soft, so fine ones draw as velvet rather than static; coarse (140 a unit),
+    each a few pixels wide, they read as a grainy towel. */
+export const CREW_PILE = { shells: 11, length: 0.026, density: 250 }
+
+/** Each build's figure from `base`, loaded once for every member that is that build. */
+export function crewModels(base: string): (kind: FigureKind) => Promise<Object3D> {
+  const loaded = new Map<FigureKind, Promise<Object3D>>()
+  return (kind) => {
+    let found = loaded.get(kind)
+    if (!found) {
+      found = readModel(`${base}${kind}.glb`).then((gltf) => {
+        const figure = gltf.scene.getObjectByName('figure')
+        if (!figure) throw new Error(`The ${kind} figure has no “figure”.`)
+        shineWithEyes(figure)
+        figure.traverse((object) => { if (object instanceof Mesh && object.name.startsWith('wear_')) stripeHeights(object, figure) })
+        figure.removeFromParent()
+        figure.position.set(0, 0, 0)
+        return figure
+      })
+      loaded.set(kind, found)
+    }
+    return found
+  }
 }
 
 export interface CrewCallbacks {
@@ -51,6 +82,11 @@ export interface CrewCallbacks {
 }
 
 interface Figure {
+  /** How far up it stands for its feet to touch the floor, and how tall it is standing there. */
+  stand: number
+  top: number
+  /** Its velvet pile (furCoat). */
+  pile: Object3D[]
   root: Object3D
   body: Object3D
   neck: Object3D
@@ -70,8 +106,12 @@ interface Figure {
   hop: number
 }
 
-/** Holding the thread: both mittens forward and a little in, at the waist. */
-const REST = { bodyY: 0, bodyRY: 0, lookX: 0, lookY: 0, armLRX: -0.62, armLRZ: -0.16, armRRX: -0.62, armRRZ: 0.16, wave: 0 }
+/**
+ * Holding the thread: both mittens out in front, together, as its stills hold their paws (and as the
+ * bench's figure holds them at its keys, whose clothes are made for it). Forward and in at the waist
+ * (-0.62, 0.16), the stubby arms lay inside the round body, paws and all, and the crew looked armless.
+ */
+export const REST = { bodyY: 0, bodyRY: 0, lookX: 0, lookY: 0, armLRX: -1.42, armLRZ: -0.05, armRRX: -1.42, armRRZ: 0.05, wave: 0 }
 type Pose = typeof REST
 
 const SPACING = 0.78
@@ -91,8 +131,8 @@ const SHADOW = 0.2
 const LAMP = { depth: 0.8, out: 3 }
 
 /**
- * The landing page's crew: the app's own figures (workbench.glb, the same model and materials as
- * Build by hand), six of them standing in a row and holding one gold thread. Alive the way the
+ * The landing page's crew: the app's own figures (each build's glb, the same model and materials as
+ * Build by hand, without its wardrobe), six of them standing in a row and holding one gold thread. Alive the way the
  * figure on its bench is between runs: they breathe, blink, and look where you point. The one
  * under the pointer lets go of the thread with one mitten and waves, and the others look at it.
  * Given a script (talk()), they act out a hand-off: the one talking bobs as it speaks, the others
@@ -112,6 +152,8 @@ export class CrewScene {
   private readonly reduced: boolean
   private readonly members: readonly CrewMember[]
   private readonly figures: Figure[] = []
+  /** Where each build's figure is (CREW_FIGURES). */
+  private readonly figureBase: string
   private readonly disposables: { dispose: () => void }[] = []
   private width = 1
   private height = 1
@@ -126,7 +168,6 @@ export class CrewScene {
   private pointer: Vector2 | null = null
   private hovered: number | null = null
   private nextFidget = 3
-  private standY = 0
   private headTop = 1
   /** Which figures stand in each row, front row first: one row of six, or two of three. */
   private rows: number[][] = []
@@ -157,7 +198,8 @@ export class CrewScene {
   /** Each state's glow colour, the page's own (glowColors()); these are its dark theme's. */
   private colors: Record<Glow, Vector4> = { ready: glowColor('#4FC98D'), working: glowColor('#6AB8FF'), waiting: glowColor('#E9C46A') }
 
-  constructor(canvas: HTMLCanvasElement, members: readonly CrewMember[], callbacks: CrewCallbacks, reduced: boolean) {
+  constructor(canvas: HTMLCanvasElement, members: readonly CrewMember[], callbacks: CrewCallbacks, reduced: boolean, figureBase = CREW_FIGURES) {
+    this.figureBase = figureBase
     this.members = members
     this.callbacks = callbacks
     this.reduced = reduced
@@ -202,25 +244,25 @@ export class CrewScene {
     this.glow = this.own(new CrewGlow(this.renderer, 0.9))
   }
 
-  /** Build the crew from workbench.glb: its URL, or its bytes when the page has fetched them already. */
-  async load(model: string | ArrayBuffer): Promise<void> {
+  /**
+   * Build the crew: each member in its own build (`figures`), dressed as the app draws it. `_bench` is
+   * workbench.glb, which the page fetches once for every scene; the crew no longer draws from it.
+   */
+  async load(_bench?: string | ArrayBuffer): Promise<void> {
     // The room it is lit by: made here rather than with its WebGL context, so a page that loads it a
     // moment after making it (main.js) waits on one of the two at a time.
     this.scene.environment = await roomEnvironment(this.renderer, 0.04)
     this.scene.environmentIntensity = 0.55
 
-    const gltf = await readModel(model)
-    const source = gltf.scene.getObjectByName('figure')
-    if (!source) throw new Error('The model has no figure.')
-    source.removeFromParent()
-    source.position.set(0, 0, 0)
-    source.updateMatrixWorld(true)
-    const box = new Box3().setFromObject(source, true)
-    this.standY = -box.min.y
+    const model = crewModels(this.figureBase)
+    const sources = await Promise.all(this.members.map((member) => model(member.figure.kind)))
     const wound = this.own(woundTexture())
     this.members.forEach((member, index) => {
-      const root = source.clone(true)
+      const root = sources[index].clone(true)
+      // Its clothes bend with its arms (bendClothes), on this copy's own pivots.
+      bendClothes(root)
       const meshes = dressFigure(root, member, wound, (item) => this.own(item))
+      poseClothes(root)
       for (const mesh of meshes) {
         const role = mesh.userData.role as string
         // The eyes' glints and the cheeks are painted on the face: they neither cast nor catch a shadow.
@@ -232,17 +274,24 @@ export class CrewScene {
       }
       const named = figurePart(root)
       const eyes = figureEyes(root)
+      // Its pile, which the glow's flat pass leaves out (drawFlat).
+      const pile: Object3D[] = []
+      root.traverse((object) => { if (object instanceof Mesh && (object.material as Material).name === 'pile') pile.push(object) })
+      // Each build stands on its own feet, and the tallest one's head is the crew's top.
+      root.updateMatrixWorld(true)
+      const box = new Box3().setFromObject(root, true)
       this.scene.add(root)
       this.figures.push({
+        stand: -box.min.y, top: box.max.y - box.min.y, pile,
         root, body: named('body'), neck: named('neck'), head: named('head'), armL: named('arm_l'), armR: named('arm_r'),
         handL: named('hand_l'), handR: named('hand_r'), eyes, meshes, tint: this.glow.material(), pose: { ...REST },
         nextBlink: 1.5 + ((index * 1.37) % 2.6), phase: index * 1.618, hop: -10,
       })
     })
     for (const geometry of new Set(this.figures.flatMap((figure) => figure.meshes.map((mesh) => mesh.geometry)))) this.disposables.push(geometry)
-    source.traverse((object) => { if (object instanceof Mesh) (object.material as Material).dispose() })
+    for (const source of new Set(sources)) source.traverse((object) => { if (object instanceof Mesh) (object.material as Material).dispose() })
     // Measured where it stands on the floor.
-    this.headTop = new Box3().setFromObject(this.figures[0].root, true).max.y + this.standY
+    this.headTop = Math.max(...this.figures.map((figure) => figure.top))
     this.threadMaterial = this.own(new MeshStandardMaterial({ color: '#E2B451', roughness: 0.32, metalness: 1, emissive: new Color('#E9C46A'), emissiveIntensity: 0.18 }))
     const beadGeometry = this.own(new SphereGeometry(0.032, 20, 14))
     const core = new Mesh(beadGeometry, this.own(new MeshStandardMaterial({ color: '#FFF1C9', roughness: 0.35, emissive: new Color('#F2C25B'), emissiveIntensity: 2.4 })))
@@ -276,9 +325,9 @@ export class CrewScene {
     rows.forEach((row, r) => row.forEach((index, at) => {
       // The back row stands half a place over, so its heads show between the front row's.
       const offset = at - (row.length - 1) / 2 + (r === 1 ? 0.5 : 0)
-      const figure = this.figures[index].root
+      const { root: figure, stand } = this.figures[index]
       // A shallow arc, the ends a little forward, each turned a touch toward the middle.
-      figure.position.set(offset * SPACING, this.standY, r === 1 ? -0.95 : -0.06 * offset * offset)
+      figure.position.set(offset * SPACING, stand, r === 1 ? -0.95 : -0.06 * offset * offset)
       figure.rotation.y = -offset * 0.07
     }))
     if (!same || this.threads.length === 0) {
@@ -518,6 +567,7 @@ export class CrewScene {
       figure.head.rotation.set(-p.lookY * HEAD_NOD, p.lookX * HEAD_TURN, 0)
       figure.armL.rotation.set(p.armLRX, 0, p.armLRZ)
       figure.armR.rotation.set(p.armRRX, 0, p.armRRZ)
+      if (figure.armL.parent) poseClothes(figure.armL.parent)
       figure.handR.rotation.x = -0.3 * p.wave
       this.blink(figure)
     })
@@ -546,11 +596,13 @@ export class CrewScene {
     const shown = [this.floor, this.bead, ...this.threads].filter((object) => object.visible)
     for (const object of shown) object.visible = false
     for (const figure of this.figures) for (const mesh of figure.meshes) mesh.material = figure.tint
+    for (const figure of this.figures) for (const coat of figure.pile) coat.visible = false
     // The shadows are the scene's, drawn once with it.
     this.renderer.shadowMap.autoUpdate = false
     this.renderer.render(this.scene, this.camera)
     this.renderer.shadowMap.autoUpdate = true
     for (const figure of this.figures) for (const mesh of figure.meshes) mesh.material = mesh.userData.material as Material
+    for (const figure of this.figures) for (const coat of figure.pile) coat.visible = true
     for (const object of shown) object.visible = true
   }
 
@@ -696,26 +748,44 @@ export class CrewScene {
 }
 
 /**
- * Dress a clone of the model's figure as one member: the bench's materials, its skin in its colour,
- * and only its own head showing. Each mesh keeps the role Blender
- * named its material in `userData.role`. Whatever it makes is handed to `own` to dispose of.
+ * Dress a clone of a build's figure as one member: the bench's materials, its velvet (and its sign)
+ * in its colour with a light pile (furCoat), only its own job's sign, and only what it wears, each
+ * piece in its cloth or leather (dressWear). Each mesh keeps the role Blender named its material in
+ * `userData.role`. Whatever it makes is handed to `own` to dispose of.
  */
 export function dressFigure(root: Object3D, member: CrewMember, wound: Texture, own: <T extends { dispose: () => void }>(item: T) => T): Mesh[] {
   const meshes: Mesh[] = []
   const pegboard = () => own(pegboardTexture())
-  const skin = pileColor(COLOR_HEX[member.figure.color])
+  const skin = velvetColor(member.figure.color)
+  const sign = `sign_${member.figure.sign ?? 'curl'}`
+  // Every other sign, and every piece it doesn't wear, leaves the clone: a hidden part would still
+  // count in its size. A piece's parts are named for it: wear_<item>, its sleeves and its pairs.
+  const worn = new Set<string>(member.figure.wear ?? [])
+  const others: Object3D[] = []
+  root.traverse((object) => {
+    const piece = /^wear_([a-z_]+?)(_sleeve)?(_[lr])?(_pose_[a-z]+)?$/.exec(object.name)?.[1]
+    if ((object.name.startsWith('sign_') && object.name !== sign) || (piece !== undefined && !worn.has(piece))) others.push(object)
+  })
+  for (const other of others) other.removeFromParent()
   root.traverse((object) => {
     if (!(object instanceof Mesh)) return
     const role = (object.material as Material).name
-    const material = own(benchMaterial(role, object.name, { pegboard, wound }))
+    const material = own(role.startsWith('wear_') ? dressWear(object) : benchMaterial(role, object.name, { pegboard, wound }))
     if (role === 'skin' || role === 'skin_wound') paintSkin(material, skin)
     if (role === 'skin_deep') paintSkin(material, skin.clone().multiplyScalar(0.86))
     object.material = material
     object.userData.role = role
     meshes.push(object)
   })
-  const named = figurePart(root)
-  for (const kind of FIGURE_KINDS) named(`head_${kind}`).visible = kind === member.figure.kind
+  // The crew's own pile (CREW_PILE): six figures share the page, each drawn small. None under its
+  // shoes or gloves (coveredBy), where it would poke through.
+  const covered = coveredBy(worn)
+  for (const mesh of meshes) if (mesh.userData.role === 'skin' && !covered.has(mesh.name)) for (const coat of furCoat(mesh, CREW_PILE)) own(coat.material as Material)
+  // Short round its face's features, so they sit clear on the velvet (clearFace).
+  clearFace(root)
+  // None under the garment it wears, which lies close over the body.
+  const garment = [...worn].find(isGarment)
+  coverPile(root, garment ? garmentMesh(root, garment) : null)
   return meshes
 }
 
@@ -728,7 +798,7 @@ export function figurePart(root: Object3D): (name: string) => Object3D {
   }
 }
 
-/** Every eye on a figure, the hidden heads' too: a blink squashes them all. */
+/** Every eye on a figure: a blink squashes them. */
 export function figureEyes(root: Object3D): Object3D[] {
   const eyes: Object3D[] = []
   root.traverse((object) => { if (/_eye_[lr]$/.test(object.name)) eyes.push(object) })

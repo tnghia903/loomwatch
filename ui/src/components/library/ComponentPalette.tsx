@@ -4,7 +4,7 @@ import { DEFAULT_MODEL, modelNameFromId } from '../../lib/ai/modelIds'
 import { OPERATOR_SOURCE } from '../../lib/library/fixtures'
 import { benchChatOwner, removeJob, savedJobPreset, useSavedJobs } from '../../lib/library/jobs'
 import { isOpenTeam, teamAgentSource, useAgentUses, type TeamOwnAgent } from '../../lib/library/uses'
-import { agentFigure, figureFor, type FigureChoice } from '../../lib/library/figures'
+import { agentFigure, figureFor, type FigureChoice, jobFigure } from '../../lib/library/figures'
 import { FigureStill } from '../agents/FigureStill'
 import { modelForPreset, roleSource, type RoleIcon, type RolePreset } from '../../lib/library/roles'
 import type { CapabilityInventory, DetectedCapability } from '../../lib/library/client'
@@ -257,7 +257,7 @@ export function ComponentPalette({ capabilityInventory, capabilitiesLoading = fa
   // and tried on its own before a team depends on it. After them, the agents that live in teams:
   // this team's own (found on the canvas) and other teams' (added as a copy).
   const yours = { name: YOURS, items: [
-    ...saved.jobs.map(job => { const item = jobItem(savedJobPreset(job), job.id); return { ...item, figure: figureFor(job.id, job.figure) } }),
+    ...saved.jobs.map(job => { const item = jobItem(savedJobPreset(job), job.id); return { ...item, figure: jobFigure(job) } }),
     ...teamAgents.map(agent => hereItem(agent, agentFigure(agent, saved.jobs, benchChatOwner(teamPath)), onRevealAgent)),
     ...(teamOwn ?? []).filter(agent => !isOpenTeam(agent.teamPath, teamPath, teamsRoot)).map(elsewhereItem),
   ] }

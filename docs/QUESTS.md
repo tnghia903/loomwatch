@@ -28,7 +28,7 @@ After    the receipt says what the run did, and why it   (the run receipt, once,
 - **Only a run that finished earns.** A run that failed, was stopped, or finished with gaps earns
   nothing, and neither does a follow-up that started part-way.
 - **One agent alone earns what one agent shows.** A one-agent turn (an agent's own chat, or `@name`
-  in team chat) can earn the Crew vest, Tailor’s tape and Maker’s apron, judged on that agent
+  in team chat) can earn the Trench coat, Coffee to go and Little black dress, judged on that agent
   only: each is one agent's own practice. The rest need the whole team at work (a check step, a
   teammate, a schedule, or the team's earlier runs), so only a whole-team run earns them.
 
@@ -36,30 +36,31 @@ After    the receipt says what the run did, and why it   (the run receipt, once,
 
 | Item | Part | Practice | Earned when |
 |---|---|---|---|
-| Tailor’s chalk | Prompt | Clear success criteria | A check step’s first look at an agent’s work gives a verdict on every item of its Done when, every one is Met, and no check sends the work back. What the agent says about its own work never counts. |
-| Crew vest (clothes) | Prompt | Ask, don’t guess | An agent asks you a question (`ask_user`), and your answer comes back. A permission request asks whether a tool may run, not a question about the work, so it doesn’t count. |
-| Tailor’s tape | Context | Scoped context | An agent is given at least one folder, and reads from every folder it was given. |
-| Maker’s apron (clothes) | Context | Reusable skills | An agent opens a skill it was given: the daemon’s `skill_opened` record. A skill only loaded into its prompt, or named in a tool’s title, doesn’t count. |
-| Safety-pin clip | Harness | Least privilege | A scheduled run never asks for a permission, and every key its agents hold (web, files, commands) was used. |
-| Wrist pincushion | Harness | Test before you ship | A team runs an agent from Your agents that had a test bench run that finished before it. |
-| Shuttle | Team shape | Orchestrator and workers | One agent asks another over the Team Bus and gets an answer. |
-| Work overalls (clothes) | Team shape | Parallel work | One agent dispatches work to two teammates, each still working when the other is handed its part, and neither fails. A teammate's time at work runs from the dispatch that reached it to its last recorded step after it. |
-| Plain tee (clothes) | Team shape | Chain clear steps | A pipeline of three or more stages (a review step is you, not a stage), every stage after the first handed what came before it, and none fails. |
-| Button monocle | Checking | Evaluator–optimizer loop | A check step sends work back, and the second pass meets every item it checks. |
-| Sewn-on patch | Checking | Learn from failures | Something that went wrong in two or more of the team’s last five runs (a permission asked for, an agent failing, a teammate left idle, a stage asking for more) doesn’t happen in this run. |
-| Scissors (a figure) | Team shape | Start simple | The team runs with fewer agents than its last finished run, and uses fewer tokens. |
-| Bobbin (a figure) | All five | The whole craft | The wardrobe holds an item from each of the five parts. |
+| Bow | Prompt | Clear success criteria | A check step’s first look at an agent’s work gives a verdict on every item of its Done when, every one is Met, and no check sends the work back. What the agent says about its own work never counts. |
+| Trench coat (clothes) | Prompt | Ask, don’t guess | An agent asks you a question (`ask_user`), and your answer comes back. A permission request asks whether a tool may run, not a question about the work, so it doesn’t count. |
+| Coffee to go | Context | Scoped context | An agent is given at least one folder, and reads from every folder it was given. |
+| Little black dress (clothes) | Context | Reusable skills | An agent opens a skill it was given: the daemon’s `skill_opened` record. A skill only loaded into its prompt, or named in a tool’s title, doesn’t count. |
+| Gloves | Harness | Least privilege | A scheduled run never asks for a permission, and every key its agents hold (web, files, commands) was used. |
+| Ballet flats | Harness | Test before you ship | A team runs an agent from Your agents that had a test bench run that finished before it. |
+| Silk scarf | Team shape | Orchestrator and workers | One agent asks another over the Team Bus and gets an answer. |
+| Cardigan (clothes) | Team shape | Parallel work | One agent dispatches work to two teammates, each still working when the other is handed its part, and neither fails. A teammate's time at work runs from the dispatch that reached it to its last recorded step after it. |
+| Striped top (clothes) | Team shape | Chain clear steps | A pipeline of three or more stages (a review step is you, not a stage), every stage after the first handed what came before it, and none fails. |
+| Beret | Checking | Evaluator–optimizer loop | A check step sends work back, and the second pass meets every item it checks. |
+| Round collar | Checking | Learn from failures | Something that went wrong in two or more of the team’s last five runs (a permission asked for, an agent failing, a teammate left idle, a stage asking for more) doesn’t happen in this run. |
+| Plum figure (a finish) | Team shape | Start simple | The team runs with fewer agents than its last finished run, and uses fewer tokens. |
+| Sunset figure (a finish) | All five | The whole craft | The wardrobe holds an item from each of the five parts. |
 
 ## Where you see them
 
 - **The Quests page** (`/quests`, `ui/src/components/quests/QuestsPage.tsx`) is how you find out
   that runs earn anything at all. It lists every accessory and figure: what you have, when you
   earned it and the run that did, and for each one still locked, what to try and how a run earns
-  it. Bobbin shows which of the five parts the wardrobe already holds. **Quests** is one of the
+  it. The Sunset figure shows which of the five parts the wardrobe already holds. **Quests** is one of the
   dock's places on every screen (ADR 0101), and ⌘K has **Quests…**.
 - **An agent's figure** (`FigurePicker`) sits beside its ID card in My agents, not on the
   workbench: the bench is how the agent works, the figure only how it looks. It has three parts
-  side by side: **Shape** (the earned figures are locked silhouettes until earned), **Color**,
+  side by side: **Shape** (six builds, all open), **Color** (the two earned finishes are locked
+  until earned),
   **Clothes** (one set at a time: putting one on takes the other off) and **Accessories**, each
   listing earned items to wear and locked ones with their hint.
 - **The receipt** of the run that earned an item, once, with one sentence of why.
@@ -83,24 +84,29 @@ After    the receipt says what the run did, and why it   (the run receipt, once,
   The first run to earn it keeps it, so that run's receipt is the one that says so.
 - **Wearing** is part of a saved agent's figure (`figure.wear` in `.jobs/<agent>.yaml`). Like the
   figure itself, it never makes a new version, and a team never copies it.
-- **The clothes and accessories are worn, not stuck on.** Each is a 3D object fitted to the figure
-  by casting rays onto its body (`accessoryMeshes.ts`). Clothes are cloth laid a little off the
-  torso, under the arms: a plain tee in a deeper shade of the figure's own colour with short
-  sleeves, denim work overalls with a bib pocket and nickel buttons, a linen maker's apron on
-  leather straps with a pencil in its pocket, and a charcoal crew vest open in a V. None of it is
-  gold, blue or red: those say you, running and trouble. What goes over them lies
-  on them: the tailor's tape lies over the shoulders and down the
-  chest, the button monocle sits on the eye and is tied to the chest with plum thread, the chalk is
-  tucked behind an ear and has drawn a cut line on the tummy, the patch is sewn onto the tummy's
-  curve, a safety pin is worn on the chest like a brooch, the pincushion is strapped round a wrist, and a shuttle is
-  pushed through the top of the head as needles are stuck in a ball of yarn. The 3D bench wears
-  them. The pictures stack one layer per item over the still (`ui/public/agent/wear`; the tee,
-  made in the figure's own colour, has one per colour),
-  rendered from the same objects with the figure hiding what is behind it and catching its
-  shadow, so pictures and bench agree. Only the face-high ones show in the chat avatar.
-- **The earned figures** are heads in `ui/public/agent/workbench.glb` (`head_scissors`,
-  `head_bobbin`) with stills in `ui/public/agent/figures/`. An agent nobody dressed is only ever
-  given one of the six starter figures, so it keeps the figure it had.
+- **The clothes and accessories are fashion pieces fitted to the figure.** They are modelled in
+  Blender on the velvet figure, shaped from each build's own
+  body, so each fits all six builds:
+  - Clothes: a striped top, a cardigan, a little black dress and a trench coat.
+  - Accessories: ballet flats, gloves, a coffee to go, a round collar, a silk scarf, a beret and a
+    bow.
+
+  Nothing sits on the crown, where the job sign grows: the beret sits over one side of the head,
+  the bow on the other, and the face stays open. None of it is gold, blue, green or red: those say you, running, ready and trouble.
+  Hardware is silver. The pictures stack one layer per item over the still (`ui/public/agent/wear`),
+  rendered with the figure hiding what is behind it. Only the face-high ones show in the chat
+  avatar.
+- **The earned figures are finishes:** plum, and sunset (raspberry to violet). Any build can be one
+  once earned. An agent nobody dressed is only ever given one of the six starter colours, so it
+  keeps the figure it had.
+- **Old names still load.** An agent saved with one of the first figures, and a wardrobe that earned
+  their items (or the sunglasses, pearls and handbag, which became the beret, the round collar and
+  the coffee to go), read as today's: each item becomes the one that rewards the same quest
+  (`crates/loomwatch-backend/src/figures.rs`, twinned in `figures.ts` and `catalog.ts`).
+- **The 3D bench draws the same figure.** Each build is its own model
+  (`ui/public/agent/figure/<build>.glb`), made from the Blender figures. It holds every job sign and
+  every wardrobe piece, hidden. The bench loads the build an agent wears, in the node layout it poses
+  by name, and shows that agent's sign and what it wears (`workbenchScene.ts` `showBuild`, `wear`).
 
 | Route | What it does |
 |---|---|
@@ -114,6 +120,6 @@ Both answer only this computer and this app's own pages, like the run evidence t
 1. Add it to `QUESTS` in `ui/src/lib/quests/catalog.ts`: the practice, a one-line hint, one
    sentence of why it works, and what a run has to show. No links.
 2. Write its rule in `rules.ts` from recorded facts only, with a test that fails without it.
-3. Add its item to `ACCESSORIES` or `FIGURE_ITEMS` in `crates/loomwatch-backend/src/wardrobe.rs`.
-   For an accessory, build it in `accessoryMeshes.ts` and render its layers and icons with
-   `scripts/figures` (its README); for a figure, model its head there.
+3. Add its item to `ACCESSORIES` or `EARNED_COLORS` in `crates/loomwatch-backend/src/figures.rs`,
+   and the twin in `catalog.ts`. Model it with the Blender figures, and render its
+   layers and icons for every build.

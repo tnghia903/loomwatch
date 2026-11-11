@@ -88,14 +88,18 @@
   --color-ok:             var(--lw-jade-700);
   --color-halt:           var(--lw-slate-600);
   /* Each figure's colour as text and as an avatar's disc (lib/library/figures.ts FIGURE_COLORS),
-     so an agent has one colour everywhere. Deep enough to read on paper (4.8:1 or more); butter
-     leans olive so it never reads as your gold. */
+     so an agent has one colour everywhere. Deep enough to read on paper (4.8:1 or more). */
   --color-fig-clay:       #A4512C;
-  --color-fig-butter:     #766D0C;
   --color-fig-sage:       #477A4B;
   --color-fig-sky:        #2D69A6;
   --color-fig-lilac:      #6851B8;
   --color-fig-rose:       #AC3B61;
+  --color-fig-orchid:     #8A44A6;
+  --color-fig-plum:       #7A2C69;
+  --color-fig-sunset:     #A32E73;
+  /* Retired as figure colours; project marks (projects/studioUi.ts) and skill glyphs still use them.
+     Butter leans olive so it never reads as your gold. */
+  --color-fig-butter:     #766D0C;
   --color-fig-oat:        #76664C;
   /* A chart's series in a widget (ADR 0114), in this order, never cycled: blue, clay, violet.
      Checked for colour-blind separation and contrast on the panel, light and dark. Text beside a
@@ -165,13 +169,17 @@
   --color-alert-on-fill:  var(--color-white);
   --color-ok:             var(--lw-jade-400);
   --color-halt:           var(--lw-slate-400);
-  /* Light enough to read on obsidian (9:1 or more); butter leans lemon, away from your gold. */
+  /* Light enough to read on obsidian (9:1 or more). */
   --color-fig-clay:       #EBA68A;
-  --color-fig-butter:     #E3DA7C;
   --color-fig-sage:       #A5CBA3;
   --color-fig-sky:        #A3C8EC;
   --color-fig-lilac:      #C4B6F2;
   --color-fig-rose:       #F1ABC0;
+  --color-fig-orchid:     #DDB4EE;
+  --color-fig-plum:       #E2B2D8;
+  --color-fig-sunset:     #F3A9D6;
+  /* Project marks and skill glyphs only; butter leans lemon, away from your gold. */
+  --color-fig-butter:     #E3DA7C;
   --color-fig-oat:        #E2D6C0;
   --color-series-1:       #3A86D6;
   --color-series-2:       #D0662F;

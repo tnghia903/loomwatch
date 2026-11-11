@@ -15,9 +15,11 @@
   dark mode, white over no picture), so each name sits on a gold-700 tag that black and white both
   read on at about 4.5 : 1.
 
-  The crew round the edges are dmg/crew/wave-*.webp: `Blender -b --factory-startup -P
-  ui/blender/workbench.py -- wave DIR 128` (the figures' Blender script, which is kept out of git),
-  each render cropped to 213,196–747,788 and saved with `cwebp -q 88 -m 6 -alpha_filter best`.
+  The crew round the edges are dmg/crew/wave-<build>-<l|r>.webp: the app's figures in their waiting
+  pose (one paw raised and held, saying hello; nothing here loops), each with its job's sign and
+  dressed as the landing page's crew, cropped to one box (534 × 592, the feet at the bottom). The `r`
+  ones are mirrored, so they raise the other paw and the two sides of the window mirror each other.
+  The figure pipeline makes them from the app's stills.
 -->
 <html>
 <head>
@@ -80,9 +82,9 @@
     color: var(--ink-2);
   }
   svg.art { position: absolute; left: 0; top: 0; }
-  /* The crew, peeking in round the edges and waving hello. Each picture is one render from
-     ui/blender/workbench.py's wave mode, cropped to one box (534 × 592, the seat at the bottom), so
-     one width sizes them all alike; they turn about the seat. */
+  /* The crew, peeking in round the edges, a paw raised to say hello. Each picture is cropped to one
+     box (534 × 592, the feet at the bottom), so one width sizes them all alike; they turn about
+     their feet. */
   .pal {
     position: absolute;
     width: 100px;
@@ -165,12 +167,12 @@
   </g>
 </svg>
 
-<img class="pal" src="dmg/crew/wave-button-l.webp" alt="" style="left: -32px; top: 150px; transform: rotate(10deg)">
-<img class="pal" src="dmg/crew/wave-yarn-r.webp" alt="" style="left: 14px; top: 366px; transform: rotate(6deg)">
-<img class="pal" src="dmg/crew/wave-spool-l.webp" alt="" style="left: 96px; top: 382px; transform: rotate(-4deg)">
-<img class="pal" src="dmg/crew/wave-pincushion-r.webp" alt="" style="left: 524px; top: 382px; transform: rotate(4deg)">
-<img class="pal" src="dmg/crew/wave-cone-l.webp" alt="" style="left: 606px; top: 366px; transform: rotate(-6deg)">
-<img class="pal" src="dmg/crew/wave-thimble-r.webp" alt="" style="left: 652px; top: 150px; transform: rotate(-10deg)">
+<img class="pal" src="dmg/crew/wave-wide-l.webp" alt="" style="left: -32px; top: 150px; transform: rotate(10deg)">
+<img class="pal" src="dmg/crew/wave-chubby-r.webp" alt="" style="left: 14px; top: 366px; transform: rotate(6deg)">
+<img class="pal" src="dmg/crew/wave-tall-l.webp" alt="" style="left: 96px; top: 382px; transform: rotate(-4deg)">
+<img class="pal" src="dmg/crew/wave-egg-r.webp" alt="" style="left: 524px; top: 382px; transform: rotate(4deg)">
+<img class="pal" src="dmg/crew/wave-slim-l.webp" alt="" style="left: 606px; top: 366px; transform: rotate(-6deg)">
+<img class="pal" src="dmg/crew/wave-little-r.webp" alt="" style="left: 652px; top: 150px; transform: rotate(-10deg)">
 <span class="bubble" style="left: 56px; top: 340px">hi!</span>
 <span class="bubble" style="left: 556px; top: 352px">hello!</span>
 

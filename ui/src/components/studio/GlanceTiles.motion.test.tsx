@@ -13,7 +13,7 @@ const props = (needs: NeedsYouItem[]): GlanceProps => ({
   needs, last: null, working: [], crew: [], finishedToday: [], spenders: [], cost: null,
   spend: { usd: 0, runs: 0, atLeast: false, byTeam: new Map() },
   doneBy: () => ({ seat: null, where: null }) as never,
-  figureOf: () => ({ kind: 'yarn', color: 'sage' }),
+  figureOf: () => ({ kind: 'chubby', color: 'sage' }),
   onReview: vi.fn(), onOpenRun: vi.fn(), stepUp: true,
 })
 

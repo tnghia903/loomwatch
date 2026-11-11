@@ -20,7 +20,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 function Bench({ start }: { start: Partial<AgentDraft> }) {
   const [draft, setDraft] = useState<AgentDraft>({ ...BLANK_DRAFT, ...start })
-  return <ByHand draft={draft} set={(key, value) => setDraft((current) => ({ ...current, [key]: value }))} skills={[]} skillsLoading={false} roleField={createRef()} figure={{ kind: 'yarn', color: 'sage' }} record={null} />
+  return <ByHand draft={draft} set={(key, value) => setDraft((current) => ({ ...current, [key]: value }))} skills={[]} skillsLoading={false} roleField={createRef()} figure={{ kind: 'chubby', color: 'sage' }} record={null} />
 }
 const row = (title: RegExp) => screen.getByRole('button', { name: title })
 

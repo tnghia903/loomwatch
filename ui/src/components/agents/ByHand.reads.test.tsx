@@ -34,7 +34,7 @@ function daemon({ notion = true }: { notion?: boolean } = {}) {
 /** ByHand as the builder holds it: every change is kept, so what it shows next is what was set. */
 function Builder({ start, onChange, ...rest }: { start: Partial<AgentDraft>; onChange?: (draft: AgentDraft) => void; readOnly?: boolean }) {
   const [draft, setDraft] = useState<AgentDraft>({ ...BLANK_DRAFT, name: 'Writer', ...start })
-  return <ByHand {...rest} draft={draft} set={(key, value) => setDraft((current) => { const next = { ...current, [key]: value }; onChange?.(next); return next })} skills={[]} skillsLoading={false} roleField={createRef()} figure={{ kind: 'yarn', color: 'sage' }} record={null} />
+  return <ByHand {...rest} draft={draft} set={(key, value) => setDraft((current) => { const next = { ...current, [key]: value }; onChange?.(next); return next })} skills={[]} skillsLoading={false} roleField={createRef()} figure={{ kind: 'chubby', color: 'sage' }} record={null} />
 }
 
 const readsBlock = () => screen.getByRole('region', { name: 'What it reads' })

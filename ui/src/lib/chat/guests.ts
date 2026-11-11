@@ -1,4 +1,4 @@
-import { figureFor, type FigureChoice } from '../library/figures'
+import { type FigureChoice, jobFigure } from '../library/figures'
 
 /**
  * Guests (ADR 0092): the agent a team's work starts with, or an agent working alone, may bring in
@@ -40,7 +40,7 @@ export function guestsOf(saved: readonly Saved[], teamNames: Iterable<string>): 
   for (const job of saved) {
     const id = `${GUEST_PREFIX}${job.id}`
     names.set(id, taken.has(job.name.trim().toLowerCase()) ? `${job.name} (My agents)` : job.name)
-    figures.set(id, figureFor(job.id, job.figure))
+    figures.set(id, jobFigure(job))
   }
   return { names, figures }
 }

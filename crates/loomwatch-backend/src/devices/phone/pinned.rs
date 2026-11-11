@@ -11,7 +11,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::daemon::Daemon;
-use super::studio::figure_for;
+use super::studio::job_figure;
 use crate::chat_files::SentFile;
 
 /// Where My agents' chats are kept, relative to the teams folder (`jobs::BENCH_DIR`).
@@ -136,12 +136,11 @@ pub async fn chat_view(daemon: &Daemon, id: &str) -> anyhow::Result<Value> {
         ))
         .await
         .ok();
-    let (kind, color) = figure_for(&id, job.get("figure"));
     Ok(json!({
         "agent": {
             "id": id,
             "name": name_of(&id, &job),
-            "figure": {"kind": kind, "color": color},
+            "figure": job_figure(&id, &job),
             "agent": chat_agent_id(&id),
             "chatPath": path,
         },

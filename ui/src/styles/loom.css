@@ -179,12 +179,13 @@ span.story-schedule { cursor: default; }
    2 butter, 3 sage, 4 sky, 5 lilac, 6 rose, 7 oat. */
 .hue-0 { --hue: var(--color-accent); }
 .hue-1 { --hue: var(--color-fig-clay); }
-.hue-2 { --hue: var(--color-fig-butter); }
-.hue-3 { --hue: var(--color-fig-sage); }
-.hue-4 { --hue: var(--color-fig-sky); }
-.hue-5 { --hue: var(--color-fig-lilac); }
-.hue-6 { --hue: var(--color-fig-rose); }
-.hue-7 { --hue: var(--color-fig-oat); }
+.hue-2 { --hue: var(--color-fig-sage); }
+.hue-3 { --hue: var(--color-fig-sky); }
+.hue-4 { --hue: var(--color-fig-lilac); }
+.hue-5 { --hue: var(--color-fig-rose); }
+.hue-6 { --hue: var(--color-fig-orchid); }
+.hue-7 { --hue: var(--color-fig-plum); }
+.hue-8 { --hue: var(--color-fig-sunset); }
 /* Something that is nobody, like the schedule: no colour of its own. */
 .hue-quiet { --hue: var(--color-ink-3); }
 .chat-avatar { position: relative; display: inline-grid; place-items: center; flex: none; border-radius: 50%; border: 2px solid var(--color-panel); background: color-mix(in srgb, var(--hue) 18%, var(--color-panel-solid)); color: var(--hue); font: 650 11px/1 var(--font-sans); letter-spacing: .01em; }

@@ -5,12 +5,15 @@ import App from './App.tsx'
 import { AgentFigure } from './components/agents/benchFigure'
 import { ErrorBoundary } from './components/ui/ErrorBoundary'
 import { MarkdownRenderer } from './components/ui/markdownCode'
+import { watchFiguresStill } from './lib/motion/figuresStill'
 
 // The two pieces of code that come as their own downloads are asked for now, beside the first
 // draw, so neither holds its part of the page back later: the bench on the agent pages, and
 // Markdown, which answers, files and Ask all show with.
 if (window.location.pathname.startsWith('/agents')) AgentFigure.preload().catch(() => {})
 MarkdownRenderer.preload().catch(() => {})
+// The figures' idle breath holds still while the window is in the background (motion.css).
+watchFiguresStill()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

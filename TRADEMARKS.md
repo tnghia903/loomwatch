@@ -11,8 +11,8 @@ so in section 6. This page says what you can do with them.
 - **The logo:** the crew's face sewn onto its tile, the wordmark and the two together. The masters
   are in [docs/assets/brand](docs/assets/brand). Copies are the app icons in `packaging/macos/`,
   `ui/public/` and `site/`.
-- **The crew figures:** the sewing-box characters the agents wear, their clothes and their
-  workbench. They are in `ui/public/agent/` and `site/assets/crew/`.
+- **The crew figures:** the velvet characters the agents are drawn as, their job signs, their
+  clothes and their workbench. They are in `ui/public/agent/` and `site/assets/crew/`.
 
 The logo and figure files are not under the MIT or Apache License. Copyright © 2026 Nghia Thai,
 all rights reserved, except for the uses below.

@@ -4,7 +4,7 @@ import { MoreHorizontal, Plus, UserRound } from '../ui/icon'
 import { modelNameFromId } from '../../lib/ai/modelIds'
 import type { DetectedCapability } from '../../lib/library/client'
 import { draftFromJob } from '../../lib/library/draft'
-import { figureFor } from '../../lib/library/figures'
+import { jobFigure } from '../../lib/library/figures'
 import { useSavedJobs, type SavedJob } from '../../lib/library/jobs'
 import { usePinnedAgent } from '../../lib/library/pinned'
 import { modelForPreset, ROLE_PRESETS } from '../../lib/library/roles'
@@ -130,7 +130,7 @@ function AgentsList() {
             {jobs.map((job) => (
               <li key={job.id} className="agent-card-box">
                 <button type="button" className="home-card agent-card" title={job.model ? `${job.name} · on ${modelNameFromId(job.model)}` : job.name} onClick={() => open(`/agents/${encodeURIComponent(job.id)}`)}>
-                  <AgentTile id={job.id} figure={figureFor(job.id, job.figure)} draft={draftFromJob(job)} teams={usage.get(job.id)?.teams ?? 0} runs={records} pinned={pinned === job.id} />
+                  <AgentTile id={job.id} figure={jobFigure(job)} draft={draftFromJob(job)} teams={usage.get(job.id)?.teams ?? 0} runs={records} pinned={pinned === job.id} />
                 </button>
                 {/* Beside the tile's button, never inside it: a button holds no other control. */}
                 <AgentCardMenu name={job.name} chat={`/agents/${encodeURIComponent(job.id)}?view=chat`} onRemove={() => setRemoving(job)} />

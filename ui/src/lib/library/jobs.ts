@@ -7,6 +7,7 @@ import type { AgentAllow, AgentConfig } from '../team-file/types'
 import type { FigureChoice } from './figures'
 import type { AgentRead } from './reads'
 import { ROLE_ICON_IDS, type RoleIcon, type RolePreset } from './roles'
+export { guessIcon } from './roleIcons'
 
 /**
  * Your agents: agents the operator built or saved for reuse (ADR 0030 began them as saved jobs).
@@ -166,32 +167,6 @@ export function jobIdFor(name: string): string {
     .slice(0, 64)
     .replace(/-+$/g, '')
   return safeFileStem(slug || 'job')
-}
-
-const ICON_WORDS: ReadonlyArray<readonly [RoleIcon, RegExp]> = [
-  ['review', /\b(review|check|critic|qa|verif|audit|approv)/],
-  ['edit', /\b(edit|proofread|polish|tighten|copyedit)/],
-  ['research', /\b(research|search|find|source|scout|investigat)/],
-  ['slides', /\b(slides?|deck|presentation|powerpoint|pptx)\b/],
-  ['sheet', /\b(spreadsheet|workbook|excel|xlsx)\b/],
-  ['dashboard', /\bdashboards?\b/],
-  ['chart', /\b(charts?|graphs?|plots?)\b/],
-  ['video', /\b(videos?|clips?|voice-?over|animation)\b/],
-  ['document', /\b(word documents?|docx|pdfs?)\b/],
-  ['analyse', /\b(analy[sz]|data|metric|number|statistic)/],
-  ['design', /\b(design|visual|layout|diagram|ui\b)/],
-  ['code', /\b(code|coder|develop|engineer|program|bug|test|refactor)/],
-  ['write', /\b(write|writer|draft|author|copy|blog|post|notes?)\b/],
-]
-
-/** An icon for a job from its name, then its instructions; none when nothing fits. */
-export function guessIcon(name: string, instructions = ''): RoleIcon | undefined {
-  for (const text of [name, instructions]) {
-    const lower = text.toLowerCase()
-    const hit = ICON_WORDS.find(([, pattern]) => pattern.test(lower))
-    if (hit) return hit[0]
-  }
-  return undefined
 }
 
 /** Only the switches that are on, or nothing: how a team file and a job file both write `allow`. */

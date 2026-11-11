@@ -338,6 +338,9 @@
 .figure-picker-color { position: relative; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; cursor: pointer; }
 .figure-picker-color > span:first-of-type { width: 22px; height: 22px; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .12); }
 .figure-picker-color:has(input:checked) { box-shadow: 0 0 0 2px var(--color-accent); }
+.figure-picker-color.locked { cursor: default; }
+.figure-picker-color.locked > span:first-of-type { opacity: .28; }
+.figure-picker-color .figure-picker-lock { top: -3px; right: -3px; }
 /* A figure a quest earns, before it is earned: its silhouette, with the hint in its title. */
 .figure-picker-kind.locked { cursor: default; }
 .figure-picker-kind.locked:hover { background: transparent; }
@@ -459,6 +462,10 @@
 /* A still wearing accessories (FigureStill): the class sizes the box, the still and its overlay fill it. */
 .figure-still { position: relative; display: inline-block; vertical-align: middle; }
 .figure-still > img, .figure-still > .worn-overlay, .figure-still > .worn-overlay > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+/* The job sign: its grey picture multiplied over the figure's own colour, inside the sign's shape, so
+   one picture serves every colour (FigureStill). */
+.figure-still > .figure-sign { position: absolute; inset: 0; isolation: isolate; background: var(--tint); -webkit-mask: var(--sign) center / contain no-repeat; mask: var(--sign) center / contain no-repeat; pointer-events: none; }
+.figure-still > .figure-sign::after { content: ''; position: absolute; inset: 0; background: var(--sign) center / contain no-repeat; mix-blend-mode: multiply; }
 .figure-still > .worn-overlay { pointer-events: none; }
 /* Whether it brings in helpers for a big task (ADR 0079), under its model: how it works, as a switch. */
 .byhand-helpers { margin-top: var(--sp-1); }

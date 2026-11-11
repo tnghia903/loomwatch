@@ -4,6 +4,7 @@ import type { AgentAllow, AgentLink, CapabilityRef } from '../team-file/types'
 import { callsFor, type ToolAllow } from '../tools/allow'
 import { knowledgeOf, type AgentRead } from './reads'
 import type { LibrarySource } from './types'
+import { ROLE_ICON_IDS, type RoleIcon } from './roleIcons'
 
 /**
  * Helpers by job, for the Build palette.
@@ -23,12 +24,11 @@ import type { LibrarySource } from './types'
  * Operators save their own jobs from an agent that worked (`jobs.ts`); those arrive here as presets
  * too, and are placed exactly the same way.
  */
-export type RoleIcon = 'research' | 'write' | 'edit' | 'review' | 'code' | 'design' | 'analyse' | 'slides' | 'document' | 'sheet' | 'chart' | 'dashboard' | 'video'
+export type { RoleIcon }
 
 export type { EffortTier, ModelTier }
 
-/** The same list as `schemas/job-icons.json`, which the daemon checks a saved agent's icon against. */
-export const ROLE_ICON_IDS: readonly RoleIcon[] = ['research', 'write', 'edit', 'review', 'code', 'design', 'analyse', 'slides', 'document', 'sheet', 'chart', 'dashboard', 'video']
+export { ROLE_ICON_IDS }
 
 export interface RolePreset {
   id: string

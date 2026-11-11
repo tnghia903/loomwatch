@@ -24,7 +24,7 @@ describe('By hand, while bringing in my agents is off everywhere', () => {
   it('shows no switch for it', () => {
     expect(MY_AGENTS_LISTED_BY_DEFAULT).toBe(0)
     expect(BRINGING_IN_SHIPPED).toBe(false)
-    render(<ByHand draft={BLANK_DRAFT} set={vi.fn()} skills={[]} skillsLoading={false} roleField={createRef()} figure={{ kind: 'yarn', color: 'sage' }} record={null} />)
+    render(<ByHand draft={BLANK_DRAFT} set={vi.fn()} skills={[]} skillsLoading={false} roleField={createRef()} figure={{ kind: 'chubby', color: 'sage' }} record={null} />)
     expect(screen.getByRole('button', { name: /Brings in helpers for big tasks/ })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Can bring in other agents/ })).toBeNull()
   })

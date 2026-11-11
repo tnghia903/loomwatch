@@ -61,7 +61,7 @@ vi.mock('../../lib/runs/useRunSession', () => ({
 }))
 
 const approved: unknown[] = []
-const maya: SavedJob = { id: 'maya', file: '.jobs/maya.yaml', name: 'Maya', instructions: 'Help me with my day.', model: 'fake/offline', figure: { kind: 'spool', color: 'lilac' } }
+const maya: SavedJob = { id: 'maya', file: '.jobs/maya.yaml', name: 'Maya', instructions: 'Help me with my day.', model: 'fake/offline', figure: { kind: 'tall', color: 'lilac' } }
 const opened = vi.fn()
 
 beforeEach(() => {

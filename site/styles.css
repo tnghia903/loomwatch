@@ -848,7 +848,15 @@ em { font-style: italic; }
 .bench { position: relative; aspect-ratio: 4 / 3; border-radius: 12px; overflow: hidden; background: radial-gradient(ellipse 70% 60% at 50% 46%, color-mix(in srgb, var(--fig, var(--accent)) 16%, var(--ground)), var(--ground) 75%); border: 1px solid var(--hairline); }
 .bench-canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; transition: opacity .7s var(--ease); touch-action: pan-y; }
 .bench.live .bench-canvas { opacity: 1; }
-.bench-poster { position: absolute; left: 50%; top: 44%; width: 48%; height: auto; transform: translate(-50%, -50%); transition: opacity .5s var(--ease); -webkit-mask-image: radial-gradient(ellipse 50% 50% at 50% 50%, #000 78%, transparent 100%); mask-image: radial-gradient(ellipse 50% 50% at 50% 50%, #000 78%, transparent 100%); }
+/* A figure's still with its job's sign on its head, as the app stacks them: the bare still, then the
+   sign's grey picture (--sign) tinted to the figure's colour (--tint), multiplied. */
+.figure-still { position: relative; display: inline-block; flex: none; }
+.figure-still > img { display: block; width: 100%; height: 100%; }
+.figure-still > .figure-sign { position: absolute; inset: 0; isolation: isolate; background: var(--tint); -webkit-mask: var(--sign) center / contain no-repeat; mask: var(--sign) center / contain no-repeat; pointer-events: none; }
+.figure-still > .figure-sign::after { content: ''; position: absolute; inset: 0; background: var(--sign) center / contain no-repeat; mix-blend-mode: multiply; }
+.figure-still .worn { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.figure-still > .figure-worn { position: absolute; inset: 0; }
+.bench-poster { position: absolute; left: 50%; top: 44%; width: 48%; height: auto; aspect-ratio: 1; transform: translate(-50%, -50%); transition: opacity .5s var(--ease); -webkit-mask-image: radial-gradient(ellipse 50% 50% at 50% 50%, #000 78%, transparent 100%); mask-image: radial-gradient(ellipse 50% 50% at 50% 50%, #000 78%, transparent 100%); }
 .bench-plate { position: absolute; left: 50%; bottom: 52px; transform: translateX(-50%); margin: 0; display: grid; justify-items: center; gap: 2px; padding: 8px 16px; border-radius: 10px; background: var(--slip); color: var(--slip-ink); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 60%, transparent); min-width: 150px; transition: opacity .4s; }
 .bench-plate b { font: 400 22px/1.05 var(--serif); }
 .bench-plate span { font-size: 11.5px; color: var(--slip-ink-2); }
@@ -907,7 +915,7 @@ em { font-style: italic; }
 .ag-kinds button { display: grid; place-items: center; padding: 2px 0; border-radius: 9px; border: 1px solid transparent; background: none; cursor: pointer; }
 .ag-kinds img { width: 100%; max-width: 46px; aspect-ratio: 1; object-fit: contain; }
 /* A still carries its soft ground shadow to the picture's edge: fade the edge so it never reads as a box on paper. */
-.ag-kinds img, .ag-shelf li img { -webkit-mask-image: radial-gradient(ellipse 50% 50% at 50% 50%, #000 78%, transparent 100%); mask-image: radial-gradient(ellipse 50% 50% at 50% 50%, #000 78%, transparent 100%); }
+.ag-kinds img, .ag-shelf li .figure-still { -webkit-mask-image: radial-gradient(ellipse 50% 50% at 50% 50%, #000 78%, transparent 100%); mask-image: radial-gradient(ellipse 50% 50% at 50% 50%, #000 78%, transparent 100%); }
 .ag-kinds button:hover { background: var(--accent-tint); }
 .ag-kinds button[aria-checked="true"] { border-color: color-mix(in srgb, var(--accent) 60%, transparent); background: var(--accent-tint); }
 .ag-colors { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 8px; }
@@ -927,7 +935,7 @@ em { font-style: italic; }
 .ag-shelf { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 12px 20px 14px; border-top: 1px solid var(--hairline); }
 .ag-shelf ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
 .ag-shelf li { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px 0 4px; border-radius: 999px; border: 1px solid var(--hairline-2); font: 600 13px/1 var(--sans); color: var(--ink); animation: shelf-in .45s var(--ease) 1; }
-.ag-shelf li img { width: 30px; height: 30px; margin: -4px 0; object-fit: contain; }
+.ag-shelf li .figure-still { width: 30px; height: 30px; margin: -4px 0; }
 .ag-shelf-note { flex-basis: 100%; margin: 0; font-size: 12.5px; color: var(--ink-3); }
 @keyframes shelf-in { from { transform: translateY(6px) scale(.96); opacity: 0; } }
 
@@ -952,12 +960,12 @@ em { font-style: italic; }
    whole figure, a little larger than the face it stands for, with no disc behind it. */
 .tc-av.m-researcher, .tc-av.m-writer, .tc-av.m-checker { position: relative; border-color: transparent; background: none; color: transparent; }
 .tc-av.m-researcher::before, .tc-av.m-writer::before, .tc-av.m-checker::before { content: ''; position: absolute; inset: -20%; background: no-repeat 50% 50% / contain; pointer-events: none; }
-.tc-av.m-researcher::before { background-image: url(assets/figures/pincushion-rose.webp); }
-.tc-av.m-writer::before { background-image: url(assets/figures/spool-sky.webp); }
-.tc-av.m-checker::before { background-image: url(assets/figures/thimble-sage.webp); }
+.tc-av.m-researcher::before { background-image: url(assets/crew/researcher.webp); }
+.tc-av.m-writer::before { background-image: url(assets/crew/writer.webp); }
+.tc-av.m-checker::before { background-image: url(assets/crew/checker.webp); }
 .face { display: inline-block; width: 22px; height: 22px; margin: -5px 6px -5px 0; vertical-align: middle; border-radius: 50%; background: color-mix(in srgb, var(--m) 18%, var(--panel-solid)) no-repeat 50% 20% / 170%; flex: none; }
-.face.m-researcher { background-image: url(assets/figures/pincushion-rose.webp); }
-.face.m-writer { background-image: url(assets/figures/spool-sky.webp); }
+.face.m-researcher { background-image: url(assets/crew/researcher.webp); }
+.face.m-writer { background-image: url(assets/crew/writer.webp); }
 
 /* What it does: every capability, in the order you use it. */
 .band-can { padding: 12vh 0 10vh; background: radial-gradient(ellipse 60% 40% at 50% 0%, color-mix(in srgb, var(--accent) 6%, transparent), transparent 70%); }

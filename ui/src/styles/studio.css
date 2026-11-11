@@ -43,10 +43,9 @@
 .desk-state.waiting { color: var(--color-accent); }
 .desk-state.working { color: var(--color-live); }
 .desk-state.failed { color: var(--color-alert); }
-/* Each state has a pose as well as a colour, held still, as the crew rail's figures do. */
-.desk-figure[data-glow="waiting"] img { rotate: -8deg; }
-.desk-figure[data-glow="working"] img { translate: 0 -3px; }
-.desk-figure[data-glow="failed"] img { rotate: 8deg; translate: 0 3px; }
+/* Each state is a pose of its own in the still (FigureStill `state`, step 5) as well as a colour; the
+   tilts and lifts that stood in for poses are gone (they turned the picture and not its sign). Failed
+   keeps its drained colour. */
 .desk-figure[data-glow="failed"] { filter: saturate(.35) drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 3px var(--glow)); }
 /* Level with the middle of the figures, whatever words stand under each desk. */
 .desk-onward { flex: none; width: 16px; margin-top: calc(var(--fig, 44px) / 2 - 5px); }

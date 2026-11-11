@@ -27,7 +27,7 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 function Bench({ chat, cover }: { chat?: ReactNode; cover?: ReactNode }) {
-  return <ByHand draft={{ ...BLANK_DRAFT, name: 'Coby', instructions: 'Answer questions.' }} set={() => {}} skills={[]} skillsLoading={false} roleField={createRef()} figure={{ kind: 'spool', color: 'butter' }} record={null} chat={chat} cover={cover} />
+  return <ByHand draft={{ ...BLANK_DRAFT, name: 'Coby', instructions: 'Answer questions.' }} set={() => {}} skills={[]} skillsLoading={false} roleField={createRef()} figure={{ kind: 'tall', color: 'clay' }} record={null} chat={chat} cover={cover} />
 }
 
 /** Whether `first` comes before `then` in the page, as it is read and tabbed through. */

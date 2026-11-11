@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 
-import { figureFor, type FigureChoice } from '../../lib/library/figures'
+import { jobFigure, type FigureView } from '../../lib/library/figures'
 import type { SavedJob } from '../../lib/library/jobs'
 import type { MadeFile } from '../../lib/projects/glance'
 import { FigureStill } from '../agents/FigureStill'
@@ -20,7 +20,7 @@ export function PickUp({ files, chats, jobs, figures }: {
   /** Your agents' own chats with something in them, newest first. */
   chats: readonly string[]
   jobs: readonly SavedJob[]
-  figures: ReadonlyMap<string, FigureChoice | undefined>
+  figures: ReadonlyMap<string, FigureView | undefined>
 }) {
   const [choosing, setChoosing] = useState(false)
   const menu = useRef<HTMLDivElement>(null)
@@ -40,7 +40,7 @@ export function PickUp({ files, chats, jobs, figures }: {
       {recent.map((job) => (
         // The figure alone, unlit: this row says nothing of whether it is at work.
         <a key={job.id} className="pick-up-chat" href={`/agents/${encodeURIComponent(job.id)}?view=chat`}>
-          <FigureStill figure={figureFor(job.id, figures.get(job.id))} alt="" width={30} height={30} decoding="async" />
+          <FigureStill figure={(figures.get(job.id) ?? jobFigure(job))} alt="" width={30} height={30} decoding="async" />
           <span><b>{job.name}</b><small>Your chat</small></span>
         </a>
       ))}
@@ -51,7 +51,7 @@ export function PickUp({ files, chats, jobs, figures }: {
             {jobs.length === 0 && <a role="menuitem" href="/agents/new">Build an agent first</a>}
             {jobs.map((job) => (
               <a key={job.id} role="menuitem" href={`/agents/${encodeURIComponent(job.id)}?view=chat`}>
-                <FigureStill figure={figureFor(job.id, job.figure)} headOnly alt="" width={22} height={22} decoding="async" />
+                <FigureStill figure={jobFigure(job)} headOnly alt="" width={22} height={22} decoding="async" />
                 {job.name}
               </a>
             ))}

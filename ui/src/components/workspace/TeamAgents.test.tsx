@@ -17,7 +17,7 @@ vi.mock('../agents/AgentFigure', () => ({
   default: ({ labels }: AgentFigureProps) => <div>{labels.map((tag) => <button key={tag.anchor} type="button" aria-label={tag.label}>{tag.text}</button>)}</div>,
 }))
 
-const reader: SavedJob = { id: 'reader', file: '.jobs/reader.yaml', name: 'Reader', does: 'Checks each story', instructions: 'Check every story.', figure: { kind: 'button', color: 'sage' } }
+const reader: SavedJob = { id: 'reader', file: '.jobs/reader.yaml', name: 'Reader', does: 'Checks each story', instructions: 'Check every story.', figure: { kind: 'wide', color: 'sage' } }
 const elsewhere: SavedJob = { id: 'coder', file: '.jobs/coder.yaml', name: 'Coder', instructions: 'Write code.', model: 'openai/gpt-6.1-sol' }
 
 const scoper: AgentConfig = {

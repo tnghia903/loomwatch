@@ -24,9 +24,9 @@ describe('the agent builder’s draft', () => {
   })
 
   it('saves what it shows and reads back the same', () => {
-    const draft = { name: 'Reader', does: 'Checks stories', instructions: 'Check every story.', model: 'sonnet', effort: '', skills: ['source-check'], tools: ['github'], toolAllow: {}, reads: [], doneWhen: [], allow: { web: true, edits: false }, figure: { kind: 'button' as const, color: 'sage' as const } }
+    const draft = { name: 'Reader', does: 'Checks stories', instructions: 'Check every story.', model: 'sonnet', effort: '', skills: ['source-check'], tools: ['github'], toolAllow: {}, reads: [], doneWhen: [], allow: { web: true, edits: false }, figure: { kind: 'wide' as const, color: 'sage' as const } }
     const spec = specFromDraft(draft, 'First cut')
-    expect(spec).toEqual({ name: 'Reader', does: 'Checks stories', instructions: 'Check every story.', icon: 'review', figure: { kind: 'button', color: 'sage' }, model: 'sonnet', skills: ['source-check'], tools: ['github'], allow: { web: true }, note: 'First cut' })
+    expect(spec).toEqual({ name: 'Reader', does: 'Checks stories', instructions: 'Check every story.', icon: 'review', figure: { kind: 'wide', color: 'sage' }, model: 'sonnet', skills: ['source-check'], tools: ['github'], allow: { web: true }, note: 'First cut' })
     expect(draftFromJob(spec)).toEqual({ ...draft, allow: { web: true } })
   })
 
@@ -59,10 +59,10 @@ describe('the agent builder’s draft', () => {
     // A team copies its tools too, so giving it one is a new version.
     expect(makesNewVersion({ ...saved, tools: ['github'] }, saved)).toBe(true)
     // Its figure is only how it looks in Your agents: worth saving, never a new version.
-    const dressed = { ...saved, figure: { kind: 'spool' as const, color: 'sky' as const } }
+    const dressed = { ...saved, figure: { kind: 'tall' as const, color: 'sky' as const } }
     expect(makesNewVersion(dressed, saved)).toBe(false)
     expect(draftChanged(dressed, saved)).toBe(true)
-    expect(draftChanged({ ...dressed, figure: { kind: 'spool' as const, color: 'rose' as const } }, dressed)).toBe(true)
+    expect(draftChanged({ ...dressed, figure: { kind: 'tall' as const, color: 'rose' as const } }, dressed)).toBe(true)
     expect(draftChanged({ ...dressed }, dressed)).toBe(false)
   })
 

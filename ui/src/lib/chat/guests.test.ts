@@ -15,12 +15,12 @@ describe('one of my agents brought in (ADR 0092)', () => {
 
   it('is named and drawn as in My agents, told apart from a team agent with its name', () => {
     const guests = guestsOf([
-      { id: 'researcher', name: 'Researcher', figure: { kind: 'cone', color: 'sky' } },
+      { id: 'researcher', name: 'Researcher', figure: { kind: 'slim', color: 'sky' } },
       { id: 'coder', name: 'Coder' },
     ], ['Researcher', 'Writer'])
     expect(guests.names.get('mine+researcher')).toBe('Researcher (My agents)')
     expect(guests.names.get('mine+coder')).toBe('Coder')
-    expect(guests.figures.get('mine+researcher')).toEqual({ kind: 'cone', color: 'sky' })
+    expect(guests.figures.get('mine+researcher')).toMatchObject({ kind: 'slim', color: 'sky' })
     expect(guests.figures.get('mine+coder')).toBeTruthy()
   })
 

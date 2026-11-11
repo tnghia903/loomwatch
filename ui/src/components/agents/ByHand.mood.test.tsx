@@ -26,7 +26,7 @@ const run = (status: RunRecord['status'], eventCount: number | null = null): Run
 })
 
 function bench(record: RunRecord | null) {
-  return <ByHand draft={{ ...BLANK_DRAFT, name: 'Reader', instructions: 'Check it.' }} set={vi.fn()} skills={[]} skillsLoading={false} roleField={createRef()} figure={{ kind: 'yarn', color: 'sage' }} record={record} />
+  return <ByHand draft={{ ...BLANK_DRAFT, name: 'Reader', instructions: 'Check it.' }} set={vi.fn()} skills={[]} skillsLoading={false} roleField={createRef()} figure={{ kind: 'chubby', color: 'sage' }} record={record} />
 }
 
 beforeEach(() => { vi.useFakeTimers({ shouldAdvanceTime: true }); shown.view = null; stream.asked = []; stream.count = 0; stream.events = null })
@@ -87,7 +87,7 @@ describe('the figure at the bench, while its run works', () => {
 // writing while its figure sat still. Such an answer starts no run, so the bench is told apart.
 describe('the figure at the bench, while it answers in its chat itself', () => {
   const writing = (record: RunRecord | null, on: boolean) => (
-    <ByHand draft={{ ...BLANK_DRAFT, name: 'Reader', instructions: 'Check it.' }} set={vi.fn()} skills={[]} skillsLoading={false} roleField={createRef()} figure={{ kind: 'yarn', color: 'sage' }} record={record} writing={on} />
+    <ByHand draft={{ ...BLANK_DRAFT, name: 'Reader', instructions: 'Check it.' }} set={vi.fn()} skills={[]} skillsLoading={false} roleField={createRef()} figure={{ kind: 'chubby', color: 'sage' }} record={record} writing={on} />
   )
 
   it('types until the answer is in, then rests as it did before', async () => {

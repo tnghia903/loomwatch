@@ -3,6 +3,7 @@ import { seatWords, shownSeats, type RoomTeam, type Seat } from '../../lib/proje
 import type { FigureOf } from '../../lib/projects/studioUi'
 import { FigureStill } from '../agents/FigureStill'
 import { AgentMark } from '../ui/AgentMark'
+import { stateOf } from '../../lib/library/figures'
 
 /** The arrow between two desks: work moves on to the next one. */
 function Onward() {
@@ -28,7 +29,7 @@ function Desk({ seat, figureOf, size, compact = false }: { seat: Seat; figureOf:
       {seat.kind === 'you'
         ? <span className="desk-you" aria-hidden="true"><AgentMark id={seat.id} operator size={Math.round(size * 0.78)} /></span>
         // An agent elsewhere is still itself here, faint: its desk keeps its place in the row.
-        : <span className={`desk-figure${seat.away ? ' away' : ''}`} data-glow={seat.away ? undefined : seat.state}><FigureStill figure={figureOf(seat)} alt="" width={size} height={size} decoding="async" /></span>}
+        : <span className={`desk-figure${seat.away ? ' away' : ''}`} data-glow={seat.away ? undefined : seat.state}><FigureStill figure={figureOf(seat)} state={seat.away ? 'ready' : stateOf(seat.state)} alt="" width={size} height={size} decoding="async" /></span>}
       {/* Drawn small in a line of words, the figure alone: the line's words and the row's label say the rest. */}
       {!compact && (
         <>

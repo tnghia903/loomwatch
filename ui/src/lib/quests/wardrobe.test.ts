@@ -8,8 +8,8 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 
 describe('the wardrobe client', () => {
   it('reads what was earned and leaves out what this app cannot draw', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => json({ earned: { monocle: { at: '2026-10-15T10:00:00Z', runId: 'run-1', agentId: 'checker' }, crown: { at: 'x', runId: 'y' } } })))
-    expect(await fetchWardrobe()).toEqual({ monocle: { at: '2026-10-15T10:00:00Z', runId: 'run-1', agentId: 'checker' } })
+    vi.stubGlobal('fetch', vi.fn(async () => json({ earned: { beret: { at: '2026-10-15T10:00:00Z', runId: 'run-1', agentId: 'checker' }, crown: { at: 'x', runId: 'y' } } })))
+    expect(await fetchWardrobe()).toEqual({ beret: { at: '2026-10-15T10:00:00Z', runId: 'run-1', agentId: 'checker' } })
   })
 
   it('says a daemon older than the wardrobe has none', async () => {
@@ -26,10 +26,10 @@ describe('the wardrobe client', () => {
     }))
     const heard = vi.fn()
     window.addEventListener(WARDROBE_CHANGED_EVENT, heard)
-    expect(await earnItem('band', { runId: 'run-1', teamPath: 'trip.yaml' })).toEqual({ at: '2026-10-15T10:00:00Z', runId: 'run-1' })
-    expect(calls[0]).toEqual({ url: '/api/wardrobe/earned', body: { item: 'band', runId: 'run-1', teamPath: 'trip.yaml', agentId: null } })
+    expect(await earnItem('coffee', { runId: 'run-1', teamPath: 'trip.yaml' })).toEqual({ at: '2026-10-15T10:00:00Z', runId: 'run-1' })
+    expect(calls[0]).toEqual({ url: '/api/wardrobe/earned', body: { item: 'coffee', runId: 'run-1', teamPath: 'trip.yaml', agentId: null } })
     status = 200
-    await earnItem('band', { runId: 'run-2' })
+    await earnItem('coffee', { runId: 'run-2' })
     expect(heard).toHaveBeenCalledTimes(1)
     window.removeEventListener(WARDROBE_CHANGED_EVENT, heard)
   })

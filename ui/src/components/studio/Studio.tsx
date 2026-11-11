@@ -2,7 +2,7 @@ import { Plus, Search } from '../ui/icon'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import { FileReaderContext, type FileToRead } from '../../lib/files/reader'
-import { figureFor, type FigureChoice } from '../../lib/library/figures'
+import { jobFigure, type FigureView } from '../../lib/library/figures'
 import type { SavedJob } from '../../lib/library/jobs'
 import { projectFile, projectsChanged, saveProject, useProjects, type Project, type ProjectEntry } from '../../lib/projects/client'
 import { costWords, doneByOf, crewOf, finishedToday, lastFinished, madeHere, monthCost, monthSpend, monthSpenders, needsYou, workingNow } from '../../lib/projects/glance'
@@ -106,7 +106,7 @@ function NotInAProject({ jobs, rooms, used, figureOf, said = null, onMove, onDel
         {idle.map((job) => (
           <span key={job.id} className="idle-agent">
             <button type="button" className="idle-agent-chip" aria-expanded={open === job.id} aria-haspopup="menu" onClick={() => { setOpen(open === job.id ? null : job.id); setAdding(false) }}>
-              <FigureStill figure={figureFor(job.id, job.figure)} alt="" width={30} height={30} decoding="async" />
+              <FigureStill figure={jobFigure(job)} alt="" width={30} height={30} decoding="async" />
               {job.name}
             </button>
             {open === job.id && (
@@ -158,7 +158,7 @@ export function Studio({ runs, onSetUp, setUpUnavailable, asking = false, part =
   const [problem, setProblem] = useState<string | null>(null)
   // A team just moved out of "Not in a project": where it went, or why it couldn't, said there.
   const [moved, setMoved] = useState<{ team: string; to: ProjectEntry | undefined; failed?: string } | null>(null)
-  const figures = useMemo(() => new Map<string, FigureChoice | undefined>(jobs.map((job) => [job.id, job.figure])), [jobs])
+  const figures = useMemo(() => new Map<string, FigureView | undefined>(jobs.map((job) => [job.id, jobFigure(job)])), [jobs])
   const figureOf = useMemo(() => defaultFigureOf(figures), [figures])
   const rooms = useMemo(
     () => (list && shapes ? roomsOf([...list.projects, ...looseProjects(list.loose, summaries ?? [])], shapes, runs, root) : null),

@@ -1,7 +1,7 @@
 import { ArrowRight, Check } from '../ui/icon'
 import { useId, useState } from 'react'
 
-import { figureFor } from '../../lib/library/figures'
+import { jobFigure } from '../../lib/library/figures'
 import { fetchJobs, saveJob, useSavedJobs } from '../../lib/library/jobs'
 import { saveTeamFile } from '../../lib/team-file/client'
 import { teamOfMyAgents } from '../../lib/team-file/myAgents'
@@ -113,7 +113,7 @@ export function NewTeamDialog({ existingPaths, onClose, openTeamUnsaved = false,
                   return (
                     <label key={job.id} className={`nt-agent ${on ? 'on' : ''}`}>
                       <input type="checkbox" checked={on} onChange={(event) => tick(job.id, event.target.checked)} />
-                      <FigureStill className="nt-agent-figure" figure={figureFor(job.id, job.figure)} headOnly alt="" width={28} height={28} loading="lazy" decoding="async" />
+                      <FigureStill className="nt-agent-figure" figure={jobFigure(job)} headOnly alt="" width={28} height={28} loading="lazy" decoding="async" />
                       <b>{job.name}</b>
                     </label>
                   )

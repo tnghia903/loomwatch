@@ -89,7 +89,7 @@ describe('BuildAgentCard on the Build canvas', () => {
 
 describe('BuildAgentCard wears the agent’s figure', () => {
   it('is the one it wears in My agents when it came from there, and the one its id picks when it is the team’s own', () => {
-    const editor: SavedJob = { id: 'editor', file: '.jobs/editor.yaml', name: 'Editor', instructions: 'Edit.', figure: { kind: 'button', color: 'butter' } }
+    const editor: SavedJob = { id: 'editor', file: '.jobs/editor.yaml', name: 'Editor', instructions: 'Edit.', figure: { kind: 'wide', color: 'clay' } }
     // Placed from Your agents as "editor-2": it still wears Editor's figure, found by its link.
     const { container, unmount } = render(
       <SavedAgentsContext.Provider value={[editor]}>
@@ -98,10 +98,10 @@ describe('BuildAgentCard wears the agent’s figure', () => {
         </CanvasActionsContext.Provider>
       </SavedAgentsContext.Provider>,
     )
-    expect(container.querySelector('.build-node-figure')).toHaveAttribute('src', figureStill({ kind: 'button', color: 'butter' }))
+    expect(container.querySelector('.build-node-figure > img')).toHaveAttribute('src', figureStill({ kind: 'wide', color: 'clay' }))
     unmount()
     const own = renderCard(nodeData)
-    expect(own.container.querySelector('.build-node-figure')).toHaveAttribute('src', figureStill(figureFor('ada')))
+    expect(own.container.querySelector('.build-node-figure > img')).toHaveAttribute('src', figureStill(figureFor('ada')))
   })
 })
 

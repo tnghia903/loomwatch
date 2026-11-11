@@ -7,23 +7,6 @@
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-/// The figures anyone starts with, in the order the Mac picks from (`ui/src/lib/library/figures.ts`
-/// `STARTER_KINDS`). Only these are picked for an agent nobody dressed.
-const STARTER_KINDS: [&str; 6] = ["yarn", "spool", "button", "thimble", "pincushion", "cone"];
-/// Every figure, starters first, then the ones quests earn (`FIGURE_KINDS`).
-const FIGURE_KINDS: [&str; 8] = [
-    "yarn",
-    "spool",
-    "button",
-    "thimble",
-    "pincushion",
-    "cone",
-    "scissors",
-    "bobbin",
-];
-/// `FIGURE_COLORS`, in its order.
-const FIGURE_COLORS: [&str; 7] = ["clay", "butter", "sage", "sky", "lilac", "rose", "oat"];
-
 /// `hashId` in `ui/src/lib/story/mark.ts`: FNV-1a over UTF-16 code units, as JavaScript's
 /// `charCodeAt` reads a string.
 #[must_use]
@@ -33,25 +16,44 @@ pub fn hash_id(text: &str) -> u32 {
     })
 }
 
-/// `figureFor`: the figure chosen for it when that is one the Mac can draw, else one its id picks,
-/// the same every time.
+/// `figureFor`: the figure chosen for it when that is one the Mac can draw (under today's names,
+/// `crate::figures`), else one its id picks, the same every time.
 #[must_use]
 pub fn figure_for(id: &str, chosen: Option<&Value>) -> (String, String) {
+    use crate::figures::{is_build, is_color, migrate_figure, pick};
     if let Some(chosen) = chosen {
         let kind = chosen.get("kind").and_then(Value::as_str);
         let color = chosen.get("color").and_then(Value::as_str);
-        if let (Some(kind), Some(color)) = (kind, color)
-            && FIGURE_KINDS.contains(&kind)
-            && FIGURE_COLORS.contains(&color)
-        {
-            return (kind.to_owned(), color.to_owned());
+        if let (Some(kind), Some(color)) = (kind, color) {
+            let (kind, color) = migrate_figure(kind, color);
+            if is_build(&kind) && is_color(&color) {
+                return (kind, color);
+            }
         }
     }
-    let seed = hash_id(id) as usize;
-    (
-        STARTER_KINDS[seed % STARTER_KINDS.len()].to_owned(),
-        FIGURE_COLORS[(seed / STARTER_KINDS.len()) % FIGURE_COLORS.len()].to_owned(),
+    let (kind, color) = pick(hash_id(id));
+    (kind.to_owned(), color.to_owned())
+}
+
+/// `signFor`: the sign on the figure of one of My agents, as `GET /api/jobs` lists it: its job's
+/// icon, else what its name and instructions suggest, else a curl (`crate::figures::sign_for`).
+/// Only for drawing: the phone never sends it back in a figure it saves.
+#[must_use]
+pub fn job_sign(job: &Value) -> &'static str {
+    let text = |key: &str| job.get(key).and_then(Value::as_str);
+    crate::figures::sign_for(
+        text("icon"),
+        text("name").unwrap_or(""),
+        text("instructions").or_else(|| text("role")).unwrap_or(""),
     )
+}
+
+/// `jobFigure`: one of My agents' figure as the Mac draws it, with the sign its job puts on its
+/// head.
+#[must_use]
+pub fn job_figure(id: &str, job: &Value) -> Value {
+    let (kind, color) = figure_for(id, job.get("figure"));
+    json!({"kind": kind, "color": color, "sign": job_sign(job)})
 }
 
 #[derive(Deserialize, Default)]
@@ -68,6 +70,8 @@ struct TeamAgent {
     id: String,
     name: Option<String>,
     kind: Option<String>,
+    /// Its instructions, as a team file names them.
+    role: Option<String>,
     from: Option<FromLink>,
 }
 
@@ -100,6 +104,17 @@ pub fn floor(path: &str, listed_name: Option<&str>, yaml: &str, jobs: &Value) ->
                     .find(|job| job.get("id").and_then(Value::as_str) == Some(linked))
             });
             let (kind, color) = figure_for(linked.unwrap_or(&agent.id), job.and_then(|job| job.get("figure")));
+            // Its sign: its saved agent's, else what its own name and instructions suggest.
+            let sign = job.map_or_else(
+                || {
+                    crate::figures::sign_for(
+                        None,
+                        agent.name.as_deref().unwrap_or(&agent.id),
+                        agent.role.as_deref().unwrap_or(""),
+                    )
+                },
+                job_sign,
+            );
             // Its own name in the team, else its saved agent's, as the Mac shows it.
             let saved_name = job
                 .and_then(|job| job.get("name"))
@@ -111,7 +126,7 @@ pub fn floor(path: &str, listed_name: Option<&str>, yaml: &str, jobs: &Value) ->
                 "name": name.unwrap_or_else(|| if operator { "You".to_owned() } else { agent.id.clone() }),
                 "operator": operator,
                 "myAgent": linked,
-                "figure": { "kind": kind, "color": color },
+                "figure": { "kind": kind, "color": color, "sign": sign },
             })
         })
         .collect();
@@ -184,18 +199,19 @@ fn order(team: &TeamFile) -> Vec<&TeamAgent> {
 mod tests {
     use super::*;
 
-    /// Answers from the Mac's own `figureFor` and `hashId`, run in Node on 2026-10-29.
+    /// Answers from the Mac's own `figureFor` and `hashId`, run in Node on 2026-10-29, under
+    /// today's names (`crate::figures::migrate_figure`): an agent nobody dressed keeps its look.
     #[test]
     fn picks_the_same_figure_as_the_mac() {
         for (id, hash, kind, color) in [
-            ("reader", 653_517_270, "yarn", "clay"),
-            ("writer", 2_228_000_106, "yarn", "lilac"),
-            ("researcher", 1_844_902_523, "cone", "sky"),
-            ("editor", 1_544_389_240, "pincushion", "sage"),
-            ("checker", 856_779_548, "button", "clay"),
-            ("review", 576_156_385, "spool", "butter"),
-            ("Cole", 1_769_126_556, "yarn", "oat"),
-            ("việt", 2_469_842_627, "cone", "rose"),
+            ("reader", 653_517_270, "chubby", "clay"),
+            ("writer", 2_228_000_106, "chubby", "lilac"),
+            ("researcher", 1_844_902_523, "slim", "sky"),
+            ("editor", 1_544_389_240, "egg", "sage"),
+            ("checker", 856_779_548, "wide", "clay"),
+            ("review", 576_156_385, "tall", "clay"),
+            ("Cole", 1_769_126_556, "chubby", "orchid"),
+            ("việt", 2_469_842_627, "slim", "rose"),
         ] {
             assert_eq!(hash_id(id), hash, "{id}");
             assert_eq!(
@@ -208,10 +224,16 @@ mod tests {
 
     #[test]
     fn a_chosen_figure_wins_only_when_the_mac_can_draw_it() {
-        let chosen = json!({"kind": "bobbin", "color": "rose"});
+        let chosen = json!({"kind": "egg", "color": "sunset"});
         assert_eq!(
             figure_for("reader", Some(&chosen)),
-            ("bobbin".to_owned(), "rose".to_owned())
+            ("egg".to_owned(), "sunset".to_owned())
+        );
+        // A figure saved under an earlier name is that figure today.
+        let old = json!({"kind": "bobbin", "color": "rose"});
+        assert_eq!(
+            figure_for("reader", Some(&old)),
+            ("tall".to_owned(), "sunset".to_owned())
         );
         let unknown = json!({"kind": "robot", "color": "sage"});
         assert_eq!(
@@ -255,7 +277,7 @@ mod tests {
     fn an_agent_from_my_agents_is_called_by_its_saved_name() {
         let yaml = "agents:\n  - id: researcher\n    from: {agent: researcher-lw}\n  - id: writer\n    name: Writer\n    from: {agent: writer-lw}\n";
         let jobs = json!({"jobs": [
-            {"id": "researcher-lw", "name": "Researcher · LoomWatch marketing", "figure": {"kind": "thimble", "color": "sky"}},
+            {"id": "researcher-lw", "name": "Researcher · LoomWatch marketing", "figure": {"kind": "little", "color": "sky"}},
             {"id": "writer-lw", "name": "Saved writer"},
         ]});
         let floor = floor("team.yaml", None, yaml, &jobs);
@@ -263,7 +285,7 @@ mod tests {
             floor["agents"][0]["name"],
             "Researcher · LoomWatch marketing"
         );
-        assert_eq!(floor["agents"][0]["figure"]["kind"], "thimble");
+        assert_eq!(floor["agents"][0]["figure"]["kind"], "little");
         // A name the team gives it wins.
         assert_eq!(floor["agents"][1]["name"], "Writer");
     }
@@ -272,19 +294,47 @@ mod tests {
     fn an_agent_from_my_agents_wears_its_saved_figure() {
         let yaml = "agents:\n  - id: editor-2\n    from: {agent: editor, version: 3}\n  - id: reader-2\n    from: {agent: reader, version: 1}\n";
         let jobs = json!({"jobs": [
-            {"id": "editor", "figure": {"kind": "thimble", "color": "lilac"}},
+            {"id": "editor", "figure": {"kind": "little", "color": "lilac"}},
             {"id": "reader"}
         ]});
         let floor = floor("team.yaml", None, yaml, &jobs);
         assert_eq!(
             floor["agents"][0]["figure"],
-            json!({"kind": "thimble", "color": "lilac"})
+            json!({"kind": "little", "color": "lilac", "sign": "curl"})
         );
         // A saved agent with no figure chosen wears the one its own id picks.
         let (kind, color) = figure_for("reader", None);
         assert_eq!(
             floor["agents"][1]["figure"],
-            json!({"kind": kind, "color": color})
+            json!({"kind": kind, "color": color, "sign": "curl"})
+        );
+    }
+
+    /// `agentFigure`'s sign: a saved agent's job icon, else what its saved name and instructions
+    /// suggest; a team's own agent's, from its name (its id when it has none) and its role.
+    #[test]
+    fn each_figure_wears_its_jobs_sign() {
+        let yaml = "agents:\n  - id: researcher\n    name: Researcher\n  - id: ada\n    name: Ada\n    role: Turn the sales data into charts.\n  - id: helper\n  - id: clip-2\n    from: {agent: clips}\n  - id: notes-2\n    name: Ada\n    from: {agent: notes}\n  - id: lost\n    name: Writer\n    from: {agent: gone}\n";
+        let jobs = json!({"jobs": [
+            {"id": "clips", "name": "Ada", "icon": "video", "instructions": "Write the brief."},
+            {"id": "notes", "name": "Notes taker", "instructions": "Keep it short."},
+        ]});
+        let floor = floor("team.yaml", None, yaml, &jobs);
+        let signs: Vec<&str> = floor["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|agent| agent["figure"]["sign"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            signs,
+            ["research", "chart", "curl", "video", "write", "write"]
+        );
+        // One of My agents, listed: the same sign.
+        assert_eq!(job_figure("clips", &jobs["jobs"][0])["sign"], "video");
+        assert_eq!(
+            job_sign(&json!({"name": "Ada", "role": "Proofread it."})),
+            "edit"
         );
     }
 }

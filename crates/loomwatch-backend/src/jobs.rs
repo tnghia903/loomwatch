@@ -61,21 +61,6 @@ static ICONS: LazyLock<Vec<String>> = LazyLock::new(|| {
         .icons
 });
 
-/// The figures an agent may wear in Your agents, and their colours (ui/src/lib/library/figures.ts
-/// draws them). Only the builder and the agent lists show it: a team never copies it. The last
-/// ones are earned on quests (`crate::wardrobe`), and the app offers them once they are.
-const FIGURES: &[&str] = &[
-    "yarn",
-    "spool",
-    "button",
-    "thimble",
-    "pincushion",
-    "cone",
-    "scissors",
-    "bobbin",
-];
-const FIGURE_COLORS: &[&str] = &["clay", "butter", "sage", "sky", "lilac", "rose", "oat"];
-
 const FILE_HEADER: &str = "# One of your LoomWatch agents, in \"My agents\".\n\
 # Every team it is in uses it as it is here: a change you save reaches them all from their next run.\n";
 
@@ -342,31 +327,37 @@ fn normalize_icon(icon: Option<String>) -> Result<Option<String>, String> {
     Ok(icon)
 }
 
-/// A figure is one the UI draws, in one of its colours.
+/// A figure is one the UI draws (`crate::figures`): a build, in one of its colours, wearing what the
+/// wardrobe holds. A name an earlier `LoomWatch` wrote is read as today's, so an agent saved then
+/// still loads and keeps its look; its next save writes today's names.
 fn normalize_figure(figure: Option<JobFigure>) -> Result<Option<JobFigure>, String> {
+    use crate::figures::{
+        ACCESSORIES, BUILDS, EARNED_COLORS, STARTER_COLORS, is_build, is_color, migrate_figure,
+        migrate_item,
+    };
     let Some(JobFigure { kind, color, wear }) = figure else {
         return Ok(None);
     };
-    let (kind, color) = (kind.trim().to_owned(), color.trim().to_owned());
-    if !FIGURES.contains(&kind.as_str()) {
+    let (kind, color) = migrate_figure(kind.trim(), color.trim());
+    if !is_build(&kind) {
         return Err(format!(
             "Unknown figure {kind:?}. Use one of: {}.",
-            FIGURES.join(", ")
+            BUILDS.join(", ")
         ));
     }
-    if !FIGURE_COLORS.contains(&color.as_str()) {
+    if !is_color(&color) {
         return Err(format!(
             "Unknown figure colour {color:?}. Use one of: {}.",
-            FIGURE_COLORS.join(", ")
+            [STARTER_COLORS, EARNED_COLORS].concat().join(", ")
         ));
     }
     let mut worn: Vec<String> = Vec::new();
     for item in wear {
-        let item = item.trim().to_owned();
-        if !crate::wardrobe::ACCESSORIES.contains(&item.as_str()) {
+        let item = migrate_item(item.trim()).to_owned();
+        if !ACCESSORIES.contains(&item.as_str()) {
             return Err(format!(
                 "Unknown accessory {item:?}. Use one of: {}.",
-                crate::wardrobe::ACCESSORIES.join(", ")
+                ACCESSORIES.join(", ")
             ));
         }
         if !worn.contains(&item) {
@@ -1133,9 +1124,9 @@ mod tests {
         let first = save_job(root.path(), "notes", spec("Notes"), true, None).expect("first");
         let mut dressed = spec("Notes");
         dressed.figure = Some(JobFigure {
-            kind: " button ".into(),
+            kind: " wide ".into(),
             color: "sage".into(),
-            wear: vec!["monocle".into(), " band".into(), "monocle".into()],
+            wear: vec!["beret".into(), " coffee".into(), "beret".into()],
         });
         let same = save_job(root.path(), "notes", dressed, false, Some(1)).expect("figure");
         assert_eq!(same.spec.version, 1);
@@ -1143,22 +1134,21 @@ mod tests {
         assert_eq!(
             same.spec.figure,
             Some(JobFigure {
-                kind: "button".into(),
+                kind: "wide".into(),
                 color: "sage".into(),
-                wear: vec!["monocle".into(), "band".into()],
+                wear: vec!["beret".into(), "coffee".into()],
             })
         );
         let written = fs::read_to_string(root.path().join(".jobs/notes.yaml")).expect("file");
         assert!(
-            written.contains(
-                "figure:\n  kind: button\n  color: sage\n  wear:\n  - monocle\n  - band\n"
-            ),
+            written
+                .contains("figure:\n  kind: wide\n  color: sage\n  wear:\n  - beret\n  - coffee\n"),
             "{written}"
         );
         for (kind, color, wear) in [
             ("robot", "sage", None),
-            ("button", "red", None),
-            ("button", "sage", Some("crown")),
+            ("wide", "red", None),
+            ("wide", "sage", Some("crown")),
         ] {
             let mut odd = spec("Notes");
             odd.figure = Some(JobFigure {
@@ -1171,6 +1161,36 @@ mod tests {
                 Err(JobError::Invalid(_))
             ));
         }
+    }
+
+    // Saved by an earlier LoomWatch, with a sewing figure and sewing things: it still lists, wearing
+    // the figure and the things that are those today, and its next save writes today's names.
+    #[test]
+    fn an_agent_saved_with_old_figure_names_keeps_its_figure() {
+        let root = root();
+        save_job(root.path(), "notes", spec("Notes"), true, None).expect("first");
+        let path = root.path().join(".jobs/notes.yaml");
+        let text = fs::read_to_string(&path).expect("file");
+        fs::write(
+            &path,
+            format!("{text}figure:\n  kind: bobbin\n  color: oat\n  wear:\n  - tee\n  - monocle\n"),
+        )
+        .expect("old names");
+        let listed = list_jobs(root.path()).expect("list");
+        assert!(listed.problems.is_empty(), "{:?}", listed.problems);
+        let want = Some(JobFigure {
+            kind: "tall".into(),
+            color: "sunset".into(),
+            wear: vec!["striped_top".into(), "beret".into()],
+        });
+        assert_eq!(listed.jobs[0].spec.figure, want);
+        let mut saved = read_job(root.path(), "notes").expect("read");
+        assert_eq!(saved.figure, want);
+        saved.does = "Drafts the release notes".into();
+        save_job(root.path(), "notes", saved, false, None).expect("save");
+        let written = fs::read_to_string(&path).expect("file");
+        assert!(written.contains("kind: tall\n  color: sunset"), "{written}");
+        assert!(!written.contains("bobbin"), "{written}");
     }
 
     #[test]

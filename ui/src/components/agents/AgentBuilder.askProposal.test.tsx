@@ -144,7 +144,7 @@ describe('an agent Ask proposed, on its own page (ADR 0119)', () => {
   }, 15_000)
 
   it('keeps the figure the agent wears, and waits for Ask’s change when it answers after My agents', async () => {
-    listedFigure = { kind: 'spool', color: 'sage' }
+    listedFigure = { kind: 'tall', color: 'sage' }
     proposalLate = true
     window.history.replaceState({}, '', '/agents/writer?proposal=proposal-1')
     render(<AgentsPage skills={[]} skillsLoading={false} />)
@@ -152,7 +152,7 @@ describe('an agent Ask proposed, on its own page (ADR 0119)', () => {
     expect(screen.getByRole('textbox', { name: /Instructions/ })).toHaveValue('Write a short draft.\nGive it a title.\nReply with the draft.')
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save' })) })
     await waitFor(() => expect(saves).toHaveLength(1), { timeout: 5000 })
-    expect(JSON.parse(String(saves[0].init.body)).figure).toEqual({ kind: 'spool', color: 'sage' })
+    expect(JSON.parse(String(saves[0].init.body)).figure).toEqual({ kind: 'tall', color: 'sage' })
   }, 15_000)
 
   it('says LoomWatch restarted when Ask’s change is gone', async () => {

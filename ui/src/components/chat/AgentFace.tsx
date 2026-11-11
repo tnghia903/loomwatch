@@ -6,6 +6,7 @@ import { useAgentFaces, type AgentFacts } from '../../lib/chat/faces'
 import { AGENT_CARD_WIDTH, useAgentCard, type CardPlace } from '../../lib/chat/useAgentCard'
 import { AvatarFace } from '../agents/AvatarFace'
 import { Markdown } from '../ui/Markdown'
+import { stateOf } from '../../lib/library/figures'
 
 
 /**
@@ -98,7 +99,7 @@ export function AgentCard({ facts, hint }: { facts: AgentFacts; hint?: ReactNode
   return (
     <>
       <div className="tc-agent-card-head">
-        <span className={`tc-member ${facts.state}`}><AvatarFace id={facts.id} hue={facts.hue} size={32} fontSize={11} text={initials(facts.name)} /></span>
+        <span className={`tc-member ${facts.state}`}><AvatarFace id={facts.id} hue={facts.hue} size={32} fontSize={11} text={initials(facts.name)} state={stateOf(facts.state)} /></span>
         <span className="tc-agent-card-who">
           <b className={`hue-${facts.hue}`}>{facts.name}</b>
           <span className={`tc-agent-card-state ${facts.state}`}>{facts.stateWords}{facts.step && ` · step ${facts.step.at} of ${facts.step.of}`}</span>

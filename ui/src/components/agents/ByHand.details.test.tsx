@@ -60,7 +60,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 /** The bench with its draft kept, as the builder keeps it, so a pinned-up skill shows. */
 function Bench({ start = {}, onSet }: { start?: Partial<AgentDraft>; onSet?: (key: string, value: unknown) => void }) {
   const [draft, setDraft] = useState<AgentDraft>({ ...BLANK_DRAFT, name: 'Reviewer', ...start })
-  return <ByHand draft={draft} set={(key, value) => { onSet?.(key, value); setDraft((current) => ({ ...current, [key]: value })) }} skills={[audit, notes]} skillsLoading={false} roleField={createRef()} figure={{ kind: 'yarn', color: 'sage' }} record={null} />
+  return <ByHand draft={draft} set={(key, value) => { onSet?.(key, value); setDraft((current) => ({ ...current, [key]: value })) }} skills={[audit, notes]} skillsLoading={false} roleField={createRef()} figure={{ kind: 'chubby', color: 'sage' }} record={null} />
 }
 
 const skillsBlock = () => screen.getByRole('region', { name: 'Skills' })

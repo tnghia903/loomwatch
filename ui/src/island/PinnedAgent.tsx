@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import { FigureStill } from '../components/agents/FigureStill'
 import type { WorkPhase } from '../lib/library/figure'
-import { figureFor } from '../lib/library/figures'
+import { jobFigure } from '../lib/library/figures'
 import { dollars } from '../lib/runs/spend'
 import type { TeamRequest } from '../lib/runs/teamRequests'
 import { useRunSession } from '../lib/runs/useRunSession'
@@ -27,7 +27,7 @@ export function Slot({ island }: { island: Island }) {
   return (
     <div className="island-slot-open" role="status" aria-label={`Drop it here for ${agent.name}`}>
       <span className="island-tray-figure glow" data-moment="ready" aria-hidden="true">
-        <FigureStill figure={figureFor(agent.id, agent.job.figure)} alt="" />
+        <FigureStill figure={jobFigure({ ...agent.job, id: agent.id })} alt="" />
       </span>
       <span className="island-tray" aria-hidden="true">
         <svg><rect width="100%" height="100%" rx="16" pathLength="728" /></svg>

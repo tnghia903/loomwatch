@@ -10,7 +10,7 @@ import { useModels } from '../../lib/ai/useModels'
 import type { DetectedCapability } from '../../lib/library/client'
 import { BLANK_DRAFT, blankDraft, draftChanged, draftFromJob, draftFromPreset, specFromDraft, type AgentDraft } from '../../lib/library/draft'
 import type { ReadSource } from '../../lib/library/figure'
-import { figureFor, freshFigure } from '../../lib/library/figures'
+import { figureFor, freshFigure, signFor, type FigureView } from '../../lib/library/figures'
 import { JobApiError, jobIdFor, saveJob, useSavedJobs, versionOf, type SavedJob } from '../../lib/library/jobs'
 import { usePinnedAgent } from '../../lib/library/pinned'
 import { ROLE_PRESETS } from '../../lib/library/roles'
@@ -295,7 +295,11 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
   const saveLabel = !saved ? 'Save to My agents' : 'Save'
   const markId = saved?.id ?? (draft.name || 'new')
   const figure = figureFor(saved?.id ?? startKey, draft.figure)
-  const badge = <AgentBadge markId={markId} figure={figure} draft={draft} modelName={modelName} effortName={effortName} usedIn={saved ? { teams: mine.length, scheduled: scheduledUses } : undefined} usesListed={Boolean(saved)} />
+  // As it is drawn, with the sign its job puts on its head: its saved icon, as its card shows it, else
+  // the one a save would give it from its name and instructions. Only the picker gets \`figure\`, which
+  // is saved, and a saved figure never holds a sign.
+  const drawn: FigureView = { ...figure, sign: signFor({ icon: saved?.icon, name: draft.name, instructions: draft.instructions }) }
+  const badge = <AgentBadge markId={markId} figure={drawn} draft={draft} modelName={modelName} effortName={effortName} usedIn={saved ? { teams: mine.length, scheduled: scheduledUses } : undefined} usesListed={Boolean(saved)} />
 
   const name = draft.name.trim() || 'New agent'
   // On Chat its Send keeps the screen's one gold fill: Save is a gold ring there, as a team's Save is.
@@ -376,16 +380,16 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
     <ByHand
       fresh={!id}
       widgetsDefault={widgetsDefault}
-      draft={draft} set={set} skills={skills} skillsLoading={skillsLoading} roleField={roleField} figure={figure} record={benchRecord} writing={benchWriting} reads={inTeam?.reads} onShowWorkflow={inTeam?.onShowWorkflow}
+      draft={draft} set={set} skills={skills} skillsLoading={skillsLoading} roleField={roleField} figure={drawn} record={benchRecord} writing={benchWriting} reads={inTeam?.reads} onShowWorkflow={inTeam?.onShowWorkflow}
       learned={saved ? { savedAgent: saved.id } : null}
-      chat={view === 'chat' ? <AgentChat draft={draft} model={draft.model} chatId={chatId} figure={figure} onAllow={(what) => (typeof what === 'string' ? set('allow', { ...draft.allow, [what]: true }) : set('toolAllow', withAllowed(draft.toolAllow, what.tool, what.call)))} onRecord={setBenchRecord} onWriting={setBenchWriting} answerRunId={answerRun} onOpenAnswer={(runId) => { setAnswerRun(runId); if (runId) details.close() }} knowledge={inTeam?.knowledge} file={benchFile.chat}
+      chat={view === 'chat' ? <AgentChat draft={draft} model={draft.model} chatId={chatId} figure={drawn} onAllow={(what) => (typeof what === 'string' ? set('allow', { ...draft.allow, [what]: true }) : set('toolAllow', withAllowed(draft.toolAllow, what.tool, what.call)))} onRecord={setBenchRecord} onWriting={setBenchWriting} answerRunId={answerRun} onOpenAnswer={(runId) => { setAnswerRun(runId); if (runId) details.close() }} knowledge={inTeam?.knowledge} file={benchFile.chat}
         detailsRunId={details.asked?.runId ?? null} onDetails={(asked) => { details.open(asked); setAnswerRun(null); benchFile.close() }} reveal={details.reveal} landAt={run} /> : undefined}
       onBuild={() => showView('build')}
       framed={Boolean(bar)}
       lead={bar ? <>{notices}{askNote}</> : undefined}
       after={bar ? side : undefined}
-      cover={view === 'chat' && benchFile.reading ? <AgentFile bench={benchFile} chatId={chatId} name={name} figure={figure} />
-        : view === 'chat' && details.asked ? <AgentDetails key={details.asked.at} asked={details.asked} draft={draft} model={draft.model} chatId={chatId} figure={figure} onClose={details.close} onAllow={(key) => set('allow', { ...draft.allow, [key]: true })} onRevealMessage={details.revealMessage} />
+      cover={view === 'chat' && benchFile.reading ? <AgentFile bench={benchFile} chatId={chatId} name={name} figure={drawn} />
+        : view === 'chat' && details.asked ? <AgentDetails key={details.asked.at} asked={details.asked} draft={draft} model={draft.model} chatId={chatId} figure={drawn} onClose={details.close} onAllow={(key) => set('allow', { ...draft.allow, [key]: true })} onRevealMessage={details.revealMessage} />
         : view === 'chat' && answerRun ? <AgentAnswer runId={answerRun} name={name} onClose={() => setAnswerRun(null)} /> : undefined}
     />
   )
