@@ -278,12 +278,32 @@ export const itemAnchor = (item: ChatItem): string => (item.kind === 'work' ? it
 /** When an item happened, for ordering pages and asking for the next one. */
 export const itemAt = (item: ChatItem): string => (item.kind === 'work' ? item.run.createdAt : item.message.createdAt)
 
+/** The pages read last, by address, with their versions (the daemon's `ETag`): a few, newest last. */
+const lastPages = new Map<string, { etag: string; page: ChatPage }>()
+const PAGES_KEPT = 8
+
+/**
+ * One page of a team's chat, newest first. While a team works the newest page is read every second
+ * and a half, and every answer on it is whole: the daemon says when it reads as last time instead
+ * of sending it again, and this is then the very same page, its items the same objects, so nothing
+ * on it is compared or drawn again (`keepIfSame`).
+ */
 export async function fetchChatPage(teamPath: string, before?: string | null, limit?: number, signal?: AbortSignal): Promise<ChatPage> {
   const query = new URLSearchParams({ teamPath })
   if (before) query.set('before', before)
   if (limit) query.set('limit', String(limit))
-  const response = await daemonFetch(`/api/chat?${query.toString()}`, { signal, cache: 'no-store' })
-  return readRun<ChatPage>(response)
+  const address = `/api/chat?${query.toString()}`
+  const known = lastPages.get(address)
+  const response = await daemonFetch(address, { signal, cache: 'no-store', ...(known && { headers: { 'If-None-Match': known.etag } }) })
+  if (response.status === 304 && known) return known.page
+  const page = await readRun<ChatPage>(response)
+  const etag = response.headers?.get('ETag')
+  lastPages.delete(address)
+  if (etag && page && Array.isArray(page.items)) {
+    lastPages.set(address, { etag, page })
+    if (lastPages.size > PAGES_KEPT) lastPages.delete(lastPages.keys().next().value!)
+  }
+  return page
 }
 
 /** Something said in the chat that a search found, named as the chat names it (ADR 0081). */

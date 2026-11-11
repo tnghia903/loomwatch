@@ -327,7 +327,10 @@ sound recording the agent gets only the time). A box or a moment always starts t
 it can open the file, rather than a quick answer in the chat from the words alone. Each part stays
 on the bar with the agent's bubble above it; click the bubble to open the answer and skip to that
 moment. Drag the edge between the
-chat and the pane to resize; double-click resets it. The chat is paged from `GET /api/chat`. The magnifier in its header finds words anywhere in the
+chat and the pane to resize; double-click resets it. The chat is paged from `GET /api/chat`, read every
+1.5 s while a team works and every 8 s otherwise. Each page carries an `ETag` from what it says; asked
+again with it in `If-None-Match`, the daemon answers `304 Not Modified` with no body, so a page that
+hasn't changed isn't sent again. The magnifier in its header finds words anywhere in the
 team's chat (`GET /api/chat/find`, ADR 0081): what you asked, the answers, your notes and what the
 agents said to each other, in any order and any form of a word, with or without Vietnamese accents.
 What matches shows in place of the chat, best first; a line opens the chat at that message with

@@ -4536,7 +4536,7 @@ fn runs_etag(version: &str, preview: bool) -> String {
 }
 
 /// Whether the request's `If-None-Match` names `etag` (weakly, as `GET` compares).
-fn names_etag(headers: &HeaderMap, etag: &str) -> bool {
+pub(crate) fn names_etag(headers: &HeaderMap, etag: &str) -> bool {
     let bare = |tag: &str| tag.trim().trim_start_matches("W/").to_owned();
     headers
         .get_all(header::IF_NONE_MATCH)
