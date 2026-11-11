@@ -10,7 +10,7 @@ import { listNames } from '../../lib/format'
 import { replyLine, replySection } from '../../lib/library/desk'
 import { draftFromJob, type AgentDraft } from '../../lib/library/draft'
 import { askedKey, CARD_SLOTS, FIGURE_KEYS, figureMood, READ_SLOTS, TOOL_SLOTS, type BenchUse, type ReadSource } from '../../lib/library/figure'
-import { figureFor } from '../../lib/library/figures'
+import { jobFigure } from '../../lib/library/figures'
 import type { SavedJob } from '../../lib/library/jobs'
 import { knowledgeOf } from '../../lib/library/reads'
 import { readsOf } from '../../lib/library/teamDraft'
@@ -138,7 +138,8 @@ const HELPER_LINGER_MS = 3500
  */
 export function useSavedBench(job: SavedJob, record: RunRecord | null, writing = false): { view: BenchView; labels: BenchLabel[] } {
   const draft = useMemo(() => draftFromJob(job), [job])
-  const figure = useMemo(() => figureFor(job.id, job.figure), [job.id, job.figure])
+  // As drawn: with the sign its job puts on its head (jobFigure).
+  const figure = useMemo(() => jobFigure(job), [job])
   const { catalog } = useModels()
   const listed = catalog?.models.find((item) => item.id === draft.model)
   const model = listed ? shortName(listed) : modelNameFromId(draft.model)

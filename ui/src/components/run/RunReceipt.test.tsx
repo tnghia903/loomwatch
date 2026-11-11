@@ -31,12 +31,12 @@ const tokens: ReceiptTokens = {
 describe('RunReceipt', () => {
   // docs/QUESTS.md: on the run that earned it, what the run did and one sentence of why. No lesson.
   it('says what the run earned and, in one sentence, why it works, linking only to where to wear it and the quests', () => {
-    const monocle = questFor('monocle') as Quest
-    render(<RunReceipt receipt={receipt(false)} onInspectEvidence={vi.fn()} earned={[{ quest: monocle, agentId: 'checker', line: 'Checker sent Writer’s work back once, and the second pass met all 2 items it checks.' }]} />)
+    const beret = questFor('beret') as Quest
+    render(<RunReceipt receipt={receipt(false)} onInspectEvidence={vi.fn()} earned={[{ quest: beret, agentId: 'checker', line: 'Checker sent Writer’s work back once, and the second pass met all 2 items it checks.' }]} />)
     const earned = screen.getByRole('region', { name: 'Earned on this run' })
     expect(earned).toHaveTextContent('New in the wardrobe')
-    expect(earned).toHaveTextContent('Button monocle. Checker sent Writer’s work back once')
-    expect(earned).toHaveTextContent(monocle.why)
+    expect(earned).toHaveTextContent('Beret. Checker sent Writer’s work back once')
+    expect(earned).toHaveTextContent(beret.why)
     expect(earned).not.toHaveTextContent('The practice')
     expect(within(earned).getAllByRole('link').map((link) => link.getAttribute('href'))).toEqual(['/agents', '/quests'])
   })

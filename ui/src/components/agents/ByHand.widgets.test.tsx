@@ -20,7 +20,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 const draw = (draft = BLANK_DRAFT, widgetsDefault?: boolean) => {
   const set = vi.fn()
-  render(<ByHand draft={draft} set={set} skills={[]} skillsLoading={false} roleField={createRef()} figure={{ kind: 'yarn', color: 'sage' }} record={null} widgetsDefault={widgetsDefault} />)
+  render(<ByHand draft={draft} set={set} skills={[]} skillsLoading={false} roleField={createRef()} figure={{ kind: 'chubby', color: 'sage' }} record={null} widgetsDefault={widgetsDefault} />)
   return { set, toggle: screen.getByRole('button', { name: /Adds charts, checklists and calculators to its answers/ }) }
 }
 

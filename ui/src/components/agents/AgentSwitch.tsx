@@ -1,6 +1,6 @@
 import { useMemo, useState, type MouseEvent } from 'react'
 
-import { figureFor } from '../../lib/library/figures'
+import { jobFigure, stateOf } from '../../lib/library/figures'
 import { useSavedJobs, type SavedJob } from '../../lib/library/jobs'
 import { agentPresence } from '../../lib/rail/presence'
 import { useRunRecords } from '../../lib/story/useNeedsYou'
@@ -70,7 +70,7 @@ export function AgentSwitch({ open, view, onPick }: AgentSwitchProps) {
                   <a className="room-card-team" href={agentHref(job.id, view)} aria-current={job.id === open ? 'page' : undefined} onClick={(event) => follow(event, job)}>
                     {/* Its name is beside it, so the figure says nothing more; its glow is how it is. */}
                     <span className="desk-figure agent-switch-figure" data-glow={presence} aria-hidden="true">
-                      <FigureStill figure={figureFor(job.id, job.figure)} alt="" width={28} height={28} loading="lazy" decoding="async" />
+                      <FigureStill figure={jobFigure(job)} state={stateOf(presence)} alt="" width={28} height={28} loading="lazy" decoding="async" />
                     </span>
                     <span className="room-card-team-words">
                       <b>{job.name}</b>

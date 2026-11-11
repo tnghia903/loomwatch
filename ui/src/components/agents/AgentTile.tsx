@@ -1,7 +1,7 @@
 import { modelNameFromId } from '../../lib/ai/modelIds'
 import { agentPresence } from '../../lib/rail/presence'
 import type { AgentDraft } from '../../lib/library/draft'
-import type { FigureChoice } from '../../lib/library/figures'
+import { stateOf, type FigureChoice } from '../../lib/library/figures'
 import type { RunRecord } from '../../lib/runs/client'
 import { stateLabel } from '../../lib/state/words'
 import { ALLOW_SWITCHES } from '../../lib/team-file/allow'
@@ -38,7 +38,7 @@ export function AgentTile({ id, figure, draft, teams, runs, pinned = false }: {
       {/* Its name is right under it, so the figure says nothing more. */}
       <span className="desk-figure agent-tile-figure" data-glow={presence} aria-hidden="true">
         {figure
-          ? <FigureStill figure={figure} alt="" width={112} height={112} loading="lazy" decoding="async" />
+          ? <FigureStill figure={figure} state={stateOf(presence)} alt="" width={112} height={112} loading="lazy" decoding="async" />
           : <AgentMark id={id} name={name} size={112} animate={false} />}
       </span>
       <strong className="agent-tile-name">{name}{pinned && <Pin className="agent-badge-pin" size={13} role="img" aria-label="pinned to the notch"><title>Pinned to the notch</title></Pin>}</strong>

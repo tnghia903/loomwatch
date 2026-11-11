@@ -13,7 +13,7 @@ const parts: SentencePart[] = [
   { kind: 'agent', id: 'review', name: 'You', operator: true, title: 'review' },
   { kind: 'text', text: ' check it.' },
 ]
-const figures = new Map<string, FigureChoice>([['tutor', { kind: 'spool', color: 'lilac' }]])
+const figures = new Map<string, FigureChoice>([['tutor', { kind: 'tall', color: 'lilac' }]])
 
 describe('the team in one sentence', () => {
   afterEach(cleanup)
@@ -21,7 +21,7 @@ describe('the team in one sentence', () => {
   // Each agent wears one colour everywhere: its name in the sentence is its name in the chat.
   it('names each agent in its figure’s colour, and you without one', () => {
     render(<TeamStory parts={parts} figures={figures} onAgent={vi.fn()} />)
-    expect(screen.getByRole('button', { name: 'First-principles tutor' })).toHaveClass('story-name', 'hue-5')
+    expect(screen.getByRole('button', { name: 'First-principles tutor' })).toHaveClass('story-name', 'hue-4')
     const you = screen.getByRole('button', { name: 'You, the review step' })
     expect(you).toHaveClass('story-name', 'you')
     expect(you.className).not.toMatch(/hue-/)
@@ -36,7 +36,7 @@ describe('the team in one sentence', () => {
     expect(tutor.querySelector('.tc-mention-face img')).not.toBeNull()
     expect(tutor.querySelector('.tc-mention-name')).toHaveTextContent('First-principles tutor')
     const inChat = document.createElement('span')
-    inChat.className = 'tc-mention hue-5'
+    inChat.className = 'tc-mention hue-4'
     document.body.append(inChat)
     expect([cascaded(inChat, '--chip'), cascaded(tutor, '--chip')]).toEqual(['22px', '28px'])
     expect(cascaded(tutor, 'font-size')).toBe('13px')

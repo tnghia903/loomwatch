@@ -14,7 +14,7 @@ import { Mic, Plus } from '../components/ui/icon'
 import { LoomMark, StatusGlyph } from '../components/ui/glyphs'
 import { dropped } from '../lib/chat/attachments'
 import type { WorkPhase } from '../lib/library/figure'
-import { figureFor } from '../lib/library/figures'
+import { jobFigure, stateOf } from '../lib/library/figures'
 import type { Ticket } from '../lib/story/needsYou'
 import { useSessionEvents } from '../lib/watch/useSessionEvents'
 import { workPhase } from '../lib/watch/workPhase'
@@ -177,12 +177,12 @@ export function Island() {
             )}
             {stoodAgent && (
               <span key={`${stoodAgent.id}-left`} className="island-head glow is-leaving" data-moment={stoodMoment} style={{ left: 0, zIndex: figures }}>
-                <FigureStill figure={figureFor(stoodAgent.id, stoodAgent.figure)} alt="" />
+                <FigureStill figure={jobFigure(stoodAgent)} state={stateOf(stoodMoment)} alt="" />
               </span>
             )}
             {island.pinned && (
               <span key={island.pinned.id} className={`island-head island-pinned-head glow${stood ? ' is-coming' : ''}`} data-moment={tucked.pinned?.moment ?? 'ready'} style={{ left: 0, zIndex: figures }}>
-                <FigureStill figure={figureFor(island.pinned.id, island.pinned.job.figure)} alt="" />
+                <FigureStill figure={jobFigure({ ...island.pinned.job, id: island.pinned.id })} state={stateOf(tucked.pinned?.moment)} alt="" />
               </span>
             )}
             {first === 'mark' && (
@@ -192,7 +192,7 @@ export function Island() {
             )}
             {tucked.heads.map((team, index) => (
               <span key={team.runId} className="island-head glow" data-moment={team.moment} style={{ left: heads.first + index * heads.step, zIndex: figures - index - 1 }}>
-                <FigureStill figure={island.figure(team.teamPath, team.agent)} alt="" />
+                <FigureStill figure={island.figure(team.teamPath, team.agent)} state={stateOf(team.moment)} alt="" />
               </span>
             ))}
           </span>
@@ -283,7 +283,7 @@ function Pill({ island }: { island: IslandState }) {
     <div className="island-pill" aria-hidden="true">
       <span className="island-pill-desk">
         <span className="island-pill-figure glow" data-moment={moment} data-phase={phase ?? undefined}>
-          <FigureStill figure={figureFor(box.id, box.job.figure)} alt="" />
+          <FigureStill figure={jobFigure({ ...box.job, id: box.id })} state={stateOf(moment)} alt="" />
         </span>
       </span>
       {time && <span className="island-time">{time}</span>}
@@ -516,7 +516,7 @@ function RowFigures({ island, team }: { island: IslandState; team: TeamNow }) {
     <span className="island-row-figures" aria-hidden="true" data-moment={team.moment}>
       {(team.agents.length ? team.agents : [team.agent]).slice(0, 3).map((agent, index) => (
         <span key={agent ?? index} className={`island-row-figure${agent === team.agent ? ' glow' : ' is-behind'}`} data-moment={team.moment} data-phase={agent === team.agent ? phase ?? undefined : undefined} style={{ left: index * 16, zIndex: agent === team.agent ? 4 : 3 - index }}>
-          <FigureStill figure={island.figure(team.teamPath, agent)} alt="" />
+          <FigureStill figure={island.figure(team.teamPath, agent)} state={agent === team.agent ? stateOf(team.moment) : 'ready'} alt="" />
         </span>
       ))}
     </span>
@@ -578,7 +578,7 @@ function PinnedRow({ island, work, crews, firstPermission, watching, foot, flyin
   const figure = (
     <span key={pinned.id} className={`island-switch${was && !watching ? ' is-coming' : ''}`}>
       <span className="island-row-figure glow" data-moment={moment} data-phase={phase ?? undefined}>
-        <FigureStill figure={figureFor(pinned.id, pinned.job.figure)} alt="" />
+        <FigureStill figure={jobFigure({ ...pinned.job, id: pinned.id })} state={stateOf(moment)} alt="" />
       </span>
     </span>
   )
@@ -607,7 +607,7 @@ function PinnedRow({ island, work, crews, firstPermission, watching, foot, flyin
         {was && left && (
           <span key={was.id} className="island-switch is-leaving" aria-hidden="true">
             <span className="island-row-figure glow" data-moment={was.moment}>
-              <FigureStill figure={figureFor(left.id, left.figure)} alt="" />
+              <FigureStill figure={jobFigure(left)} alt="" />
             </span>
           </span>
         )}

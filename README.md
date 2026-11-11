@@ -63,7 +63,7 @@ and asks.
 <td width="50%" valign="middle">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="site/assets/app/agents-dark.webp">
-  <img src="site/assets/app/agents-light.webp" alt="Building an agent called Writer. Down the left, LoomWatch's dock: Home with a count of 1, Projects, My agents marked, Skills, Quests, then Ask and You. Along the top, the name Writer, saved a minute ago, the Build and Chat tabs, and 1 needs you. Under them, one sentence sums the agent up: Writer thinks with Claude Sonnet 5.5, has no skills yet, and reads nothing yet. It asks you before it searches the web, edits files or runs commands. Below it, Writer's figure sits at a desk, with a label on each part: The job, its instructions pinned up; Skills · none yet; Thinks with Claude Sonnet 5.5; Allowed · nothing; Asks you first · Web, Edit files, Commands; Hands back · said in its instructions; Reads · nothing yet; Tools · none yet. On the right, each setting is a row that says what it is set to: Name, Writer · Turns the kept stories into the digest; Instructions, 3 of 4 parts · add How it checks; Model, Thinks with Claude Sonnet 5.5; then Skills, What it reads, Tools it can use, What it may do without asking and What it hands back.">
+  <img src="site/assets/app/agents-light.webp" alt="Building an agent called Writer. Down the left, LoomWatch's dock: Home, Projects, My agents marked, Skills, Quests, then Ask and You. Along the top, the name Writer, saved a few minutes ago, the Build and Chat tabs, and All clear. Under them, one sentence sums the agent up: Writer thinks with Claude Sonnet 5.5, has no skills yet, and reads nothing yet. It asks you before it searches the web, edits files or runs commands. Below it, each setting is a row that says what it is set to: Name, Writer; Instructions, 3 of 4 parts · add How it checks; Model, Thinks with Claude Sonnet 5.5; then Skills, What it reads, Tools it can use, What it may do without asking, What it hands back, and what it has Learned. On the right, Writer's figure, lilac velvet with its job's sign on its head, sits at a desk, with a label on each part: The job, its instructions pinned up; Skills · none yet; Thinks with Claude Sonnet 5.5; Allowed · nothing; Asks you first · Web, Edit files, Commands; Hands back · said in its instructions; Reads · nothing yet; Tools · none yet.">
 </picture>
 </td>
 <td width="50%" valign="middle">
@@ -223,10 +223,11 @@ one click moves to another, and each glows while it works or waits for you.
 </td>
 <td width="33%" valign="top">
 
-### 🧶 A face for every agent
+### 🧸 A face for every agent
 
-Pick each agent a figure from a sewing-box crew and a colour. It is the same on the canvas, in the
-team sentence, in the chat and in Details, and it moves only as the run record says.
+Pick each agent a figure: one of six velvet builds, in a colour, with its job's sign on its head. It
+is the same on the canvas, in the team sentence, in the chat and in Details, and it moves only as
+the run record says.
 
 </td>
 <td width="33%" valign="top">
@@ -384,7 +385,7 @@ add, connect and rename agents to match. To run a team on a schedule, ask
 <td align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="site/assets/app/home-dark.webp">
-  <img src="site/assets/app/home-light.webp" alt="Home. Down the left, LoomWatch's dock: Home, marked, with a count of 1, then Projects, My agents, Skills, Quests, Ask and You. At the top, the box to give work: To Daily tech digest, What should Daily tech digest do?, a clip to add files and the send arrow. Under it, Needs you · 1 across the row: Researcher's figure, drawn big, brought work for you to check in Review stop demo, with a page icon to read it first and Approve. Then Working now (nobody is working, 8 ready, their figures), Finished today and This month. Under Projects, a room for each project with its team's agents: Review stop demo, where Researcher is waiting for you; Daily tech digest, which runs every day at 9:00 AM; and Research and review, ready. At the top right, the bell saying 1 needs you, and search.">
+  <img src="site/assets/app/home-light.webp" alt="Home. Down the left, LoomWatch's dock: Home, marked, with a count of 1, then Projects, My agents, Skills, Quests, Ask and You. At the top, the box to give work: To Daily tech digest, What should Daily tech digest do?, a clip to add files and the send arrow. Under it, Needs you · 1 across the row: Researcher's figure, drawn big, brought work for you to check in Review stop demo, with a page icon to read it first and Approve. Then Working now (nobody is working, 6 ready, their figures), Finished today and This month. Under Projects, a room for each project with its team's agents: Review stop demo, where Researcher is waiting for you; Daily tech digest, which runs every day at 9:00 AM; and Research and review, ready. At the top right, the bell saying 1 needs you, and search.">
 </picture>
 <br><sub><strong>Home.</strong> Your desk first, with whoever waits for you, then a room for each project, with its agents at their desks.</sub>
 </td>
@@ -393,7 +394,7 @@ add, connect and rename agents to match. To run a team on a schedule, ask
 <td align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="site/assets/app/workflow-dark.webp">
-  <img src="site/assets/app/workflow-light.webp" alt="A team's Team tab, beside LoomWatch's dock with Projects marked. Along the top, the team's name, Daily tech digest, saved, the Team and Chat tabs, 1 needs you and the ⋯. The heading says Your team is ready, beside Run team. Down the left, the Add to your team panel lists My agents, each with what it does and its model. On the canvas the team is read back as one sentence, with each agent's figure: every day at 9:00 AM and whenever you ask, Gatherer collects what is needed, then Reader does its part, and finally Writer writes the answer. Below it, a daily schedule feeds Gatherer, then Reader, then Writer, which produces the team response.">
+  <img src="site/assets/app/workflow-light.webp" alt="A team's Team tab, beside LoomWatch's dock with Projects marked. Along the top, the team's name, Daily tech digest, saved, the Team and Chat tabs, All clear and the ⋯. The heading says Your team is ready, beside Run team. Down the left, the Add to your team panel lists My agents, each with what it does and its model. On the canvas the team is read back as one sentence, with each agent's figure: every day at 9:00 AM and whenever you ask, Gatherer collects what is needed, then Reader does its part, and finally Writer writes the answer. Below it, a daily schedule feeds Gatherer, then Reader, then Writer, which produces the team response.">
 </picture>
 <br><sub><strong>Team.</strong> Your agents on the canvas, connected in order and read back as one sentence.</sub>
 </td>
@@ -402,7 +403,7 @@ add, connect and rename agents to match. To run a team on a schedule, ask
 <td align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="site/assets/app/chat-dark.webp">
-  <img src="site/assets/app/chat-light.webp" alt="A team's Chat tab, beside LoomWatch's dock with Projects marked. Along the top, Review stop demo, with Researcher waiting for you and Editor ready. The request Prepare a short getting-started guide for new users; under it, Waiting for you: Researcher's work is ready for your review, with Details, Stop and 1 reply on the right. Below, in the chat, Researcher's handover to you, then Approve and Send back to Researcher, and the box ready for your review note.">
+  <img src="site/assets/app/chat-light.webp" alt="A team's Chat tab, beside LoomWatch's dock with Projects marked. Along the top, Review stop demo, with Researcher waiting for you and Writer ready. The request Prepare a short getting-started guide for new users; under it, Waiting for you: Researcher's work is ready for your review, with Details, Stop and 1 reply on the right. Below, in the chat, Researcher's handover to you, then Approve and Send back to Researcher, and the box ready for your review note.">
 </picture>
 <br><sub><strong>Chat.</strong> Your review waits in the chat, under what the agents said, and Details opens every step beside the chat.</sub>
 </td>

@@ -107,14 +107,14 @@ describe('a finished run’s quests', () => {
     await new Promise((resolve) => setTimeout(resolve, 20))
     expect(posted).toEqual([])
     rerender({ complete: true })
-    await waitFor(() => expect(result.current.map((earned) => earned.quest.item)).toEqual(['chalk']))
-    expect(posted).toEqual([{ item: 'chalk', runId: 'now', teamPath: 'research.yaml', agentId: 'writer' }])
+    await waitFor(() => expect(result.current.map((earned) => earned.quest.item)).toEqual(['bow']))
+    expect(posted).toEqual([{ item: 'bow', runId: 'now', teamPath: 'research.yaml', agentId: 'writer' }])
     expect(result.current[0].line).toBe('Checker checked Writer’s work and found all 1 item of its Done when met on the first pass.')
   })
 
   it('earns nothing for an old run whose team file has changed since, so a setting added later never counts', async () => {
     // The run's writer had no Done when; one was added after it. Judged against today's file, the
-    // check that met the request would read as a Done when met, and chalk is earned for good.
+    // check that met the request would read as a Done when met, and the bow is earned for good.
     const posted = daemon(ran, { yaml: WRITER_TEAM, revision: 'sha256:edited-after-the-run' })
     const { result } = renderHook(() => useRunQuests({ record: ran, phase: 'succeeded', projection }))
     await new Promise((resolve) => setTimeout(resolve, 50))

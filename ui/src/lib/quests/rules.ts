@@ -83,7 +83,7 @@ function chalk({ succeeded, agents, projection }: QuestFacts): Award | null {
     if (!rounds.every((candidate) => candidate.round === 1 && candidate.items.every((item) => item.verdict === 'met'))) continue
     const round = rounds.find((candidate) => candidate.items.length >= count)
     if (!round) continue
-    return { item: 'chalk', agentId: agent.id, line: `${nameOf(agents, round.checker)} checked ${agent.name}’s work and found all ${plural(count, 'item')} of its Done when met on the first pass.` }
+    return { item: 'bow', agentId: agent.id, line: `${nameOf(agents, round.checker)} checked ${agent.name}’s work and found all ${plural(count, 'item')} of its Done when met on the first pass.` }
   }
   return null
 }
@@ -94,7 +94,7 @@ function vest({ succeeded, agents, projection, current }: QuestFacts): Award | n
   if (!succeeded) return null
   const asked = projection.messages.find((message) => message.kind === 'question' && !message.carried && message.state === 'answered' && message.from && message.from !== OPERATOR_ID && current.agentIds.includes(message.from) && message.reply?.text.trim())
   if (!asked?.from) return null
-  return { item: 'vest', agentId: asked.from, line: `${nameOf(agents, asked.from)} asked you a question instead of guessing, and your answer saw the run through.` }
+  return { item: 'trench_coat', agentId: asked.from, line: `${nameOf(agents, asked.from)} asked you a question instead of guessing, and your answer saw the run through.` }
 }
 
 function band({ succeeded, agents, projection, current }: QuestFacts): Award | null {
@@ -107,7 +107,7 @@ function band({ succeeded, agents, projection, current }: QuestFacts): Award | n
     if (!folders.every((folder) => paths.some((path) => within(path, folder)))) continue
     const files = readCount(projection.evidence.filter((item) => item.agentId === agent.id)).files
     return {
-      item: 'band', agentId: agent.id,
+      item: 'coffee', agentId: agent.id,
       line: `${agent.name} was given ${plural(folders.length, 'folder')} and read from every one${files ? `, ${plural(files, 'file')} in all` : ''}.`,
     }
   }
@@ -124,7 +124,7 @@ function apron({ succeeded, agents, projection, current }: QuestFacts): Award | 
     const given = new Set((agent.capabilities ?? []).flatMap((capability) => (capability.kind === 'skill' ? [key(capability.name)] : [])))
     if (given.size === 0) continue
     const opened = projection.evidence.find((item) => item.agentId === agent.id && item.kind === 'skill' && item.relation === 'opened by the agent' && item.status === 'succeeded' && given.has(key(item.name)))
-    if (opened) return { item: 'apron', agentId: agent.id, line: `${agent.name} opened its “${opened.name}” skill when the work called for it.` }
+    if (opened) return { item: 'black_dress', agentId: agent.id, line: `${agent.name} opened its “${opened.name}” skill when the work called for it.` }
   }
   return null
 }
@@ -143,20 +143,20 @@ function pin({ run, succeeded, agents, projection, current }: QuestFacts): Award
         : item.kind === 'command'))
   if (!held.every(({ agent, key }) => used(agent.id, key))) return null
   const words = [...new Set(held.map(({ key }) => SWITCH_WORDS[key]))]
-  return { item: 'pin', agentId: null, line: `This scheduled run never had to ask you, and its agents used everything they were allowed (${words.join(', ')}).` }
+  return { item: 'gloves', agentId: null, line: `This scheduled run never had to ask you, and its agents used everything they were allowed (${words.join(', ')}).` }
 }
 
 function cushion({ succeeded, agents, current, benched }: QuestFacts): Award | null {
   if (!succeeded) return null
   const agent = agents.find((candidate) => candidate.from && current.agentIds.includes(candidate.id) && benched.has(candidate.from.agent))
-  return agent ? { item: 'cushion', agentId: agent.id, line: `${agent.name} was tried in its Chat tab before this team used it.` } : null
+  return agent ? { item: 'ballet_flats', agentId: agent.id, line: `${agent.name} was tried in its Chat tab before this team used it.` } : null
 }
 
 function shuttle({ succeeded, agents, projection }: QuestFacts): Award | null {
   if (!succeeded) return null
   const ask = projection.messages.find((message) => message.kind === 'ask' && !message.carried && message.state === 'answered' && !message.reply?.stopped && message.from && message.to && message.from !== message.to)
   if (!ask?.from || !ask.to) return null
-  return { item: 'shuttle', agentId: ask.from, line: `${nameOf(agents, ask.from)} asked ${nameOf(agents, ask.to)} a question over the Team Bus and got an answer.` }
+  return { item: 'silk_scarf', agentId: ask.from, line: `${nameOf(agents, ask.from)} asked ${nameOf(agents, ask.to)} a question over the Team Bus and got an answer.` }
 }
 
 /** Two teammates sent work by the same agent, each still working when the other was handed its
@@ -179,7 +179,7 @@ function overalls({ succeeded, agents, projection, current }: QuestFacts): Award
     })
     for (const [index, one] of windows.entries()) {
       const other = windows.slice(index + 1).find((candidate) => Math.max(one.from, candidate.from) < Math.min(one.to, candidate.to))
-      if (other) return { item: 'overalls', agentId: lead, line: `${nameOf(agents, lead)} dispatched work to ${nameOf(agents, one.id)} and ${nameOf(agents, other.id)}, who worked on it at the same time and both finished.` }
+      if (other) return { item: 'cardigan', agentId: lead, line: `${nameOf(agents, lead)} dispatched work to ${nameOf(agents, one.id)} and ${nameOf(agents, other.id)}, who worked on it at the same time and both finished.` }
     }
   }
   return null
@@ -193,7 +193,7 @@ function tee({ succeeded, agents, projection, current }: QuestFacts): Award | nu
   if (stages.length < 3 || stages.some((stage) => current.failed.has(stage.id))) return null
   const handed = (id: string) => projection.messages.some((message) => message.kind === 'handover' && !message.carried && message.to === id && message.text.trim())
   if (!stages.filter((stage) => stage.id !== current.entrypoint).every((stage) => handed(stage.id))) return null
-  return { item: 'tee', agentId: null, line: `This run passed the work along ${stages.length} stages, each starting from what the one before handed it.` }
+  return { item: 'striped_top', agentId: null, line: `This run passed the work along ${stages.length} stages, each starting from what the one before handed it.` }
 }
 
 function monocle({ succeeded, agents, projection }: QuestFacts): Award | null {
@@ -201,7 +201,7 @@ function monocle({ succeeded, agents, projection }: QuestFacts): Award | null {
   const round = (projection.checks ?? []).find((candidate) => candidate.round >= 2 && candidate.items.length > 0 && candidate.items.every((item) => item.verdict === 'met'))
   if (!round) return null
   return {
-    item: 'monocle', agentId: round.checker,
+    item: 'beret', agentId: round.checker,
     line: `${nameOf(agents, round.checker)} sent ${nameOf(agents, round.checked)}’s work back once, and the second pass met all ${plural(round.items.length, 'item')} it checks.`,
   }
 }
@@ -218,11 +218,11 @@ function patch({ succeeded, agents, current, earlier }: QuestFacts): Award | nul
     for (const key of ['web', 'edits', 'commands'] as AllowSwitch[]) {
       const asked = (run: LessonRun) => run.messages.some((message) => message.kind === 'permission' && !message.carried && message.from === agent.id && message.permission?.switch === key)
       const before = ranIn.filter(asked).length
-      if (before >= 2 && !asked(current)) return { item: 'patch', agentId: agent.id, line: `${agent.name} asked to ${SWITCH_WORDS[key]} in ${before} recent runs, and didn’t need to this time.` }
+      if (before >= 2 && !asked(current)) return { item: 'collar', agentId: agent.id, line: `${agent.name} asked to ${SWITCH_WORDS[key]} in ${before} recent runs, and didn’t need to this time.` }
     }
     // It stopped failing.
     const failures = ranIn.filter((run) => run.failed.has(agent.id)).length
-    if (failures >= 2 && !current.failed.has(agent.id)) return { item: 'patch', agentId: agent.id, line: `${agent.name} failed in ${failures} recent runs, and finished its part this time.` }
+    if (failures >= 2 && !current.failed.has(agent.id)) return { item: 'collar', agentId: agent.id, line: `${agent.name} failed in ${failures} recent runs, and finished its part this time.` }
   }
   // A lead that never handed a teammate anything now does.
   const lead = agents.find((agent) => agent.id === current.entrypoint)
@@ -232,7 +232,7 @@ function patch({ succeeded, agents, current, earlier }: QuestFacts): Award | nul
       const together = recent.filter((run) => run.succeeded && run.mode === 'team' && run.entrypoint === lead.id && run.agentIds.includes(teammate.id))
       const idle = together.length >= 3 && together.every((run) => !run.messages.some((message) => work(message) && message.to === teammate.id))
       if (idle && current.messages.some((message) => work(message) && message.from === lead.id && message.to === teammate.id)) {
-        return { item: 'patch', agentId: lead.id, line: `${lead.name} never gave ${teammate.name} any work in ${together.length} runs, and did this time.` }
+        return { item: 'collar', agentId: lead.id, line: `${lead.name} never gave ${teammate.name} any work in ${together.length} runs, and did this time.` }
       }
     }
   }
@@ -253,7 +253,7 @@ function patch({ succeeded, agents, current, earlier }: QuestFacts): Award | nul
     for (const { from, to, count, runs } of asks.values()) {
       if (count < 3 || runs < 2 || !current.agentIds.includes(from) || !current.agentIds.includes(to)) continue
       if (current.messages.some((message) => !message.carried && message.kind === 'ask' && message.from === from && message.to === to)) continue
-      return { item: 'patch', agentId: to, line: `${nameOf(agents, from)} kept asking ${nameOf(agents, to)} for more, and this time the handover was enough.` }
+      return { item: 'collar', agentId: to, line: `${nameOf(agents, from)} kept asking ${nameOf(agents, to)} for more, and this time the handover was enough.` }
     }
   }
   return null
@@ -271,7 +271,7 @@ function scissors({ succeeded, current, earlier }: QuestFacts): Award | null {
   const [now, before] = [totalTokens(current), totalTokens(last)]
   if (now === null || before === null || now >= before) return null
   const saved = Math.round((1 - now / before) * 100)
-  return { item: 'scissors', agentId: null, line: `This team ran with ${plural(current.agentIds.length, 'agent')} instead of ${last.agentIds.length}, and used ${saved}% fewer tokens than its last run.` }
+  return { item: 'plum', agentId: null, line: `This team ran with ${plural(current.agentIds.length, 'agent')} instead of ${last.agentIds.length}, and used ${saved}% fewer tokens than its last run.` }
 }
 
 const RULES = [chalk, vest, band, apron, pin, cushion, shuttle, overalls, tee, monocle, patch, scissors]
@@ -293,10 +293,10 @@ export function questsEarned(facts: QuestFacts): Award[] {
   return ONE_AGENT_RULES.flatMap((rule) => rule(alone) ?? [])
 }
 
-/** Bobbin: the wardrobe, with what this run earned, holds an item from every part. */
+/** Sunset, the whole craft: the wardrobe, with what this run earned, holds an item from every part. */
 export function wholeCraft(held: Iterable<string>): boolean {
   const items = new Set(held)
   return AREAS.every((area) => QUESTS.some((quest) => quest.area === area && items.has(quest.item)))
 }
 
-export const BOBBIN_LINE = 'Your wardrobe now holds an item from each of the five parts of building agents.'
+export const WHOLE_CRAFT_LINE = 'Your wardrobe now holds an item from each of the five parts of building agents.'

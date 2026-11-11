@@ -11,7 +11,7 @@ use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
 use super::daemon::Daemon;
-use super::studio::figure_for;
+use super::studio::job_figure;
 
 /// What the phone may change on one of My agents. Absent fields stay as they are.
 #[derive(Debug, Default, Deserialize)]
@@ -67,7 +67,8 @@ async fn saved(daemon: &Daemon, id: &str) -> anyhow::Result<Option<Value>> {
 }
 
 /// `GET /phone/v0/agents`: My agents in the Mac's order, each with its name and the figure it
-/// wears, the one its id picks when none was chosen, as the Mac draws it.
+/// wears, the one its id picks when none was chosen, as the Mac draws it, its job's sign on its
+/// head.
 ///
 /// # Errors
 /// When `LoomWatch` can't be reached.
@@ -83,11 +84,10 @@ fn listed(jobs: &Value) -> Value {
         .flatten()
         .filter_map(|job| {
             let id = job.get("id").and_then(Value::as_str)?;
-            let (kind, color) = figure_for(id, job.get("figure"));
             Some(json!({
                 "id": id,
                 "name": job.get("name").and_then(Value::as_str).unwrap_or(id),
-                "figure": {"kind": kind, "color": color},
+                "figure": job_figure(id, job),
             }))
         })
         .collect();
@@ -107,10 +107,9 @@ pub async fn agent_view(daemon: &Daemon, id: &str) -> anyhow::Result<Option<Valu
         .get_json(&format!("/api/lessons?savedAgent={id}"))
         .await
         .ok();
-    let (kind, color) = figure_for(id, job.get("figure"));
     Ok(Some(json!({
         "version": version_of(&job),
-        "figure": {"kind": kind, "color": color},
+        "figure": job_figure(id, &job),
         "job": job,
         "lessons": lessons.as_ref().and_then(|lessons| lessons.get("lessons")).cloned().unwrap_or(json!([])),
         "learns": lessons.as_ref().and_then(|lessons| lessons.get("learns")).cloned().unwrap_or(json!(true)),
@@ -244,7 +243,7 @@ mod tests {
             "id": "maya", "file": ".jobs/maya.yaml", "name": "Maya", "instructions": "Help.",
             "model": "anthropic/claude-sonnet-5.5", "thinkingEffort": "high",
             "reads": [{"name": "Trips", "path": "~/Trips"}], "tools": ["notion"],
-            "figure": {"kind": "bobbin", "color": "butter", "wear": ["scarf"]},
+            "figure": {"kind": "bobbin", "color": "butter", "wear": ["collar"]},
             "savedAt": "2026-10-28T10:00:00Z", "version": 3,
         })
     }
@@ -259,13 +258,33 @@ mod tests {
         let agents = list["agents"].as_array().unwrap();
         assert_eq!(
             agents[0],
-            json!({"id": "maya", "name": "Maya", "figure": {"kind": "bobbin", "color": "butter"}})
+            // Saved under an earlier name (the earned bobbin), it wears that figure today, with the
+            // sign its job puts on its head: none named, a curl.
+            json!({"id": "maya", "name": "Maya", "figure": {"kind": "tall", "color": "sunset", "sign": "curl"}})
         );
         // None chosen: the one its id picks, never one stand-in for all.
-        let (kind, color) = figure_for("cole", None);
-        assert_eq!(agents[1]["figure"], json!({"kind": kind, "color": color}));
+        let (kind, color) = super::super::studio::figure_for("cole", None);
+        assert_eq!(
+            agents[1]["figure"],
+            json!({"kind": kind, "color": color, "sign": "curl"})
+        );
         assert_ne!(agents[1]["figure"], agents[2]["figure"]);
         assert_eq!(agents[2]["name"], "nameless");
+    }
+
+    /// The sign is only for drawing: a figure the phone sends back with one is refused, as the
+    /// saved figure (`jobs::JobFigure`) refuses one, so the phone never sends it.
+    #[test]
+    fn my_agents_wear_their_jobs_sign_and_a_change_never_carries_it() {
+        let list = listed(&json!({"jobs": [
+            {"id": "w", "name": "Trip writer"},
+            {"id": "v", "name": "Ada", "icon": "video"},
+        ]}));
+        assert_eq!(list["agents"][0]["figure"]["sign"], "write");
+        assert_eq!(list["agents"][1]["figure"]["sign"], "video");
+        let signed =
+            json!({"version": 1, "figure": {"kind": "tall", "color": "sky", "sign": "write"}});
+        assert!(serde_json::from_value::<AgentChange>(signed).is_err());
     }
 
     #[test]
@@ -278,7 +297,7 @@ mod tests {
                 commands: false,
             }),
             figure: Some(Figure {
-                kind: "spool".into(),
+                kind: "tall".into(),
                 color: "sky".into(),
             }),
             version: 3,
@@ -293,7 +312,7 @@ mod tests {
         // Its accessories stay on whatever figure it wears.
         assert_eq!(
             spec["figure"],
-            json!({"kind": "spool", "color": "sky", "wear": ["scarf"]})
+            json!({"kind": "tall", "color": "sky", "wear": ["collar"]})
         );
         assert_eq!(spec["reads"], job()["reads"]);
         assert_eq!(spec["tools"], json!(["notion"]));

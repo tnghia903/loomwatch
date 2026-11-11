@@ -15,7 +15,7 @@ import { fetchTeamFile, saveTeamFile } from '../team-file/client'
  * It wears the butter spool, the crew member the landing page's lamp hangs from, and keeps it when
  * kept: the figure that greets a newcomer is the one they find in My agents, its chat and teams.
  */
-export const FIRST_FIGURE: FigureChoice = { kind: 'spool', color: 'butter' }
+export const FIRST_FIGURE: FigureChoice = { kind: 'tall', color: 'clay' }
 export const FIRST_AGENT: AgentDraft = { ...BLANK_DRAFT, name: 'Helper', does: 'Helps with whatever you ask', figure: FIRST_FIGURE }
 export const FIRST_CHAT = jobIdFor(FIRST_AGENT.name)
 

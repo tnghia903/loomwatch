@@ -27,13 +27,10 @@ use crate::api::ApiError;
 use crate::watch_api::local_evidence;
 
 /// Everything a quest can earn (ui/src/lib/quests/catalog.ts names the quest behind each): what
-/// any agent can wear (the clothes, worn one at a time, then the accessories), then the figures
-/// it can be.
-pub(crate) const ACCESSORIES: &[&str] = &[
-    "tee", "overalls", "apron", "vest", "chalk", "band", "pin", "cushion", "shuttle", "monocle",
-    "patch",
-];
-pub(crate) const FIGURE_ITEMS: &[&str] = &["scissors", "bobbin"];
+/// any agent can wear (the clothes, worn one at a time, then the accessories), then the finishes
+/// any figure can be (`crate::figures`).
+pub(crate) use crate::figures::ACCESSORIES;
+pub(crate) const FIGURE_ITEMS: &[&str] = crate::figures::EARNED_COLORS;
 
 const FILE_NAME: &str = "wardrobe.json";
 
@@ -145,11 +142,27 @@ fn load(file: &Path) -> Contents {
         }
     };
     match serde_json::from_slice::<Contents>(&text) {
-        Ok(mut contents) => {
-            // An item a newer LoomWatch knows and this one does not stays in the file only while
-            // nothing new is earned; this daemon cannot draw it, so it does not list it.
-            contents.earned.retain(|item, _| is_item(item));
-            contents
+        Ok(contents) => {
+            // An item an earlier LoomWatch named (a sewing one) is the item that rewards the same
+            // quest today, so nothing earned then is lost. An item a newer LoomWatch knows and this
+            // one does not stays in the file only while nothing new is earned; this daemon cannot
+            // draw it, so it does not list it.
+            let mut earned = BTreeMap::new();
+            for (item, held) in contents.earned {
+                let item = crate::figures::migrate_item(&item).to_owned();
+                if is_item(&item) {
+                    // Two old names never map to one item, but keep the first earned if they did.
+                    earned
+                        .entry(item)
+                        .and_modify(|kept: &mut Earned| {
+                            if held.at < kept.at {
+                                *kept = held.clone();
+                            }
+                        })
+                        .or_insert(held);
+                }
+            }
+            Contents { earned }
         }
         Err(error) => {
             let aside = file.with_extension("unreadable.json");
@@ -200,7 +213,8 @@ async fn post_earned(
     State(wardrobe): State<Wardrobe>,
     Json(earn): Json<Earn>,
 ) -> Result<Response, ApiError> {
-    let item = earn.item.trim();
+    // An app from before the fashion wardrobe may still send a sewing item's name.
+    let item = crate::figures::migrate_item(earn.item.trim());
     if !is_item(item) {
         let mut known = ACCESSORIES.to_vec();
         known.extend_from_slice(FIGURE_ITEMS);
@@ -271,13 +285,14 @@ mod tests {
         let first = app
             .clone()
             .oneshot(post(
-                r#"{"item":"monocle","runId":"run-1","teamPath":"research.yaml","agentId":"checker"}"#,
+                r#"{"item":"beret","runId":"run-1","teamPath":"research.yaml","agentId":"checker"}"#,
             ))
             .await
             .expect("first");
         assert_eq!(first.status(), StatusCode::CREATED);
         let again = app
             .clone()
+            // An app from before the fashion wardrobe names it by its sewing name: the same item.
             .oneshot(post(r#"{"item":"monocle","runId":"run-2"}"#))
             .await
             .expect("again");
@@ -294,7 +309,7 @@ mod tests {
             .await
             .expect("list");
         let listed = body(listed).await;
-        assert_eq!(listed["earned"]["monocle"]["agentId"], "checker");
+        assert_eq!(listed["earned"]["beret"]["agentId"], "checker");
         assert_eq!(
             listed["earned"].as_object().map(serde_json::Map::len),
             Some(1)
@@ -306,8 +321,8 @@ mod tests {
         let app = router(Wardrobe::in_memory());
         for json in [
             r#"{"item":"crown","runId":"run-1"}"#,
-            r#"{"item":"band","runId":"  "}"#,
-            r#"{"item":"band","runId":"run\u0000"}"#,
+            r#"{"item":"coffee","runId":"  "}"#,
+            r#"{"item":"coffee","runId":"run\u0000"}"#,
         ] {
             let response = app.clone().oneshot(post(json)).await.expect("response");
             assert_eq!(
@@ -321,7 +336,7 @@ mod tests {
     #[tokio::test]
     async fn another_site_cannot_read_or_fill_the_wardrobe() {
         let app = router(Wardrobe::in_memory());
-        let mut request = post(r#"{"item":"band","runId":"run-1"}"#);
+        let mut request = post(r#"{"item":"coffee","runId":"run-1"}"#);
         request.headers_mut().insert(
             header::ORIGIN,
             "https://example.com".parse().expect("origin"),
@@ -345,10 +360,23 @@ mod tests {
             team_path: None,
             agent_id: None,
         };
-        assert!(wardrobe.earn("patch", earned.clone()).expect("earn").0);
+        assert!(wardrobe.earn("collar", earned.clone()).expect("earn").0);
         assert_eq!(
-            Wardrobe::open(&dir).contents().earned.get("patch"),
+            Wardrobe::open(&dir).contents().earned.get("collar"),
             Some(&earned)
+        );
+
+        // Earned under an earlier LoomWatch, by sewing names or the pearls: still earned, as today's
+        // items.
+        let old = format!(
+            r#"{{"earned": {{"scissors": {e}, "monocle": {e}, "pearls": {e}, "crown": {e}}}}}"#,
+            e = serde_json::to_string(&earned).expect("json")
+        );
+        std::fs::write(dir.join(FILE_NAME), old).expect("old names");
+        let held = Wardrobe::open(&dir).contents().earned;
+        assert_eq!(
+            held.keys().map(String::as_str).collect::<Vec<_>>(),
+            ["beret", "collar", "plum"]
         );
 
         std::fs::write(dir.join(FILE_NAME), b"{ not json").expect("corrupt");

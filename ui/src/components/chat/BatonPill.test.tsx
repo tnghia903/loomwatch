@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import { background, cascaded } from '../../test/cascade'
 import { apcaLc, THEMES, tokenColour, wcagRatio, type Theme } from '../../test/contrast'
+import { FIGURE_HUES } from '../../lib/library/figures'
 import { BatonPill } from './BatonPill'
 
 afterEach(cleanup)
@@ -42,7 +43,7 @@ describe('the pill in the chat’s header that says who has the work', () => {
   // panel, but not on its own 14% tint. The words are now that colour taken halfway to ink, and ink
   // on the gold tint, where gold words never go.
   it('says it in words that read on its tint, for every agent’s colour and while one waits on you, in both themes', () => {
-    const pills = [...Array.from({ length: 8 }, (_, hue) => ({ hue, waiting: false })), { hue: 3, waiting: true }]
+    const pills = [...Array.from({ length: FIGURE_HUES + 1 }, (_, hue) => ({ hue, waiting: false })), { hue: 3, waiting: true }]
     const shells = ['', 'lw-shell', 'lw-railed']
     for (const { hue, waiting } of pills) {
       const { container, unmount } = render(<BatonPill words={waiting ? 'needs you' : 'Asking Researcher…'} hue={hue} waiting={waiting} />)
@@ -71,7 +72,7 @@ describe('the pill in the chat’s header that says who has the work', () => {
     const [ink] = inkOf(screen.getByText('Asking Researcher…'))
     expect(ink).toMatch(/^color-mix\(in srgb, var\(--hue\) \d+%, var\(--color-ink\)\)$/)
     expect(fillOf(pill)[0]).toMatch(/var\(--hue\)/)
-    for (const theme of THEMES) expect(hue(theme)).toBe(tokenColour('var(--color-fig-sage)', theme, pill))
+    for (const theme of THEMES) expect(hue(theme)).toBe(tokenColour('var(--color-fig-sky)', theme, pill))
     rerender(<BatonPill words="needs you" hue={3} waiting />)
     for (const theme of THEMES) expect(hue(theme)).toBe(tokenColour('var(--color-accent)', theme, pill))
   })

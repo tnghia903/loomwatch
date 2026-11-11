@@ -8,7 +8,7 @@ import { draftFromTeamAgent, readsOf, teamKnowledge, type TeamKnowledge } from '
 import type { RunRecord } from '../../lib/runs/client'
 import type { ModelMove } from '../../lib/team-file/useModelFollowing'
 import type { AgentConfig } from '../../lib/team-file/types'
-import { agentFigure, figureFor } from '../../lib/library/figures'
+import { agentFigure, jobFigure } from '../../lib/library/figures'
 import { FigureStill } from '../agents/FigureStill'
 import { useAgentFigure } from '../agents/figureContext'
 import { useBenchFile } from '../../lib/files/useBenchFile'
@@ -138,7 +138,7 @@ function AddAgents({ jobs, inTeam, teamPath, first, onAdd, onClose }: { jobs: re
             const added = here.has(job.id)
             return (
               <li key={job.id}>
-                <FigureStill figure={figureFor(job.id, job.figure)} alt="" width={52} height={52} loading="lazy" decoding="async" />
+                <FigureStill figure={jobFigure(job)} alt="" width={52} height={52} loading="lazy" decoding="async" />
                 <span><b>{job.name}</b><em>{added ? 'Already in this team' : job.does ? <InlineMarkdown clickable={false}>{job.does}</InlineMarkdown> : 'One of My agents'}</em></span>
                 <button type="button" className="btn" onClick={() => onAdd(job)}><Plus size={13} aria-hidden="true" />{added ? 'Add again' : 'Add'}</button>
               </li>

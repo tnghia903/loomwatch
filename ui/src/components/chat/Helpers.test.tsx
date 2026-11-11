@@ -8,7 +8,7 @@ import { Helpers } from './Helpers'
 
 afterEach(cleanup)
 
-const figures = new Map([['ada', { kind: 'yarn' as const, color: 'sage' as const }]])
+const figures = new Map([['ada', { kind: 'chubby' as const, color: 'sage' as const }]])
 const names = new Map([['ada', 'Ada']])
 const name = (id: string) => names.get(id) ?? `Ada’s helper ${id.split('~')[1]}`
 
@@ -35,7 +35,7 @@ describe('an agent’s helpers on its piece of work (ADR 0079)', () => {
     expect(faces).toHaveLength(3)
     for (const face of faces) {
       expect(face).toHaveClass('has-figure')
-      expect(face.querySelector('img')).toHaveAttribute('src', figureStill({ kind: 'yarn', color: 'sage' }))
+      expect(face.querySelector('img')).toHaveAttribute('src', figureStill({ kind: 'chubby', color: 'sage' }))
     }
     // The fan in the gutter is as wide as it allows; each part's row wears its number.
     expect((container.querySelector('.tc-helpers-faces') as HTMLElement).style.getPropertyValue('--count')).toBe('3')

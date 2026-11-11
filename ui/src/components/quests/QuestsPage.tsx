@@ -1,6 +1,6 @@
 import { ArrowRight, Check, Lock } from '../ui/icon'
 
-import { figureStill, type FigureKind } from '../../lib/library/figures'
+import { figureStill, type FigureColor } from '../../lib/library/figures'
 import { AREA_NAMES, AREAS, isAccessory, isGarment, QUESTS, type Quest } from '../../lib/quests/catalog'
 import { partsDone, useWardrobe, type EarnedItem, type Wardrobe } from '../../lib/quests/wardrobe'
 import { historyRunUrl } from '../../lib/runs/history'
@@ -72,7 +72,7 @@ function QuestCard({ quest, entry, wardrobe }: { quest: Quest; entry: EarnedItem
       <span className={`quest-art ${quest.reward}${earned ? '' : ' locked'}`}>
         {isAccessory(quest.item)
           ? <AccessoryIcon item={quest.item} locked={!earned} />
-          : <img src={figureStill({ kind: quest.item as FigureKind, color: 'lilac' })} alt="" width={64} height={64} loading="lazy" decoding="async" />}
+          : <img src={figureStill({ kind: 'tall', color: quest.item as FigureColor })} alt="" width={64} height={64} loading="lazy" decoding="async" />}
       </span>
       <div className="quest-body">
         <p className="quest-name">

@@ -11,6 +11,7 @@ import { formatCost } from '../../lib/watch/usage'
 import { FigureStill } from '../agents/FigureStill'
 import { FileChip } from '../ui/FileChip'
 import { Icon } from '../ui/icon'
+import { stateOf } from '../../lib/library/figures'
 
 /** How many of what needs you a tile lists before "N more". */
 const LISTED = 2
@@ -127,7 +128,7 @@ function NeedsTile({ needs, last, doneBy, figureOf, onApprove, onReview, onOpenR
         {listed.map((item, index) => (
           // On Home the first steps up: the one that needs you most, drawn big, its line first.
           <li key={item.key} className={stepUp && index === 0 ? 'glance-up' : undefined} data-new={stepUp && index === 0 && popped === item.key ? true : undefined}>
-            <span className="desk-figure" data-glow={item.kind}><FigureStill figure={figureOf(item.seat)} alt="" width={stepUp && index === 0 ? 88 : 44} height={stepUp && index === 0 ? 88 : 44} decoding="async" /></span>
+            <span className="desk-figure" data-glow={item.kind}><FigureStill figure={figureOf(item.seat)} state={stateOf(item.kind)} alt="" width={stepUp && index === 0 ? 88 : 44} height={stepUp && index === 0 ? 88 : 44} decoding="async" /></span>
             <span className="glance-need-words">
               <span><NeedsShape kind={item.kind} />{item.seat.name} {item.says}</span>
               <small title={item.reason}>{item.reason ? `${item.teamName} · ${item.reason}` : item.teamName}</small>
@@ -180,7 +181,7 @@ function WorkingTile({ working, crew, figureOf, onOpenRun }: Pick<GlanceProps, '
       {lead ? (
         <>
           <button type="button" className="glance-agent glance-lead" onClick={() => onOpenRun(lead)} aria-label={named(lead)}>
-            <span className="desk-figure" data-glow="working"><FigureStill figure={figureOf(lead.seat)} alt="" width={52} height={52} decoding="async" /></span>
+            <span className="desk-figure" data-glow="working"><FigureStill figure={figureOf(lead.seat)} state="working" alt="" width={52} height={52} decoding="async" /></span>
             <span className="glance-need-words">
               <span className="glance-doing">{lead.prompt}</span>
               <small>{line(lead)}</small>
@@ -188,7 +189,7 @@ function WorkingTile({ working, crew, figureOf, onOpenRun }: Pick<GlanceProps, '
           </button>
           {others.slice(0, ALSO).map((at) => (
             <button key={at.key} type="button" className="glance-agent" onClick={() => onOpenRun(at)} aria-label={named(at)}>
-              <span className="desk-figure" data-glow="working"><FigureStill figure={figureOf(at.seat)} alt="" width={26} height={26} decoding="async" /></span>
+              <span className="desk-figure" data-glow="working"><FigureStill figure={figureOf(at.seat)} state="working" alt="" width={26} height={26} decoding="async" /></span>
               <span className="glance-need-words"><small>{line(at)}</small></span>
             </button>
           ))}
@@ -202,7 +203,7 @@ function WorkingTile({ working, crew, figureOf, onOpenRun }: Pick<GlanceProps, '
             {drawn.slice(0, CREW).map((seat, index) => (
               <li key={`${index}:${seat.id}`} title={seatWords(seat)}>
                 <span className={`desk-figure${seat.away ? ' away' : ''}`} data-glow={seat.away ? undefined : seat.state}>
-                  <FigureStill figure={figureOf(seat)} alt={seatWords(seat)} width={36} height={36} decoding="async" />
+                  <FigureStill figure={figureOf(seat)} state={seat.away ? 'ready' : stateOf(seat.state)} alt={seatWords(seat)} width={36} height={36} decoding="async" />
                 </span>
               </li>
             ))}

@@ -85,7 +85,7 @@ export const maya: SavedJob = {
   name: 'Maya',
   instructions: 'Help me with my day.',
   model: 'anthropic/claude-sonnet-4.5',
-  figure: { kind: 'spool', color: 'sage' },
+  figure: { kind: 'tall', color: 'sage' },
 }
 
 /** A run in Maya's own chat. */

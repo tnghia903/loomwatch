@@ -7,7 +7,7 @@ import { AgentFigure } from '../components/agents/benchFigure'
 import { useSavedBench } from '../components/agents/benchOf'
 import { FigureStill } from '../components/agents/FigureStill'
 import type { SavedJob } from '../lib/library/jobs'
-import { figureFor } from '../lib/library/figures'
+import { jobFigure } from '../lib/library/figures'
 import type { RunRecord } from '../lib/runs/client'
 import type { Island } from './useIsland'
 
@@ -20,7 +20,7 @@ export default function BenchCard({ island, hidden }: { island: Island; hidden: 
   if (!box) return null
   // Its figure stands in while the bench comes, and where it can't be drawn: there is nothing the
   // person could do about that, so nothing is said.
-  const still = <FigureStill figure={figureFor(box.id, box.job.figure)} alt="" />
+  const still = <FigureStill figure={jobFigure({ ...box.job, id: box.id })} alt="" />
   return (
     <div className="island-bench" role="group" aria-label={`${box.name}’s workbench`} hidden={hidden}>
       {failed ? (

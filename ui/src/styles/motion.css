@@ -223,4 +223,28 @@
 @keyframes count-pop { from { scale: .4; } }
 @keyframes sheet-in { from { opacity: 0; translate: 0 12px; } }
 @keyframes figure-pop { from { scale: .6; translate: 0 8px; } }
+
+/* ---- Figures: a new state settles in once; ready and working breathe at a desk (step 5) ----
+   FigureStill marks a still `data-moved` only when its state changes after it was first drawn, so a
+   page of figures doesn't move as it opens. Each settle plays once, on one property. The breath is
+   the only loop: it never runs under reduced motion, stops while the window is in the background
+   (html.figures-still, lib/motion/figuresStill.ts) and while a glass panel is open (a loop under a
+   backdrop blur makes it redraw every frame). Done and waiting hold their pose. */
+@media (prefers-reduced-motion: no-preference) {
+  [data-moved][data-pose="ready"] { animation: pose-settle var(--t-spring) var(--ease-out); }
+  [data-moved][data-pose="working"] { transform-origin: 50% 90%; animation: pose-lean var(--t-spring) var(--ease-out); }
+  [data-moved][data-pose="waiting"] { animation: pose-raise var(--t-spring) var(--ease-spring); }
+  [data-moved][data-pose="done"] { transform-origin: 50% 90%; animation: pose-pop var(--t-spring) var(--ease-spring); }
+  [data-moved][data-pose="failed"] { animation: pose-sink var(--t-settle) var(--ease-out); }
+  .desk-figure:is([data-glow="ready"], [data-glow="working"]) > :is(img, .figure-still) { transform-origin: 50% 90%; animation: figure-breathe calc(var(--t-breathe) * 2) ease-in-out infinite; }
+  .desk-figure:is([data-glow="ready"], [data-glow="working"]) > [data-moved] { animation: pose-settle var(--t-spring) var(--ease-out), figure-breathe calc(var(--t-breathe) * 2) ease-in-out var(--t-spring) infinite; }
+  html.figures-still .desk-figure > *,
+  html:has(.ask-glass, .inspector-glass, .lw-modal-scrim) .desk-figure > * { animation-play-state: paused; }
+}
+@keyframes pose-settle { from { translate: 0 2px; } }
+@keyframes pose-lean { from { rotate: -4deg; } }
+@keyframes pose-raise { from { translate: 0 4px; } }
+@keyframes pose-pop { from { scale: .92; } }
+@keyframes pose-sink { from { translate: 0 -3px; } }
+@keyframes figure-breathe { 50% { scale: 1.012; } }
 @keyframes pip-fill { from { scale: 0 1; } }

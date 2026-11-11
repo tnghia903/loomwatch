@@ -22,7 +22,7 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 const bench = (start: Partial<AgentDraft>, hideDoes = false) => render(
-  <ByHand draft={{ ...BLANK_DRAFT, ...start }} set={() => {}} skills={[]} skillsLoading={false} hideDoes={hideDoes} roleField={createRef()} figure={{ kind: 'yarn', color: 'sage' }} record={null} />,
+  <ByHand draft={{ ...BLANK_DRAFT, ...start }} set={() => {}} skills={[]} skillsLoading={false} hideDoes={hideDoes} roleField={createRef()} figure={{ kind: 'chubby', color: 'sage' }} record={null} />,
 )
 
 describe('By hand: the Name block', () => {

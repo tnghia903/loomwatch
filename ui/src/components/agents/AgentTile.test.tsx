@@ -38,3 +38,11 @@ it('lights its figure and says what it is doing in its own chat', () => {
   expect(screen.getByText('Waiting for you')).toHaveClass('agent-tile-state', 'waiting')
   expect(screen.getByRole('img', { name: 'In no team yet' })).toBeInTheDocument()
 })
+
+it('draws its figure in the pose of what it is doing, as well as lighting it (step 5)', () => {
+  render(<AgentTile id="writer" figure={{ kind: 'tall', color: 'lilac' }} draft={writer} teams={0} runs={[ownChat('running', { node: 'writer', name: 'Writer', kind: 'question', since: '2026-10-30T09:01:00Z', question: 'Which tone?' } as RunRecord['waitingOn'])]} />)
+  const figure = document.querySelector('.agent-tile-figure [data-pose]') as HTMLElement
+  expect(figure).toHaveAttribute('data-pose', 'waiting')
+  // With its job's sign it is the still in a box: the picture is inside.
+  expect(figure.matches('img') ? figure : figure.querySelector('img')).toHaveAttribute('src', '/agent/figures/tall-lilac-waiting.webp')
+})

@@ -25,6 +25,7 @@ pub mod delivery;
 pub mod devices;
 pub mod documents;
 pub mod engine;
+mod figures;
 mod files;
 pub mod health;
 pub mod helpers;

@@ -1,7 +1,7 @@
 import { ArrowRight, Check, ChevronDown, ChevronRight, ClipboardCopy } from '../ui/icon'
 import { useId, useState } from 'react'
 
-import { figureStill, type FigureKind } from '../../lib/library/figures'
+import { figureStill, type FigureColor } from '../../lib/library/figures'
 import { isAccessory } from '../../lib/quests/catalog'
 import { RECEIPT_MARK, receiptMarkdown, type Receipt, type ReceiptOutcome, type ReceiptTokens } from '../../lib/story/receipt'
 import type { AllowSwitch } from '../../lib/team-file/types'
@@ -136,7 +136,7 @@ function ReceiptEarned({ earned }: { earned: readonly RunEarned[] }) {
           <span className={`receipt-earned-art ${quest.reward}`}>
             {isAccessory(quest.item)
               ? <AccessoryIcon item={quest.item} />
-              : <img src={figureStill({ kind: quest.item as FigureKind, color: 'lilac' })} alt="" width={64} height={64} />}
+              : <img src={figureStill({ kind: 'tall', color: quest.item as FigureColor })} alt="" width={64} height={64} />}
           </span>
           <div>
             <b>{quest.reward === 'accessory' ? 'New in the wardrobe' : 'A new figure'}</b>

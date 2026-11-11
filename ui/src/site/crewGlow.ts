@@ -16,8 +16,16 @@ import { readyToDraw } from '../components/agents/workbenchModel'
 /** Taps each side of the centre in one blur pass. */
 const TAPS = 8
 
+// Skinned, so clothes that bend with the arms (bendClothes) glow where they are, not at rest.
 const FLAT_VERTEX = /* glsl */ `
-void main() { gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`
+#include <common>
+#include <skinning_pars_vertex>
+void main() {
+  #include <skinbase_vertex>
+  #include <begin_vertex>
+  #include <skinning_vertex>
+  #include <project_vertex>
+}`
 const FLAT_FRAGMENT = /* glsl */ `
 uniform vec4 tint;
 void main() { gl_FragColor = tint; }`

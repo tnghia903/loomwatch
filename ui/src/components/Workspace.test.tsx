@@ -1889,7 +1889,7 @@ describe('the Workflow canvas cards', () => {
 // link to a run of Cole's chat opened. The chat is a team of one in `.jobs/.bench/cole.yaml` whose
 // agent names no link, so the file it is says whose agent it is.
 describe('an agent’s own chat, opened on the team screen', () => {
-  const lilac = '/agent/figures/spool-lilac.webp'
+  const lilac = '/agent/figures/tall-lilac.webp'
   let nodes: typeof documentState.nodes
   beforeEach(() => {
     nodes = documentState.nodes
@@ -1897,7 +1897,7 @@ describe('an agent’s own chat, opened on the team screen', () => {
     Object.assign(documentState, { path: '/teams/.jobs/.bench/reviewer.yaml', nodes: [{ ...reviewer, data: { ...reviewer.data, isEntrypoint: true } }], edges: [], entrypoint: 'reviewer' })
     const fallback = globalThis.fetch
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => String(input) === '/api/jobs'
-      ? new Response(JSON.stringify({ folder: '.jobs', jobs: [{ id: 'reviewer', file: '.jobs/reviewer.yaml', name: 'Reviewer', instructions: 'Review it.', figure: { kind: 'spool', color: 'lilac' } }], problems: [] }), { status: 200 })
+      ? new Response(JSON.stringify({ folder: '.jobs', jobs: [{ id: 'reviewer', file: '.jobs/reviewer.yaml', name: 'Reviewer', instructions: 'Review it.', figure: { kind: 'tall', color: 'lilac' } }], problems: [] }), { status: 200 })
       : fallback(input, init)))
   })
   afterEach(() => { Object.assign(documentState, { path: '/teams/demo.yaml', nodes, edges: [{ id: 'researcher->reviewer', source: 'researcher', target: 'reviewer', data: { kind: 'sequence', ts: '' }, selected: false }], entrypoint: 'researcher' }) })
@@ -1905,9 +1905,9 @@ describe('an agent’s own chat, opened on the team screen', () => {
   it('draws its agent in the figure it wears in My agents: its card, the team’s sentence and the palette', async () => {
     expect(figureStill(figureFor('reviewer'))).not.toBe(lilac)
     renderWorkspace()
-    await waitFor(() => expect(document.querySelector('[data-node="agent"] .build-node-figure')).toHaveAttribute('src', lilac))
+    await waitFor(() => expect(document.querySelector('[data-node="agent"] .build-node-figure > img')).toHaveAttribute('src', lilac))
     expect(document.querySelector('.story-name .tc-mention-face img')).toHaveAttribute('src', lilac)
-    expect(screen.getByRole('button', { name: /^Reviewer\s*On this canvas/ }).querySelector('.palette-figure')).toHaveAttribute('src', lilac)
+    expect(screen.getByRole('button', { name: /^Reviewer\s*On this canvas/ }).querySelector('.palette-figure > img, img.palette-figure')).toHaveAttribute('src', lilac)
   })
 })
 

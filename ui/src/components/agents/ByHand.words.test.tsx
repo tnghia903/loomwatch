@@ -29,7 +29,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 function Bench({ start }: { start: Partial<AgentDraft> }) {
   const [draft, setDraft] = useState<AgentDraft>({ ...BLANK_DRAFT, ...start })
-  return <ByHand draft={draft} set={(key, value) => setDraft((current) => ({ ...current, [key]: value }))} skills={[]} skillsLoading={false} roleField={createRef()} figure={{ kind: 'spool', color: 'butter' }} record={null} />
+  return <ByHand draft={draft} set={(key, value) => setDraft((current) => ({ ...current, [key]: value }))} skills={[]} skillsLoading={false} roleField={createRef()} figure={{ kind: 'tall', color: 'clay' }} record={null} />
 }
 
 /** Every word on the page a person can read or hear: its text, and its labels and titles. */

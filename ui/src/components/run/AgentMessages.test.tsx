@@ -50,14 +50,14 @@ const msg = (name: RegExp) => screen.getByRole('listitem', { name })
 
 describe('Team chat', () => {
   it('colours each agent with its figure’s colour, the same as its avatar and its figure', () => {
-    const figures = new Map([['editor', { kind: 'pincushion' as const, color: 'rose' as const }], ['writer', { kind: 'spool' as const, color: 'sky' as const }]])
+    const figures = new Map([['editor', { kind: 'egg' as const, color: 'rose' as const }], ['writer', { kind: 'tall' as const, color: 'sky' as const }]])
     render(
       <TeamFiguresContext.Provider value={figures}>
         <AgentMessages messages={[message({ id: 'editor:q9', kind: 'ask', from: 'editor', to: 'writer', text: 'Is the headline too long?', evidenceId: 'editor:q9', seq: 3 })]} order={order} evidence={[]} live={false} onInspectEvidence={vi.fn()} />
       </TeamFiguresContext.Provider>,
     )
     const bubble = screen.getByText('Is the headline too long?').closest('.chat-msg')
-    expect(bubble).toHaveClass(`hue-${figureHue({ kind: 'pincushion', color: 'rose' })}`)
+    expect(bubble).toHaveClass(`hue-${figureHue({ kind: 'egg', color: 'rose' })}`)
     expect(bubble?.querySelector('.chat-avatar')).toHaveClass('has-figure')
   })
 

@@ -305,12 +305,12 @@ describe('the island page', () => {
   // showed. An agent's own chat (`.jobs/.bench/<id>.yaml`) is that agent, pinned to the notch or not.
   it('shows a run of an agent’s own chat in the figure the agent wears in My agents', async () => {
     // Maya is first in My agents, so the box opens with her; Writer is the one at work.
-    jobs = [maya, { ...writer, figure: { kind: 'cone', color: 'sky' } }]
-    expect(figureStill(figureFor('writer'))).not.toContain('cone-sky')
+    jobs = [maya, { ...writer, figure: { kind: 'slim', color: 'sky' } }]
+    expect(figureStill(figureFor('writer'))).not.toContain('slim-sky')
     runs = [run('r1', { teamPath: '.jobs/.bench/writer.yaml', teamName: 'Writer · chat', entrypoint: 'writer', responder: 'writer', agentIds: ['writer'], agentNames: { writer: 'Writer' }, working: ['writer'] })]
     const { container } = render(<Island />)
     tellPage({ kind: 'place', notch: { width: 188, height: 32 }, menuBar: 32 })
-    await waitFor(() => expect(container.querySelector('.island-head img')?.getAttribute('src')).toContain('cone-sky'))
+    await waitFor(() => expect(container.querySelector('.island-head img')?.getAttribute('src')).toContain('slim-sky'))
   })
 
   it('lists an agent answering in the chat, where no run is', async () => {
@@ -848,7 +848,7 @@ describe('the agent pinned to the notch', () => {
     runs = [pinnedChat('c1', { working: ['maya'] })]
     await waitFor(() => expect(island.getAttribute('data-view')).toBe('work'), { timeout: 5000 })
     // It peeks out wearing the figure it wears in My agents.
-    expect(container.querySelector('.island-slot.is-on img')?.getAttribute('src')).toContain('spool-sage')
+    expect(container.querySelector('.island-slot.is-on img')?.getAttribute('src')).toContain('tall-sage')
     const whole = 'You have two meetings today.\n\n- 10:00 [budget review](https://cal.example/b)\n- 12:30 lunch with **Sam**'
     let letRead = () => {}
     holdRunReads = new Promise((done) => { letRead = done })

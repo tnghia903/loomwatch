@@ -207,9 +207,13 @@
   // the first WebGL context a page makes can take a second, and it would come before the first paint.
   const canDraw = 'WebGLRenderingContext' in window
   const MODEL = 'assets/live/workbench.glb'
+  // Each build's figure, <build>.glb (site/build.sh): for the crew and the cord, with only what they
+  // wear; for the bench, the app's own, with every piece, since you can dress your agent as any build.
+  const FIGURES = 'assets/live/figure/'
+  const WARDROBE = 'assets/live/wardrobe/'
   let live = null
   let model = null
-  // The model comes down alongside the code, once for all three scenes.
+  // The bench's model comes down once, ahead of the bench.
   const loadModel = () => {
     if (!model) {
       model = fetch(MODEL).then((response) => (response.ok ? response.arrayBuffer() : Promise.reject(new Error(`${MODEL}: ${response.status}`))))
@@ -218,12 +222,14 @@
     return model
   }
   const loadLive = () => {
-    if (canDraw) loadModel()
     return (live ||= canDraw ? import('./assets/live/live.js') : Promise.reject(new Error('WebGL is off')))
   }
   // What a scene is built from: the model's bytes. A live.js cached from before readModel, for ten
   // minutes after a deploy, takes only its URL and fetches it itself.
   const modelFor = (scenes) => (scenes.readModel ? loadModel() : MODEL)
+  // The crew and the cord are built from each build's own figure (FIGURES); a live.js cached from
+  // before them still wants the bench's model.
+  const crewModelFor = async (scenes) => (scenes.CREW_FIGURES ? undefined : modelFor(scenes))
   // Two frames along: in a task of its own, after what was asked of the screen before it.
   const nextPaint = () => new Promise((resolve) => window.requestAnimationFrame(() => window.requestAnimationFrame(resolve)))
   // The figures' work on the GPU (their WebGL contexts, then their shaders) starts once the crew's
@@ -251,14 +257,17 @@
 
   /* ================================================================ The crew */
 
-  // Six agents, each in its own figure. Point at one and it waves; pick one to build one like it.
+  // Six agents, each in its own figure, with its job's sign on its head and dressed from the app's
+  // wardrobe, as the app draws them. Point at one and it waves; pick one to build one like it. Their
+  // stills (assets/crew/<id>.webp) and their builds' models (assets/live/figure, only these pieces
+  // in them) are made from the same builds, colours, signs and clothes: keep the three alike.
   const CREW = [
-    { id: 'scout', name: 'Scout', does: 'finds sources', job: 'sources', figure: { kind: 'yarn', color: 'clay' } },
-    { id: 'writer', name: 'Writer', does: 'writes the brief', job: 'brief', figure: { kind: 'spool', color: 'sky' } },
-    { id: 'editor', name: 'Editor', does: 'tightens every line', job: 'brief', figure: { kind: 'button', color: 'butter' } },
-    { id: 'checker', name: 'Checker', does: 'checks each claim', job: 'check', figure: { kind: 'thimble', color: 'sage' } },
-    { id: 'researcher', name: 'Researcher', does: 'digs into one question', job: 'sources', figure: { kind: 'pincushion', color: 'rose' } },
-    { id: 'planner', name: 'Planner', does: 'splits the job up', job: 'check', figure: { kind: 'cone', color: 'lilac' } },
+    { id: 'scout', name: 'Scout', does: 'finds sources', job: 'sources', figure: { kind: 'chubby', color: 'clay', sign: 'research', wear: ['trench_coat', 'beret'] } },
+    { id: 'writer', name: 'Writer', does: 'writes the brief', job: 'brief', figure: { kind: 'tall', color: 'sky', sign: 'write', wear: ['striped_top', 'silk_scarf'] } },
+    { id: 'editor', name: 'Editor', does: 'tightens every line', job: 'brief', figure: { kind: 'wide', color: 'orchid', sign: 'edit', wear: ['cardigan', 'collar'] } },
+    { id: 'checker', name: 'Checker', does: 'checks each claim', job: 'check', figure: { kind: 'little', color: 'sage', sign: 'review', wear: ['ballet_flats', 'bow'] } },
+    { id: 'researcher', name: 'Researcher', does: 'digs into one question', job: 'sources', figure: { kind: 'egg', color: 'rose', sign: 'research', wear: ['black_dress', 'collar'] } },
+    { id: 'planner', name: 'Planner', does: 'splits the job up', job: 'check', figure: { kind: 'slim', color: 'lilac', sign: 'document', wear: ['striped_top', 'gloves'] } },
   ]
   const crewBox = $('#crew')
   const crewCanvas = $('#crew-canvas')
@@ -366,7 +375,7 @@
     crewCanvas.addEventListener('pointerup', (event) => { const [x, y] = local(event, crewCanvas); scene.pointerUp(x, y) })
     // Its lighting and figures a frame or two after its WebGL context, so the page answers between them.
     await nextPaint()
-    await scene.load(await modelFor(scenes))
+    await scene.load(await crewModelFor(scenes))
     crewBox.classList.add('live')
     // They start talking once the headline has had a moment, twice through, then stop; the button
     // pauses them, and plays it again. A live.js or page cached from before the conversation has no
@@ -394,7 +403,7 @@
   const cordPath = $('.cord-thread path', cord)
   const cordFigure = $('#cord-figure')
   const cordTag = $('#cord-tag')
-  const LAMPLIGHTER = { id: 'lamplighter', figure: { kind: 'spool', color: 'butter' } }
+  const LAMPLIGHTER = { id: 'lamplighter', figure: { kind: 'tall', color: 'clay', sign: 'curl', wear: ['beret'] } }
   const LINKS = 8
   const STEP = 1 / 120
   const BOX = 64 // the figure's box (styles.css)
@@ -439,7 +448,7 @@
   let tiltSpeed = 0
   let held = null
   let tugAt = -1
-  let tie = { x: BOX / 2, y: BOX * 0.163 } // where the thread is tied: the spool's hole in the still
+  let tie = { x: BOX * 0.547, y: BOX * 0.147 } // where the cord is tied: the top of the curl in the still
   let near = false
   let pointer = null
   let figureScene = null
@@ -720,9 +729,9 @@
     await crewMounted
     await nextPaint()
     const scenes = await loadLive()
-    const scene = new scenes.CordScene($('.cord-canvas', cord), LAMPLIGHTER, reduced)
+    const scene = new scenes.CordScene($('.cord-canvas', cord), LAMPLIGHTER, reduced, FIGURES)
     scene.resize(BOX, BOX)
-    await scene.load(await modelFor(scenes))
+    await scene.load(await crewModelFor(scenes))
     figureScene = scene
     cord.classList.add('live')
   }
@@ -737,13 +746,32 @@
 
   /* ================================================================ Step 1 · Agents */
 
-  // The same crew as the app: six figures in seven colours (ui/src/lib/library/figures.ts).
+  // The same figures as the app: six builds in the six colours anyone can pick, each colour as the
+  // stills show it, and the tint it gives a job's sign (ui/src/lib/library/figures.ts, signTints.ts).
   const KINDS = [
-    { id: 'yarn', name: 'yarn ball' }, { id: 'spool', name: 'spool' }, { id: 'button', name: 'button' },
-    { id: 'thimble', name: 'thimble' }, { id: 'pincushion', name: 'pincushion' }, { id: 'cone', name: 'thread cone' },
+    { id: 'chubby', name: 'round' }, { id: 'tall', name: 'tall' }, { id: 'wide', name: 'wide' },
+    { id: 'little', name: 'small' }, { id: 'egg', name: 'square' }, { id: 'slim', name: 'slim' },
   ]
-  const COLORS = { clay: '#E3A386', butter: '#F1D488', sage: '#9FBF9E', sky: '#9EC3E6', lilac: '#BDB0E6', rose: '#EBB3C0', oat: '#E8DFCF' }
+  const COLORS = { clay: '#C3693F', sage: '#6A8F6A', sky: '#5C8BB2', lilac: '#8576C7', rose: '#BB687F', orchid: '#AA67BC' }
+  const SIGN_TINT = { clay: '#FFCBA1', sage: '#D6EED4', sky: '#CBEBFF', lilac: '#DEDCFF', rose: '#FFD0DE', orchid: '#F7D6FF' }
+  // The wardrobe, in the order the app lays its pieces over a still (ui/src/lib/library/figures.ts).
+  const WEAR_ORDER = ['striped_top', 'cardigan', 'black_dress', 'trench_coat', 'ballet_flats', 'gloves', 'coffee', 'collar', 'silk_scarf', 'beret', 'bow']
   const figureSrc = (kind, color) => `assets/figures/${kind}-${color}.webp`
+  // A figure's still with its job's sign on its head and what it wears, as the app stacks them
+  // (FigureStill): the bare still, then the grey sign tinted to the figure's colour, then a layer per
+  // piece worn, in the wardrobe's order.
+  const signSrc = (kind, sign) => `assets/signs/${kind}-${sign}.webp`
+  function paintSign(sign, kind, color, job) {
+    sign.style.setProperty('--sign', `url("${signSrc(kind, job)}")`)
+    sign.style.setProperty('--tint', SIGN_TINT[color])
+  }
+  const wornLayers = (kind, wear) => WEAR_ORDER.filter((item) => wear.includes(item))
+    .map((item) => el('img', { class: 'worn', src: `assets/wear/${kind}-${item}.webp`, alt: '', decoding: 'async' }))
+  function figureEl(kind, color, job, wear = []) {
+    const sign = el('span', { class: 'figure-sign', 'aria-hidden': 'true' })
+    paintSign(sign, kind, color, job)
+    return el('span', { class: 'figure-still' }, el('img', { src: figureSrc(kind, color), width: '60', height: '60', alt: '' }), sign, wornLayers(kind, wear))
+  }
   // The keys an agent may be handed, and what each one means, said beside it as the app says it.
   const KEYS = [
     { key: 'web', word: 'Web', label: 'Search the web', may: 'search the web', asks: 'searches the web', off: 'Asks you before it searches the web.', on: 'Searches the web without asking.' },
@@ -753,16 +781,16 @@
   // A job is its instructions (the pattern on its clipboard), the skills pinned on its board, and
   // the one key its test run reaches for.
   const JOBS = [
-    { id: 'sources', label: 'Find sources', does: 'Finds sources', instructions: 'Find what is new this week. Reply with each claim and a link to its source.', skills: ['web-research'], needs: 'web', tool: 'web search', ask: 'search the web for “open-weight models this week”',
+    { id: 'sources', sign: 'research', label: 'Find sources', does: 'Finds sources', instructions: 'Find what is new this week. Reply with each claim and a link to its source.', skills: ['web-research'], needs: 'web', tool: 'web search', ask: 'search the web for “open-weight models this week”',
       reply: 'Three stories this week, each with its link: a new open coding model, a faster small model for phones, and a licence change.', without: 'Without the web, I can only tell you what I already know, and it may be out of date.' },
-    { id: 'brief', label: 'Write the brief', does: 'Writes the brief', instructions: 'Turn the findings into a short brief in plain words. Reply with the brief as Markdown.', skills: ['house-style', 'markdown'], needs: 'edits', tool: 'writing brief.md', ask: 'save the brief as brief.md in its folder',
+    { id: 'brief', sign: 'write', label: 'Write the brief', does: 'Writes the brief', instructions: 'Turn the findings into a short brief in plain words. Reply with the brief as Markdown.', skills: ['house-style', 'markdown'], needs: 'edits', tool: 'writing brief.md', ask: 'save the brief as brief.md in its folder',
       reply: 'The brief is in brief.md: five lines, the biggest story first, every claim with its link.', without: 'Here is the brief in my reply instead of a file: five lines, the biggest story first.' },
-    { id: 'check', label: 'Check the facts', does: 'Checks each claim', instructions: 'Check every claim in the draft against its source. Reply with what holds and what does not.', skills: ['fact-check', 'web-research'], needs: 'web', tool: 'checking 3 sources', ask: 'open the 3 sources the draft links to',
+    { id: 'check', sign: 'review', label: 'Check the facts', does: 'Checks each claim', instructions: 'Check every claim in the draft against its source. Reply with what holds and what does not.', skills: ['fact-check', 'web-research'], needs: 'web', tool: 'checking 3 sources', ask: 'open the 3 sources the draft links to',
       reply: 'Two claims hold. One quotes the wrong benchmark: the model card says 61%, not 67%.', without: 'Without opening the sources, I can only say which claims have a link, not whether they hold.' },
-    { id: 'slides', label: 'Make the slides', does: 'Makes the slides', instructions: 'Turn the brief into slides, one story on each. Reply with where the file is.', skills: ['house-style'], needs: 'commands', tool: 'making brief.pptx', ask: 'run a command that makes brief.pptx from the brief',
+    { id: 'slides', sign: 'slides', label: 'Make the slides', does: 'Makes the slides', instructions: 'Turn the brief into slides, one story on each. Reply with where the file is.', skills: ['house-style'], needs: 'commands', tool: 'making brief.pptx', ask: 'run a command that makes brief.pptx from the brief',
       reply: 'The slides are in brief.pptx: five slides, one story on each, the biggest first.', without: 'Without running a command I can’t make the file, so here are the five slides as an outline.' },
   ]
-  const agent = { name: 'Scout', kind: 'pincushion', color: 'rose', model: 'sonnet', job: 'sources', keys: { web: false, edits: false, commands: false } }
+  const agent = { name: 'Scout', kind: 'egg', color: 'rose', wear: ['black_dress', 'collar'], model: 'sonnet', job: 'sources', keys: { web: false, edits: false, commands: false } }
   const shelf = [] // { name, job, kind, color }
   let trial = 0 // the test run in flight, or 0; a newer one or an edit ends it
   let trials = 0
@@ -775,12 +803,15 @@
   const orText = (items) => items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} or ${items.at(-1)}`
 
   const jobOf = () => JOBS.find((j) => j.id === agent.job)
+  // The sign on its head: the one of the crew member it was built like, until its job changes, as an
+  // agent in the app keeps the icon it was given; otherwise its job's.
+  const agentSign = () => agent.sign ?? jobOf().sign
   const agentName = () => agent.name.trim() || 'Your agent'
   const agentJob = () => `${agent.model}|${agent.job}|${KEYS.filter((k) => agent.keys[k.key]).map((k) => k.key).join(',')}`
   const shelved = () => shelf.find((s) => s.name.toLowerCase() === agentName().toLowerCase())
   const looksLike = () => {
     const kind = KINDS.find((k) => k.id === agent.kind).name
-    return `${/^[aeiou]/.test(agent.color) ? 'an' : 'a'} ${agent.color} ${kind}`
+    return `${/^[aeiou]/.test(agent.color) ? 'an' : 'a'} ${agent.color} ${kind} figure`
   }
 
   // A radio group of buttons: one tab stop, arrow keys move the choice, as the app's pickers do.
@@ -811,7 +842,7 @@
     const job = jobOf()
     return {
       look: { name: agentName(), instructions: job.instructions, model: modelOf(agent.model).openrouter, skills: job.skills, allow: { ...agent.keys } },
-      figure: { kind: agent.kind, color: agent.color },
+      figure: { kind: agent.kind, color: agent.color, sign: agentSign(), wear: [...agent.wear] },
       pattern: benchPattern(agentName()),
       does: job.does,
       modelName: modelOf(agent.model).name,
@@ -876,7 +907,7 @@
         // A live.js cached from before placeFace has none for ten minutes after a deploy.
         if (placeFace) for (const [face, element] of Object.entries(faceEls)) placeFace(element, faces[face])
       },
-    }, reduced)
+    }, reduced, { figures: WARDROBE })
     benchScene = scene
     scene.set(benchView())
     stageOf(bench, scene)
@@ -900,8 +931,8 @@
   // The bench loads when Step 1 is near, and after the crew and the cord are on the screen, so the
   // first screen only waits for the crew and the GPU readies one scene at a time.
   if ('IntersectionObserver' in window) {
-    // Its code comes down once the cord's figure is up, so it is here by the time Step 1 is.
-    cordMounted.then(loadLive).then((scenes) => scenes.bench?.()).catch(() => {})
+    // Its code and model come down once the cord's figure is up, so they are here by the time Step 1 is.
+    cordMounted.then(loadLive).then((scenes) => { if (scenes.readModel) loadModel(); return scenes.bench?.() }).catch(() => {})
     const near = new IntersectionObserver((entries) => {
       if (!entries.some((e) => e.isIntersecting)) return
       near.disconnect()
@@ -914,6 +945,8 @@
   function paintStill() {
     const src = figureSrc(agent.kind, agent.color)
     bench.style.setProperty('--fig', COLORS[agent.color])
+    paintSign($('#ag-sign'), agent.kind, agent.color, agentSign())
+    $('#ag-worn').replaceChildren(...wornLayers(agent.kind, agent.wear))
     if (agImg.getAttribute('src') === src) return
     const next = new Image()
     next.src = src
@@ -930,7 +963,7 @@
     $('#ag-plate-name').textContent = agentName()
     $('#ag-plate-what').textContent = looksLike()
     radios($('#ag-apps'), state.models.map((id) => ({ id, label: modelOf(id).name, kids: [modelOf(id).name] })), agent.model, (id) => { agent.model = id; edited() })
-    radios($('#ag-jobs'), JOBS.map((j) => ({ id: j.id, label: j.label, kids: [j.label] })), agent.job, (id) => { agent.job = id; edited() })
+    radios($('#ag-jobs'), JOBS.map((j) => ({ id: j.id, label: j.label, kids: [j.label] })), agent.job, (id) => { if (id !== agent.job) agent.sign = null; agent.job = id; edited() })
     radios($('#ag-kinds'), KINDS.map((k) => ({
       id: k.id, label: k.name[0].toUpperCase() + k.name.slice(1),
       kids: [el('img', { src: figureSrc(k.id, agent.color), width: '96', height: '96', alt: '', loading: 'lazy' })],
@@ -1060,24 +1093,24 @@
     const saved = shelved()
     const note = $('#ag-shelf-note')
     if (!saved) {
-      shelf.push({ name: agentName(), job: agentJob(), kind: agent.kind, color: agent.color })
+      shelf.push({ name: agentName(), job: agentJob(), sign: agentSign(), kind: agent.kind, color: agent.color, wear: [...agent.wear] })
       note.replaceChildren(`${agentName()} is in My agents. `, el('a', { href: '#act-workflow', text: 'Put it in a team ↓' }))
     } else if (changedSince(saved)) {
-      Object.assign(saved, { job: agentJob(), kind: agent.kind, color: agent.color })
+      Object.assign(saved, { job: agentJob(), sign: agentSign(), kind: agent.kind, color: agent.color, wear: [...agent.wear] })
       note.textContent = `Saved. Every team ${saved.name} is in uses the change from its next run.`
     } else {
       note.textContent = `Nothing changed since you saved ${saved.name}.`
     }
     $('#ag-shelf').hidden = false
     $('#ag-shelf-list').replaceChildren(...shelf.map((s) => el('li', {},
-      el('img', { src: figureSrc(s.kind, s.color), width: '60', height: '60', alt: '' }), s.name)))
+      figureEl(s.kind, s.color, s.sign, s.wear), s.name)))
     paintSaved()
   }
 
   // The crew's pick: an agent like the one you clicked, ready on the bench.
   function buildLike(member) {
     if (trial) endTrial()
-    Object.assign(agent, { name: member.name, kind: member.figure.kind, color: member.figure.color, job: member.job })
+    Object.assign(agent, { name: member.name, kind: member.figure.kind, color: member.figure.color, wear: [...member.figure.wear], job: member.job, sign: member.figure.sign })
     $('#ag-name').value = member.name
     replied = false
     renderAgent()
@@ -2706,8 +2739,8 @@
   window.addEventListener('resize', placeOsPill)
 
   const SCREENS = {
-    home: { w: 2880, h: 1600, alt: 'LoomWatch Home: first Your desk, where the Researcher brought work for you to check, with a gold Review button. Below, your projects as rooms, each with its team\u2019s agents at their desks in the order work moves: in SUTD final project the Researcher is drawn faint because it is at your desk, then the gold ring where you check; in Bakery website the Writer is working; Morning news runs every day at 8:00 AM; in My thesis the Writer is drawn faint because it is working in the Website team. Then a New project tile, and an agent in no project yet.', cap: 'Home: your desk first, with whoever waits for you, then a room for each project, with its agents at their desks.' },
-    agents: { w: 2880, h: 1600, alt: "Building Writer in LoomWatch: a sentence saying Writer thinks with Claude Opus 5.5, has one skill and asks you before it searches the web, edits files or runs commands; a lavender figure at its desk with labels for its job, its skill, the model it thinks with, what it is allowed, what it asks you first, what it hands back, what it reads and its tools; and on the right the blocks that make it, starting with Name and Instructions with a check of what good instructions say.", cap: 'An agent at its desk: the figure shows what it has, the blocks beside it change it, and the sentence on top says what it all adds up to.' },
+    home: { w: 2880, h: 1600, alt: 'LoomWatch Home: first the box to give a team work, then Needs you, where the Researcher brought work for you to check in Review stop demo, with a gold Approve button. Then who is working now, what finished today and this month\u2019s spend. Below, your projects as rooms, each with its team\u2019s agents in the order work moves: in Review stop demo the Researcher is waiting for you, then the gold ring where you check; Daily tech digest runs every day at 9:00 AM; Research and review is ready.', cap: 'Home: your desk first, with whoever waits for you, then a room for each project, with its agents at their desks.' },
+    agents: { w: 2880, h: 1600, alt: "Building Writer in LoomWatch: a sentence saying Writer thinks with Claude Sonnet 5.5, has no skills yet, reads nothing yet and asks you before it searches the web, edits files or runs commands; under it, the rows that make it, starting with Name and Instructions; and on the right a lilac velvet figure with its job's sign on its head, at its desk, with labels for its job, its skills, the model it thinks with, what it is allowed, what it asks you first, what it hands back, what it reads and its tools.", cap: 'An agent at its desk: the figure shows what it has, the blocks beside it change it, and the sentence on top says what it all adds up to.' },
     workflow: { w: 2880, h: 1600, alt: 'LoomWatch Workflow for a daily tech digest: the team as one sentence, Every day at 9:00 AM and whenever you ask, Gatherer collects what is needed, then Reader does its part, and finally Writer writes the answer, each with its figure; on the left your saved agents ready to add; on the canvas a schedule trigger at 9 AM wired to Gatherer, Reader and Writer, and the team response.', cap: 'Workflow: your agents wired in order, read back as one sentence, with your saved agents one click away on the left.' },
     chat: { w: 2880, h: 1600, alt: "LoomWatch Chat: you ask the team for a short getting-started guide. Under your message, Waiting for you, with Details, Stop and Researcher's figure with 1 reply on the right; below, in the chat, what Researcher handed over to you, with Approve and Send back to Researcher under it.", cap: "Chat: the agents' replies and what needs you, together in the chat, and every step a click away in Details." },
   }

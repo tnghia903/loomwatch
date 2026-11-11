@@ -1,3 +1,4 @@
+import { BENCH_ITEM } from '../../lib/library/figures'
 import {
   Box3,
   BufferGeometry,
@@ -45,9 +46,9 @@ import type { Accessory } from '../../lib/quests/catalog'
  * rays onto the body, or onto the clothes when it wears some, so it sits on the surface of
  * whichever figure wears it.
  *
- * The 3D bench dresses its figure with this, and scripts/figures renders the stills' accessory
- * layers (ui/public/agent/wear) from it too, so the pictures and the bench always agree. Nothing
- * here is clickable: a click on the figure still means its model (lib/library/figure.ts).
+ * The 3D bench dresses its figure with this. The stills' accessory layers (ui/public/agent/wear)
+ * are drawn to match it, so the pictures and the bench agree. Nothing here is clickable: a click
+ * on the figure still means its model (lib/library/figure.ts).
  */
 
 export interface Dressed {
@@ -864,7 +865,9 @@ export function dress(figure: Object3D, kind: string, wear: readonly Accessory[]
     const nudge = options.faceNudge ?? new Vector3()
     // Built in world space, then handed to the part it hangs from, so it moves with it.
     const hang = (parent: Object3D, object: Object3D) => { parent.attach(object); placed.push(object) }
-    for (const item of wear) {
+    for (const worn of wear) {
+      // The bench's model is still the old one: each item shows the old piece for the same quest.
+      const item = BENCH_ITEM[worn]
       switch (item) {
         case 'tee': { const { body, sleeves } = tee(k, b); hang(b.body, body); placed.push(...sleeves); break }
         case 'overalls': hang(b.body, overalls(k, b)); break

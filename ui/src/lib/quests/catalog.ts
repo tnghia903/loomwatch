@@ -22,15 +22,16 @@ export const AREAS: readonly QuestArea[] = ['prompt', 'context', 'harness', 'gra
 export const AREA_NAMES: Record<QuestArea, string> = { prompt: 'Prompt', context: 'Context', harness: 'Harness', graph: 'Team shape', loop: 'Checking' }
 
 /** Clothes from the wardrobe: a figure wears one at a time, under everything else. */
-export const GARMENTS = ['tee', 'overalls', 'apron', 'vest'] as const
+export const GARMENTS = ['striped_top', 'cardigan', 'black_dress', 'trench_coat'] as const
 export type Garment = (typeof GARMENTS)[number]
 
-/** Everything a figure can wear, in the order it is layered: what sits behind first, so clothes first. */
-export const ACCESSORIES = [...GARMENTS, 'band', 'chalk', 'patch', 'pin', 'monocle', 'cushion', 'shuttle'] as const
+/** Everything a figure can wear, in the order it is layered: what sits behind first, so clothes first.
+    The backend's figures.rs `ACCESSORIES` is the twin. */
+export const ACCESSORIES = [...GARMENTS, 'ballet_flats', 'gloves', 'coffee', 'collar', 'silk_scarf', 'beret', 'bow'] as const
 export type Accessory = (typeof ACCESSORIES)[number]
 
-/** Figures a quest earns (lib/library/figures.ts draws them once earned). */
-export const EARNED_FIGURES = ['scissors', 'bobbin'] as const
+/** Finishes a quest earns: any build can be one once earned (lib/library/figures.ts `FIGURE_COLORS`). */
+export const EARNED_FIGURES = ['plum', 'sunset'] as const
 export type EarnedFigure = (typeof EARNED_FIGURES)[number]
 
 export type QuestItem = Accessory | EarnedFigure
@@ -54,84 +55,111 @@ export interface Quest {
 
 export const QUESTS: readonly Quest[] = [
   {
-    item: 'chalk', reward: 'accessory', area: 'prompt', name: 'Tailor’s chalk', practice: 'Clear success criteria',
+    item: 'bow', reward: 'accessory', area: 'prompt', name: 'Bow', practice: 'Clear success criteria',
     hint: 'Give an agent a Done when, and a check step that checks its work against it.',
     why: 'Checkable criteria tell an agent when it is finished, and give a check step something to hold its work against.',
     earnedWhen: 'A check step’s first look at an agent’s work finds every item of its Done when met, in a run that finished.',
   },
   {
-    item: 'vest', reward: 'accessory', area: 'prompt', name: 'Crew vest', practice: 'Ask, don’t guess',
+    item: 'trench_coat', reward: 'accessory', area: 'prompt', name: 'Trench coat', practice: 'Ask, don’t guess',
     hint: 'Tell an agent to ask you when the brief leaves a real choice open.',
     why: 'One question at the right moment costs less than a whole run built on the wrong guess.',
     earnedWhen: 'An agent asks you a question, you answer it, and the run finishes.',
   },
   {
-    item: 'band', reward: 'accessory', area: 'context', name: 'Tailor’s tape', practice: 'Scoped context',
+    item: 'coffee', reward: 'accessory', area: 'context', name: 'Coffee to go', practice: 'Scoped context',
     hint: 'Give an agent only the folders its job needs, not a whole drive.',
     why: 'A model recalls less the more it holds, so the few folders a job needs beat a whole drive.',
     earnedWhen: 'An agent is given at least one folder to read, and reads from every folder it was given, in a run that finished.',
   },
   {
-    item: 'apron', reward: 'accessory', area: 'context', name: 'Maker’s apron', practice: 'Reusable skills',
+    item: 'black_dress', reward: 'accessory', area: 'context', name: 'Little black dress', practice: 'Reusable skills',
     hint: 'Give an agent a skill its job needs, so it opens the know-how only when the work calls for it.',
     why: 'A skill keeps a procedure out of the prompt until the job calls for it, so the agent reads it when it matters.',
     earnedWhen: 'An agent opens a skill it was given, in a run that finished.',
   },
   {
-    item: 'pin', reward: 'accessory', area: 'harness', name: 'Safety-pin clip', practice: 'Least privilege',
+    item: 'gloves', reward: 'accessory', area: 'harness', name: 'Gloves', practice: 'Least privilege',
     hint: 'Before a scheduled run, allow its agents only what their job uses: web search, file edits or commands.',
     why: 'Anything allowed that the job doesn’t use only turns a model’s mistake into real damage.',
     earnedWhen: 'A scheduled run finishes without asking you anything, and its agents used everything they were allowed.',
   },
   {
-    item: 'cushion', reward: 'accessory', area: 'harness', name: 'Wrist pincushion', practice: 'Test before you ship',
+    item: 'ballet_flats', reward: 'accessory', area: 'harness', name: 'Ballet flats', practice: 'Test before you ship',
     hint: 'Try an agent in its Chat tab in My agents before a team uses it.',
     why: 'An agent acts over many steps and changes things, so a trial run catches problems before they reach real work.',
     earnedWhen: 'A team run finishes with an agent from My agents that you tried in its Chat tab first.',
   },
   {
-    item: 'shuttle', reward: 'accessory', area: 'graph', name: 'Shuttle', practice: 'Orchestrator and workers',
+    item: 'silk_scarf', reward: 'accessory', area: 'graph', name: 'Silk scarf', practice: 'Orchestrator and workers',
     hint: 'Let a lead hand one clear question to a teammate instead of doing everything itself.',
     why: 'A lead that hands a teammate one clear question gets a focused answer back, instead of doing every part itself.',
     earnedWhen: 'One agent asks another a question over the Team Bus and gets an answer, in a run that finished.',
   },
   {
-    item: 'overalls', reward: 'accessory', area: 'graph', name: 'Work overalls', practice: 'Parallel work',
+    item: 'cardigan', reward: 'accessory', area: 'graph', name: 'Cardigan', practice: 'Parallel work',
     hint: 'Have a lead dispatch two independent parts of a job to two teammates at once.',
     why: 'Independent parts done side by side finish sooner, and each teammate holds only its own part.',
     earnedWhen: 'One agent dispatches work to two teammates who work on it at the same time, and both finish, in a run that finished.',
   },
   {
-    item: 'tee', reward: 'accessory', area: 'graph', name: 'Plain tee', practice: 'Chain clear steps',
+    item: 'striped_top', reward: 'accessory', area: 'graph', name: 'Striped top', practice: 'Chain clear steps',
     hint: 'Split a job into three or more stages, each handing its result to the next.',
     why: 'Each stage does one smaller job well, and every handover shows exactly what passed between them.',
     earnedWhen: 'A pipeline of three or more stages finishes, each stage after the first starting from what it was handed.',
   },
   {
-    item: 'monocle', reward: 'accessory', area: 'loop', name: 'Button monocle', practice: 'Evaluator–optimizer loop',
+    item: 'beret', reward: 'accessory', area: 'loop', name: 'Beret', practice: 'Evaluator–optimizer loop',
     hint: 'Add a check step with “Send it back once” on, after the agent whose work matters most.',
     why: 'A second look against clear criteria catches what the first pass missed, and one more pass fixes it.',
     earnedWhen: 'A check step sends work back, and the second pass meets every item it checks, in a run that finished.',
   },
   {
-    item: 'patch', reward: 'accessory', area: 'loop', name: 'Sewn-on patch', practice: 'Learn from failures',
+    item: 'collar', reward: 'accessory', area: 'loop', name: 'Round collar', practice: 'Learn from failures',
     hint: 'When the checkup shows a lesson from your runs, fix its cause and use the team again.',
     why: 'Fixing the cause of what went wrong in real runs improves an agent more than guessing does.',
     earnedWhen: 'Something that went wrong in two or more of a team’s recent runs doesn’t happen in its next run, and that run finishes.',
   },
   {
-    item: 'scissors', reward: 'figure', area: 'graph', name: 'Scissors', practice: 'Start simple',
+    item: 'plum', reward: 'figure', area: 'graph', name: 'Plum figure', practice: 'Start simple',
     hint: 'If a team works, try it with one agent fewer. Add agents only when a run shows the need.',
     why: 'Every agent a team doesn’t need adds tokens, time and another place to go wrong.',
     earnedWhen: 'A team runs with fewer agents than its last finished run, finishes, and uses fewer tokens.',
   },
   {
-    item: 'bobbin', reward: 'figure', area: 'all', name: 'Bobbin', practice: 'The whole craft',
+    item: 'sunset', reward: 'figure', area: 'all', name: 'Sunset figure', practice: 'The whole craft',
     hint: 'Earn one item from each of the five parts: prompt, context, harness, team shape and checking.',
     why: 'A good agent takes more than a good prompt, and your runs have now shown every part of it.',
     earnedWhen: 'The wardrobe holds an item from each of the five parts.',
   },
 ]
+
+/** The items an earlier LoomWatch gave, each the item that rewards the same quest now: the sewing
+    items, and the sunglasses, pearls and handbag, which became the beret, the round collar and the
+    coffee to go (2026-11-09). The backend's figures.rs `migrate_item` is the twin. */
+const OLD_ITEMS: Record<string, QuestItem> = {
+  tee: 'striped_top',
+  overalls: 'cardigan',
+  apron: 'black_dress',
+  vest: 'trench_coat',
+  chalk: 'bow',
+  band: 'coffee',
+  pin: 'gloves',
+  cushion: 'ballet_flats',
+  shuttle: 'silk_scarf',
+  monocle: 'beret',
+  patch: 'collar',
+  scissors: 'plum',
+  bobbin: 'sunset',
+  handbag: 'coffee',
+  pearls: 'collar',
+  sunglasses: 'beret',
+}
+
+/** An item under today's name; today's names, and ones this build does not know, pass through. */
+export function migrateItem(item: string): string {
+  return OLD_ITEMS[item] ?? item
+}
 
 export function questFor(item: string): Quest | undefined {
   return QUESTS.find((quest) => quest.item === item)

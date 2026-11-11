@@ -1,4 +1,4 @@
-import { figureFor, type FigureChoice } from '../library/figures'
+import { figureFor, signFor, type FigureView } from '../library/figures'
 import type { Room, RoomTeam, Seat } from './studio'
 
 /** The colours a project's mark may take: the figures' own, so a mark never reads as a state. */
@@ -39,8 +39,13 @@ export function openNeedsYou(runId?: string): void {
 }
 
 /** The figure each agent wears, by its id in My agents (or its id in the team). */
-export type FigureOf = (seat: Pick<Seat, 'id' | 'agent'>) => FigureChoice
+export type FigureOf = (seat: Pick<Seat, 'id' | 'agent'> & { name?: string }) => FigureView
 
-export function defaultFigureOf(figures: ReadonlyMap<string, FigureChoice | undefined>): FigureOf {
-  return (seat) => figureFor(seat.agent ?? seat.id, seat.agent ? figures.get(seat.agent) : undefined)
+/** `figures`: My agents' figures as drawn (`jobFigure`), by id; a seat for a team's own agent takes
+    the sign its name suggests. */
+export function defaultFigureOf(figures: ReadonlyMap<string, FigureView | undefined>): FigureOf {
+  return (seat) => {
+    const saved = seat.agent ? figures.get(seat.agent) : undefined
+    return { ...figureFor(seat.agent ?? seat.id, saved), sign: saved?.sign ?? signFor({ name: seat.name ?? seat.id }) }
+  }
 }

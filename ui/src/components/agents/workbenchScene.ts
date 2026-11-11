@@ -32,19 +32,21 @@ import {
   type Material,
 } from 'three'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
+import { clone as cloneWithSkeleton } from 'three/addons/utils/SkeletonUtils.js'
 
 import { BUSY, BUSY_SECONDS, CARD_SLOTS, FIGURE_KEYS, nextBusy, partOfNode, reactionsBetween, READ_SLOTS, TOOL_SLOTS, type BenchUse, type BusyKind, type FigureLook, type FigureMood, type FigurePart, type FigureReaction, type ReadSource, type WorkPhase } from '../../lib/library/figure'
-import { COLOR_HEX, FIGURE_KINDS, wornBy, type FigureChoice, type FigureKind } from '../../lib/library/figures'
+import { wornBy, type FigureKind, type FigureView } from '../../lib/library/figures'
+import { isGarment } from '../../lib/quests/catalog'
 import type { AllowSwitch } from '../../lib/team-file/types'
-import { dress, type Dressed } from './accessoryMeshes'
 import { cardTexture, keyLabelTexture, OBSIDIAN_PEGBOARD, pegboardTexture, toolTexture, woundTexture, type PegboardColors } from './benchTextures'
-import { benchMaterial, fitCanvas, LIVE, paintSkin, pileColor, readModel, readyToDraw, renewShadows } from './workbenchModel'
+import { SoftShading } from './softShading'
+import { benchMaterial, bendClothes, clearFace, coveredBy, coverPile, dressWear, garmentMesh, poseClothes, fitCanvas, furCoat, LIVE, paintSkin, readModel, readyToDraw, renewShadows, shineWithEyes, showPile, stripeHeights, velvetColor, weaveCloth } from './workbenchModel'
 
 /** Everything the bench shows, from the agent on screen and the run in its chat. */
 export interface BenchView {
   look: FigureLook
   /** The figure it wears: which head, and the colour of its skin. */
-  figure: FigureChoice
+  figure: FigureView
   does: string
   appName: string
   hasReply: boolean
@@ -146,6 +148,8 @@ export interface BenchOptions {
   clipboardOnBoard?: boolean
   /** The app's theme, which the bench's furniture follows (setTone). Left out, it stays dark. */
   tone?: BenchTone
+  /** Where each build's figure is (`<figures><build>.glb`): the app's own, or the landing page's copy. */
+  figures?: string
 }
 
 export type BenchTone = 'dark' | 'light'
@@ -185,12 +189,21 @@ export function paintFurniture(parts: BenchFurniture, tone: BenchTone, board: (t
 }
 
 /**
- * Where the clipboard hangs on the pegboard, in the pegboard's own space: in the middle, above
- * the figure's head, between the key hooks on its left (where keys you hand over hang) and the
- * skill cards on its right. Its origin is the clipboard's bottom edge; it is drawn this much
- * smaller than on the bench.
+ * Where the clipboard hangs on the pegboard, in the pegboard's own space: left of the middle,
+ * between the key hooks on its left (where keys you hand over hang, out to about -0.48) and the
+ * job sign on the figure's head (from about -0.18 on every build); the skill cards are on the right.
+ * In the middle, the sign stood in front of it. Its origin is the clipboard's bottom edge; it is
+ * drawn this much smaller than on the bench.
  */
-const CLIPBOARD_ON_BOARD = { x: 0, y: 0.1, z: 0.03, size: 0.66 }
+export const CLIPBOARD_ON_BOARD = { x: -0.33, y: 0.1, z: 0.03, size: 0.66 }
+
+/**
+ * Where the coffee a figure wears stands on the bench, in the bench's own space: on the desk top, at
+ * the front between your dish and the laptop. Held in a paw it was hidden, as the paws rest behind the
+ * laptop's plaque at the desk. Measured on the bench: the dish reaches x -0.64, the laptop starts at
+ * -0.15, the helpers' laptops come forward to z -0.03, and the desk's front edge is z 0.36.
+ */
+export const COFFEE_ON_DESK = { x: -0.36, y: 0.62, z: 0.16 }
 
 export interface BenchCallbacks {
   onPart: (part: FigurePart) => void
@@ -249,8 +262,68 @@ const HEAD_NOD = 0.24
 
 /** The figure's pose, as offsets the frame eases toward. Arms at rest reach out to the laptop. */
 const REST = { bodyY: 0, bodyRX: 0, bodyRY: 0, neckRX: 0, neckRZ: 0, lookX: 0, lookY: -0.3, armLRX: -1.42, armLRZ: -0.05, armRRX: -1.42, armRRZ: 0.05, scale: 1, band: 0, screen: 0.12, typing: 0, hands: 0, click: 0 }
-type Pose = typeof REST
+export type Pose = typeof REST
 type Channel = keyof Pose
+
+/**
+ * The poses of what it is doing at the bench, as its stills have them (step 5), each held, never
+ * looped (the review's motion rules). A question for you: one paw up, held, where it used to wave.
+ */
+export function questionPose(target: Pose) {
+  target.armRRX = -0.25
+  target.armRRZ = -2.6
+  target.hands = -0.3
+}
+
+/**
+ * Failed's arms: tipped this far forward and swung this far out, so its paws rest on the bench at its
+ * sides, off the keys. Hanging down or a little forward (-0.55, 0.05), the stubby arms lay inside the
+ * round body, paws and all, and it looked armless; hanging at its sides, the bench hid its paws.
+ */
+export const FAILED_ARMS = { x: -1.1, out: 0.5 }
+
+/** Done: both paws up beside its head, held. Under reduced motion it is there at once (no easing). */
+export function donePose(target: Pose) {
+  target.armLRX = -0.3
+  target.armLRZ = 2.2
+  target.armRRX = -0.3
+  target.armRRZ = -2.2
+}
+
+/**
+ * Failed: its hands off the keys, its head dropped to one side, slumped (not crying). Its face stays
+ * over its collar, so the head leans aside rather than nodding: nodded (0.28), the eyes sank to the
+ * neckline and read as buttons, and a wide build's squat face went under its collar at 0.14. Its paws
+ * rest on the bench at its sides (FAILED_ARMS).
+ */
+export function failedPose(target: Pose) {
+  target.armLRX = FAILED_ARMS.x
+  target.armRRX = FAILED_ARMS.x
+  target.armLRZ = FAILED_ARMS.out
+  target.armRRZ = -FAILED_ARMS.out
+  target.neckRX = 0.03
+  target.neckRZ = -0.24
+  target.bodyRX = 0.04
+}
+
+/**
+ * Its face for each mood, as the stills' faces are: how open the eyes are (a blink closes them from
+ * there), how far the brows lift (in the head's units), how far they tilt (raising their inner ends:
+ * worry; lowering them: focus) and how wide the mouth is. Done shuts its eyes in a smile.
+ */
+export interface Face { open: number; lift: number; tilt: number; mouth: number }
+const RESTING_FACE: Face = { open: 1, lift: 0, tilt: 0, mouth: 1 }
+const FOCUSED_FACE: Face = { open: 0.72, lift: -0.008, tilt: -0.14, mouth: 0.85 }
+export const MOOD_FACES: Record<FigureMood, Face> = {
+  still: RESTING_FACE,
+  starting: RESTING_FACE,
+  stopped: RESTING_FACE,
+  working: FOCUSED_FACE,
+  quiet: FOCUSED_FACE,
+  asking: { open: 1, lift: 0.014, tilt: 0.1, mouth: 0.9 },
+  done: { open: 0.22, lift: 0.01, tilt: 0.08, mouth: 1.3 },
+  failed: { open: 0.62, lift: 0.004, tilt: 0.28, mouth: 0.75 },
+}
 
 interface Action { kind: string; start: number; duration: number; side?: number }
 /** What it does now while it works, and what it does next once that is decided. */
@@ -420,17 +493,32 @@ function posed(rig: Rig, p: Pose, t: number, motion: number) {
   rig.head.scale.setScalar(p.scale)
   rig.armL.rotation.set(p.armLRX, 0, p.armLRZ)
   rig.armR.rotation.set(p.armRRX, 0, p.armRRZ)
+  // Its clothes settle as they would with its arms so (poseClothes).
+  poseClothes(rig.body)
   for (const [hand, phase, right] of [[rig.handL, 0, false], [rig.handR, 1.9, true]] as const) {
     const tap = Math.max(0, Math.sin(t * 11 + phase)) ** 3
     hand.rotation.x = p.hands + p.typing * 0.35 * tap * motion + (right ? p.click * 0.45 : 0)
   }
 }
 
+/**
+ * Where a build's brows and mouth rest, for its face to move from (MOOD_FACES): each brow's height and
+ * turn, and which side it is on, so a tilt raises both inner ends together; the mouth's width.
+ */
+export function restOfFace(figure: Object3D) {
+  const brows = (['l', 'r'] as const).flatMap((side) => {
+    const node = figure.getObjectByName(`brow_${side}`)
+    return node ? [{ node, y: node.position.y, z: node.rotation.z, side: side === 'l' ? 1 : -1 }] : []
+  })
+  const mouth = figure.getObjectByName('mouth')
+  return { brows, mouth: mouth ? { node: mouth, x: mouth.scale.x } : null }
+}
+
 /** Shut `eyes` for a blink when it is time, and say when the next one is. */
-function blinked(eyes: readonly Object3D[], now: number, next: number): number {
+function blinked(eyes: readonly Object3D[], now: number, next: number, open = 1): number {
   const since = now - next
   const shut = since < 0 ? 1 : since < 0.14 ? 0.12 + 0.88 * Math.abs(since / 0.07 - 1) : 1
-  for (const eye of eyes) eye.scale.y = shut
+  for (const eye of eyes) eye.scale.y = shut * open
   return since >= 0.14 ? now + 2.6 + ((now * 7.13) % 3.4) : next
 }
 
@@ -587,6 +675,8 @@ function actOut(phase: WorkPhase, acting: Acting, target: Pose, t: number, { red
  */
 export class WorkbenchScene {
   private readonly renderer: WebGLRenderer
+  /** Its soft shade (SoftShading), made with the first frame it draws. */
+  private shading: SoftShading | null = null
   private readonly scene = new Scene()
   private readonly camera = new PerspectiveCamera(24, 1, 0.1, 40)
   private readonly callbacks: BenchCallbacks
@@ -626,6 +716,9 @@ export class WorkbenchScene {
   private actions: Action[] = []
   private tweens: Tween[] = []
   private pose: Pose = { ...REST }
+  /** Its face as it eases toward its mood's (MOOD_FACES), and its brows' and mouth's rest, per build. */
+  private face: Face = { ...RESTING_FACE }
+  private faceRest: { brows: { node: Object3D; y: number; z: number; side: number }[]; mouth: { node: Object3D; x: number } | null } | null = null
   private nextFidget = 7
   private nextBlink = 2.5
   private now = 0
@@ -639,6 +732,7 @@ export class WorkbenchScene {
   private readonly acting: Acting = { busy: null, flash: 0, nextFlash: 0 }
   /** The parts of its figure its pose moves, once the model is in. */
   private rig: Rig | null = null
+  private disposed = false
   /** The helpers at the bench, by id (ADR 0079), and the figure they were copied from. */
   private readonly seats = new Map<string, Seat>()
   private seatedAs = ''
@@ -649,13 +743,18 @@ export class WorkbenchScene {
   private readonly seenUses = new Set<string>()
   private trip: Trip | null = null
   private readonly figureHome = new Vector3()
+  /** The coffee its figure wears, set down on the desk (COFFEE_ON_DESK) out of its paw. */
+  private cupOnDesk: Mesh | null = null
   private wound: Texture | null = null
   /** Each head it can wear, and every eye (they blink together; only the worn head's show). */
-  private readonly heads = new Map<FigureKind, Object3D>()
+  /** Each build's figure as loaded (public/agent/figure/<build>.glb), kept for the next time it is worn. */
+  private readonly builds = new Map<FigureKind, Promise<Object3D>>()
+  /** The build the figure is now, and the one being put on. */
+  private build: FigureKind | null = null
+  private building: FigureKind | null = null
   private readonly eyes: Object3D[] = []
   private drawn = { figure: '' }
   /** What it wears from the wardrobe (docs/QUESTS.md), fitted to the head it wears now. */
-  private dressed: Dressed | null = null
 
   private readonly options: BenchOptions
   private tone: BenchTone
@@ -734,7 +833,8 @@ export class WorkbenchScene {
       this.pickables.push(object)
       this.disposables.push(object.geometry)
     })
-    for (const kind of FIGURE_KINDS) this.heads.set(kind, this.node(`head_${kind}`))
+    // The figure in workbench.glb is the old one, never shown: the figure is the build it wears (showBuild).
+    this.emptyFigure()
     for (const [face, name] of Object.entries(FACE_MESH) as [BenchFace, string][]) this.faceCorners.set(face, corners(this.node(name) as Mesh))
     this.scene.add(model)
     if (this.options.clipboardOnBoard) this.hangClipboard()
@@ -750,8 +850,7 @@ export class WorkbenchScene {
     }
     this.lights()
     this.figureHome.copy(this.node('figure').position)
-    this.rig = rigOf(this.node('figure'))
-    this.node('head').add(this.thoughtMark)
+    await this.showBuild(this.view?.figure.kind ?? 'tall')
     this.placeThought()
     // Every shader it draws with, the hidden parts' too, compiled before its first frame (readyToDraw).
     await readyToDraw(this.renderer, this.scene, this.camera)
@@ -809,6 +908,10 @@ export class WorkbenchScene {
 
   resize(width: number, height: number) {
     const size = fitCanvas(this.renderer, width, height)
+    if (this.shading) {
+      const drawn = this.renderer.getDrawingBufferSize(new Vector2())
+      this.shading.setSize(drawn.x, drawn.y)
+    }
     this.width = size.width
     this.height = size.height
     this.camera.aspect = this.width / this.height
@@ -832,10 +935,11 @@ export class WorkbenchScene {
 
   dispose() {
     this.stop()
+    this.disposed = true
     this.scene.traverse((object) => { if (object instanceof Mesh) (object.material as Material).dispose() })
-    this.dressed?.undress()
     for (const item of this.disposables) item.dispose()
     this.scene.environment?.dispose()
+    this.shading?.dispose()
     this.renderer.dispose()
   }
 
@@ -910,7 +1014,7 @@ export class WorkbenchScene {
 
   private apply(before: BenchView | null, view: BenchView) {
     const { look } = view
-    const figureKey = `${view.figure.kind}/${view.figure.color}/${wornBy(view.figure).join()}`
+    const figureKey = `${view.figure.kind}/${view.figure.color}/${view.figure.sign ?? ''}/${wornBy(view.figure).join()}`
     if (this.drawn.figure !== figureKey) {
       this.drawn.figure = figureKey
       this.wear(view.figure)
@@ -951,23 +1055,167 @@ export class WorkbenchScene {
     }
   }
 
-  /** Show the head it wears, hide the others, and colour its skin. */
-  private wear(figure: FigureChoice) {
-    for (const [kind, head] of this.heads) head.visible = kind === figure.kind
-    const skin = pileColor(COLOR_HEX[figure.color])
+  /**
+   * Dress the figure as `figure`: its build (put on first if it is another, showBuild), its colour on
+   * every velvet part, the sign its job puts on its head, and what it wears from the wardrobe. Each
+   * build's file holds every sign and every piece, hidden; this shows the ones it wears.
+   */
+  private wear(figure: FigureView) {
+    if (figure.kind !== this.build) {
+      void this.showBuild(figure.kind)
+      return
+    }
+    const skin = velvetColor(figure.color)
     for (const mesh of [...this.meshes('skin'), ...this.meshes('skin_wound')]) paintSkin(mesh.material as Material, skin)
     const deep = skin.clone().multiplyScalar(0.86)
     for (const mesh of this.meshes('skin_deep')) paintSkin(mesh.material as Material, deep)
-    this.dress(figure)
+    const sign = `sign_${figure.sign ?? 'curl'}`
+    const worn = new Set<string>(wornBy(figure))
+    this.node('figure').traverse((object) => {
+      if (object.name.startsWith('sign_')) object.visible = object.name === sign
+      const piece = /^wear_([a-z_]+?)(_sleeve)?(_[lr])?(_pose_[a-z]+)?$/.exec(object.name)
+      if (piece) {
+        object.visible = worn.has(piece[1])
+        // A garment made for each pose shows the one nearest its arms (poseClothes).
+        if (piece[4]) object.userData.worn = object.visible
+      }
+    })
+    showPile(this.node('figure'), coveredBy(worn))
+    const garment = [...worn].find(isGarment)
+    coverPile(this.node('figure'), garment ? garmentMesh(this.node('figure'), garment) : null)
+    poseClothes(this.node('figure'))
+    this.setCupDown(worn.has('coffee'))
     this.placeThought()
   }
 
-  /** Put on what it wears from the wardrobe, fitted to the head it wears (accessoryMeshes.ts). */
-  private dress(figure: FigureChoice) {
-    this.dressed?.undress()
-    this.dressed = null
-    const wear = wornBy(figure)
-    if (wear.length > 0) this.dressed = dress(this.node('figure'), figure.kind, wear)
+  /**
+   * The coffee it wears stands on the desk, not in its paw (COFFEE_ON_DESK): upright, turned as the
+   * figure faces, its base on the desk top. Not worn, it is hidden there.
+   */
+  private setCupDown(worn: boolean) {
+    const bench = this.nodes.get('bench')
+    if (!this.cupOnDesk) {
+      const held = this.node('figure').getObjectByName('wear_coffee')
+      if (!bench || !(held instanceof Mesh)) return
+      held.updateWorldMatrix(true, false)
+      bench.updateWorldMatrix(true, false)
+      bench.attach(held)
+      const facing = this.node('figure').getWorldQuaternion(new Quaternion())
+      held.quaternion.copy(bench.getWorldQuaternion(new Quaternion()).invert().multiply(facing))
+      held.geometry.computeBoundingBox()
+      const box = held.geometry.boundingBox as Box3
+      const base = new Vector3((box.min.x + box.max.x) / 2, box.min.y, (box.min.z + box.max.z) / 2).multiply(held.scale).applyQuaternion(held.quaternion)
+      held.position.set(COFFEE_ON_DESK.x, COFFEE_ON_DESK.y, COFFEE_ON_DESK.z).sub(base)
+      this.cupOnDesk = held
+    }
+    this.cupOnDesk.visible = worn
+  }
+
+  /** Its brows and mouth for its face (this.face): lifted and tilted from their rest, the mouth widened. */
+  private showFace() {
+    const rest = this.faceRest
+    if (!rest) return
+    for (const brow of rest.brows) {
+      brow.node.position.y = brow.y + this.face.lift
+      brow.node.rotation.z = brow.z + brow.side * this.face.tilt
+    }
+    if (rest.mouth) rest.mouth.node.scale.x = rest.mouth.x * this.face.mouth
+  }
+
+  /** Take every part out of the figure, and out of what the bench picks and paints. */
+  private emptyFigure() {
+    const figure = this.node('figure')
+    const gone = new Set<Object3D>()
+    // The coffee it set down on the desk is the figure's too.
+    if (this.cupOnDesk) {
+      gone.add(this.cupOnDesk)
+      this.cupOnDesk.removeFromParent()
+      this.cupOnDesk = null
+    }
+    for (const child of [...figure.children]) {
+      child.traverse((object) => gone.add(object))
+      figure.remove(child)
+    }
+    for (const object of gone) {
+      if (object.name && this.nodes.get(object.name) === object) this.nodes.delete(object.name)
+      if (object instanceof Mesh) {
+        this.roles.delete(object)
+        this.parts.delete(object)
+        const at = this.pickables.indexOf(object)
+        if (at >= 0) this.pickables.splice(at, 1)
+      }
+    }
+    for (let at = this.eyes.length - 1; at >= 0; at -= 1) if (gone.has(this.eyes[at])) this.eyes.splice(at, 1)
+    this.faceRest = null
+  }
+
+  /** Put on build `kind`: its parts in place of the figure's, posed by the same names (rigOf). */
+  private async showBuild(kind: FigureKind) {
+    if (this.building === kind) return
+    this.building = kind
+    let made = this.builds.get(kind)
+    if (!made) {
+      made = this.loadBuild(kind)
+      this.builds.set(kind, made)
+    }
+    const template = await made
+    if (this.building !== kind || this.disposed) return
+    this.emptyFigure()
+    const figure = this.node('figure')
+    for (const child of [...template.clone(true).children]) figure.add(child)
+    // Its clothes bend with its arms (bendClothes), on this copy's own pivots.
+    bendClothes(figure)
+    figure.traverse((object) => {
+      if (object === figure) return
+      if (object.name) this.nodes.set(object.name, object)
+      if (/_eye_[lr]$/.test(object.name)) this.eyes.push(object)
+      if (!(object instanceof Mesh)) return
+      // A clone shares its template's material: each worn figure paints its own. A copy leaves the
+      // stripes' shader behind, so they are drawn again.
+      object.material = (object.material as Material).clone()
+      if ((object.material as Material).name.startsWith('wear_')) weaveCloth(object.material as MeshPhysicalMaterial, !!object.geometry.getAttribute('stripeAt'))
+      this.roles.set(object, (object.material as Material).name)
+      this.pickables.push(object)
+    })
+    // Its velvet pile, on every velvet part (furCoat). The pile never moves, so reduced motion keeps it.
+    for (const [mesh, role] of this.roles) {
+      if (role !== 'skin' || !this.node('figure').getObjectById(mesh.id)) continue
+      for (const coat of furCoat(mesh)) this.disposables.push(coat.material as Material)
+    }
+    this.rig = rigOf(figure)
+    // Short pile round its face's features, so they sit clear on the velvet (clearFace).
+    clearFace(figure)
+    this.faceRest = restOfFace(figure)
+    this.node('head').add(this.thoughtMark)
+    this.build = kind
+    this.building = null
+    if (this.view) this.wear(this.view.figure)
+  }
+
+  /** A build's figure from its file, in the bench's materials, by the role Blender named each. */
+  private async loadBuild(kind: FigureKind): Promise<Object3D> {
+    const gltf = await readModel(`${this.options.figures ?? '/agent/figure/'}${kind}.glb`)
+    const figure = gltf.scene.getObjectByName('figure')
+    if (!figure) throw new Error(`The ${kind} figure has no “figure”.`)
+    shineWithEyes(figure)
+    figure.traverse((object) => {
+      if (!(object instanceof Mesh)) return
+      const role = (object.material as Material).name
+      const from = object.material as Material
+      if (role.startsWith('wear_')) {
+        // In cloth, leather or pearl, as it is (wearMaterial), its stripes drawn sharp.
+        stripeHeights(object, figure)
+        object.material = dressWear(object)
+      } else object.material = this.material(role, object.name)
+      from.dispose()
+      ;(object.material as Material).name = role
+      const decal = role === 'glint' || role === 'freckle'
+      object.castShadow = !decal
+      object.receiveShadow = !decal
+      if (object.name.startsWith('sign_') || object.name.startsWith('wear_')) object.visible = false
+      this.disposables.push(object.geometry, object.material as Material)
+    })
+    return figure
   }
 
   private paint(name: string, made: Texture) {
@@ -1310,10 +1558,17 @@ export class WorkbenchScene {
     return this.now - Math.max(this.movedAt, this.moodSince) >= SETTLE_S
   }
 
+  /** Whether `object` is part of a figure, the agent's or a helper's (SoftShading shades those). */
+  private isFigure(object: Object3D): boolean {
+    for (let at: Object3D | null = object; at; at = at.parent) if (at.name === 'figure' || at.name.startsWith('helper_')) return true
+    return false
+  }
+
   private frame() {
     // Nothing shows until it has loaded, and a frame drawn while its shaders compile would wait for them.
     if (!this.loaded) return
-    this.renderer.render(this.scene, this.camera)
+    this.shading ??= new SoftShading(this.renderer, this.scene, this.camera, (mesh) => this.isFigure(mesh))
+    this.shading.render()
     this.callbacks.onFrame(this.anchors(), this.facesOnScreen())
   }
 
@@ -1357,23 +1612,18 @@ export class WorkbenchScene {
           target.armRRZ = -0.7
           look = glance ? 'viewer' : this.node(`dish_${KEY_NODE[view.asked]}`).getWorldPosition(new Vector3())
         } else {
-          // It has a question for you: a hand up, looking at you.
-          target.armRRX = -0.25
-          target.armRRZ = -2.6 + 0.24 * Math.sin(t * 8) * motion
-          target.hands = -0.3
-          target.bodyY = 0.01 * Math.abs(Math.sin(t * 3.4)) * motion
+          // It has a question for you: a paw up, held, looking at you (it used to wave, a loop).
+          questionPose(target)
           look = 'viewer'
         }
         break
       case 'done':
+        donePose(target)
         look = 'viewer'
         break
       case 'failed':
-        // The run stopped with a problem: its hands come off the keys, and it looks at the screen.
-        target.armLRX = -0.55
-        target.armRRX = -0.55
-        target.armLRZ = 0.05
-        target.armRRZ = -0.05
+        // The run stopped with a problem: its hands come off the keys, it slumps, and it looks at the screen.
+        failedPose(target)
         target.lookY = -0.6
         look = screenPoint()
         break
@@ -1500,7 +1750,12 @@ export class WorkbenchScene {
 
     const p = this.pose
     posed(rig, p, t, motion)
-    if (!this.reduced) this.nextBlink = blinked(this.eyes, this.now, this.nextBlink)
+    // Its face for the mood, eased as the pose is.
+    const face = MOOD_FACES[view.mood]
+    for (const key of Object.keys(face) as (keyof Face)[]) this.face[key] += (face[key] - this.face[key]) * ease
+    this.showFace()
+    if (!this.reduced) this.nextBlink = blinked(this.eyes, this.now, this.nextBlink, this.face.open)
+    else for (const eye of this.eyes) eye.scale.y = this.face.open
 
     const light = this.node('laptop_light') as Mesh
     const band = light.material as MeshStandardMaterial
@@ -1600,10 +1855,12 @@ export class WorkbenchScene {
         target.bodyY += 0.02 * bump((t - (seat.finished ?? t)) * 1.4) * motion
         look = this.rig?.head.getWorldPosition(new Vector3()) ?? 'viewer'
       } else {
-        // It couldn't finish: its hands come off the keys, and it looks at its screen.
+        // It couldn't finish: its hands come off the keys to its sides, and it looks at its screen.
         seat.acting.busy = null
-        target.armLRX = -0.55
-        target.armRRX = -0.55
+        target.armLRX = FAILED_ARMS.x
+        target.armRRX = FAILED_ARMS.x
+        target.armLRZ = FAILED_ARMS.out
+        target.armRRZ = -FAILED_ARMS.out
         target.lookY = -0.6
         target.screen = 0.2
       }
@@ -1628,7 +1885,8 @@ export class WorkbenchScene {
     const laptopNode = this.node('laptop')
     const laptop = laptopNode.clone(true)
     laptop.position.set(0, 0, 0)
-    const figure = this.node('figure').clone(true)
+    // A skeleton-aware copy: a plain one leaves the copy's clothes on the figure's own arms.
+    const figure = cloneWithSkeleton(this.node('figure'))
     figure.position.copy(this.figureHome).sub(laptopNode.position)
     figure.rotation.set(0, 0, 0)
     const group = new Group()

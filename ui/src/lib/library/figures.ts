@@ -1,21 +1,28 @@
-import { ACCESSORIES, isAccessory, isGarment, type Accessory, type EarnedFigure } from '../quests/catalog'
+import { ACCESSORIES, isAccessory, isGarment, migrateItem, type Accessory, type EarnedFigure, type Garment } from '../quests/catalog'
 import { hashId } from '../story/mark'
 import type { AgentConfig } from '../team-file/types'
+import { guessIcon, ROLE_ICON_IDS, type RoleIcon } from './roleIcons'
+import { COLOR_HEX } from './figureHex'
+import { SIGN_TINT } from './signTints'
 
 /**
- * The figures an agent wears in Your agents: a sewing-box crew, so you can tell your agents apart
- * at a glance. Each is a big head on a small sitting body (ui/blender/workbench.py models them, and
- * the backend's jobs.rs accepts the same names). The figure is only how the agent looks here: a
- * team never copies it, so choosing one never makes a new version.
+ * The figures an agent wears in Your agents: a fluffy velvet figure in one of six builds and one of
+ * six colours, so you can tell your agents apart at a glance. The figure is only how the agent looks
+ * here: a team never copies it, so choosing one never makes a new version. The backend's figures.rs
+ * is the twin: it accepts the same names and maps the same old ones (`migrateFigure`).
  */
-export const STARTER_KINDS = ['yarn', 'spool', 'button', 'thimble', 'pincushion', 'cone'] as const
-/** Every figure: the starters anyone can choose, then the ones quests earn (lib/quests). Only the
-    starters are ever picked for an agent, so an agent nobody dressed keeps the figure it had. */
-export const FIGURE_KINDS = [...STARTER_KINDS, 'scissors', 'bobbin'] as const satisfies readonly (string | EarnedFigure)[]
+/** The six builds, in the order an agent nobody dressed is given one: each sits where the old sewing
+    figure of the same shape sat (yarn, spool, button, thimble, pincushion, cone), so it keeps its look. */
+export const BUILDS = ['chubby', 'tall', 'wide', 'little', 'egg', 'slim'] as const
+/** Every build anyone can choose: a figure is a build, in a colour. */
+export const FIGURE_KINDS = BUILDS
 export type FigureKind = (typeof FIGURE_KINDS)[number]
 
-/** Soft and quiet, and never one of the app's status colours: blue runs, gold is you, red is trouble. */
-export const FIGURE_COLORS = ['clay', 'butter', 'sage', 'sky', 'lilac', 'rose', 'oat'] as const
+/** Soft and rich, and never one of the app's status colours: green ready, blue runs, gold is you, red is trouble. */
+export const STARTER_COLORS = ['clay', 'sage', 'sky', 'lilac', 'rose', 'orchid'] as const
+/** Every colour: the starters anyone can choose, then the finishes quests earn (lib/quests), which any
+    build can be once earned. */
+export const FIGURE_COLORS = [...STARTER_COLORS, 'plum', 'sunset'] as const satisfies readonly (string | EarnedFigure)[]
 export type FigureColor = (typeof FIGURE_COLORS)[number]
 
 export interface FigureChoice {
@@ -25,29 +32,81 @@ export interface FigureChoice {
   wear?: Accessory[]
 }
 
+/**
+ * The job sign on a figure's head: the app's own symbol for the agent's job (`ROLE_ICONS`), so one
+ * job has one symbol wherever it shows; a plain curl for an agent with no job's icon. It comes from
+ * the agent, never from the figure a person picks.
+ */
+export type Sign = RoleIcon | 'curl'
+export const SIGNS: readonly Sign[] = [...ROLE_ICON_IDS, 'curl']
+
+/** A figure as it is drawn: what was chosen, and the sign its agent's job puts on its head. Only for
+    drawing: a saved figure never holds a sign (the backend refuses one). */
+export type FigureView = FigureChoice & { sign?: Sign }
+
+/**
+ * What a figure is doing, as its still shows it (step 5): a pose and a face of its own for each.
+ * Ready stands with its paws together; working leans into its work, paws forward at shoulder height;
+ * waiting raises a paw and holds it; done lifts both, eyes closed in a smile; failed slumps. Thinking
+ * shows as working at the sizes stills are drawn.
+ */
+export type FigureState = 'ready' | 'working' | 'waiting' | 'done' | 'failed'
+export const FIGURE_STATES: readonly FigureState[] = ['ready', 'working', 'waiting', 'done', 'failed']
+
+/**
+ * A still's state from the words the app already says a figure's state in: a presence or work state
+ * (working, waiting, failed), a chat face's (idle, away: ready), an island moment (work, ask, done,
+ * fail) or a glow. Anything else is ready.
+ */
+export function stateOf(word?: string | null): FigureState {
+  switch (word) {
+    case 'working': case 'work': case 'busy': return 'working'
+    case 'waiting': case 'ask': return 'waiting'
+    case 'done': return 'done'
+    case 'failed': case 'fail': return 'failed'
+    default: return 'ready'
+  }
+}
+
+/** How a state's still is named after ready's: ready's has the plain name. */
+export function posed(state: FigureState = 'ready'): string {
+  return state === 'ready' ? '' : `-${state}`
+}
+
+/** The sign for an agent: its saved job's icon, else the one its name and instructions suggest (as a
+    save picks one, `guessIcon`), else a plain curl. */
+export function signFor(agent: { icon?: string | null; name?: string; instructions?: string; role?: string }): Sign {
+  if (agent.icon && (ROLE_ICON_IDS as readonly string[]).includes(agent.icon)) return agent.icon as RoleIcon
+  return guessIcon(agent.name ?? '', agent.instructions ?? agent.role ?? '') ?? 'curl'
+}
+
+/** A saved agent's figure as it is drawn, with its job's sign. */
+export function jobFigure(job: { id: string; figure?: FigureChoice | null; icon?: string | null; name?: string; instructions?: string }): FigureView {
+  return { ...figureFor(job.id, job.figure), sign: signFor(job) }
+}
+
 export const FIGURE_NAMES: Record<FigureKind, string> = {
-  yarn: 'Yarn ball',
-  spool: 'Spool',
-  button: 'Button',
-  thimble: 'Thimble',
-  pincushion: 'Pincushion',
-  cone: 'Thread cone',
-  scissors: 'Scissors',
-  bobbin: 'Bobbin',
+  chubby: 'Round',
+  tall: 'Tall',
+  wide: 'Wide',
+  little: 'Small',
+  egg: 'Square',
+  slim: 'Slim',
 }
 
 export const COLOR_NAMES: Record<FigureColor, string> = {
   clay: 'Clay',
-  butter: 'Butter',
   sage: 'Sage',
   sky: 'Sky',
   lilac: 'Lilac',
   rose: 'Rose',
-  oat: 'Oat',
+  orchid: 'Orchid',
+  plum: 'Plum',
+  sunset: 'Sunset',
 }
 
 /**
- * The chat colour an agent wears (`.hue-N` in loom.css): its figure's colour, 1 to 7, so its name,
+ * The chat colour an agent wears (`.hue-N` in loom.css): its figure's colour, 1 to 8, so its name,
  * its avatar's disc and its figure agree. 0 is you.
  */
 export function figureHue(figure: FigureChoice): number {
@@ -57,15 +116,37 @@ export function figureHue(figure: FigureChoice): number {
 /** How many agent colours there are: one per figure colour. */
 export const FIGURE_HUES = FIGURE_COLORS.length
 
-/** The skin colours, the same as the model's (workbench.py PALETTE). */
-export const COLOR_HEX: Record<FigureColor, string> = {
-  clay: '#E3A386',
-  butter: '#F1D488',
-  sage: '#9FBF9E',
-  sky: '#9EC3E6',
-  lilac: '#BDB0E6',
-  rose: '#EBB3C0',
-  oat: '#E8DFCF',
+export { COLOR_HEX }
+
+/** A colour's swatch in the picker: sunset is a gradient, as the figure is. */
+export function colorSwatch(color: FigureColor): string {
+  return color === 'sunset' ? 'linear-gradient(to top, #A8446A, #9C3D86 55%, #6B3A9E)' : COLOR_HEX[color]
+}
+
+/** The sewing figures an earlier LoomWatch drew, each the build of the same shape now; the two that
+    were earned are that build in the finish earned now. */
+const OLD_KINDS: Record<string, readonly [FigureKind, FigureColor?]> = {
+  yarn: ['chubby'],
+  spool: ['tall'],
+  button: ['wide'],
+  thimble: ['little'],
+  pincushion: ['egg'],
+  cone: ['slim'],
+  scissors: ['slim', 'plum'],
+  bobbin: ['tall', 'sunset'],
+}
+/** Retired colours: butter rendered as cream, too close to another company's figure; oat with it. */
+const OLD_COLORS: Record<string, FigureColor> = { butter: 'clay', oat: 'orchid' }
+
+/** A figure under today's names, so an agent saved by an earlier LoomWatch keeps its look. Today's
+    names, and names this build does not know, pass through for `isFigureChoice` to judge. */
+export function migrateFigure(value: unknown): unknown {
+  if (!value || typeof value !== 'object') return value
+  const { kind, color, wear } = value as Record<string, unknown>
+  const old = typeof kind === 'string' ? OLD_KINDS[kind] : undefined
+  const nextColor = old?.[1] ?? (typeof color === 'string' ? (OLD_COLORS[color] ?? color) : color)
+  const nextWear = Array.isArray(wear) ? wear.map((item) => (typeof item === 'string' ? migrateItem(item) : item)) : wear
+  return { ...(value as object), kind: old?.[0] ?? kind, color: nextColor, ...(wear === undefined ? {} : { wear: nextWear }) }
 }
 
 export function isFigureChoice(value: unknown): value is FigureChoice {
@@ -81,11 +162,16 @@ export function wornBy(figure: Pick<FigureChoice, 'wear'>): Accessory[] {
   return ACCESSORIES.filter((item) => worn.has(item) && (!isGarment(item) || item === clothes))
 }
 
-/** The figure an agent wears: the one chosen for it, or one picked from its id, the same every time. */
+/** The colours an agent nobody dressed is given: the old seven, renamed, so it keeps the colour it had. */
+const PICK_COLORS: readonly FigureColor[] = ['clay', 'clay', 'sage', 'sky', 'lilac', 'rose', 'orchid']
+
+/** The figure an agent wears: the one chosen for it (under today's names), or one picked from its id,
+    the same every time and the same as the backend's `figures::pick`. */
 export function figureFor(id: string, chosen?: FigureChoice | null): FigureChoice {
-  if (chosen && isFigureChoice(chosen)) return chosen
+  const today = migrateFigure(chosen)
+  if (today && isFigureChoice(today)) return today
   const seed = hashId(id)
-  return { kind: STARTER_KINDS[seed % STARTER_KINDS.length], color: FIGURE_COLORS[Math.floor(seed / STARTER_KINDS.length) % FIGURE_COLORS.length] }
+  return { kind: BUILDS[seed % BUILDS.length], color: PICK_COLORS[Math.floor(seed / BUILDS.length) % PICK_COLORS.length] }
 }
 
 /**
@@ -95,10 +181,10 @@ export function figureFor(id: string, chosen?: FigureChoice | null): FigureChoic
  * (`chatOf`, from `benchChatOwner`) is that agent on a team of one, written with no link, so its
  * agent wears the figure of the agent the chat is named for.
  */
-export function agentFigure(agent: Pick<AgentConfig, 'id' | 'from'>, saved: readonly { id: string; figure?: FigureChoice }[], chatOf: string | null = null): FigureChoice {
+export function agentFigure(agent: Pick<AgentConfig, 'id' | 'from'> & Partial<Pick<AgentConfig, 'name' | 'role'>>, saved: readonly { id: string; figure?: FigureChoice; icon?: string; name?: string; instructions?: string }[], chatOf: string | null = null): FigureView {
   const linked = agent.from?.agent ?? chatOf ?? undefined
   const job = linked ? saved.find((candidate) => candidate.id === linked) : undefined
-  return figureFor(linked ?? agent.id, job?.figure)
+  return { ...figureFor(linked ?? agent.id, job?.figure), sign: signFor(job ?? { name: agent.name ?? agent.id, role: agent.role }) }
 }
 
 /**
@@ -108,8 +194,8 @@ export function agentFigure(agent: Pick<AgentConfig, 'id' | 'from'>, saved: read
  */
 export function freshFigure(seed: string, worn: readonly FigureChoice[]): FigureChoice {
   const start = figureFor(seed)
-  const kinds = rotate<FigureKind>(STARTER_KINDS, STARTER_KINDS.indexOf(start.kind as (typeof STARTER_KINDS)[number]))
-  const colors = rotate(FIGURE_COLORS, FIGURE_COLORS.indexOf(start.color))
+  const kinds = rotate<FigureKind>(BUILDS, BUILDS.indexOf(start.kind))
+  const colors = rotate<FigureColor>(STARTER_COLORS, Math.max(0, STARTER_COLORS.indexOf(start.color as (typeof STARTER_COLORS)[number])))
   const count = (kind: FigureKind) => worn.filter((figure) => figure.kind === kind).length
   const byUse = [...kinds].sort((a, b) => count(a) - count(b))
   for (const kind of byUse) {
@@ -123,9 +209,38 @@ function rotate<T>(list: readonly T[], from: number): T[] {
   return [...list.slice(from), ...list.slice(0, from)]
 }
 
-/** Its portrait, rendered with the model (workbench.py `stills`): for cards and the picker. */
-export function figureStill(figure: FigureChoice): string {
-  return `/agent/figures/${figure.kind}-${figure.color}.webp`
+/**
+ * The 3D bench's model (workbench.glb) still carries the old sewing heads, until it is remade from
+ * the Blender figures. Until then each build shows the old head of
+ * the same shape there, and each item the old piece that rewarded the same quest.
+ */
+export const BENCH_HEAD: Record<FigureKind, string> = { chubby: 'yarn', tall: 'spool', wide: 'button', little: 'thimble', egg: 'pincushion', slim: 'cone' }
+export const BENCH_ITEM: Record<Accessory, string> = {
+  striped_top: 'tee', cardigan: 'overalls', black_dress: 'apron', trench_coat: 'vest', ballet_flats: 'cushion',
+  gloves: 'pin', coffee: 'band', collar: 'patch', silk_scarf: 'shuttle', beret: 'monocle', bow: 'chalk',
+}
+
+/** Its portrait, rendered in Blender, in its state's pose: for cards and the picker. */
+export function figureStill(figure: FigureChoice, state: FigureState = 'ready'): string {
+  return `/agent/figures/${figure.kind}-${figure.color}${posed(state)}.webp`
+}
+
+/** Where the figure shows when it wears `garment`, in that state, as an alpha mask the size of the
+    still: the bare still is drawn through it under the garment's layer, so its fur never stands round
+    clothes that would cover it. A garment is fabric settled on the figure by the figure pipeline. */
+export function garmentMask(kind: FigureKind, garment: Garment, state: FigureState = 'ready'): string {
+  return `/agent/masks/${kind}-${garment}${posed(state)}.webp`
+}
+
+/** Its job sign, drawn in a neutral grey to be tinted to the figure's colour (`signTint`), the size of
+    the still and laid over it. */
+export function signStill(kind: FigureKind, sign: Sign, state: FigureState = 'ready'): string {
+  return `/agent/signs/${kind}-${sign}${posed(state)}.webp`
+}
+
+/** The colour a sign is tinted to: the head's own colour, so the sign reads as the same velvet. */
+export function signTint(color: FigureColor): string {
+  return SIGN_TINT[color]
 }
 
 /** The figure in words, for its picture's alt text. */
