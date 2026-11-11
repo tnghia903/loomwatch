@@ -102,7 +102,8 @@ pub(crate) const WIDGETS: Block = Block::new(
      chart for figures to compare, a graph for figures over time, a scale for where a figure \
      stands among named ranges, such as whether a reading is normal, a timeline for things on \
      dates, a map for places to go, such as cafés near them, even when you also compare them, \
-     a picture for something to see \
+     a calendar for their bookings and free time on a day or a few, such as whether they are \
+     free on Saturday, a picture for something to see \
      (how a thing works or where its parts are), drawn by you, and one that plays when it \
      happens in steps or rounds, such as how a thing moves or a message passes through a \
      network, or when one thing changes another, a flow for one thing leading to the next when \

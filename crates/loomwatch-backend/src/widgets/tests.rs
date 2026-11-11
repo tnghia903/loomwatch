@@ -895,7 +895,7 @@ fn every_kind_the_tool_offers_has_its_place_in_the_guide() {
         .iter()
         .map(|kind| kind.as_str().unwrap())
         .collect();
-    assert_eq!(kinds.len(), 15);
+    assert_eq!(kinds.len(), 16);
     let guide = SHOW_WIDGET.default_text();
     let habit = crate::agent::prompt::WIDGETS.default_text();
     let kind_line = SHOW_WIDGET_KIND.default_text();

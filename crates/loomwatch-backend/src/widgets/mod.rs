@@ -6,17 +6,18 @@
 //! reply became the answer are kept with it ([`of_answer`], [`store`]); what the person ticks or
 //! changes is kept beside them, and the next run's conversation says so ([`showed`], [`changes`]).
 //!
-//! Fifteen kinds, drawn by the app (`ui/src/components/chat/widgets/`): choices the person taps to
+//! Sixteen kinds, drawn by the app (`ui/src/components/chat/widgets/`): choices the person taps to
 //! reply, a checklist they tick, a calculator whose results `LoomWatch` works out as they change its
 //! inputs ([`formula`]), a finder whose questions they answer to reach the outcome for their own
 //! case ([`finder`]), a quiz that checks they took in what was explained ([`quiz`]), steps they
 //! tap through, a picture whose numbered parts they step through, a map of places they open in a
-//! maps app ([`map`]), and seven to look at: a
+//! maps app ([`map`]), and eight to look at: a
 //! comparison of two or three things side by side (or the parts of one thing) with facts read
 //! across, a chart whose bars `LoomWatch` draws to scale from the figures the agent gives, a graph
 //! of bars or a line over labels, a scale of named ranges with figures pinned where they fall
-//! ([`scale`]), a timeline of events on their dates ([`timeline`]), a row of things marked yes or
-//! no, and a flow of boxes and arrows. Figures that count whole things (`counted`) are drawn as dots. A
+//! ([`scale`]), a timeline of events on their dates ([`timeline`]), a calendar of the person's
+//! bookings and free time ([`calendar`]), a row of things marked yes or no, and a flow of boxes and
+//! arrows. Figures that count whole things (`counted`) are drawn as dots. A
 //! picture is the one the agent draws (ADR 0117): `LoomWatch` keeps only the shapes of its SVG and
 //! draws them again in its own lines ([`picture`]), so nothing the agent writes is shown as
 //! markup. The tool's description tells it which kind fits which shape of answer
@@ -29,6 +30,7 @@
 //! widget belongs in its answer. When the run ends the line is taken out of the answer's words and
 //! the widget keeps the line it stood before ([`place`]), so the words read whole everywhere else.
 
+pub(crate) mod calendar;
 pub(crate) mod finder;
 pub(crate) mod formula;
 pub(crate) mod host;
@@ -157,6 +159,12 @@ pub(crate) mod limits {
     /// The farthest two places on one map may be apart: a city, a region or a road trip, and a
     /// place given on the wrong side of the world is caught.
     pub(crate) const MAP_SPREAD_KM: f64 = 2_000.0;
+    /// A calendar's days, its bookings and what each may say.
+    pub(crate) const DAYS: (usize, usize) = (1, 7);
+    pub(crate) const BOOKINGS: (usize, usize) = (0, 40);
+    pub(crate) const BOOKING_LABEL_CHARS: usize = 60;
+    pub(crate) const BOOKING_PLACE_CHARS: usize = 80;
+    pub(crate) const ZONE_CHARS: usize = 40;
 }
 
 /// One widget, as the agent asked for it and `LoomWatch` checked it.
@@ -315,6 +323,17 @@ pub(crate) enum Widget {
         places: Vec<map::Place>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         from: Option<map::Start>,
+    },
+    /// A day, or a few, of the person's calendar: each booking at its time and the free time
+    /// between them in the hours shown ([`calendar`]). To look at.
+    Calendar {
+        title: String,
+        days: Vec<String>,
+        bookings: Vec<calendar::Booking>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        hours: Option<calendar::Hours>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        zone: Option<String>,
     },
 }
 
@@ -492,7 +511,8 @@ impl Widget {
             | Self::Quiz { title, .. }
             | Self::Scale { title, .. }
             | Self::Timeline { title, .. }
-            | Self::Map { title, .. } => title,
+            | Self::Map { title, .. }
+            | Self::Calendar { title, .. } => title,
         }
     }
 
@@ -514,6 +534,7 @@ impl Widget {
             Self::Scale { .. } => "scale",
             Self::Timeline { .. } => "timeline",
             Self::Map { .. } => "map",
+            Self::Calendar { .. } => "calendar",
         }
     }
 
@@ -544,6 +565,7 @@ impl Widget {
             Self::Scale { .. } => "a scale",
             Self::Timeline { .. } => "a timeline",
             Self::Map { .. } => "a map",
+            Self::Calendar { .. } => "a calendar",
         };
         format!("{what} \"{}\"", self.title())
     }
@@ -632,10 +654,12 @@ pub(crate) fn read(arguments: &Value) -> Result<Widget, String> {
         "scale" => scale::read(arguments, title)?,
         "timeline" => timeline::read(arguments, title)?,
         "map" => map::read(arguments, title)?,
+        "calendar" => calendar::read(arguments, title)?,
         other => {
             return Err(format!(
                 "kind \"{other}\" isn't a widget: use compare, chart, graph, scale, timeline, \
-                 map, flow, steps, picture, calculator, checklist, finder, quiz, marks or choices"
+                 map, calendar, flow, steps, picture, calculator, checklist, finder, quiz, marks or \
+                 choices"
             ));
         }
     };
@@ -1365,6 +1389,8 @@ pub(crate) const SHOW_WIDGET: Block = Block::new(
      deadlines: timeline\n\
      - places the person may go to or where things are, such as cafés near them, a trip's stops \
      or where to stay: map\n\
+     - the person's bookings on a day or a few and the free time between them, such as whether \
+     they are free on Saturday or what their week looks like: calendar\n\
      - something to see, drawn by you: how a machine, a body or nature works, where a thing's \
      parts are, what happens in steps or rounds, such as how it moves or a message passing \
      through a network, or how one thing changes another, which play: picture\n\
@@ -1382,6 +1408,8 @@ pub(crate) const SHOW_WIDGET: Block = Block::new(
      wait for another answer. When things in order have dates, show a timeline, which spaces \
      them by the time between them, rather than a flow. When you name places to go, show them \
      on a map: a comparison of their hours or prices may stand beside it, never in its place. \
+     When you tell them what is booked or when they are free, show the days on a calendar, \
+     which marks the free time, rather than a timeline. \
      A flow's line says that one thing leads to the next, so two or three parts that sit side by \
      side, such as a shop's sales and support teams, are shown with compare, not flow. When what \
      you explain can be seen, such as how an engine or a lung works or how a tide moves, draw it \
@@ -1399,9 +1427,9 @@ pub(crate) const SHOW_WIDGET: Block = Block::new(
 /// `show_widget`'s `kind`.
 pub(crate) const SHOW_WIDGET_KIND: Block = Block::new(
     "bus.show_widget.kind",
-    "compare, chart, graph, scale, timeline, map, flow, steps, picture, calculator, checklist, \
-     finder, quiz, marks or choices, picked by the shape of what you are telling. Fill in only \
-     that kind's fields.",
+    "compare, chart, graph, scale, timeline, map, calendar, flow, steps, picture, calculator, \
+     checklist, finder, quiz, marks or choices, picked by the shape of what you are telling. Fill \
+     in only that kind's fields.",
 );
 
 /// A picture's `drawing` (ADR 0117).
@@ -1569,6 +1597,30 @@ pub(crate) const SHOW_WIDGET_FROM: Block = Block::new(
     "bus.show_widget.from",
     "map: where the person is or starts, when the places are near it, such as their office: its \
      name, lat and lng. LoomWatch tells you how far each place is from it.",
+);
+
+/// A calendar's `days` (ADR 0114, amended 11 November).
+pub(crate) const SHOW_WIDGET_DAYS: Block = Block::new(
+    "bus.show_widget.days",
+    "calendar: 1 to 7 days it shows, each written as 2026-11-14, a day with nothing booked too, \
+     such as the Saturday the person asks about. LoomWatch shows them in day order, side by side.",
+);
+
+/// A calendar's `bookings` (ADR 0114, amended 11 November).
+pub(crate) const SHOW_WIDGET_BOOKINGS: Block = Block::new(
+    "bus.show_widget.bookings",
+    "calendar: what is booked on those days, as you read it from the person's calendar, each its \
+     day, its start and end as 09:30, 24-hour in the person's time, a few words on what it is, and \
+     where. Leave out start and end for one that lasts all day; split one that runs past midnight \
+     into two days. LoomWatch draws each at its time and works out the free time between them, \
+     and tells you, so say the free time it gives you.",
+);
+
+/// A calendar's `hours` (ADR 0114, amended 11 November).
+pub(crate) const SHOW_WIDGET_HOURS: Block = Block::new(
+    "bus.show_widget.hours",
+    "calendar: the part of each day it shows and finds free time in, from and to as 07:00 and \
+     24:00, when the person asks about other hours than 08:00 to 22:00, such as their evening.",
 );
 
 /// A calculator result's `note`.
@@ -1776,6 +1828,43 @@ pub(crate) fn tool_definition() -> Value {
         "required": ["name", "lat", "lng"],
         "additionalProperties": false
     });
+    let days = json!({
+        "type": "array",
+        "description": SHOW_WIDGET_DAYS.text(),
+        "maxItems": limits::DAYS.1,
+        "items": {"type": "string", "description": "A day, such as 2026-11-14", "minLength": 10}
+    });
+    let bookings = json!({
+        "type": "array",
+        "description": SHOW_WIDGET_BOOKINGS.text(),
+        "maxItems": limits::BOOKINGS.1,
+        "items": {
+            "type": "object",
+            "properties": {
+                "day": {"type": "string", "description": "Its day, one of days, such as 2026-11-14", "minLength": 10},
+                "start": {"type": "string", "description": "When it starts, such as 09:30"},
+                "end": {"type": "string", "description": "When it ends, such as 11:00, or 24:00 for midnight"},
+                "label": {"type": "string", "description": "A few words: what it is", "minLength": 1},
+                "place": {"type": "string", "description": "Where it is, a few words"}
+            },
+            "required": ["day", "label"],
+            "additionalProperties": false
+        }
+    });
+    let hours = json!({
+        "type": "object",
+        "description": SHOW_WIDGET_HOURS.text(),
+        "properties": {
+            "from": {"type": "string", "description": "Such as 07:00"},
+            "to": {"type": "string", "description": "Such as 24:00"}
+        },
+        "required": ["from", "to"],
+        "additionalProperties": false
+    });
+    let zone = json!({
+        "type": "string",
+        "description": "calendar: the time its hours are in, a few words, such as Singapore time"
+    });
     let mut tool = json!({
         "name": TOOL,
         "description": SHOW_WIDGET.text(),
@@ -1785,7 +1874,7 @@ pub(crate) fn tool_definition() -> Value {
                 "kind": {
                     "type": "string",
                     "description": SHOW_WIDGET_KIND.text(),
-                    "enum": ["compare", "chart", "graph", "scale", "timeline", "map", "flow", "steps", "picture", "calculator", "checklist", "finder", "quiz", "marks", "choices"]
+                    "enum": ["compare", "chart", "graph", "scale", "timeline", "map", "calendar", "flow", "steps", "picture", "calculator", "checklist", "finder", "quiz", "marks", "choices"]
                 },
                 "title": {
                     "type": "string",
@@ -2051,6 +2140,10 @@ pub(crate) fn tool_definition() -> Value {
             ("events", events),
             ("places", places),
             ("from", from),
+            ("days", days),
+            ("bookings", bookings),
+            ("hours", hours),
+            ("zone", zone),
         ] {
             properties.insert(name.to_owned(), field);
         }
@@ -2098,6 +2191,15 @@ pub(crate) fn shown(widget: &Widget, place: u32) -> Value {
     }
     if let Widget::Map { places, from, .. } = widget {
         out["distances"] = json!(map::distances_line(places, from.as_ref()));
+    }
+    if let Widget::Calendar {
+        days,
+        bookings,
+        hours,
+        ..
+    } = widget
+    {
+        out["free"] = json!(calendar::line(days, bookings, hours.as_ref()));
     }
     out["next"] = json!(SHOW_WIDGET_SHOWN.text());
     out
@@ -2409,7 +2511,8 @@ pub(crate) fn read_state(widget: &Widget, state: &Value) -> Result<Value, String
         | Widget::Graph { .. }
         | Widget::Scale { .. }
         | Widget::Timeline { .. }
-        | Widget::Map { .. } => Err(format!("{} keep nothing", widget.kind())),
+        | Widget::Map { .. }
+        | Widget::Calendar { .. } => Err(format!("{} keep nothing", widget.kind())),
     }
 }
 
@@ -2511,7 +2614,8 @@ pub(crate) fn showed(widgets: &[Kept]) -> Option<String> {
             | Widget::Quiz { .. }
             | Widget::Scale { .. }
             | Widget::Timeline { .. }
-            | Widget::Map { .. } => {
+            | Widget::Map { .. }
+            | Widget::Calendar { .. } => {
                 format!("{} ({})", kept.spec.named(), in_brief(&kept.spec))
             }
         })
@@ -2519,9 +2623,9 @@ pub(crate) fn showed(widgets: &[Kept]) -> Option<String> {
     Some(format!("[Under this answer: {}.]", each.join("; ")))
 }
 
-/// A finder, a quiz, a scale, a timeline or a map in a few words, for the next run: its questions
-/// and outcomes, how many questions, its ranges and where each figure falls, its first events, or
-/// its places.
+/// A finder, a quiz, a scale, a timeline, a map or a calendar in a few words, for the next run: its
+/// questions and outcomes, how many questions, its ranges and where each figure falls, its first
+/// events, its places, or its days' bookings and free time.
 fn in_brief(widget: &Widget) -> String {
     match widget {
         Widget::Finder {
@@ -2548,6 +2652,12 @@ fn in_brief(widget: &Widget) -> String {
         ),
         Widget::Timeline { events, .. } => timeline::line(events),
         Widget::Map { places, from, .. } => map::line(places, from.as_ref()),
+        Widget::Calendar {
+            days,
+            bookings,
+            hours,
+            ..
+        } => calendar::line(days, bookings, hours.as_ref()),
         _ => String::new(),
     }
 }
@@ -2638,7 +2748,8 @@ fn change(widget: &Widget, state: &Value) -> Option<String> {
         | Widget::Graph { .. }
         | Widget::Scale { .. }
         | Widget::Timeline { .. }
-        | Widget::Map { .. } => None,
+        | Widget::Map { .. }
+        | Widget::Calendar { .. } => None,
     }
 }
 

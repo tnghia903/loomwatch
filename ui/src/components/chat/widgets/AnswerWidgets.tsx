@@ -4,6 +4,7 @@ import { useAppear } from '../../../lib/chat/appear'
 import type { KeptWidget, WidgetState } from '../../../lib/widgets/types'
 import { useFirstSight } from '../../../lib/widgets/useFirstSight'
 import { useHeldState } from '../../../lib/widgets/useHeldState'
+import { WidgetCalendar } from './WidgetCalendar'
 import { WidgetCalculator } from './WidgetCalculator'
 import { WidgetChart } from './WidgetChart'
 import { WidgetChecklist } from './WidgetChecklist'
@@ -54,7 +55,7 @@ export function AnswerWidgets(props: AnswerWidgetsProps) {
  * works out, a finder whose questions lead you to the outcome for your case, a quiz that checks
  * what the answer explained, steps to tap through, a picture the agent drew whose parts you step
  * through, a map of places to open in a maps app, or a comparison, a chart, a graph, a scale, a
- * timeline, a row of marks or a flow to look at. What you tick, answer or change is kept, and the next work's conversation says so. When it
+ * timeline, a calendar, a row of marks or a flow to look at. What you tick, answer or change is kept, and the next work's conversation says so. When it
  * arrives as news (ADR 0051) and this window hasn't drawn it before, its marks grow in once
  * (`wg-fresh`); history and a widget drawn again are simply there.
  */
@@ -122,6 +123,7 @@ function drawn({ kept, onChange, onChoose, chosen = null, live = false, by }: Om
     case 'scale': return <WidgetScale spec={kept.spec} />
     case 'timeline': return <WidgetTimeline spec={kept.spec} />
     case 'map': return <WidgetMap spec={kept.spec} />
+    case 'calendar': return <WidgetCalendar spec={kept.spec} onChoose={live ? undefined : onChoose} by={by} />
     case 'skill': return <WidgetSkill kept={kept} onChange={onChange} live={live} by={by} />
   }
   return null

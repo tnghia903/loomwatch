@@ -20,6 +20,8 @@ Replies are scripted from what the request says, so a run exercises real tool ca
   and a timeline), then an answer that places each under the words it goes with
 - "MOCK-MAP" in the task             -> a show_widget call with a map of three lunch places near an
   office in Singapore's one-north, then an answer that places it under its words
+- "MOCK-CALENDAR" in the task        -> a show_widget call with a calendar of a Saturday with two
+  study blocks, then an answer that places it under its words and says the free time
 - "MOCK-FAIL-402" in the task         -> a 402 out-of-credits answer
 - the chat's read of an @ message     -> TALK for a greeting, thanks or a question ("hi", "thanks",
                                          "Explain …", "… ?"), so the agents answer it in the chat;
@@ -229,6 +231,31 @@ MAP_WIDGET = {
 }
 
 
+CALENDAR_WIDGET = {
+    "kind": "calendar",
+    "title": "This Saturday",
+    "zone": "Singapore time",
+    "days": ["2026-11-14"],
+    "hours": {"from": "07:00", "to": "24:00"},
+    "bookings": [
+        {"day": "2026-11-14", "start": "10:00", "end": "15:00", "label": "Study", "place": "Home"},
+        {"day": "2026-11-14", "start": "19:00", "end": "23:00", "label": "Study", "place": "Home"},
+    ],
+}
+
+
+def calendar_with(places):
+    """An answer that places the calendar after the words that lead to it."""
+    place = (places + [""])[0]
+    return "\n".join([
+        "**This Saturday (14 Nov)** you're free before 10:00, from 15:00 to 19:00 and after 23:00.",
+        "",
+        place,
+        "",
+        "Both study blocks are at home, Singapore time.",
+    ])
+
+
 def map_with(places):
     """An answer that places the map after the words that lead to it."""
     place = (places + [""])[0]
@@ -338,7 +365,7 @@ def plan(body):
         if call_name.endswith("dispatch"):
             # Both dispatches answered with "accepted": end this turn; the results come back later.
             return ("text", "I handed the two parts of the question to the Researcher. Their findings come back next.")
-        if call_name.endswith("show_widget") and any(word in latest_task(messages) for word in ("MOCK-BRIEF", "MOCK-KINDS", "MOCK-MAP")):
+        if call_name.endswith("show_widget") and any(word in latest_task(messages) for word in ("MOCK-BRIEF", "MOCK-KINDS", "MOCK-MAP", "MOCK-CALENDAR")):
             # Every widget shown this turn answered with its place line, in the order shown.
             places = []
             for message in reversed(messages):
@@ -351,6 +378,8 @@ def plan(body):
             task = latest_task(messages)
             if "MOCK-MAP" in task:
                 return ("text", map_with(places))
+            if "MOCK-CALENDAR" in task:
+                return ("text", calendar_with(places))
             return ("text", kinds_with(places) if "MOCK-KINDS" in task else brief_with(places))
         if call_name.endswith("show_widget"):
             # ADR 0114: write the place line on a line of its own, between words that lead to the
@@ -472,6 +501,8 @@ def plan(body):
         return ("calls", [(find_tool(names, "show_widget"), spec) for spec in KINDS_WIDGETS])
     if "MOCK-MAP" in task and find_tool(names, "show_widget"):
         return ("calls", [(find_tool(names, "show_widget"), MAP_WIDGET)])
+    if "MOCK-CALENDAR" in task and find_tool(names, "show_widget"):
+        return ("calls", [(find_tool(names, "show_widget"), CALENDAR_WIDGET)])
     if "MOCK-TOOL:" in task:
         line = task.rsplit("MOCK-TOOL:", 1)[1].strip().splitlines()[0]
         call, _, arguments = line.partition(" ")

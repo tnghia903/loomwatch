@@ -124,6 +124,13 @@ export interface WidgetPlace {
 /** Where you are or start: a map's distances are from here. */
 export interface WidgetStart { name: string; lat: number; lng: number }
 
+/** One booking on a calendar: its day (`2026-11-14`), when it starts and ends (`09:30`, 24-hour;
+    neither for one that lasts all day), what it is, and where. */
+export interface WidgetBooking { day: string; start?: string; end?: string; label: string; place?: string }
+
+/** The hours of each day a calendar shows and finds free time in, `07:00` to `24:00`. */
+export interface WidgetHours { from: string; to: string }
+
 export type WidgetSpec =
   | { kind: 'choices'; title: string; options: WidgetChoice[] }
   | { kind: 'checklist'; title: string; items: WidgetItem[] }
@@ -140,6 +147,7 @@ export type WidgetSpec =
   | { kind: 'scale'; title: string; ranges: WidgetRange[]; pins: WidgetPin[]; unit?: string; prefix?: string; decimals?: number }
   | { kind: 'timeline'; title: string; events: WidgetEvent[] }
   | { kind: 'map'; title: string; places: WidgetPlace[]; from?: WidgetStart }
+  | { kind: 'calendar'; title: string; days: string[]; bookings: WidgetBooking[]; hours?: WidgetHours; zone?: string }
   /** A skill the agent suggested with `suggest_skill` (ADR 0118): its name in words, when to use
       it, and what to do. Nothing is saved until the person saves it. */
   | { kind: 'skill'; title: string; description: string; instructions: string }

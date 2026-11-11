@@ -106,7 +106,7 @@ side by side (or the parts of one thing, joined to the whole above them) with fa
 chart whose bars LoomWatch draws to scale from the agent's figures, a graph of bars or a line, a row
 of things marked yes or no, a flow of numbered stops along a line, a scale that says where a figure
 stands among named ranges (is 38.5 °C a fever?), a timeline of events on their dates with today
-among them, questions to tap through to the outcome for your own case (do you need a visa?), a quiz
+among them, a calendar of your bookings with the free time between them marked, where you can drag out a time to hold or ask the agent to book, questions to tap through to the outcome for your own case (do you need a visa?), a quiz
 that checks what the answer explained, or a picture the agent draws of
 what it explains (a plane at each stage of take-off, the parts of a flower), its parts numbered on
 it to tap or step through (ADR 0117). LoomWatch keeps only the drawing's shapes and its words, and
@@ -392,6 +392,7 @@ The stand-in also answers the Skills page's Write it and Change it, from the wor
 with a long brief that places the charts between its bullets and the checklist under a heading.
 `MOCK-KINDS` makes it show a finder, a scale, a timeline and a quiz, each under its own words.
 `MOCK-MAP` makes it show a map of three lunch places near an office in Singapore's one-north.
+`MOCK-CALENDAR` makes it show a calendar of a Saturday with two study blocks and the free time between them.
 A message ending in "?" is read as a question and answered without work, so no tool is called.
 
 ## Evidence transport
