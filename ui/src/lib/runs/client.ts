@@ -520,14 +520,24 @@ export async function runScheduleNow(teamPath: string): Promise<RunRecord> {
   return readRun<RunRecord>(response)
 }
 
+/** The last list of runs read, and its version (the daemon's `ETag`). */
+let lastRuns: { etag: string; records: RunRecord[] } | null = null
+
 /**
  * Every run the daemon knows, newest first, each `reply` cut to its opening: replies are nearly all
  * of a long history's bytes and the list is read every few seconds. A run's whole reply is at
- * [`fetchRun`].
+ * [`fetchRun`]. While nothing in it changed, the daemon says so instead of sending it all again,
+ * and this is the same list as last time: the very same array, so nothing drawn from it is worked
+ * out again (`keepIfSame`).
  */
 export async function fetchRuns(signal?: AbortSignal): Promise<RunRecord[]> {
-  const response = await daemonFetch('/api/runs?preview=true', { signal, cache: 'no-store' })
-  return readRun<RunRecord[]>(response)
+  const known = lastRuns
+  const response = await daemonFetch('/api/runs?preview=true', { signal, cache: 'no-store', ...(known && { headers: { 'If-None-Match': known.etag } }) })
+  if (response.status === 304 && known) return known.records
+  const records = await readRun<RunRecord[]>(response)
+  const etag = response.headers?.get('ETag')
+  lastRuns = etag && Array.isArray(records) ? { etag, records } : null
+  return records
 }
 
 /**

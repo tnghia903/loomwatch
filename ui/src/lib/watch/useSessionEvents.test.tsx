@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { useSessionEvents } from './useSessionEvents'
+import { forgetArchiveReads, useSessionEvents } from './useSessionEvents'
 
 class MockSocket {
   static all: MockSocket[] = []
@@ -17,7 +17,7 @@ class MockSocket {
 const event = (seq: number) => ({ id: `event-${seq}`, seq, sessionId: 's', agentId: 'a', ts: '2026-09-10T00:00:00Z', kind: 'process', payload: { phase: 'spawned' } })
 const response = (events: unknown[]) => new Response(JSON.stringify(events), { headers: { 'Content-Type': 'application/json' } })
 beforeEach(() => { vi.useFakeTimers(); MockSocket.all = []; vi.stubGlobal('WebSocket', MockSocket) })
-afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); forgetArchiveReads() })
 
 it('recovers after disconnect from the verified cursor without duplicating frames', async () => {
   const fetchMock = vi.fn().mockImplementation(async () => response([event(0)]))

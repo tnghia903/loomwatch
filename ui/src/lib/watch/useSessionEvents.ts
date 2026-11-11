@@ -1,14 +1,85 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { appendEvents, parseEvents, type RunEvent } from './events'
 
-export async function readArchive<T>(url: string, signal?: AbortSignal): Promise<T> {
+async function fetchArchive(url: string, signal: AbortSignal): Promise<unknown> {
   const response = await fetch(url, { signal, cache: 'no-store' })
   const body: unknown = await response.json()
   if (!response.ok) {
     const message = typeof body === 'object' && body && 'error' in body ? String(body.error) : `Archive request failed (${response.status}).`
     throw new Error(message)
   }
-  return body as T
+  return body
+}
+
+/**
+ * Reads of the archive by address: those under way, and full pages of a session's events for a
+ * while after (`FULL_PAGE_KEPT_MS`), with how many readers wait on each.
+ */
+const reads = new Map<string, { answer: Promise<unknown>; controller: AbortController; waiting: number; until: number }>()
+const FULL_PAGE_KEPT_MS = 30_000
+const READS_KEPT = 64
+
+/** Forget every read kept: for tests, each of which stands up an archive of its own. */
+export function forgetArchiveReads() {
+  reads.clear()
+}
+
+/** Whether `body` is a full page of the events `url` asks for: the archive only adds after them, so it never changes. */
+function fullPage(url: string, body: unknown): boolean {
+  const limit = Number(new URLSearchParams(url.split('?')[1] ?? '').get('limit'))
+  return url.startsWith('/api/session/events?') && Array.isArray(body) && limit > 0 && body.length === limit
+}
+
+/**
+ * `url` read from the archive. Opening a team, its chat's pieces and its checkup's lessons each read
+ * the same runs' events, one after the other, and every page of them came down twice (6.4 MB for a
+ * chat with five long answers). A read of the same address under way is waited on, not made again,
+ * and a full page of a session's events is kept for half a minute after it arrives: it can't change.
+ * A page short of full (the newest of a run still going) is read fresh every time. The download
+ * stops only when every reader waiting on it has stopped (`signal`).
+ */
+export async function readArchive<T>(url: string, signal?: AbortSignal): Promise<T> {
+  signal?.throwIfAborted()
+  const now = Date.now()
+  for (const [address, kept] of reads) if (kept.until < now) reads.delete(address)
+  let read = reads.get(url)
+  if (!read) {
+    const controller = new AbortController()
+    const started = { answer: fetchArchive(url, controller.signal), controller, waiting: 0, until: Infinity }
+    started.answer.then(
+      (body) => {
+        if (reads.get(url) !== started) return
+        if (fullPage(url, body)) started.until = Date.now() + FULL_PAGE_KEPT_MS
+        else reads.delete(url)
+      },
+      () => { if (reads.get(url) === started) reads.delete(url) },
+    )
+    reads.set(url, started)
+    if (reads.size > READS_KEPT) {
+      const settled = [...reads].find(([, kept]) => kept.until !== Infinity)
+      if (settled) reads.delete(settled[0])
+    }
+    read = started
+  }
+  const shared = read
+  shared.waiting += 1
+  try {
+    if (!signal) return (await shared.answer) as T
+    return await new Promise<T>((resolve, reject) => {
+      const stop = () => reject(signal.reason ?? new DOMException('Aborted', 'AbortError'))
+      signal.addEventListener('abort', stop, { once: true })
+      shared.answer.then(
+        (body) => { signal.removeEventListener('abort', stop); resolve(body as T) },
+        (failed: unknown) => { signal.removeEventListener('abort', stop); reject(failed) },
+      )
+    })
+  } finally {
+    shared.waiting -= 1
+    if (shared.waiting === 0 && signal?.aborted && shared.until === Infinity) {
+      shared.controller.abort()
+      if (reads.get(url) === shared) reads.delete(url)
+    }
+  }
 }
 
 /** The most the archive returns per page (watch_api.rs). */

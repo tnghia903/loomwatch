@@ -2368,6 +2368,7 @@ impl Item {
 async fn chat_page(
     State(state): State<ChatState>,
     Query(query): Query<PageQuery>,
+    headers: HeaderMap,
 ) -> Result<Response, ApiError> {
     let (relative, team) = open_team(&state.teams_root, &query.team_path)?;
     let team_ref = TeamRef {
@@ -2458,13 +2459,33 @@ async fn chat_page(
     }
     with_lessons(&state, &shown, &mut items).await?;
     with_widgets(&state, &shown, &mut items).await?;
-    Ok(Json(json!({
+    let page = json!({
         "teamKey": team_ref.key,
         "teamPath": relative,
         "items": items,
         "more": more,
-    }))
-    .into_response())
+    });
+    Ok(unless_unchanged(&headers, &page))
+}
+
+/// `page` as JSON, with an `ETag` from what it says; asked again with that tag in `If-None-Match`,
+/// 304 and no body. While a team works the chat reads its newest page every second and a half, and
+/// every answer on it is whole: a page that reads as the app already has it is not sent again.
+fn unless_unchanged(headers: &HeaderMap, page: &Value) -> Response {
+    let body = page.to_string();
+    let digest = <sha2::Sha256 as sha2::Digest>::digest(body.as_bytes());
+    let etag = format!("W/\"chat-{}\"", crate::skills_store::hex(&digest[..12]));
+    if crate::runs::names_etag(headers, &etag) {
+        return (StatusCode::NOT_MODIFIED, [(header::ETAG, etag)]).into_response();
+    }
+    (
+        [
+            (header::CONTENT_TYPE, "application/json".to_owned()),
+            (header::ETAG, etag),
+        ],
+        body,
+    )
+        .into_response()
 }
 
 /// The most pieces one search shows.
@@ -5360,6 +5381,73 @@ mod tests {
         assert_eq!(found["everyWord"], true);
         let found = page_at(app, "/api/chat/find?teamPath=news.yaml&q=%25").await;
         assert!(found["pieces"].as_array().unwrap().is_empty(), "{found}");
+    }
+
+    /// While a team works the chat reads its newest page every second and a half, and every answer
+    /// on it is whole: a page that reads as the app already has it is not sent again, and one that
+    /// changed is sent whole.
+    #[tokio::test]
+    async fn a_chat_page_that_did_not_change_is_not_sent_again() {
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        let _ = write_news_desk(&dir, FirstTurn::Waits);
+        let rig = rig(pool, &dir);
+        let note = |text: &'static str| json!({"teamPath": "news.yaml", "text": text, "to": null});
+        let read = |tag: Option<String>| {
+            let app = rig.app.clone();
+            async move {
+                let mut request = Request::builder()
+                    .uri("/api/chat?teamPath=news.yaml")
+                    .header("host", "localhost");
+                if let Some(tag) = tag {
+                    request = request.header(header::IF_NONE_MATCH, tag);
+                }
+                let response = app
+                    .oneshot(request.body(Body::empty()).unwrap())
+                    .await
+                    .unwrap();
+                let status = response.status();
+                let tag = response
+                    .headers()
+                    .get(header::ETAG)
+                    .map(|value| value.to_str().unwrap().to_owned());
+                let bytes = response.into_body().collect().await.unwrap().to_bytes();
+                (status, tag, bytes)
+            }
+        };
+
+        assert_eq!(
+            send(&rig.app, note("we only cover listed companies"))
+                .await
+                .0,
+            StatusCode::OK
+        );
+        let (status, tag, bytes) = read(None).await;
+        assert_eq!(status, StatusCode::OK);
+        let tag = tag.expect("a page carries its version");
+        let first: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            first,
+            page(&rig.app).await,
+            "the same page as without a tag"
+        );
+
+        let (status, again, bytes) = read(Some(tag.clone())).await;
+        assert_eq!(status, StatusCode::NOT_MODIFIED, "nothing changed");
+        assert_eq!(again.as_deref(), Some(tag.as_str()));
+        assert!(bytes.is_empty(), "none of the chat is sent again");
+
+        // A new note changes the page: it is sent whole, under a new version.
+        assert_eq!(
+            send(&rig.app, note("and keep it short")).await.0,
+            StatusCode::OK
+        );
+        let (status, changed, bytes) = read(Some(tag.clone())).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_ne!(changed.as_deref(), Some(tag.as_str()));
+        let second: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(second["items"].as_array().unwrap().len(), 2, "{second}");
+        assert_eq!(read(changed).await.0, StatusCode::NOT_MODIFIED);
     }
 
     #[tokio::test]
