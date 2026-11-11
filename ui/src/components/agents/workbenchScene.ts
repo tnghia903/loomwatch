@@ -29,6 +29,7 @@ import {
   Vector2,
   Vector3,
   WebGLRenderer,
+  type Intersection,
   type Material,
 } from 'three'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
@@ -403,6 +404,16 @@ interface Tween { node: Object3D; fromP: Vector3; toP: Vector3; fromQ: Quaternio
 
 const smooth = (edge0: number, edge1: number, x: number) => MathUtils.smoothstep(x, edge0, edge1)
 const shown = (object: Object3D | null): boolean => { for (let at = object; at; at = at.parent) if (!at.visible) return false; return true }
+
+/**
+ * The nearest of `meshes` that shows and that the ray meets, or `null`. Hidden ones are never
+ * tested: the bench keeps every head, sign and garment it doesn't wear in the scene, a pose of each
+ * garment for each mood, all standing where the figure stands. Testing them cost 15–40 ms each time
+ * the pointer moved over the figure, and the figure lagged behind it.
+ */
+export function nearestShownHit(raycaster: Raycaster, meshes: readonly Object3D[]): Intersection | null {
+  return raycaster.intersectObjects(meshes.filter(shown), false)[0] ?? null
+}
 const envelope = (u: number) => smooth(0, 0.18, u) * (1 - smooth(0.72, 1, u))
 const bump = (u: number) => Math.sin(Math.PI * MathUtils.clamp(u, 0, 1))
 
@@ -2144,8 +2155,7 @@ export class WorkbenchScene {
   }
 
   private pick(x: number, y: number): { part: FigurePart | null; key: AllowSwitch | null } | null {
-    // A ray finds hidden things too: the heads it doesn't wear are still in the scene.
-    const hit = this.ray(x, y).intersectObjects(this.pickables, false).find((candidate) => shown(candidate.object))
+    const hit = nearestShownHit(this.ray(x, y), this.pickables)
     if (!hit) return null
     const names: string[] = []
     for (let object: Object3D | null = hit.object; object; object = object.parent) if (object.name) names.push(object.name)
