@@ -10,13 +10,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock, PoisonError, RwLock};
 use std::time::Duration;
 
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{Path as RoutePath, Query, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::middleware;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -890,6 +890,53 @@ pub(crate) fn decode_run(row: &sqlx::sqlite::SqliteRow) -> Result<StoredRun, sql
     })
 }
 
+/// The registry's records behind their one lock, and a count of the times it was taken to write:
+/// the run list's version. `GET /api/runs` gives it as an `ETag` and answers "not modified" while
+/// it stands, so a screen that reads the list every few seconds is sent all of the history only
+/// when something in it changed.
+struct Counted {
+    lock: RwLock<RegistryInner>,
+    writes: AtomicU64,
+    /// Told apart from another registry's count (a daemon started again counts from nothing too).
+    born: u64,
+}
+
+impl Default for Counted {
+    fn default() -> Self {
+        static REGISTRIES: AtomicU64 = AtomicU64::new(0);
+        let started = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| {
+                u64::try_from(since.as_nanos() & u128::from(u64::MAX)).unwrap_or(0)
+            });
+        Self {
+            lock: RwLock::default(),
+            writes: AtomicU64::new(0),
+            born: started ^ REGISTRIES.fetch_add(1, Ordering::Relaxed).rotate_left(48),
+        }
+    }
+}
+
+impl Counted {
+    fn read(&self) -> std::sync::LockResult<std::sync::RwLockReadGuard<'_, RegistryInner>> {
+        self.lock.read()
+    }
+
+    /// The lock to write, counted once it is held: a reader holding the lock to read sees a count
+    /// that matches the records it reads, and a count it read without the lock can be behind
+    /// what is about to change, never ahead of it.
+    fn write(&self) -> std::sync::LockResult<std::sync::RwLockWriteGuard<'_, RegistryInner>> {
+        let guard = self.lock.write();
+        self.writes.fetch_add(1, Ordering::Relaxed);
+        guard
+    }
+
+    /// The version of the records: which registry, and how many writes it has had.
+    fn version(&self) -> String {
+        format!("{:x}-{}", self.born, self.writes.load(Ordering::Relaxed))
+    }
+}
+
 /// Every run the daemon knows, cached in memory and — when an archive is configured — durable.
 ///
 /// The cache is the authority on a record's *shape*: it enforces the forward-only transition
@@ -900,7 +947,7 @@ pub(crate) fn decode_run(row: &sqlx::sqlite::SqliteRow) -> Result<StoredRun, sql
 /// depend on.
 #[derive(Clone, Default)]
 pub struct RunRegistry {
-    inner: Arc<RwLock<RegistryInner>>,
+    inner: Arc<Counted>,
     store: Option<RunStore>,
     /// Where a finished run's reply is published (ADR 0038). Installed once at startup by the
     /// scheduler, shared by every clone; absent in tests and the CLI, where a delivery reports
@@ -1435,14 +1482,28 @@ impl RunRegistry {
     /// Every run, newest first.
     #[must_use]
     pub fn list(&self) -> Vec<RunRecord> {
+        self.list_versioned(|_| true).0
+    }
+
+    /// The runs `keep` keeps, newest first, with the version of the list of all of them
+    /// ([`Self::version`]), read together. Only the runs kept are copied: the menu bar and the
+    /// island keep the last hour's out of all of the history, every two seconds.
+    fn list_versioned(&self, keep: impl Fn(&RunRecord) -> bool) -> (Vec<RunRecord>, String) {
         let inner = self.inner.read().unwrap_or_else(PoisonError::into_inner);
-        inner
+        let runs = inner
             .order
             .iter()
             .rev()
             .filter_map(|run_id| inner.runs.get(run_id))
+            .filter(|entry| keep(&entry.record))
             .map(|entry| entry.record.clone())
-            .collect()
+            .collect();
+        (runs, self.inner.version())
+    }
+
+    /// The version of the list of runs: it changes whenever anything in the registry may have.
+    fn version(&self) -> String {
+        self.inner.version()
     }
 
     /// The newest run of `team_path` (normalised, relative to the teams root) that has not
@@ -4468,9 +4529,27 @@ pub(crate) fn reply_preview(reply: &mut String) {
     }
 }
 
+/// The `ETag` of the list of runs at `version`, whole or cut to previews: the two are different
+/// bodies.
+fn runs_etag(version: &str, preview: bool) -> String {
+    format!("W/\"runs-{version}-{}\"", u8::from(preview))
+}
+
+/// Whether the request's `If-None-Match` names `etag` (weakly, as `GET` compares).
+fn names_etag(headers: &HeaderMap, etag: &str) -> bool {
+    let bare = |tag: &str| tag.trim().trim_start_matches("W/").to_owned();
+    headers
+        .get_all(header::IF_NONE_MATCH)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(','))
+        .any(|tag| bare(tag) == bare(etag))
+}
+
 async fn list_runs(
     State(state): State<RunsState>,
     Query(query): Query<RunsQuery>,
+    headers: HeaderMap,
 ) -> Result<Response, ApiError> {
     if let Some(key) = query.start_key {
         if key.is_empty() {
@@ -4490,20 +4569,33 @@ async fn list_runs(
                 )
             });
     }
-    let mut runs = state.registry.list();
+    // The whole list, which screens read every few seconds for as long as they are open, is sent
+    // again only when it may have changed. A list cut to a time window changes with the clock
+    // alone, so it is always sent.
+    let versioned = query.finished_within.is_none();
+    if versioned {
+        let etag = runs_etag(&state.registry.version(), query.preview);
+        if names_etag(&headers, &etag) {
+            return Ok((StatusCode::NOT_MODIFIED, [(header::ETAG, etag)]).into_response());
+        }
+    }
     let cutoff = query.finished_within.and_then(|seconds| {
         chrono::TimeDelta::try_seconds(i64::try_from(seconds).ok()?)
             .and_then(|window| Utc::now().checked_sub_signed(window))
     });
-    if let Some(cutoff) = cutoff {
-        runs.retain(|run| finished_since(run, cutoff));
-    }
+    let (mut runs, version) = state
+        .registry
+        .list_versioned(|run| cutoff.is_none_or(|cutoff| finished_since(run, cutoff)));
     if query.preview {
         runs.iter_mut()
             .filter_map(|run| run.reply.as_mut())
             .for_each(reply_preview);
     }
-    Ok(Json(runs).into_response())
+    let mut response = Json(runs).into_response();
+    if versioned && let Ok(etag) = HeaderValue::from_str(&runs_etag(&version, query.preview)) {
+        response.headers_mut().insert(header::ETAG, etag);
+    }
+    Ok(response)
 }
 
 async fn get_run(
@@ -6906,6 +6998,96 @@ pub(crate) mod tests {
             recent,
             sorted(&[&runs[0], &runs[1]]),
             "the run that finished two hours ago is left out"
+        );
+    }
+
+    /// Every screen reads the whole list every few seconds for as long as it is open, and the
+    /// list is all of the history: while nothing in it changed, the screen is told so and sent
+    /// none of it again. Any change, another daemon, or the other shape of the list sends it all.
+    #[tokio::test]
+    async fn the_whole_list_is_sent_again_only_once_it_changed() {
+        let team = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn: {cmd: x, cwd: .}\n    model: m\n",
+        )
+        .unwrap();
+        let queued =
+            || RunRecord::queued("t.yaml".into(), "go".into(), &team, RunTrigger::Manual).unwrap();
+        let dir = TeamsDir::new();
+        let registry = RunRegistry::default();
+        let first = queued();
+        let first_id = first.run_id.clone();
+        registry.insert(first);
+        let app = router(None, dir.0.clone(), registry.clone());
+        let read = |uri: &'static str, tag: Option<String>| {
+            let app = app.clone();
+            async move {
+                let mut request = get_local(uri);
+                if let Some(tag) = tag {
+                    request
+                        .headers_mut()
+                        .insert(header::IF_NONE_MATCH, tag.parse().unwrap());
+                }
+                app.oneshot(request).await.unwrap()
+            }
+        };
+        let etag = |response: &Response| {
+            response.headers()[header::ETAG]
+                .to_str()
+                .unwrap()
+                .to_owned()
+        };
+
+        let sent = read("/api/runs?preview=true", None).await;
+        assert_eq!(sent.status(), StatusCode::OK);
+        let tag = etag(&sent);
+        let opening = tag.clone();
+        assert_eq!(json_body(sent).await.as_array().unwrap().len(), 1);
+
+        let again = read("/api/runs?preview=true", Some(tag.clone())).await;
+        assert_eq!(again.status(), StatusCode::NOT_MODIFIED, "nothing changed");
+        assert_eq!(etag(&again), tag);
+        let bytes = again.into_body().collect().await.unwrap().to_bytes();
+        assert!(bytes.is_empty(), "none of the history is sent again");
+
+        // The whole replies are another body than the previews: not answered from the previews' tag.
+        let whole = read("/api/runs", Some(tag.clone())).await;
+        assert_eq!(whole.status(), StatusCode::OK);
+        // A list cut to a time window changes with the clock alone: always sent, with no tag.
+        let window = read(
+            "/api/runs?preview=true&finishedWithin=60",
+            Some(tag.clone()),
+        )
+        .await;
+        assert_eq!(window.status(), StatusCode::OK);
+        assert!(window.headers().get(header::ETAG).is_none());
+
+        // A change to a record already listed sends the list again, with the change in it.
+        assert!(registry.mark_running(&first_id));
+        let changed = read("/api/runs?preview=true", Some(tag.clone())).await;
+        assert_eq!(changed.status(), StatusCode::OK, "a run started");
+        let tag = etag(&changed);
+        assert_eq!(json_body(changed).await[0]["status"], "running");
+        // And so does a new run.
+        registry.insert(queued());
+        let grown = read("/api/runs?preview=true", Some(tag.clone())).await;
+        assert_eq!(grown.status(), StatusCode::OK, "a run was added");
+        assert_eq!(json_body(grown).await.as_array().unwrap().len(), 2);
+
+        // Another daemon counts its changes from nothing too: at the same count as this one was
+        // when the screen first read it, its list is still not taken for this one's.
+        let other = RunRegistry::default();
+        other.insert(queued());
+        let other_app = router(None, dir.0.clone(), other);
+        let mut request = get_local("/api/runs?preview=true");
+        request
+            .headers_mut()
+            .insert(header::IF_NONE_MATCH, opening.parse().unwrap());
+        let answer = other_app.oneshot(request).await.unwrap();
+        assert_eq!(answer.status(), StatusCode::OK);
+        assert_eq!(
+            etag(&answer).rsplit('-').nth(1),
+            opening.rsplit('-').nth(1),
+            "the same count of changes"
         );
     }
 
