@@ -475,7 +475,10 @@ iPhone or another computer connects to it and keeps nothing but a key of its own
   routes (`/phone/v0/*`) and the short list in `phone::ALLOWED`: see, answer, approve, start,
   stop, chat (with what you tick or change under an answer, `POST /api/chat/widgets`), Ask, and
   small changes to an agent or a team, never keys, sign-ins or settings
-  (`phone/`). An answer's sources read on a phone as on the Mac (ADR 0116): a site's icon comes
+  (`phone/`). Of an agent's tools the phone changes only one thing: a permission's "Always allow
+  this" adds that one call to the agent's `toolAllow` (`alwaysAllow` on
+  `POST /phone/v0/agents/{id}`, ADR 0102), and a tool the agent isn't given is refused with a reason
+  before the save, which would otherwise drop it without a word. An answer's sources read on a phone as on the Mac (ADR 0116): a site's icon comes
   from the Mac's kept icons (`GET /api/site-icon`), and the titles of the pages a run's web searches
   found come from the door (`GET /phone/v0/runs/{id}/sources`, and `sources` on the run's talk),
   read from the run's events by `phone/sources.rs`, the twin of `sourceTitles.ts`. A phone's

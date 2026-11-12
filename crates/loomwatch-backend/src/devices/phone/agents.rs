@@ -2,9 +2,11 @@
 //! and the few things the phone may change on it.
 //!
 //! The phone changes only its name, its instructions, its model and how hard it thinks, what it may
-//! do without asking, and its figure ([`AgentChange`]). What it reads, its skills and its tools stay
-//! on the Mac, where files are picked and tools are connected. A change is saved against the
-//! version the phone last read, so one saved on the Mac in between is never overwritten.
+//! do without asking, and its figure ([`AgentChange`]). It may also always allow one call of a tool
+//! the agent is given, as a permission card's "Always allow this" does (ADR 0069, ADR 0102). What it
+//! reads, its skills and its tools stay on the Mac, where files are picked and tools are connected.
+//! A change is saved against the version the phone last read, so one saved on the Mac in between is
+//! never overwritten.
 
 use axum::http::{Method, StatusCode};
 use serde::Deserialize;
@@ -26,8 +28,20 @@ pub struct AgentChange {
     pub figure: Option<Figure>,
     /// What changed, in the person's words, kept with the version.
     pub note: Option<String>,
+    /// One call of a tool it is given that it may make without asking from now on, added to its
+    /// `toolAllow`: a permission's "Always allow this" on the phone. Nothing is taken away.
+    pub always_allow: Option<ToolCall>,
     /// The version the phone read; a newer one saved on the Mac answers 412.
     pub version: u32,
+}
+
+/// A connected tool's call, by the tool's name as the agent is given it and the call's name, as a
+/// permission request names them (`tool.server`, `tool.call`).
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ToolCall {
+    pub tool: String,
+    pub call: String,
 }
 
 #[derive(Debug, Deserialize, serde::Serialize)]
@@ -152,8 +166,62 @@ pub fn changed(job: &Value, change: &AgentChange) -> Value {
         }
         spec.insert("figure".to_owned(), worn);
     }
+    if let Some(always) = &change.always_allow {
+        allow_call(&mut spec, always);
+    }
     set(&mut spec, "note", change.note.as_deref());
     Value::Object(spec)
+}
+
+/// The tool `name` as an agent's `tools` give it, ignoring case, as the daemon finds tools.
+fn given_tool<'a>(tools: Option<&'a Value>, name: &str) -> Option<&'a str> {
+    let wanted = name.trim();
+    tools?
+        .as_array()?
+        .iter()
+        .filter_map(Value::as_str)
+        .find(|tool| tool.trim().eq_ignore_ascii_case(wanted))
+}
+
+/// Adds `always.call` to the calls of `always.tool` that `spec` always allows, under the name the
+/// agent is given the tool by (the name a save keeps them under), once. The rest of `toolAllow`
+/// stays as it is.
+fn allow_call(spec: &mut Map<String, Value>, always: &ToolCall) {
+    let tool = given_tool(spec.get("tools"), &always.tool)
+        .unwrap_or_else(|| always.tool.trim())
+        .to_owned();
+    let call = always.call.trim();
+    let allowed = spec
+        .entry("toolAllow")
+        .or_insert_with(|| json!({}))
+        .as_object_mut();
+    let Some(allowed) = allowed else { return };
+    let calls = allowed.entry(tool).or_insert_with(|| json!([]));
+    if let Some(calls) = calls.as_array_mut()
+        && !calls.iter().any(|kept| kept.as_str() == Some(call))
+    {
+        calls.push(json!(call));
+    }
+}
+
+/// Why `change` can't be saved on `job`, in a sentence, before it reaches the Mac: an always
+/// allowed call of a tool the agent isn't given would be dropped by the save without a word.
+fn refusal(job: &Value, change: &AgentChange) -> Option<String> {
+    let always = change.always_allow.as_ref()?;
+    if always.tool.trim().is_empty() || always.call.trim().is_empty() {
+        return Some("Say which tool and which of its actions to always allow.".to_owned());
+    }
+    if given_tool(job.get("tools"), &always.tool).is_none() {
+        let name = job
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or("This agent");
+        return Some(format!(
+            "{name} isn't given {} in My agents, so it can't always allow it. Give it the tool on your Mac first.",
+            always.tool.trim()
+        ));
+    }
+    None
 }
 
 /// Sets `key` to `value`, trimmed; an empty one takes the field off (its default). `None` leaves it.
@@ -189,6 +257,9 @@ pub async fn save_agent(
             StatusCode::PRECONDITION_FAILED,
             json!({"error": "This agent was changed on your Mac since you opened it. Close it and open it again to see that change."}),
         ));
+    }
+    if let Some(why) = refusal(&job, &change) {
+        return Ok((StatusCode::BAD_REQUEST, json!({"error": why})));
     }
     let reply = daemon
         .send_json(
@@ -346,5 +417,70 @@ mod tests {
         let tried: Result<AgentChange, _> =
             serde_json::from_value(json!({"version": 1, "tools": ["gmail"]}));
         assert!(tried.is_err());
+        let tried: Result<AgentChange, _> = serde_json::from_value(
+            json!({"version": 1, "toolAllow": {"notion": ["create-pages"]}}),
+        );
+        assert!(
+            tried.is_err(),
+            "its whole always-allowed list stays on the Mac"
+        );
+    }
+
+    fn always(tool: &str, call: &str) -> AgentChange {
+        serde_json::from_value(json!({"version": 3, "alwaysAllow": {"tool": tool, "call": call}}))
+            .unwrap()
+    }
+
+    /// A permission's "Always allow this" on the phone: one call of a tool it is given, added to
+    /// what it always may do, under the tool's name as it is given it, once; nothing taken away.
+    #[test]
+    fn the_phone_always_allows_one_call_of_a_tool_the_agent_is_given() {
+        let mut given = job();
+        given["tools"] = json!(["notion", "Apple Health"]);
+        given["toolAllow"] = json!({"notion": ["search"]});
+
+        let spec = changed(&given, &always("apple health", " daily "));
+        assert_eq!(
+            spec["toolAllow"],
+            json!({"notion": ["search"], "Apple Health": ["daily"]})
+        );
+        assert_eq!(spec["tools"], given["tools"], "its tools stay as they are");
+
+        let again = changed(&spec, &always("Apple Health", "daily"));
+        assert_eq!(again["toolAllow"]["Apple Health"], json!(["daily"]), "once");
+        let more = changed(&spec, &always("NOTION", "create-pages"));
+        assert_eq!(
+            more["toolAllow"]["notion"],
+            json!(["search", "create-pages"])
+        );
+
+        // None kept yet.
+        assert_eq!(
+            changed(&job(), &always("notion", "search"))["toolAllow"],
+            json!({"notion": ["search"]})
+        );
+        assert!(refusal(&given, &always("apple health", "daily")).is_none());
+    }
+
+    /// A save would drop a call of a tool the agent isn't given without a word, so the phone is
+    /// told before it goes.
+    #[test]
+    fn a_tool_the_agent_isnt_given_is_refused_with_a_reason() {
+        let why = refusal(&job(), &always("Apple Health", "daily")).unwrap();
+        assert_eq!(
+            why,
+            "Maya isn't given Apple Health in My agents, so it can't always allow it. Give it the tool on your Mac first."
+        );
+        assert!(refusal(&job(), &always("notion", " ")).is_some());
+        assert!(
+            refusal(
+                &job(),
+                &AgentChange {
+                    version: 3,
+                    ..AgentChange::default()
+                }
+            )
+            .is_none()
+        );
     }
 }
