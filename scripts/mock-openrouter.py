@@ -22,6 +22,14 @@ Replies are scripted from what the request says, so a run exercises real tool ca
   office in Singapore's one-north, then an answer that places it under its words
 - "MOCK-CALENDAR" in the task        -> a show_widget call with a calendar of a Saturday with two
   study blocks, then an answer that places it under its words and says the free time
+- "MOCK-PAGE" in the task            -> a show_widget call with a page the agent wrote itself (ADR
+  0125): two pendulums, on Earth and on the Moon, swinging at a length you set, then words with
+  its place line. Only when the daemon offers pages (LOOMWATCH_WIDGET_PAGES=on)
+- "MOCK-PAGE-EXITS" in the task      -> a page that tries every way out of its frame: requests from
+  its script, pictures, links, a form, a frame, a refresh and styles from an address, all at
+  example.com. It lists what stopped each one, with every refusal the frame's policy reported. A
+  browser keeps a frame with no origin from this computer's own addresses whatever its policy, so
+  only an outside address shows the policy at work
 - "MOCK-FAIL-402" in the task         -> a 402 out-of-credits answer
 - the chat's read of an @ message     -> TALK for a greeting, thanks or a question ("hi", "thanks",
                                          "Explain …", "… ?"), so the agents answer it in the chat;
@@ -207,6 +215,34 @@ def kinds_with(places):
 
 
 # ADR 0114, amended 10 November: a map of places near where the person starts.
+# ADR 0125: a widget the agent writes itself. Two pendulums no ready-made kind could draw, with
+# their swing times declared for LoomWatch to work out.
+PAGE_WIDGET = {
+    "kind": "page",
+    "title": "How the length sets a pendulum's swing",
+    "why": "Two pendulums that swing at the length you set, on Earth and on the Moon.",
+    "inputs": [{"id": "length", "label": "Length", "start": 1, "min": 0.2, "max": 3, "step": 0.1, "unit": "m"}],
+    "results": [
+        {"id": "earth", "label": "One swing on Earth", "formula": "2 * pi * sqrt(length / 9.81)", "unit": "s", "decimals": 1},
+        {"id": "moon", "label": "On the Moon", "formula": "2 * pi * sqrt(length / 1.62)", "unit": "s", "decimals": 1},
+    ],
+    "presets": [
+        {"label": "A clock, 1 m", "values": {"length": 1}},
+        {"label": "A playground swing, 2.5 m", "values": {"length": 2.5}},
+    ],
+    "html": '<div class="lw-row"><div class="lw-well"><small>One swing on Earth</small><div class="lw-figure"><span data-result="earth"></span></div></div><div class="lw-well"><small>On the Moon</small><div class="lw-figure"><span data-result="moon"></span></div></div></div>\n<div class="lw-row"><small>On Earth</small><small>On the Moon</small></div>\n<div id="scene"></div>\n<div class="lw-row"><label>Length <input type="number" data-input="length"> m</label><input type="range" data-input="length"></div>\n<div data-presets></div>\n<p class="lw-note">The weight of the bob changes nothing: only the length and the pull of gravity.</p>\n<button type="button" data-act="why">Why doesn\'t the weight matter?</button>',
+    "script": 'const period = (len, g) => 2 * Math.PI * Math.sqrt(len / g);\nlet len = lw.values.inputs.length || 1;\nlw.on((v) => { len = v.inputs.length; });\nconst bob = (cx, angle, r, colour) => {\n  const x = (cx + r * Math.sin(angle)).toFixed(1), y = (24 + r * Math.cos(angle)).toFixed(1);\n  return `<line x1="${cx}" y1="24" x2="${x}" y2="${y}" stroke="var(--ink)" stroke-width="1.5"/>` +\n    `<circle cx="${x}" cy="${y}" r="11" fill="var(${colour})" stroke="var(--ink)" stroke-width="1.5"/>`;\n};\nlw.frame((t) => {\n  const r = 25 + len * 55;\n  const a1 = 0.32 * Math.cos(2 * Math.PI * t / period(len, 9.81));\n  const a2 = 0.32 * Math.cos(2 * Math.PI * t / period(len, 1.62));\n  lw.draw(`<svg viewBox="0 0 600 240" role="img" aria-label="Two pendulums ${len} m long, swinging on Earth and on the Moon">` +\n    `<rect width="290" height="240" rx="10" fill="var(--well)"/><rect x="310" width="290" height="240" rx="10" fill="var(--well)"/>` +\n    `<line x1="105" y1="24" x2="185" y2="24" stroke="var(--ink)" stroke-width="1.5"/><line x1="415" y1="24" x2="495" y2="24" stroke="var(--ink)" stroke-width="1.5"/>` +\n    bob(145, a1, r, \'--series-1\') + bob(455, a2, r, \'--series-2\') + `</svg>`, \'scene\');\n});\nlw.act(\'why\', () => lw.draft("Why doesn\'t a heavier weight swing faster?"));',
+}
+
+# A page that tries every way out of its frame (ADR 0125), listing what stopped each try.
+PAGE_EXITS_WIDGET = {
+    "kind": "page",
+    "title": "Ways out, all closed",
+    "why": "A check that a page reaches nothing.",
+    "html": '<p>Each of these tries to reach example.com. None may.</p>\n<img src="https://example.com/exit/from-img.png" alt="a picture from an address">\n<a href="https://example.com/exit/from-link">a link</a>\n<iframe src="https://example.com/exit/from-frame"></iframe>\n<form action="https://example.com/exit/from-form"><button>Send the form</button></form>\n<meta http-equiv="refresh" content="1;url=https://example.com/exit/from-refresh">\n<link rel="prefetch" href="https://example.com/exit/from-prefetch">\n<style>@import url(https://example.com/exit/from-import.css); .far { background: url(https://example.com/exit/from-css.png) }</style>\n<div class="far" style="border-image: url(https://example.com/exit/from-style.png)">a styled box</div>\n<svg width="20" height="20"><image href="https://example.com/exit/from-svg.png" width="20" height="20"/></svg>\n<button onclick="location.href=\'https://example.com/exit/from-onclick\'">A button with a handler</button>\n<ul id="tried"></ul>',
+    "script": "const tried = [];\nconst refused = [];\nself.addEventListener('securitypolicyviolation', (e) => refused.push(e.effectiveDirective + ': ' + e.blockedURI));\nconst attempt = (name, run) => {\n  try { const got = run(); if (got && got.catch) got.catch(() => {}); tried.push(name + ': not stopped here'); }\n  catch (e) { tried.push(name + ': stopped (' + e.message + ')'); }\n};\nconst proto = Object.getPrototypeOf(Object.getPrototypeOf(self));\nattempt('fetch', () => fetch('https://example.com/exit/from-fetch'));\nattempt('fetch past the page', () => proto.fetch.call(self, 'https://example.com/exit/from-proto-fetch'));\nattempt('XMLHttpRequest', () => { const x = new XMLHttpRequest(); x.open('GET', 'https://example.com/exit/from-xhr'); x.send(); });\nattempt('WebSocket', () => new WebSocket('wss://example.com/exit/from-socket'));\nattempt('EventSource', () => new EventSource('https://example.com/exit/from-events'));\nattempt('importScripts', () => importScripts('https://example.com/exit/from-import.js'));\nattempt('a worker', () => new Worker('https://example.com/exit/from-worker.js'));\nattempt('the page', () => self.document.body);\nsetTimeout(() => lw.draw(tried.concat(refused.map((line) => 'the frame policy refused ' + line)).map((line) => '<li>' + line + '</li>').join(''), 'tried'), 1500);",
+}
+
 MAP_WIDGET = {
     "kind": "map",
     "title": "Lunch near Galaxis",
@@ -499,6 +535,10 @@ def plan(body):
         return ("calls", [(find_tool(names, "show_widget"), spec) for spec in BRIEF_WIDGETS])
     if "MOCK-KINDS" in task and find_tool(names, "show_widget"):
         return ("calls", [(find_tool(names, "show_widget"), spec) for spec in KINDS_WIDGETS])
+    if "MOCK-PAGE-EXITS" in task and find_tool(names, "show_widget"):
+        return ("calls", [(find_tool(names, "show_widget"), PAGE_EXITS_WIDGET)])
+    if "MOCK-PAGE" in task and find_tool(names, "show_widget"):
+        return ("calls", [(find_tool(names, "show_widget"), PAGE_WIDGET)])
     if "MOCK-MAP" in task and find_tool(names, "show_widget"):
         return ("calls", [(find_tool(names, "show_widget"), MAP_WIDGET)])
     if "MOCK-CALENDAR" in task and find_tool(names, "show_widget"):

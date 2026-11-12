@@ -109,8 +109,8 @@ fn a_bad_widget_says_what_to_change() {
             "result \"Share\" with the starting values: the formula divides by zero",
         ),
         (
-            json!({"kind": "calculator", "title": "x", "inputs": [{"id": "a", "label": "A", "start": 1}], "results": [{"id": "r", "label": "R", "formula": "sqrt(a)"}]}),
-            "there is no function \"sqrt\"",
+            json!({"kind": "calculator", "title": "x", "inputs": [{"id": "a", "label": "A", "start": 1}], "results": [{"id": "r", "label": "R", "formula": "median(a)"}]}),
+            "there is no function \"median\"",
         ),
         (
             json!({"kind": "calculator", "title": "x", "inputs": [{"id": "a", "label": "A", "start": 5, "max": 4}], "results": [{"id": "r", "label": "R", "formula": "a"}]}),

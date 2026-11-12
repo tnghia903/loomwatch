@@ -145,6 +145,16 @@ it and what it says, with Save skill, Change and Not now; nothing is saved until
 the next work is told whether you saved it. A connected iPhone shows them too and keeps what you tick or change there through its door.
 Copy, Notion, search and the notch read the answer's words only.
 
+Where none of these fits, an agent can make a drawing of its own (ADR 0125). It is a trial, off
+unless LoomWatch starts with `LOOMWATCH_WIDGET_PAGES=on`. The drawing is made for its answer, such
+as two pendulums swinging at a length you set, under a line saying who drew it. It uses LoomWatch's
+colours and type, light or dark, and its numbers are worked out by LoomWatch, so they match the
+agent's words. It can't open the web, read your files, change anything in LoomWatch or send
+anything. A button in it can only put words in your message box, addressed to the agent who drew
+it, for you to send or not. One that moves has Pause. One that breaks says "This drawing didn't
+work" in its place: the answer's words still say it all, and the agent is told the next time it
+works. What you set in it is kept as a calculator's values are. The iPhone doesn't show these yet.
+
 Who said what to whom is read from the record, not from the team file as it is now:
 
 | Recorded on | Field | Says |
@@ -389,6 +399,9 @@ agent is offered: `MOCK-TOOL: <tool> <json>` in a message makes it call that too
 JSON on one line, then reply. For example, to see a widget in an answer (an agent without
 `widgets: false`): `MOCK-TOOL: show_widget {"kind":"checklist","title":"Before Wednesday","items":[{"text":"Print 32 copies"}]}`.
 The stand-in writes the place line between two short paragraphs, so the widget stands between them.
+With `LOOMWATCH_WIDGET_PAGES=on` in the daemon's environment, `MOCK-PAGE` shows a page an agent wrote
+itself (ADR 0125), two pendulums swinging, and `MOCK-PAGE-EXITS` a page that tries every way out of
+its frame and lists what stopped each one.
 To see a skill an agent suggests (ADR 0118): `MOCK-TOOL: suggest_skill {"name":"Weekly client update","description":"Writes the weekly update for a client.","instructions":"1. Read the notes.\n2. Write three bullets."}`.
 The stand-in also answers the Skills page's Write it and Change it, from the words you type.
 `MOCK-BRIEF` in a message makes it show two charts, a checklist and choices at once, then answer

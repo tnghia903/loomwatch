@@ -151,7 +151,7 @@ const SHOWN: Record<WidgetSpec['kind'], string> = {
   calculator: 'a calculator', checklist: 'a checklist', choices: 'choices', steps: 'steps',
   chart: 'a chart', graph: 'a graph', marks: 'a yes-or-no row', flow: 'a diagram', compare: 'a comparison',
   picture: 'a picture', finder: 'a decision guide', quiz: 'a quiz', scale: 'a scale', timeline: 'a timeline', map: 'a map', calendar: 'a calendar',
-  skill: 'a suggested skill',
+  skill: 'a suggested skill', page: 'a drawing',
 }
 
 /** "Show a calculator in the answer", from a `show_widget` call's input. */

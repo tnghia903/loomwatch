@@ -5,9 +5,14 @@
 //! agree to the last digit, so both read every case in `schemas/formula.cases.json`.
 //!
 //! The language is small on purpose: numbers, the calculator's inputs and earlier results by id,
-//! `+ - * / ( )`, one comparison (`< <= > >= == !=`, giving 1 or 0), and the functions `min`,
-//! `max`, `round`, `ceil`, `floor`, `abs`, `if`, `and`, `or` and `not`. A switch is 1 when on and 0
-//! when off. There are no other names, no loops and no way out of the calculator.
+//! `+ - * / ( )`, one comparison (`< <= > >= == !=`, giving 1 or 0), the functions `min`, `max`,
+//! `round`, `ceil`, `floor`, `abs`, `if`, `and`, `or` and `not`, the usual maths a page widget's
+//! figures need (`pow`, `sqrt`, `exp`, `ln`, `log10`, `sin`, `cos`; ADR 0125), and the number `pi`.
+//! A switch is 1 when on and 0 when off. There are no other names, no loops and no way out of the
+//! calculator.
+//!
+//! The maths functions come from each side's own library. Their last binary digit may differ
+//! between the daemon and the app, which the 15 significant digits a number is written with hide.
 //!
 //! Rounding, and writing a number, read it as written: its shortest decimal form, cut to 15
 //! significant digits, as a spreadsheet does, so `round(2.345, 2)` is 2.35 and not the 2.34 its
@@ -120,7 +125,21 @@ enum Function {
     And,
     Or,
     Not,
+    Pow,
+    Sqrt,
+    Exp,
+    Ln,
+    Log10,
+    Sin,
+    Cos,
 }
+
+/// The functions, as the agent is told them when it names one that isn't there.
+const FUNCTIONS: &str =
+    "min, max, round, ceil, floor, abs, if, and, or, not, pow, sqrt, exp, ln, log10, sin or cos";
+
+/// The one name a formula knows without being given it.
+pub(crate) const PI: &str = "pi";
 
 impl Function {
     fn named(name: &str) -> Option<Self> {
@@ -135,6 +154,13 @@ impl Function {
             "and" => Self::And,
             "or" => Self::Or,
             "not" => Self::Not,
+            "pow" => Self::Pow,
+            "sqrt" => Self::Sqrt,
+            "exp" => Self::Exp,
+            "ln" => Self::Ln,
+            "log10" => Self::Log10,
+            "sin" => Self::Sin,
+            "cos" => Self::Cos,
             _ => return None,
         })
     }
@@ -145,7 +171,15 @@ impl Function {
             Self::Min | Self::Max => (1, usize::MAX),
             Self::And | Self::Or => (2, usize::MAX),
             Self::Round | Self::Ceil | Self::Floor => (1, 2),
-            Self::Abs | Self::Not => (1, 1),
+            Self::Abs
+            | Self::Not
+            | Self::Sqrt
+            | Self::Exp
+            | Self::Ln
+            | Self::Log10
+            | Self::Sin
+            | Self::Cos => (1, 1),
+            Self::Pow => (2, 2),
             Self::If => (3, 3),
         }
     }
@@ -162,6 +196,13 @@ impl Function {
             Self::And => "and",
             Self::Or => "or",
             Self::Not => "not",
+            Self::Pow => "pow",
+            Self::Sqrt => "sqrt",
+            Self::Exp => "exp",
+            Self::Ln => "ln",
+            Self::Log10 => "log10",
+            Self::Sin => "sin",
+            Self::Cos => "cos",
         }
     }
 }
@@ -357,10 +398,7 @@ impl Parser {
                 let Some(function) = Function::named(&name) else {
                     return Err(FormulaError::new(
                         ErrorKind::UnknownFunction,
-                        format!(
-                            "there is no function \"{name}\": use min, max, round, ceil, floor, \
-                             abs, if, and, or or not"
-                        ),
+                        format!("there is no function \"{name}\": use {FUNCTIONS}"),
                     ));
                 };
                 self.deeper()?;
@@ -469,13 +507,13 @@ pub(crate) fn parse(text: &str) -> Result<Formula, FormulaError> {
 }
 
 impl Formula {
-    /// Every name the formula reads, in order, each once.
+    /// Every name the formula reads, in order, each once; `pi`, which it knows, isn't one.
     pub(crate) fn names(&self) -> Vec<String> {
         fn walk(expr: &Expr, out: &mut Vec<String>) {
             match expr {
                 Expr::Number(_) => {}
                 Expr::Name(name) => {
-                    if !out.contains(name) {
+                    if name != PI && !out.contains(name) {
                         out.push(name.clone());
                     }
                 }
@@ -609,6 +647,11 @@ impl Note {
 fn finite(value: f64) -> Result<f64, FormulaError> {
     if value.is_finite() {
         Ok(value)
+    } else if value.is_nan() {
+        Err(FormulaError::new(
+            ErrorKind::NotFinite,
+            "the result isn't a number, as a square root or log of a number below zero isn't",
+        ))
     } else {
         Err(FormulaError::new(
             ErrorKind::NotFinite,
@@ -626,6 +669,7 @@ fn truth(value: bool) -> f64 {
 fn eval(expr: &Expr, values: &BTreeMap<String, f64>) -> Result<f64, FormulaError> {
     match expr {
         Expr::Number(value) => Ok(*value),
+        Expr::Name(name) if name == PI && !values.contains_key(PI) => Ok(std::f64::consts::PI),
         Expr::Name(name) => values.get(name).copied().ok_or_else(|| {
             FormulaError::new(
                 ErrorKind::UnknownName,
@@ -690,6 +734,13 @@ fn call(
         Function::Not => truth(numbers[0] == 0.0),
         Function::And => truth(numbers.iter().all(|number| *number != 0.0)),
         Function::Or => truth(numbers.iter().any(|number| *number != 0.0)),
+        Function::Pow => finite(numbers[0].powf(numbers[1]))?,
+        Function::Sqrt => finite(numbers[0].sqrt())?,
+        Function::Exp => finite(numbers[0].exp())?,
+        Function::Ln => finite(numbers[0].ln())?,
+        Function::Log10 => finite(numbers[0].log10())?,
+        Function::Sin => finite(numbers[0].sin())?,
+        Function::Cos => finite(numbers[0].cos())?,
         Function::Round | Function::Ceil | Function::Floor => {
             let digits = match numbers.get(1) {
                 None => 0,

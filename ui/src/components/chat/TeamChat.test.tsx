@@ -18,6 +18,7 @@ import { AnswerDocument } from './AnswerDocument'
 import { ChatComposer } from './ChatComposer'
 import { SaidText } from './SaidText'
 import { TeamChat } from './TeamChat'
+import { DRAFT_EVENT } from './widgets/WidgetPage'
 import type { TeamView } from './WorkPiece'
 
 // The pieces read their own record and events only while live or shown; a still session here,
@@ -1229,6 +1230,32 @@ function memberRow(name: string, list: HTMLElement = screen.getByRole('list', { 
   if (!row) throw new Error(`no row for ${name}`)
   return row
 }
+
+describe('words a page an agent drew puts in the message box (ADR 0125)', () => {
+  const draft = (text: string, by?: string) => act(() => {
+    document.dispatchEvent(new CustomEvent(DRAFT_EVENT, { detail: { text, by } }))
+  })
+
+  it('go to the agent who drew it, never sent, and after anything already written', async () => {
+    const { props } = renderChat()
+    await waitFor(() => expect(box()).toBeInTheDocument())
+    draft('Why does it swing slower on the Moon?', 'Writer')
+    expect(wordsIn(box())).toBe('@Writer Why does it swing slower on the Moon?')
+    expect(posted).toEqual([])
+    expect(props.prepare).not.toHaveBeenCalled()
+    draft('And on Mars?', 'Writer')
+    expect(wordsIn(box())).toBe('@Writer Why does it swing slower on the Moon? And on Mars?')
+  })
+
+  it('name no one when the chat doesn\'t know who drew it, and ignore empty words', async () => {
+    renderChat()
+    await waitFor(() => expect(box()).toBeInTheDocument())
+    draft('   ', 'Writer')
+    expect(wordsIn(box())).toBe('')
+    draft('Why?', 'Someone else')
+    expect(wordsIn(box())).toBe('Why?')
+  })
+})
 
 describe('who is on the team', () => {
   afterEach(() => { window.localStorage.clear() })

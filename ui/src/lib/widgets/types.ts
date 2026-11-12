@@ -151,14 +151,18 @@ export type WidgetSpec =
   /** A skill the agent suggested with `suggest_skill` (ADR 0118): its name in words, when to use
       it, and what to do. Nothing is saved until the person saves it. */
   | { kind: 'skill'; title: string; description: string; instructions: string }
+  /** A widget the agent wrote itself (ADR 0125): its markup and script, drawn in a frame that
+      reaches nothing, with figures declared as a calculator's that LoomWatch works out. */
+  | { kind: 'page'; title: string; why: string; html?: string; script?: string; inputs?: WidgetInput[]; results?: WidgetFigure[]; presets?: WidgetPreset[] }
 
-/** What you made of a widget: a checklist's ticks, a calculator's values by input id, the answer
-    you took at each of a finder's questions from the first (each from 0), the choice you picked
-    for each of a quiz's questions (from 0, or null), or a suggested skill saved (by its folder
-    name) or left. */
+/** What you made of a widget: a checklist's ticks, a calculator's or a page's values by input id
+    (a page's with what it said when it couldn't draw), the answer you took at each of a finder's
+    questions from the first (each from 0), the choice you picked for each of a quiz's questions
+    (from 0, or null), or a suggested skill saved (by its folder name) or left. */
 export type WidgetState =
   | { checked: boolean[] }
-  | { values: Record<string, number | boolean> }
+  | { values: Record<string, number | boolean>; broke?: string }
+  | { broke: string }
   | { answers: number[] }
   | { picked: (number | null)[] }
   | { saved: string }

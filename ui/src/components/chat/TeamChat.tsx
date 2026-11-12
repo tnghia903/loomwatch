@@ -13,6 +13,7 @@ import { answersDecision, replyOf } from '../../lib/chat/reply'
 import { changeNoteWidget, changeWidget } from '../../lib/widgets/client'
 import { partsOf } from '../../lib/widgets/place'
 import { AnswerWidget } from './widgets/AnswerWidgets'
+import { DRAFT_EVENT } from './widgets/WidgetPage'
 import type { KeptWidget, WidgetState } from '../../lib/widgets/types'
 import { answerReply, askedPassages, partId, type AskedPassage } from '../../lib/files/passage'
 import { FileReaderContext } from '../../lib/files/reader'
@@ -506,6 +507,28 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
   useEffect(() => { if (chat.loaded) onNewestRun?.(newestWork) }, [chat.loaded, newestWork, onNewestRun])
   const members = agents.filter((agent) => !agent.operator)
   const soloAgent = team.solo ? members.find((agent) => agent.id === team.solo) ?? null : null
+  // A page an agent wrote puts words in the message box after you tap in it (ADR 0125), from the
+  // chat or from its answer read in full beside it: addressed to the agent who drew it, after
+  // anything you were already writing, and never sent by themselves.
+  const solo = soloAgent !== null
+  const roster = useRef({ members, agents })
+  useEffect(() => {
+    roster.current = { members, agents }
+  })
+  useEffect(() => {
+    const onDraft = (event: Event) => {
+      const { text, by } = (event as CustomEvent<{ text?: unknown; by?: unknown }>).detail ?? {}
+      if (typeof text !== 'string' || !text.trim()) return
+      const { members: now, agents: all } = roster.current
+      const drew = typeof by === 'string' ? now.find((agent) => (agent.name.trim() || agent.id) === by || agent.id === by) : undefined
+      setDraft((current) => {
+        if (current.trim()) return `${current.trimEnd()} ${text}`
+        return drew && !solo ? withMention(text, drew, all) : text
+      })
+    }
+    document.addEventListener(DRAFT_EVENT, onDraft)
+    return () => document.removeEventListener(DRAFT_EVENT, onDraft)
+  }, [solo])
   // ADR 0114: what each answer's choices sent, read from the message that replied to it.
   const chosenFor = new Map(chat.items.flatMap((item) => (item.kind === 'work' && item.request?.replyTo?.runId ? [[item.request.replyTo.runId, item.request.text.trim()] as const] : [])))
   // And each quick answer's, by the message it answered and the agent that answered.
