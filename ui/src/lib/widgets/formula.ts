@@ -7,9 +7,11 @@
  * `schemas/formula.cases.json`.
  *
  * Numbers, the calculator's inputs and earlier results by id, `+ - * / ( )`, one comparison
- * (`< <= > >= == !=`, giving 1 or 0), and `min max round ceil floor abs if and or not`. A switch is 1
- * when on and 0 when off. Rounding and writing a number read it as written: its shortest decimal
- * form cut to 15 significant digits, halves away from zero.
+ * (`< <= > >= == !=`, giving 1 or 0), `min max round ceil floor abs if and or not`, the maths a page
+ * widget's figures need (`pow sqrt exp ln log10 sin cos`; ADR 0125), and the number `pi`. A switch
+ * is 1 when on and 0 when off. Rounding and writing a number read it as written: its shortest
+ * decimal form cut to 15 significant digits, halves away from zero. The maths functions come from
+ * each side's own library; a last binary digit they differ by is hidden by those 15 digits.
  */
 
 export const MAX_FORMULA_CHARS = 300
@@ -39,6 +41,13 @@ export class FormulaError extends Error {
 
 type Compare = '<' | '<=' | '>' | '>=' | '==' | '!='
 type FunctionName = 'min' | 'max' | 'round' | 'ceil' | 'floor' | 'abs' | 'if' | 'and' | 'or' | 'not'
+  | 'pow' | 'sqrt' | 'exp' | 'ln' | 'log10' | 'sin' | 'cos'
+
+/** The functions, as the agent is told them when it names one that isn't there. */
+const FUNCTIONS = 'min, max, round, ceil, floor, abs, if, and, or, not, pow, sqrt, exp, ln, log10, sin or cos'
+
+/** The one name a formula knows without being given it. */
+export const PI = 'pi'
 
 type Expr =
   | { kind: 'number'; value: number }
@@ -58,6 +67,13 @@ const ARITY: Record<FunctionName, [number, number]> = {
   floor: [1, 2],
   abs: [1, 1],
   not: [1, 1],
+  sqrt: [1, 1],
+  exp: [1, 1],
+  ln: [1, 1],
+  log10: [1, 1],
+  sin: [1, 1],
+  cos: [1, 1],
+  pow: [2, 2],
   if: [3, 3],
 }
 
@@ -203,7 +219,7 @@ class Parser {
       if (this.peek()?.kind !== '(') return { kind: 'name', name: token.name }
       this.at += 1
       if (!isFunction(token.name)) {
-        throw new FormulaError('unknown_function', `there is no function "${token.name}": use min, max, round, ceil, floor, abs, if, and, or or not`)
+        throw new FormulaError('unknown_function', `there is no function "${token.name}": use ${FUNCTIONS}`)
       }
       const fn = token.name as FunctionName
       this.deeper()
@@ -253,7 +269,7 @@ export function names(formula: Formula): string[] {
   const walk = (expr: Expr) => {
     switch (expr.kind) {
       case 'number': return
-      case 'name': if (!out.includes(expr.name)) out.push(expr.name); return
+      case 'name': if (expr.name !== PI && !out.includes(expr.name)) out.push(expr.name); return
       case 'negate': walk(expr.inner); return
       case 'binary':
       case 'compare': walk(expr.left); walk(expr.right); return
@@ -315,6 +331,7 @@ export function evaluate(text: string, values: Readonly<Record<string, number>>)
 }
 
 function finite(value: number): number {
+  if (Number.isNaN(value)) throw new FormulaError('not_finite', 'the result isn\'t a number, as a square root or log of a number below zero isn\'t')
   if (!Number.isFinite(value)) throw new FormulaError('not_finite', 'the result is too large to be a number')
   return value
 }
@@ -325,6 +342,7 @@ function evaluateExpr(expr: Expr, values: Readonly<Record<string, number>>): num
   switch (expr.kind) {
     case 'number': return expr.value
     case 'name': {
+      if (expr.name === PI && !Object.hasOwn(values, PI)) return Math.PI
       if (!Object.hasOwn(values, expr.name)) throw new FormulaError('unknown_name', `"${expr.name}" is not one of this calculator's inputs or results`)
       return values[expr.name]
     }
@@ -371,6 +389,13 @@ function call(fn: FunctionName, args: Expr[], values: Readonly<Record<string, nu
     case 'not': return truth(numbers[0] === 0)
     case 'and': return truth(numbers.every((n) => n !== 0))
     case 'or': return truth(numbers.some((n) => n !== 0))
+    case 'pow': return finite(numbers[0] ** numbers[1])
+    case 'sqrt': return finite(Math.sqrt(numbers[0]))
+    case 'exp': return finite(Math.exp(numbers[0]))
+    case 'ln': return finite(Math.log(numbers[0]))
+    case 'log10': return finite(Math.log10(numbers[0]))
+    case 'sin': return finite(Math.sin(numbers[0]))
+    case 'cos': return finite(Math.cos(numbers[0]))
     default: {
       const digits = numbers.length > 1 ? wholeDigits(fn, numbers[1]) : 0
       return finite(Decimal.of(finite(numbers[0])).round(digits, fn === 'round' ? 'round' : fn === 'ceil' ? 'ceil' : 'floor').toNumber())

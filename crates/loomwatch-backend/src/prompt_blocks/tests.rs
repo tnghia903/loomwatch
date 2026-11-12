@@ -311,7 +311,37 @@ fn bus_tools(out: &mut String) {
         "bus: show_widget, once shown",
         &serde_json::to_string_pretty(&crate::widgets::shown(&calculator, 1)).expect("shown"),
     );
+    show_widget_pages(out);
     suggest_skill(out);
+}
+
+/// ADR 0125: the same tool when pages are offered (a trial, or `widgets::PAGES_ON`), and what the
+/// agent is told once a page is shown, with its figures worked out and checked.
+fn show_widget_pages(out: &mut String) {
+    section(
+        out,
+        "bus: show_widget, with pages",
+        &serde_json::to_string_pretty(&crate::widgets::tool_definition_for(true)).expect("tool"),
+    );
+    let page = crate::widgets::read_for(
+        &serde_json::json!({
+            "kind": "page",
+            "title": "How the length sets a pendulum's swing",
+            "why": "A pendulum that swings at the length you set, on Earth and on the Moon.",
+            "inputs": [{"id": "length", "label": "Length", "start": 1, "min": 0.2, "max": 3, "unit": "m"}],
+            "results": [{"id": "earth", "label": "One swing on Earth", "formula": "2 * pi * sqrt(length / 9.81)", "unit": "s", "decimals": 1}],
+            "presets": [{"label": "A playground swing, 2.5 m", "values": {"length": 2.5}}],
+            "html": "<span data-result=\"earth\"></span><canvas data-canvas=\"swing\"></canvas>",
+            "script": "lw.canvas('swing', (ctx, w, h, t) => ctx.clearRect(0, 0, w, h))"
+        }),
+        true,
+    )
+    .expect("a page");
+    section(
+        out,
+        "bus: show_widget, a page once shown",
+        &serde_json::to_string_pretty(&crate::widgets::shown(&page, 1)).expect("shown"),
+    );
 }
 
 /// ADR 0118: the tool the agent whose reply is the answer is offered to suggest a skill, and what

@@ -44,13 +44,26 @@
     { "name": "a bracket left open", "formula": "(1 + 2", "values": {}, "error": "syntax" },
     { "name": "a comma between digits", "formula": "1,000", "values": {}, "error": "syntax" },
     { "name": "an unknown name", "formula": "y * 2", "values": { "x": 1 }, "error": "unknown_name" },
-    { "name": "an unknown function", "formula": "sqrt(4)", "values": {}, "error": "unknown_function" },
+    { "name": "an unknown function", "formula": "median(4)", "values": {}, "error": "unknown_function" },
     { "name": "round takes one or two", "formula": "round(1, 2, 3)", "values": {}, "error": "arguments" },
     { "name": "if takes three", "formula": "if(1, 2)", "values": {}, "error": "arguments" },
     { "name": "abs takes one", "formula": "abs()", "values": {}, "error": "arguments" },
     { "name": "digits must be whole", "formula": "round(1, 1.5)", "values": {}, "error": "arguments" },
     { "name": "too big to be a number", "formula": "x * x", "values": { "x": 1e200 }, "error": "not_finite" },
-    { "name": "too deep", "formula": "((((((((((((((((((((((((((((((((((1))))))))))))))))))))))))))))))))))", "values": {}, "error": "too_deep" }
+    { "name": "too deep", "formula": "((((((((((((((((((((((((((((((((((1))))))))))))))))))))))))))))))))))", "values": {}, "error": "too_deep" },
+    { "name": "savings grow by a power", "formula": "round(pow(1 + rate / 100, years), 6)", "values": { "rate": 5, "years": 20 }, "result": 2.653298 },
+    { "name": "a square root", "formula": "sqrt(16)", "values": {}, "result": 4 },
+    { "name": "a pendulum's swing, with pi", "formula": "round(2 * pi * sqrt(length / 9.81), 6)", "values": { "length": 1 }, "result": 2.006067 },
+    { "name": "pi on its own", "formula": "round(pi, 10)", "values": {}, "result": 3.1415926536 },
+    { "name": "ln undoes exp", "formula": "round(ln(exp(2)), 10)", "values": {}, "result": 2 },
+    { "name": "log10 of a thousand", "formula": "round(log10(1000), 10)", "values": {}, "result": 3 },
+    { "name": "sin and cos", "formula": "round(sin(pi / 6) + cos(0), 10)", "values": {}, "result": 1.5 },
+    { "name": "caffeine left after two half-lives", "formula": "round(200 * pow(0.5, hours / 5), 2)", "values": { "hours": 10 }, "result": 50 },
+    { "name": "the square root of a number below zero", "formula": "sqrt(0 - 1)", "values": {}, "error": "not_finite" },
+    { "name": "the log of zero", "formula": "ln(0)", "values": {}, "error": "not_finite" },
+    { "name": "a power of a number below zero by a fraction", "formula": "pow(0 - 8, 1 / 3)", "values": {}, "error": "not_finite" },
+    { "name": "pow takes two", "formula": "pow(2)", "values": {}, "error": "arguments" },
+    { "name": "sin takes one", "formula": "sin(1, 2)", "values": {}, "error": "arguments" }
   ],
   "display": [
     { "value": 135000, "decimals": null, "text": "135,000" },
@@ -89,6 +102,7 @@
     { "name": "empty braces", "note": "{} found", "values": {}, "error": "syntax" },
     { "name": "a brace inside braces", "note": "{a {b}}", "values": { "a": 1, "b": 2 }, "error": "syntax" },
     { "name": "an unknown name in a note", "note": "{y} found", "values": { "x": 1 }, "error": "unknown_name" },
-    { "name": "a note that divides by zero", "note": "{a / b}", "values": { "a": 1, "b": 0 }, "error": "divide_by_zero" }
+    { "name": "a note that divides by zero", "note": "{a / b}", "values": { "a": 1, "b": 0 }, "error": "divide_by_zero" },
+    { "name": "a note with the new maths", "note": "{round(2 * pi * sqrt(l / 9.81), 1)} s a swing", "values": { "l": 2.5 }, "text": "3.2 s a swing" }
   ]
 }

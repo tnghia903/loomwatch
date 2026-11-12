@@ -790,6 +790,53 @@ out again; `earlier_work` includes them. A choice is sent as the person's messag
 answer, and keeps no state; nor do steps or a chart. A paired phone may keep ticks and values
 through the same call (`phone::ALLOWED`).
 
+#### A page the agent writes itself
+
+For what none of the kinds fits, the agent writes the widget itself (ADR 0125): `show_widget` kind
+`page`, with `html`, a `script` for what moves or answers a tap, and `why`, a sentence on what it
+shows that no kind could. It is offered only when `widgets::PAGES_ON` is on, or for a trial with
+`LOOMWATCH_WIDGET_PAGES=on` in the daemon's environment (`widgets::page::offered`); off, the tool,
+its description and `rendered.txt` are as before, byte for byte (`widgets::tool_definition_for`).
+The guide for it is `widgets::SHOW_WIDGET_PAGES`, after the kinds.
+
+A page's figures are a calculator's: `inputs`, up to 8 `results` and `presets`, which the daemon
+checks and works out as it does a calculator's (`Widget::sums`). It also works each formula out at
+the ends of the inputs' ranges, every corner of up to 6 of them (`widgets/page.rs`), and refuses one
+that breaks there with the inputs that broke it. The formula language has `pow`, `sqrt`, `exp`,
+`ln`, `log10`, `sin`, `cos` and `pi` for it, in both twins and the shared cases. What the person sets
+is kept as a calculator's values are, and `{"broke": "…"}` when the page couldn't draw, which the
+next run's conversation names.
+
+The app draws a page in a frame (`ui/src/components/chat/widgets/WidgetPage.tsx`) built by
+`ui/src/lib/widgets/page/document.ts`:
+- **The frame.** It has no origin (`sandbox="allow-scripts"` only), and its policy loads nothing
+  from any address. That is stricter than the reader's frame for pages an agent made as files,
+  which may load from the web.
+- **The renderer.** The only script in the frame is LoomWatch's own (`page/run.ts`). It draws the
+  agent's markup after taking out everything that runs, loads or goes somewhere (`page/clean.ts`,
+  an allowlist of elements and attributes). It keeps fields bound to inputs (`data-input`), figures
+  to results (`data-result`, `data-show`) and the presets (`data-presets`).
+- **The agent's script.** It never runs in the frame's document. It travels as data and runs in a
+  worker the renderer starts (`workerMain`), as `lw`, where it can't touch the page, move the frame
+  to another address or stop the chat. A worker that stops answering for 4 seconds is ended, and
+  the page shows "This drawing didn't work".
+- **The look.** The page gets the chat's tokens as variables under short names (`page/style.ts`)
+  and a stylesheet that draws plain HTML in LoomWatch's look. It also gets the chat's own fonts,
+  read once from `/fonts/` and sent in as `data:` (`pageFonts`), since the frame loads nothing from
+  an address. Its document starts in the chat's colour scheme, so its ground stays clear.
+- **The bridge.** The frame can only ask the chat four things, each checked in `WidgetPage`:
+  - an input set, kept only after a tap and only on a finished answer;
+  - its height, up to 640;
+  - words for the message box, only after a tap. `TeamChat` puts them there through
+    `DRAFT_EVENT`, addressed to the agent who drew the page and after anything already typed,
+    and never sends them;
+  - that it broke.
+
+  A frame that doesn't say it started within 5 seconds counts as broken too.
+
+The stand-in's `MOCK-PAGE` shows a page; `MOCK-PAGE-EXITS` tries every way out of the frame and
+lists what stopped each one.
+
 ### Sources in an answer
 
 A link that closes a claim is drawn as a source chip (`MarkdownRenderer.tsx`), named by its page's

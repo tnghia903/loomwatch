@@ -35,6 +35,7 @@ pub(crate) mod finder;
 pub(crate) mod formula;
 pub(crate) mod host;
 pub(crate) mod map;
+pub(crate) mod page;
 pub(crate) mod picture;
 pub(crate) mod quiz;
 pub(crate) mod scale;
@@ -58,6 +59,11 @@ use crate::{EventKind, RunEvent};
 /// 7, revisited).
 pub(crate) const DEFAULT_ON: bool = true;
 
+/// Whether `show_widget` offers a page, the widget an agent writes itself (ADR 0125). Off until
+/// the bench shows answers where a ready-made kind fits are no worse and pages help where none
+/// does; `LOOMWATCH_WIDGET_PAGES=on` turns it on for a trial ([`page::offered`]).
+pub(crate) const PAGES_ON: bool = false;
+
 /// The Team Bus tool's name.
 pub(crate) const TOOL: &str = "show_widget";
 
@@ -67,6 +73,15 @@ pub(crate) const MOST_PER_ANSWER: usize = 4;
 /// How much a widget may hold. Generous, and checked here rather than by the provider, which
 /// doesn't enforce a tool's schema.
 pub(crate) mod limits {
+    /// A page's html and script together: room for a detailed drawing that moves, short of a
+    /// program (ADR 0125).
+    pub(crate) const PAGE_CHARS: usize = 40_000;
+    /// A page's `why`: one sentence.
+    pub(crate) const PAGE_WHY_CHARS: usize = 200;
+    /// A page's results: twice a calculator's, for a page that shows several figures at once.
+    pub(crate) const PAGE_RESULTS: (usize, usize) = (1, 8);
+    /// What a page that broke says of it, kept for the next run.
+    pub(crate) const BROKE_CHARS: usize = 200;
     pub(crate) const TITLE_CHARS: usize = 80;
     pub(crate) const OPTIONS: (usize, usize) = (2, 6);
     pub(crate) const OPTION_CHARS: usize = 80;
@@ -335,6 +350,33 @@ pub(crate) enum Widget {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         zone: Option<String>,
     },
+    /// A widget the agent writes itself, for what no other kind fits (ADR 0125): its `html`, and
+    /// a `script` that runs apart from the page, in a sandbox that reaches nothing ([`page`]).
+    /// Its figures are a calculator's: `inputs`, `results` and `presets` that `LoomWatch` works
+    /// out and checks, so what the person reads is `LoomWatch`'s. What they set is kept.
+    Page {
+        title: String,
+        /// A sentence on what it shows that no other kind could: kept, so what pages are made for
+        /// is a fact.
+        why: String,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        html: String,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        script: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        inputs: Vec<Input>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        results: Vec<Figure>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        presets: Vec<Preset>,
+    },
+}
+
+/// A calculator's or a page's figures: its inputs, its results and its presets.
+pub(crate) struct Sums<'a> {
+    pub(crate) inputs: &'a [Input],
+    pub(crate) results: &'a [Figure],
+    pub(crate) presets: &'a [Preset],
 }
 
 // serde's `skip_serializing_if` passes a reference.
@@ -494,6 +536,29 @@ pub(crate) struct Series {
 }
 
 impl Widget {
+    /// A calculator's or a page's figures, which `LoomWatch` works out; `None` for the rest.
+    pub(crate) fn sums(&self) -> Option<Sums<'_>> {
+        match self {
+            Self::Calculator {
+                inputs,
+                results,
+                presets,
+                ..
+            }
+            | Self::Page {
+                inputs,
+                results,
+                presets,
+                ..
+            } => Some(Sums {
+                inputs,
+                results,
+                presets,
+            }),
+            _ => None,
+        }
+    }
+
     pub(crate) fn title(&self) -> &str {
         match self {
             Self::Choices { title, .. }
@@ -512,7 +577,8 @@ impl Widget {
             | Self::Scale { title, .. }
             | Self::Timeline { title, .. }
             | Self::Map { title, .. }
-            | Self::Calendar { title, .. } => title,
+            | Self::Calendar { title, .. }
+            | Self::Page { title, .. } => title,
         }
     }
 
@@ -535,6 +601,7 @@ impl Widget {
             Self::Timeline { .. } => "timeline",
             Self::Map { .. } => "map",
             Self::Calendar { .. } => "calendar",
+            Self::Page { .. } => "page",
         }
     }
 
@@ -566,6 +633,8 @@ impl Widget {
             Self::Timeline { .. } => "a timeline",
             Self::Map { .. } => "a map",
             Self::Calendar { .. } => "a calendar",
+            // What the person may read in the agent's words: the card says "This drawing didn't work".
+            Self::Page { .. } => "a drawing",
         };
         format!("{what} \"{}\"", self.title())
     }
@@ -582,6 +651,11 @@ impl Widget {
 /// A widget that breaks a limit, a formula that can't be read or worked out, or a field its kind
 /// needs that is missing.
 pub(crate) fn read(arguments: &Value) -> Result<Widget, String> {
+    read_for(arguments, page::offered())
+}
+
+/// [`read`], with a page a widget when `pages` (ADR 0125).
+pub(crate) fn read_for(arguments: &Value, pages: bool) -> Result<Widget, String> {
     let kind = text(arguments, "kind", 1, 20)?;
     let title = text(arguments, "title", 1, limits::TITLE_CHARS)?;
     let widget = match kind.as_str() {
@@ -655,33 +729,36 @@ pub(crate) fn read(arguments: &Value) -> Result<Widget, String> {
         "timeline" => timeline::read(arguments, title)?,
         "map" => map::read(arguments, title)?,
         "calendar" => calendar::read(arguments, title)?,
+        "page" if pages => page::read(arguments, title)?,
         other => {
+            let page = if pages { "page, " } else { "" };
             return Err(format!(
-                "kind \"{other}\" isn't a widget: use compare, chart, graph, scale, timeline, \
-                 map, calendar, flow, steps, picture, calculator, checklist, finder, quiz, marks or \
-                 choices"
+                "kind \"{other}\" isn't a widget: use {page}compare, chart, graph, scale, \
+                 timeline, map, calendar, flow, steps, picture, calculator, checklist, finder, \
+                 quiz, marks or choices"
             ));
         }
     };
     Ok(widget)
 }
 
-/// A calculator, read and checked.
-fn read_calculator(arguments: &Value, title: String) -> Result<Widget, String> {
-    let inputs = list(arguments, "inputs", limits::INPUTS, read_input)?;
-    let results = list(arguments, "results", limits::RESULTS, |figure| {
-        Ok(Figure {
-            id: id(figure)?,
-            label: text(figure, "label", 1, limits::LABEL_CHARS)?,
-            formula: text(figure, "formula", 1, formula::MAX_FORMULA_CHARS)?,
-            unit: optional_text(figure, "unit", limits::UNIT_CHARS)?,
-            prefix: optional_text(figure, "prefix", limits::UNIT_CHARS)?,
-            decimals: decimals(figure)?,
-            note: optional_text(figure, "note", limits::RESULT_NOTE_CHARS)?,
-        })
-    })?;
-    let presets = match arguments.get("presets") {
-        None | Some(Value::Null) => Vec::new(),
+/// A calculator's or a page's result: a figure `LoomWatch` works out.
+fn read_figure(figure: &Value) -> Result<Figure, String> {
+    Ok(Figure {
+        id: id(figure)?,
+        label: text(figure, "label", 1, limits::LABEL_CHARS)?,
+        formula: text(figure, "formula", 1, formula::MAX_FORMULA_CHARS)?,
+        unit: optional_text(figure, "unit", limits::UNIT_CHARS)?,
+        prefix: optional_text(figure, "prefix", limits::UNIT_CHARS)?,
+        decimals: decimals(figure)?,
+        note: optional_text(figure, "note", limits::RESULT_NOTE_CHARS)?,
+    })
+}
+
+/// A calculator's or a page's presets, when it has any.
+fn read_presets(arguments: &Value) -> Result<Vec<Preset>, String> {
+    match arguments.get("presets") {
+        None | Some(Value::Null) => Ok(Vec::new()),
         Some(_) => list(arguments, "presets", limits::PRESETS, |preset| {
             Ok(Preset {
                 label: text(preset, "label", 1, limits::LABEL_CHARS)?,
@@ -692,8 +769,15 @@ fn read_calculator(arguments: &Value, title: String) -> Result<Widget, String> {
                     .cloned()
                     .ok_or("values is missing: give input id → value for each input it sets")?,
             })
-        })?,
-    };
+        }),
+    }
+}
+
+/// A calculator, read and checked.
+fn read_calculator(arguments: &Value, title: String) -> Result<Widget, String> {
+    let inputs = list(arguments, "inputs", limits::INPUTS, read_input)?;
+    let results = list(arguments, "results", limits::RESULTS, read_figure)?;
+    let presets = read_presets(arguments)?;
     let widget = Widget::Calculator {
         title,
         inputs,
@@ -1006,6 +1090,9 @@ fn id(value: &Value) -> Result<String, String> {
             "id \"{id}\" is the name of a function: call it something else"
         ));
     }
+    if id == formula::PI {
+        return Err("id \"pi\" is the number pi in formulas: call it something else".to_owned());
+    }
     Ok(id)
 }
 
@@ -1056,14 +1143,14 @@ fn read_input(value: &Value) -> Result<Input, String> {
 
 /// Every id once, a group's switches next to each other, every formula and note read, reading
 /// only inputs and the results above it (a note may read its own result too), every preset a
-/// value its inputs take, and all worked out with the starting values and with each preset.
+/// value its inputs take, and all worked out with the starting values and with each preset. A
+/// page's figures are checked the same way ([`page`]).
 fn check_calculator(widget: &Widget) -> Result<(), String> {
-    let Widget::Calculator {
+    let Some(Sums {
         inputs,
         results,
         presets,
-        ..
-    } = widget
+    }) = widget.sums()
     else {
         return Ok(());
     };
@@ -1169,9 +1256,9 @@ fn work_out(
     widget: &Widget,
     state: Option<&Value>,
 ) -> Result<Vec<Worked>, (String, formula::FormulaError)> {
-    let Widget::Calculator {
+    let Some(Sums {
         inputs, results, ..
-    } = widget
+    }) = widget.sums()
     else {
         return Ok(Vec::new());
     };
@@ -1240,11 +1327,12 @@ fn written_around(number: &str, prefix: Option<&str>, unit: Option<&str>) -> Str
 }
 
 /// "Each family pays = 135,000 ₫; Found = 2 (2 of 3 found)": a calculator's results as `state`
-/// gives them, each with its note.
+/// gives them, each with its note. A page that declares none has none.
 fn results_line(widget: &Widget, state: Option<&Value>) -> Option<String> {
-    let Widget::Calculator { results, .. } = widget else {
+    let results = widget.sums()?.results;
+    if results.is_empty() {
         return None;
-    };
+    }
     let worked = work_out(widget, state).ok()?;
     Some(
         results
@@ -1274,7 +1362,7 @@ fn results_line(widget: &Widget, state: Option<&Value>) -> Option<String> {
 /// Each preset of a calculator with what its results would be: "Try moving relevant documents to
 /// the top → RR@5 = 1 (First at #1)", for the agent to write about it.
 fn preset_lines(widget: &Widget) -> Vec<String> {
-    let Widget::Calculator { presets, .. } = widget else {
+    let Some(Sums { presets, .. }) = widget.sums() else {
         return Vec::new();
     };
     presets
@@ -1430,6 +1518,43 @@ pub(crate) const SHOW_WIDGET_KIND: Block = Block::new(
     "compare, chart, graph, scale, timeline, map, calendar, flow, steps, picture, calculator, \
      checklist, finder, quiz, marks or choices, picked by the shape of what you are telling. Fill \
      in only that kind's fields.",
+);
+
+/// How an agent writes a page (ADR 0125), after the kinds in `show_widget`'s description when
+/// pages are offered.
+pub(crate) const SHOW_WIDGET_PAGES: Block = Block::new(
+    "bus.show_widget.pages",
+    "When none of these kinds fits what you are telling as it is, write the widget yourself: kind \
+     page, with html, and script for what moves or answers a tap. Never build it from a kind that \
+     half fits. It is drawn in a frame that reaches nothing: no web, no files, no LoomWatch. Links, \
+     forms, frames and pictures or fonts from an address are taken out.\n\
+     - Look: LoomWatch draws plain HTML in its own look: headings, p, ul, table, button, label, \
+     select, input of type number, range or checkbox, svg and canvas. Colour only with its \
+     variables, so the page reads in light and dark: var(--ink), var(--ink-2) for quieter words, \
+     var(--panel), var(--well) for a tinted box, var(--line), var(--series-1) to var(--series-3) \
+     for things told apart. var(--accent) only as a ring, line or border on the one thing picked, \
+     never a filled box or button; var(--alert) only for something wrong and var(--ok) for \
+     something right, each with a word or mark beside it. Classes: lw-figure for a large figure, \
+     lw-well for a tinted box, lw-row for things side by side that stack on a phone, lw-note for \
+     quiet words. The card already shows your title: don't repeat it as a heading. Put words in \
+     the HTML beside a drawing, not inside an svg that shrinks on a phone.\n\
+     - Figures: declare inputs, results and presets as a calculator's. LoomWatch works the results \
+     out and checks them across each input's range, so every figure the person reads is one of \
+     them. In the html, <span data-result=\"id\"></span> shows a result, <input data-input=\"id\"> \
+     sets an input, data-show=\"id\" shows an element while that result or input isn't 0, and \
+     <div data-presets></div> draws the presets.\n\
+     - Script: it runs apart from the page and can't touch it. lw.values is {inputs, results, \
+     written}; lw.on(fn) calls fn with them now and on each change; lw.draw(html, id) draws the \
+     element with that id again, or the whole page without one; lw.frame(fn) calls fn(seconds) each \
+     frame, and LoomWatch adds Pause; lw.act(name, fn) calls fn({value, checked, data}) when an \
+     element with data-act=\"name\" is tapped or changed; lw.canvas(name, fn) calls fn(ctx, width, \
+     height, seconds) for <canvas data-canvas=\"name\">, where lw.colors (the same names, such as \
+     lw.colors['series-1']) and lw.fonts.sans colour and set its words; lw.set(id, value) sets an \
+     input; lw.draft(words) puts words in the person's message box after they tap. When \
+     lw.reducedMotion is true, draw what moves standing still.\n\
+     - Draw the point first, readable before anything is touched; a typed number before a slider; \
+     two or three presets to try; never colour alone. Never draw a sign-in, a key, a password or a \
+     permission ask. Give why: one sentence on what it shows that no kind could.",
 );
 
 /// A picture's `drawing` (ADR 0117).
@@ -1673,9 +1798,64 @@ pub(crate) const SHOW_WIDGET_SHOWN: Block = Block::new(
      what to notice or try, without repeating all of it. Up to 4 show with one answer.",
 );
 
-/// The tool, as the Team Bus offers it. One schema literal, read top to bottom.
-#[allow(clippy::too_many_lines)]
+/// The tool, as the Team Bus offers it: with a page when pages are offered now
+/// ([`page::offered`]).
 pub(crate) fn tool_definition() -> Value {
+    tool_definition_for(page::offered())
+}
+
+/// The tool, with or without a page (ADR 0125). Without, it is the tool before pages, byte for
+/// byte, so the provider's cache and `rendered.txt` keep it.
+pub(crate) fn tool_definition_for(pages: bool) -> Value {
+    let mut tool = tool_without_pages();
+    if pages {
+        with_pages(&mut tool);
+    }
+    tool
+}
+
+/// A page's fields, its kind and its guide, added to the tool.
+fn with_pages(tool: &mut Value) {
+    tool["description"] = json!(format!(
+        "{}\n\n{}",
+        SHOW_WIDGET.text(),
+        SHOW_WIDGET_PAGES.text()
+    ));
+    if let Some(kinds) = tool
+        .pointer_mut("/inputSchema/properties/kind/enum")
+        .and_then(Value::as_array_mut)
+    {
+        kinds.insert(0, json!("page"));
+    }
+    if let Some(properties) = tool
+        .pointer_mut("/inputSchema/properties")
+        .and_then(Value::as_object_mut)
+    {
+        properties["inputs"]["description"] = json!(
+            "calculator or page: up to 12 values the person can change. A number has start, and \
+             may have unit, prefix, min, max and step; a switch has on instead"
+        );
+        properties["results"]["description"] =
+            json!("calculator: 1 to 4 figures LoomWatch works out, in order; page: up to 8");
+        properties["results"]["maxItems"] = json!(limits::PAGE_RESULTS.1);
+        properties.insert(
+            "why".to_owned(),
+            json!({"type": "string", "description": "page: one sentence on what it shows that no other kind could", "minLength": 1}),
+        );
+        properties.insert(
+            "html".to_owned(),
+            json!({"type": "string", "description": "page: its markup, drawn in LoomWatch's look"}),
+        );
+        properties.insert(
+            "script".to_owned(),
+            json!({"type": "string", "description": "page: JavaScript that runs apart from the page and draws it with lw"}),
+        );
+    }
+}
+
+/// The tool before pages. One schema literal, read top to bottom.
+#[allow(clippy::too_many_lines)]
+fn tool_without_pages() -> Value {
     let id = json!({"type": "string", "description": "Lowercase letters, digits and _, used in formulas", "minLength": 1});
     let label =
         json!({"type": "string", "description": "A few words the person reads", "minLength": 1});
@@ -2201,6 +2381,12 @@ pub(crate) fn shown(widget: &Widget, place: u32) -> Value {
     {
         out["free"] = json!(calendar::line(days, bookings, hours.as_ref()));
     }
+    if matches!(widget, Widget::Page { results, .. } if !results.is_empty()) {
+        out["checked"] = json!(
+            "Every result works out at the start, at each preset and at the ends of its inputs' \
+             ranges. Show the results with data-result, not figures of your own."
+        );
+    }
     out["next"] = json!(SHOW_WIDGET_SHOWN.text());
     out
 }
@@ -2469,31 +2655,9 @@ pub(crate) fn read_state(widget: &Widget, state: &Value) -> Result<Value, String
                 .get("values")
                 .and_then(Value::as_object)
                 .ok_or("a calculator's state is {\"values\": {input id: value}}")?;
-            let mut kept = serde_json::Map::new();
-            for (id, value) in values {
-                let input = inputs
-                    .iter()
-                    .find(|input| &input.id == id)
-                    .ok_or_else(|| format!("\"{id}\" isn't one of the calculator's inputs"))?;
-                if input.is_switch() {
-                    if !value.is_boolean() {
-                        return Err(format!("\"{id}\" is a switch: true or false"));
-                    }
-                } else {
-                    let number = value
-                        .as_f64()
-                        .filter(|number| number.is_finite())
-                        .ok_or_else(|| format!("\"{id}\" is a number"))?;
-                    if input.min.is_some_and(|min| number < min)
-                        || input.max.is_some_and(|max| number > max)
-                    {
-                        return Err(format!("\"{id}\" is outside its min and max"));
-                    }
-                }
-                kept.insert(id.clone(), value.clone());
-            }
-            Ok(json!({"values": kept}))
+            Ok(json!({"values": read_values(inputs, values, "the calculator's")?}))
         }
+        Widget::Page { inputs, .. } => page::read_state(inputs, state),
         Widget::Finder {
             questions,
             outcomes,
@@ -2514,6 +2678,39 @@ pub(crate) fn read_state(widget: &Widget, state: &Value) -> Result<Value, String
         | Widget::Map { .. }
         | Widget::Calendar { .. } => Err(format!("{} keep nothing", widget.kind())),
     }
+}
+
+/// A calculator's or a page's input values as the person set them, each an input it has and a
+/// value that input takes. `whose` names its inputs in what goes wrong ("the calculator's").
+fn read_values(
+    inputs: &[Input],
+    values: &serde_json::Map<String, Value>,
+    whose: &str,
+) -> Result<serde_json::Map<String, Value>, String> {
+    let mut kept = serde_json::Map::new();
+    for (id, value) in values {
+        let input = inputs
+            .iter()
+            .find(|input| &input.id == id)
+            .ok_or_else(|| format!("\"{id}\" isn't one of {whose} inputs"))?;
+        if input.is_switch() {
+            if !value.is_boolean() {
+                return Err(format!("\"{id}\" is a switch: true or false"));
+            }
+        } else {
+            let number = value
+                .as_f64()
+                .filter(|number| number.is_finite())
+                .ok_or_else(|| format!("\"{id}\" is a number"))?;
+            if input.min.is_some_and(|min| number < min)
+                || input.max.is_some_and(|max| number > max)
+            {
+                return Err(format!("\"{id}\" is outside its min and max"));
+            }
+        }
+        kept.insert(id.clone(), value.clone());
+    }
+    Ok(kept)
 }
 
 /// A widget kept with a run's answer, and what the person last made of it.
@@ -2557,10 +2754,12 @@ pub(crate) fn showed(widgets: &[Kept]) -> Option<String> {
                 items.len(),
                 if items.len() == 1 { "" } else { "s" }
             ),
-            Widget::Calculator { .. } => match results_line(&kept.spec, None) {
-                Some(results) => format!("{} ({results})", kept.spec.named()),
-                None => kept.spec.named(),
-            },
+            Widget::Calculator { .. } | Widget::Page { .. } => {
+                match results_line(&kept.spec, None) {
+                    Some(results) => format!("{} ({results})", kept.spec.named()),
+                    None => kept.spec.named(),
+                }
+            }
             Widget::Steps { steps, .. } => format!("{} ({} steps)", kept.spec.named(), steps.len()),
             Widget::Chart { .. } => match bars_line(&kept.spec) {
                 Some(bars) => format!("{} ({bars})", kept.spec.named()),
@@ -2693,25 +2892,36 @@ pub(crate) fn changes(
     Some(line)
 }
 
+/// "Pupils 30, Round up on → Each family pays = 150,000 ₫": what a calculator's or a page's inputs
+/// are set to in `state`, and what follows.
+fn set_line(widget: &Widget, inputs: &[Input], state: &Value) -> String {
+    let values = values_of(inputs, Some(state));
+    let set = inputs
+        .iter()
+        .map(|input| {
+            format!(
+                "{} {}",
+                input.label,
+                input_written(input, values.get(&input.id).copied().unwrap_or_default())
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    match results_line(widget, Some(state)) {
+        Some(results) => format!("{set} → {results}"),
+        None if widget.sums().is_some_and(|sums| sums.results.is_empty()) => set,
+        None => format!("{set} → its results can't be worked out"),
+    }
+}
+
 fn change(widget: &Widget, state: &Value) -> Option<String> {
     match widget {
-        Widget::Calculator { inputs, .. } => {
-            let values = values_of(inputs, Some(state));
-            let set = inputs
-                .iter()
-                .map(|input| {
-                    format!(
-                        "{} {}",
-                        input.label,
-                        input_written(input, values.get(&input.id).copied().unwrap_or_default())
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join(", ");
-            let results = results_line(widget, Some(state))
-                .unwrap_or_else(|| "its results can't be worked out".to_owned());
-            Some(format!("\"{}\": {set} → {results}.", widget.title()))
-        }
+        Widget::Calculator { inputs, .. } => Some(format!(
+            "\"{}\": {}.",
+            widget.title(),
+            set_line(widget, inputs, state)
+        )),
+        Widget::Page { inputs, .. } => page::change(widget, inputs, state),
         Widget::Checklist { items, .. } => {
             let checked = state.get("checked")?.as_array()?;
             let ticked: Vec<&str> = items

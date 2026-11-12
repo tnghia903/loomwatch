@@ -35,8 +35,8 @@ export function AnswerDocument({ text, by, streaming, runId = null, touched = NO
   }) : null), [at])
   const draw = useCallback((n: number) => {
     const kept = widgets?.widgets.find((one) => one.n === n)
-    return kept && widgets ? <AnswerWidget kept={kept} live={widgets.live} onChange={widgets.onChange} /> : null
-  }, [widgets])
+    return kept && widgets ? <AnswerWidget kept={kept} live={widgets.live} onChange={widgets.onChange} by={by} /> : null
+  }, [widgets, by])
   return (
     <article className="tc-document" aria-label="The team’s answer">
       <p className="tc-document-by">{streaming ? `${by} is writing this` : `Written by ${by}`}</p>
