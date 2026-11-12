@@ -2050,6 +2050,936 @@ Tell the person in a few words when the message comes, then end your turn.
   "results": "Each family pays = 135,000 ₫ (32 pupils share the bus)",
   "shown": "a calculator \"Zoo trip: cost per family\""
 }
+===== bus: show_widget, with pages
+{
+  "description": "Show your answer with what LoomWatch draws, so the person takes it in at a glance and can use it. Pick the kind by the shape of what you are telling:\n- two or three things side by side, or two or three parts of one thing, with facts to read across: compare\n- figures to compare, one for each thing: chart\n- figures that change over time, or several series: graph\n- where a figure stands among named ranges, such as whether a temperature is a fever, a score is good or a speed is safe: scale\n- things that happened or are due on dates, such as a history, a life or a plan with deadlines: timeline\n- places the person may go to or where things are, such as cafés near them, a trip's stops or where to stay: map\n- the person's bookings on a day or a few and the free time between them, such as whether they are free on Saturday or what their week looks like: calendar\n- something to see, drawn by you: how a machine, a body or nature works, where a thing's parts are, what happens in steps or rounds, such as how it moves or a message passing through a network, or how one thing changes another, which play: picture\n- one thing leading to the next, in order, when there is nothing to see: flow\n- a process the person follows, one step at a time: steps\n- a sum, a split or a cost they may change: calculator\n- things to do: checklist\n- an answer that turns on the person's own case, which a few questions settle, such as whether they need a visa or which plan suits them: finder\n- which of several things pass a test: marks\n- what they may want next, which they send to you: choices\n- when they want to learn or understand something, a few questions after it is explained, beside the rest, that check they took it in: quiz\nA finder answers them at once from what you set out; choices send their reply to you and wait for another answer. When things in order have dates, show a timeline, which spaces them by the time between them, rather than a flow. When you name places to go, show them on a map: a comparison of their hours or prices may stand beside it, never in its place. When you tell them what is booked or when they are free, show the days on a calendar, which marks the free time, rather than a timeline. A flow's line says that one thing leads to the next, so two or three parts that sit side by side, such as a shop's sales and support teams, are shown with compare, not flow. When what you explain can be seen, such as how an engine or a lung works or how a tide moves, draw it in a picture, not boxes in a flow: a flow only names what a picture shows. When it happens in steps or rounds, the picture plays its steps (drawing says how) rather than numbering them with arrows; a picture of parts numbers its parts. When figures count whole things, such as seats or people, set counted. Prefer one of these to a table, a list or bars written in text, or a page written for it. Show up to 4 when the answer has more than one of these. Words alone are for an answer with none of them, such as a short fact. Call it before you write your answer, once for each, then put each where it belongs with the place line it gives you, after the words that lead to it, and say in words what to notice or try. Give the main result in words too, since a copy of the answer shows only your words.\n\nWhen none of these kinds fits what you are telling as it is, write the widget yourself: kind page, with html, and script for what moves or answers a tap. Never build it from a kind that half fits. It is drawn in a frame that reaches nothing: no web, no files, no LoomWatch. Links, forms, frames and pictures or fonts from an address are taken out.\n- Look: LoomWatch draws plain HTML in its own look: headings, p, ul, table, button, label, select, input of type number, range or checkbox, svg and canvas. Colour only with its variables, so the page reads in light and dark: var(--ink), var(--ink-2) for quieter words, var(--panel), var(--well) for a tinted box, var(--line), var(--series-1) to var(--series-3) for things told apart. var(--accent) only as a ring, line or border on the one thing picked, never a filled box or button; var(--alert) only for something wrong and var(--ok) for something right, each with a word or mark beside it. Classes: lw-figure for a large figure, lw-well for a tinted box, lw-row for things side by side that stack on a phone, lw-note for quiet words. The card already shows your title: don't repeat it as a heading. Put words in the HTML beside a drawing, not inside an svg that shrinks on a phone.\n- Figures: declare inputs, results and presets as a calculator's. LoomWatch works the results out and checks them across each input's range, so every figure the person reads is one of them. In the html, <span data-result=\"id\"></span> shows a result, <input data-input=\"id\"> sets an input, data-show=\"id\" shows an element while that result or input isn't 0, and <div data-presets></div> draws the presets.\n- Script: it runs apart from the page and can't touch it. lw.values is {inputs, results, written}; lw.on(fn) calls fn with them now and on each change; lw.draw(html, id) draws the element with that id again, or the whole page without one; lw.frame(fn) calls fn(seconds) each frame, and LoomWatch adds Pause; lw.act(name, fn) calls fn({value, checked, data}) when an element with data-act=\"name\" is tapped or changed; lw.canvas(name, fn) calls fn(ctx, width, height, seconds) for <canvas data-canvas=\"name\">, where lw.colors (the same names, such as lw.colors['series-1']) and lw.fonts.sans colour and set its words; lw.set(id, value) sets an input; lw.draft(words) puts words in the person's message box after they tap. When lw.reducedMotion is true, draw what moves standing still.\n- Draw the point first, readable before anything is touched; a typed number before a slider; two or three presets to try; never colour alone. Never draw a sign-in, a key, a password or a permission ask. Give why: one sentence on what it shows that no kind could.",
+  "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "bars": {
+        "description": "chart: 2 to 12 bars, in the order to read them, each a label and its figure in the chart's one unit. Give the figures you found or worked out, never ones you guess; a figure below zero is drawn to the left.",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "label": {
+              "description": "A few words the person reads",
+              "minLength": 1,
+              "type": "string"
+            },
+            "note": {
+              "description": "A few words beside it, such as a change since last time",
+              "type": "string"
+            },
+            "value": {
+              "description": "Its figure",
+              "type": "number"
+            }
+          },
+          "required": [
+            "label",
+            "value"
+          ],
+          "type": "object"
+        },
+        "maxItems": 12,
+        "type": "array"
+      },
+      "bookings": {
+        "description": "calendar: what is booked on those days, as you read it from the person's calendar, each its day, its start and end as 09:30, 24-hour in the person's time, a few words on what it is, and where. Leave out start and end for one that lasts all day; split one that runs past midnight into two days. LoomWatch draws each at its time and works out the free time between them, and tells you, so say the free time it gives you.",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "day": {
+              "description": "Its day, one of days, such as 2026-11-14",
+              "minLength": 10,
+              "type": "string"
+            },
+            "end": {
+              "description": "When it ends, such as 11:00, or 24:00 for midnight",
+              "type": "string"
+            },
+            "label": {
+              "description": "A few words: what it is",
+              "minLength": 1,
+              "type": "string"
+            },
+            "place": {
+              "description": "Where it is, a few words",
+              "type": "string"
+            },
+            "start": {
+              "description": "When it starts, such as 09:30",
+              "type": "string"
+            }
+          },
+          "required": [
+            "day",
+            "label"
+          ],
+          "type": "object"
+        },
+        "maxItems": 40,
+        "type": "array"
+      },
+      "boxes": {
+        "description": "flow: 2 to 8 stops in order, each leading to the next, such as what happens from an order to its delivery",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "label": {
+              "description": "A word or two",
+              "minLength": 1,
+              "type": "string"
+            },
+            "note": {
+              "description": "A few words under it",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label"
+          ],
+          "type": "object"
+        },
+        "maxItems": 8,
+        "type": "array"
+      },
+      "cells": {
+        "description": "marks: 1 to 12 things in a row, each marked, such as which results were relevant or which days are free",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "label": {
+              "description": "A word or two, such as #1 or Mon",
+              "minLength": 1,
+              "type": "string"
+            },
+            "mark": {
+              "enum": [
+                "yes",
+                "no",
+                "neither"
+              ],
+              "type": "string"
+            },
+            "note": {
+              "description": "Only what the mark doesn't say, such as 0.82 or 9–11 am; leave it out when the mark says it all",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "mark"
+          ],
+          "type": "object"
+        },
+        "maxItems": 12,
+        "type": "array"
+      },
+      "checks": {
+        "description": "quiz: 1 to 5 questions, each on one idea your answer explains, not a detail to look up, with 2 to 4 short choices in a natural order, such as smallest to largest, the right one wherever it falls. answer is the right one, written as in choices, and why is a sentence the person reads once they pick, saying why it is right. LoomWatch keeps what they pick, so you hear what they missed.",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "answer": {
+              "description": "The right choice, as written in choices",
+              "type": "string"
+            },
+            "choices": {
+              "description": "2 to 4 short choices",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 4,
+              "type": "array"
+            },
+            "question": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "why": {
+              "description": "A sentence saying why it is right",
+              "type": "string"
+            }
+          },
+          "required": [
+            "question",
+            "choices",
+            "answer"
+          ],
+          "type": "object"
+        },
+        "maxItems": 5,
+        "type": "array"
+      },
+      "counted": {
+        "description": "chart or compare: true when the figures count whole things, such as seats, people or votes. LoomWatch draws them as dots, one for each thing or for a round number of them, so a difference is seen before it is read. Leave it out for prices, shares, averages or measures.",
+        "type": "boolean"
+      },
+      "days": {
+        "description": "calendar: 1 to 7 days it shows, each written as 2026-11-14, a day with nothing booked too, such as the Saturday the person asks about. LoomWatch shows them in day order, side by side.",
+        "items": {
+          "description": "A day, such as 2026-11-14",
+          "minLength": 10,
+          "type": "string"
+        },
+        "maxItems": 7,
+        "type": "array"
+      },
+      "decimals": {
+        "description": "chart, compare, graph or scale: decimal places shown; without it, up to 2",
+        "maximum": 6,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "dial": {
+        "description": "picture that plays, when what it shows is how one thing changes another, as the answer to a why usually is, such as how far a ball goes with how fast it is thrown: the name of the cause in a word or two, such as \"Speed\". Its parts are then 3 to 5 values of the cause, from least to most, each part's label its value, in numbers when it has them, such as \"10 m/s\", \"20 m/s\" and \"30 m/s\", and its text what that value does. The person turns the dial and watches what follows from it. Leave dial out when the parts are steps in time.",
+        "minLength": 1,
+        "type": "string"
+      },
+      "drawing": {
+        "description": "picture: the picture as SVG, such as <svg viewBox=\"0 0 640 360\">…</svg>, with path, circle, ellipse, rect, line, polyline, polygon, text and g, transforms too. First decide what it does, from what the answer is. The parts of a thing, such as the parts of a flower, stay still, numbered. Something that happens in steps or rounds, such as a plane taking off, the moon going round the Earth, blood through the heart or a message passed from node to node in a network, plays its steps instead of arrows for the order. A why, one thing changing another, such as why a ball thrown faster goes further, why a swing pushed harder goes higher or why ice melts in warm air, turns a dial: its steps are 3 to 5 values of the cause, from least to most, in numbers when it has them; set dial to the cause's name. To play, make each step a part and draw what moves or changes again in each step's part, where it is at that step, or at its size for a force or a flow that grows, the same shapes and words in the same order, each copy in a g with the same data-moves name. A message going from A through B to C: <g data-part=\"1\" data-moves=\"msg\" transform=\"translate(80 120)\"><circle r=\"8\"/><text x=\"14\">message</text></g>, then that g again with data-part=\"2\" at B and data-part=\"3\" at C. LoomWatch moves it from step to step and dots in where it was. Then draw the place where the answer happens, at the size it happens, big enough to fill the picture: the wing and the air around it to say why a plane flies, a node and its neighbours to say how a network passes messages, a valve to say how the heart keeps blood going one way; add the whole thing small in a corner only when it helps to know where that place is. Draw a real example as a good textbook figure does: people with names rather than dots, a plane with its wings and engines, in a few plain shapes you can draw well, each big enough to read on a phone, with room between them: a rounded body and a flat wing read better than a detailed outline gone wrong. Draw what happens too: the forces, what changes. Name what the person needs to know with <text>, a few words each in their language, beside what it names, on empty ground and not squeezed inside a small shape; LoomWatch sets the words in its own type. Before you finish, check the drawing against the facts: which side the light comes from, what is above or below, what joins what. No background, sky or colours: LoomWatch draws every line in its own ink. A shape with a fill is shaded, dark when the fill is dark, and fill=\"none\" leaves it an outline; stroke-dasharray dashes a line, and marker-end puts an arrowhead at its end, with no defs needed. Put data-part=\"N\" on the shapes, or the g, that show part N.",
+        "minLength": 1,
+        "type": "string"
+      },
+      "events": {
+        "description": "timeline: 2 to 12 events, each its date, a few words on what happened or is due, and a note of a few more. A date is a year such as 1997, a month such as 1997-06 or a day such as 1997-06-26; a year before year 1 is below zero, -500 for 500 BC. LoomWatch puts them in date order and spaces them by the time between them.",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "date": {
+              "description": "1997, 1997-06, 1997-06-26, or -500 for 500 BC",
+              "minLength": 1,
+              "type": "string"
+            },
+            "label": {
+              "description": "A few words: what happened or is due",
+              "minLength": 1,
+              "type": "string"
+            },
+            "note": {
+              "description": "A few words more",
+              "type": "string"
+            }
+          },
+          "required": [
+            "date",
+            "label"
+          ],
+          "type": "object"
+        },
+        "maxItems": 12,
+        "type": "array"
+      },
+      "facts": {
+        "description": "marks: up to 3 short facts under the row, such as \"2 of 3 relevant found\"",
+        "items": {
+          "type": "string"
+        },
+        "maxItems": 3,
+        "type": "array"
+      },
+      "from": {
+        "additionalProperties": false,
+        "description": "map: where the person is or starts, when the places are near it, such as their office: its name, lat and lng. LoomWatch tells you how far each place is from it.",
+        "properties": {
+          "lat": {
+            "description": "Where it is: degrees north, below zero south",
+            "maximum": 90,
+            "minimum": -90,
+            "type": "number"
+          },
+          "lng": {
+            "description": "Where it is: degrees east, below zero west",
+            "maximum": 180,
+            "minimum": -180,
+            "type": "number"
+          },
+          "name": {
+            "description": "A word or two, such as Your office",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "lat",
+          "lng"
+        ],
+        "type": "object"
+      },
+      "guess": {
+        "additionalProperties": false,
+        "description": "picture that plays: one question to ask before the step whose outcome would surprise the person, only when it really would, such as which force is bigger as a plane leaves the ground: before is that step's part number, question is the question in the person's language, choices are 2 or 3 short answers, and answer is the right one, written as in choices. The picture stops before that step the first time it plays; the person answers or skips, then watches.",
+        "properties": {
+          "answer": {
+            "description": "The right choice, as written in choices",
+            "type": "string"
+          },
+          "before": {
+            "description": "The part the question comes before, from 2",
+            "type": "integer"
+          },
+          "choices": {
+            "description": "2 or 3 short answers",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 3,
+            "type": "array"
+          },
+          "question": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "before",
+          "question",
+          "choices",
+          "answer"
+        ],
+        "type": "object"
+      },
+      "hours": {
+        "additionalProperties": false,
+        "description": "calendar: the part of each day it shows and finds free time in, from and to as 07:00 and 24:00, when the person asks about other hours than 08:00 to 22:00, such as their evening.",
+        "properties": {
+          "from": {
+            "description": "Such as 07:00",
+            "type": "string"
+          },
+          "to": {
+            "description": "Such as 24:00",
+            "type": "string"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "type": "object"
+      },
+      "html": {
+        "description": "page: its markup, drawn in LoomWatch's look",
+        "type": "string"
+      },
+      "inputs": {
+        "description": "calculator or page: up to 12 values the person can change. A number has start, and may have unit, prefix, min, max and step; a switch has on instead",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "group": {
+              "description": "Switches next to each other with the same group show as one row of boxes to tap, under the group's name, each box showing its label: give them short labels, such as #1 or Mon",
+              "type": "string"
+            },
+            "id": {
+              "description": "Lowercase letters, digits and _, used in formulas",
+              "minLength": 1,
+              "type": "string"
+            },
+            "label": {
+              "description": "A few words the person reads",
+              "minLength": 1,
+              "type": "string"
+            },
+            "max": {
+              "description": "The most it may be",
+              "type": "number"
+            },
+            "min": {
+              "description": "The least it may be",
+              "type": "number"
+            },
+            "on": {
+              "description": "A switch's starting value",
+              "type": "boolean"
+            },
+            "prefix": {
+              "description": "Written before the number, such as $",
+              "type": "string"
+            },
+            "start": {
+              "description": "A number's starting value",
+              "type": "number"
+            },
+            "step": {
+              "description": "How much one press changes it",
+              "type": "number"
+            },
+            "unit": {
+              "description": "Written after the number, such as ₫, km or %",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "label"
+          ],
+          "type": "object"
+        },
+        "maxItems": 12,
+        "type": "array"
+      },
+      "items": {
+        "description": "checklist: 1 to 20 things to do, in order",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "note": {
+              "description": "A few words beside it, such as a day",
+              "type": "string"
+            },
+            "text": {
+              "description": "The thing to do",
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "text"
+          ],
+          "type": "object"
+        },
+        "maxItems": 20,
+        "type": "array"
+      },
+      "kind": {
+        "description": "compare, chart, graph, scale, timeline, map, calendar, flow, steps, picture, calculator, checklist, finder, quiz, marks or choices, picked by the shape of what you are telling. Fill in only that kind's fields.",
+        "enum": [
+          "page",
+          "compare",
+          "chart",
+          "graph",
+          "scale",
+          "timeline",
+          "map",
+          "calendar",
+          "flow",
+          "steps",
+          "picture",
+          "calculator",
+          "checklist",
+          "finder",
+          "quiz",
+          "marks",
+          "choices"
+        ],
+        "type": "string"
+      },
+      "labels": {
+        "description": "graph: 2 to 24 labels along the bottom, such as months",
+        "items": {
+          "type": "string"
+        },
+        "maxItems": 24,
+        "type": "array"
+      },
+      "options": {
+        "description": "choices: 2 to 6 replies the person may tap. A tap sends the label as their message, so write it as they would say it.",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "detail": {
+              "description": "A few more words under the label",
+              "type": "string"
+            },
+            "label": {
+              "description": "A few words the person reads",
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "label"
+          ],
+          "type": "object"
+        },
+        "maxItems": 6,
+        "type": "array"
+      },
+      "outcomes": {
+        "description": "finder: 2 to 8 outcomes, numbered from 1 in the order given, each a few words saying what is true in that case, such as \"No visa for up to 45 days\", and a sentence or two on what to do. Every outcome is reached by some answer.",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "label": {
+              "description": "A few words: what is true in this case",
+              "minLength": 1,
+              "type": "string"
+            },
+            "text": {
+              "description": "A sentence or two on what to do",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label"
+          ],
+          "type": "object"
+        },
+        "maxItems": 8,
+        "type": "array"
+      },
+      "parts": {
+        "description": "picture: up to 8 parts in the order to read them: the steps of a picture that plays, the values of its dial, or the parts to know, each a short label and a sentence or two. The person taps a part's number on the picture, or steps through them, and its shapes turn gold. at is [x, y] in the drawing's units where its number stands, on empty ground beside what it names; without it, the number stands above its shapes.",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "at": {
+              "description": "[x, y]: two numbers, where its number stands",
+              "items": {
+                "type": "number"
+              },
+              "maxItems": 2,
+              "type": "array"
+            },
+            "label": {
+              "description": "A word or two",
+              "minLength": 1,
+              "type": "string"
+            },
+            "text": {
+              "description": "What it is or what happens there",
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "text"
+          ],
+          "type": "object"
+        },
+        "maxItems": 8,
+        "type": "array"
+      },
+      "pins": {
+        "description": "scale: 1 to 3 figures to place on it, each a word or two and its value in the scale's unit, such as {\"label\": \"You\", \"value\": 38.5}. LoomWatch tells you the range each falls in.",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "label": {
+              "description": "A word or two, such as You",
+              "minLength": 1,
+              "type": "string"
+            },
+            "value": {
+              "description": "Its figure",
+              "type": "number"
+            }
+          },
+          "required": [
+            "label",
+            "value"
+          ],
+          "type": "object"
+        },
+        "maxItems": 3,
+        "type": "array"
+      },
+      "places": {
+        "description": "map: 1 to 8 places, each its name as the place writes it, its address, and where it is: lat and lng from a map link or the place's page, or as you know them for a place or building you know well. Near is enough, since its name and address lead the person's maps app to the place itself; leave out a place you can't put on the map at all. Then its category and a sentence on why it suits them, and its rating out of 5, its price from 1 ($) to 4 ($$$$) and its own website when you found them. LoomWatch puts a pin on a map for each, and the person opens it in a maps app for directions.",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "address": {
+              "description": "Its street address, as written there",
+              "type": "string"
+            },
+            "category": {
+              "description": "What sort of place it is",
+              "enum": [
+                "food",
+                "cafe",
+                "bar",
+                "shop",
+                "hotel",
+                "sight",
+                "park",
+                "transit",
+                "other"
+              ],
+              "type": "string"
+            },
+            "lat": {
+              "description": "Where the place is: degrees north, below zero south",
+              "maximum": 90,
+              "minimum": -90,
+              "type": "number"
+            },
+            "link": {
+              "description": "Its own website",
+              "type": "string"
+            },
+            "lng": {
+              "description": "Where the place is: degrees east, below zero west",
+              "maximum": 180,
+              "minimum": -180,
+              "type": "number"
+            },
+            "name": {
+              "description": "Its name, as the place writes it",
+              "minLength": 1,
+              "type": "string"
+            },
+            "note": {
+              "description": "A sentence on what it is and why it suits them",
+              "type": "string"
+            },
+            "price": {
+              "description": "1 cheap ($) to 4 dear ($$$$)",
+              "maximum": 4,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "rating": {
+              "description": "Its rating out of 5, as its reviews give it",
+              "maximum": 5,
+              "minimum": 1,
+              "type": "number"
+            }
+          },
+          "required": [
+            "name",
+            "lat",
+            "lng"
+          ],
+          "type": "object"
+        },
+        "maxItems": 8,
+        "type": "array"
+      },
+      "prefix": {
+        "description": "chart, compare, graph or scale: written before every figure, such as $",
+        "type": "string"
+      },
+      "presets": {
+        "description": "calculator: up to 3 buttons that set some inputs to a case worth trying, such as \"Try moving the relevant ones to the top\". A button sets the inputs it names and puts the rest back to their starting values. You are told each one's results, so your words can say what changes.",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "label": {
+              "description": "What the button says",
+              "minLength": 1,
+              "type": "string"
+            },
+            "values": {
+              "description": "Input id: a number, or true or false for a switch",
+              "type": "object"
+            }
+          },
+          "required": [
+            "label",
+            "values"
+          ],
+          "type": "object"
+        },
+        "maxItems": 3,
+        "type": "array"
+      },
+      "questions": {
+        "description": "finder: 1 to 6 questions, numbered from 1 in the order given, the first asked first. Ask only what changes the outcome, the one that settles the most first, such as which passport they hold before how long they stay. Each has 2 to 4 answers the person taps, written as they would say them, and each answer leads to a later question with next or to an outcome with outcome, by its number, so every path ends at an outcome.",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "answers": {
+              "description": "2 to 4 answers to tap",
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "label": {
+                    "description": "A few words, as the person would answer",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "next": {
+                    "description": "The later question it leads to, by its number",
+                    "type": "integer"
+                  },
+                  "outcome": {
+                    "description": "The outcome it ends at, by its number",
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "label"
+                ],
+                "type": "object"
+              },
+              "maxItems": 4,
+              "type": "array"
+            },
+            "text": {
+              "description": "The question, as you would ask it",
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "text",
+            "answers"
+          ],
+          "type": "object"
+        },
+        "maxItems": 6,
+        "type": "array"
+      },
+      "ranges": {
+        "description": "scale: 2 to 6 named ranges from low to high, each where it starts (from) and ends (to), each starting where the one before it ends, such as Normal from 36.1 to 37.5 then Fever from 37.5 to 40, as a source the person can trust gives them. LoomWatch draws them to scale.",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "from": {
+              "description": "Where it starts",
+              "type": "number"
+            },
+            "label": {
+              "description": "A word or two, such as Normal",
+              "minLength": 1,
+              "type": "string"
+            },
+            "to": {
+              "description": "Where it ends, and the next one starts",
+              "type": "number"
+            }
+          },
+          "required": [
+            "label",
+            "from",
+            "to"
+          ],
+          "type": "object"
+        },
+        "maxItems": 6,
+        "type": "array"
+      },
+      "repeats": {
+        "description": "steps or flow: true when the last leads back to the first, as in a cycle",
+        "type": "boolean"
+      },
+      "results": {
+        "description": "calculator: 1 to 4 figures LoomWatch works out, in order; page: up to 8",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "decimals": {
+              "description": "Decimal places shown; without it, up to 2",
+              "maximum": 6,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "formula": {
+              "description": "Worked out by LoomWatch from the inputs and the results above this one, by id: numbers, + - * / and brackets, one comparison (< <= > >= == !=, giving 1 or 0), min, max, round(x, digits), ceil(x, digits), floor(x, digits), abs, if(condition, then, else), and, or, not. A switch is 1 when on. Digits may be negative: ceil(x, -4) rounds up to the nearest 10,000.",
+              "minLength": 1,
+              "type": "string"
+            },
+            "id": {
+              "description": "Lowercase letters, digits and _, used in formulas",
+              "minLength": 1,
+              "type": "string"
+            },
+            "label": {
+              "description": "A few words the person reads",
+              "minLength": 1,
+              "type": "string"
+            },
+            "note": {
+              "description": "A few words under the figure saying why, with formulas in braces that LoomWatch works out as the inputs change, such as \"{found} of 3 found\" or \"First at #{if(d1, 1, if(d2, 2, 3))}\". A note may read the inputs, this result and the results above it.",
+              "type": "string"
+            },
+            "prefix": {
+              "description": "Written before the number, such as $",
+              "type": "string"
+            },
+            "unit": {
+              "description": "Written after the number, such as ₫, km or %",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "label",
+            "formula"
+          ],
+          "type": "object"
+        },
+        "maxItems": 8,
+        "type": "array"
+      },
+      "rows": {
+        "description": "compare: up to 6 facts read across the sides, each a few words and one value per side in their order, such as {\"label\": \"Term\", \"values\": [\"6 years\", \"2 years\"]}.",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "label": {
+              "description": "A few words the person reads",
+              "minLength": 1,
+              "type": "string"
+            },
+            "values": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "label",
+            "values"
+          ],
+          "type": "object"
+        },
+        "maxItems": 6,
+        "type": "array"
+      },
+      "script": {
+        "description": "page: JavaScript that runs apart from the page and draws it with lw",
+        "type": "string"
+      },
+      "series": {
+        "description": "graph: 1 to 3 series, each a value for every label",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "label": {
+              "description": "A few words the person reads",
+              "minLength": 1,
+              "type": "string"
+            },
+            "values": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "label",
+            "values"
+          ],
+          "type": "object"
+        },
+        "maxItems": 3,
+        "type": "array"
+      },
+      "sides": {
+        "description": "compare: 2 or 3 things side by side, in the order to read them, each a name and a few words under it. When they share a measure, such as seats, members or a price, give each side its figure as value, in the comparison's one unit, rather than in a row: LoomWatch draws values to scale, which words in a row can't be. Every side or none.",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "label": {
+              "description": "A word or two",
+              "minLength": 1,
+              "type": "string"
+            },
+            "note": {
+              "description": "A few words under it",
+              "type": "string"
+            },
+            "value": {
+              "description": "Its figure",
+              "type": "number"
+            }
+          },
+          "required": [
+            "label"
+          ],
+          "type": "object"
+        },
+        "maxItems": 3,
+        "type": "array"
+      },
+      "steps": {
+        "description": "steps: 2 to 8, in order, each a short label and a sentence or two",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "label": {
+              "description": "A word or two",
+              "minLength": 1,
+              "type": "string"
+            },
+            "text": {
+              "description": "What happens at this step",
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "text"
+          ],
+          "type": "object"
+        },
+        "maxItems": 8,
+        "type": "array"
+      },
+      "style": {
+        "description": "graph: bars side by side, or a line over time",
+        "enum": [
+          "bar",
+          "line"
+        ],
+        "type": "string"
+      },
+      "title": {
+        "description": "A few words above it, such as \"Zoo trip: cost per family\"",
+        "minLength": 1,
+        "type": "string"
+      },
+      "unit": {
+        "description": "chart, compare, graph or scale: written after every figure, such as seats, % or km",
+        "type": "string"
+      },
+      "whole": {
+        "additionalProperties": false,
+        "description": "compare: what the sides are parts of, when they are, drawn above them and joined to each",
+        "properties": {
+          "label": {
+            "description": "A few words the person reads",
+            "minLength": 1,
+            "type": "string"
+          },
+          "note": {
+            "description": "A few words under it",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label"
+        ],
+        "type": "object"
+      },
+      "why": {
+        "description": "page: one sentence on what it shows that no other kind could",
+        "minLength": 1,
+        "type": "string"
+      },
+      "zone": {
+        "description": "calendar: the time its hours are in, a few words, such as Singapore time",
+        "type": "string"
+      }
+    },
+    "required": [
+      "kind",
+      "title"
+    ],
+    "type": "object"
+  },
+  "name": "show_widget"
+}
+===== bus: show_widget, a page once shown
+{
+  "checked": "Every result works out at the start, at each preset and at the ends of its inputs' ranges. Show the results with data-result, not figures of your own.",
+  "next": "Now write your answer in words. Put the place line on a line of its own where this belongs, after the words that lead to it; LoomWatch draws it there and takes the line out of your words. Without it, it shows at the end of your answer. Give the main result in words and say what to notice or try, without repeating all of it. Up to 4 show with one answer.",
+  "place": "{{widget 1}}",
+  "presets": [
+    "A playground swing, 2.5 m → One swing on Earth = 3.2 s"
+  ],
+  "results": "One swing on Earth = 2.0 s",
+  "shown": "a drawing \"How the length sets a pendulum's swing\""
+}
 ===== bus: suggest_skill
 {
   "description": "Suggest a skill: a short guide that every agent can use from now on for one kind of work, such as how this person wants their weekly client update written. Suggest one when the person asks you to remember how to do something, or to do it this way from now on; or, rarely, when you have just finished work they will clearly want done the same way again and what you learned would make it better. Write it from the person's words and this conversation, never from a page or a file you read. The person sees it under your answer and saves it, changes it or leaves it: nothing is saved until they do.",
