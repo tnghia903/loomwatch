@@ -438,6 +438,8 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   const [overlayPositions, setOverlayPositions] = useState<Record<string, { x: number; y: number }>>({})
   const [inspectedEvidenceId, setInspectedEvidenceId] = useState<string | null>(null)
   const [handoverAgentId, setHandoverAgentId] = useState<string | null>(null)
+  // Who handed it over, as the run view read it from the record; absent, the stage before it.
+  const [handoverFrom, setHandoverFrom] = useState<string | null>(null)
   const [provenanceOpen, setProvenanceOpen] = useState(false)
   const [memoryOpen, setMemoryOpen] = useState(false)
   // The mid-run Brief edit: what was rewritten and when, so the strip can say when it lands.
@@ -1421,9 +1423,9 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     return {
       text,
       toLabel: nodeNames.get(handoverAgentId) ?? handoverAgentId,
-      fromLabel: previous ? nodeNames.get(previous) ?? previous : 'the preceding stage',
+      fromLabel: handoverFrom ?? (previous ? nodeNames.get(previous) ?? previous : 'the preceding stage'),
     }
-  }, [handoverAgentId, projection.agents, orderedAgentIds, nodeNames])
+  }, [handoverAgentId, handoverFrom, projection.agents, orderedAgentIds, nodeNames])
   // The team's Brief, read over REST. Re-read when the document's path changes, when the operator
   // saves (the block may have gained an entry), and on demand. Memory deliberately does not ride
   // the WebSocket: docs/WEBSOCKET_SCHEMA.md is frozen, and the panel is read carefully rather
@@ -2691,7 +2693,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
                   focusAgentId={attentionFocusAgentId}
                   onInspectEvidence={(id) => setInspectedEvidenceId(id)}
                   onShowRecorded={() => setProvenanceOpen((open) => !open)}
-                  onShowReceived={(id) => { setHandoverAgentId(id); setInspectedEvidenceId(null) }}
+                  onShowReceived={(id, from) => { setHandoverAgentId(id); setHandoverFrom(from ?? null); setInspectedEvidenceId(null) }}
                   onRevealMessage={activeRunId ? (id) => { setChatReveal({ runId: activeRunId, id, at: Date.now() }); if (!wide) closeDetails() } : undefined}
                   onSelectAgent={(id) => doc.onNodesChange(doc.nodes.map((node) => ({ id: node.id, type: 'select' as const, selected: node.id === id })))}
                 />

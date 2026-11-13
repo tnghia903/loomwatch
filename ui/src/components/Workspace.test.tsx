@@ -1705,10 +1705,11 @@ describe('Workspace', () => {
       HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', '') }
       try {
         renderWorkspace('run-1')
-        const routes = await screen.findAllByRole('button', { name: 'What it received' })
+        // Who handed the first agent its work, you, is the way to what it was given.
+        const routes = await screen.findAllByRole('button', { name: /^Work from you/ })
         fireEvent.click(routes[0])
         const panel = await screen.findByRole('region', { name: /What Researcher was given/ })
-        expect(panel).toHaveTextContent('no preceding stage')
+        expect(panel).toHaveTextContent('it went first')
         // The stored packet is read after the panel opens ("Reading the stored packet…").
         await waitFor(() => expect(panel).toHaveTextContent('1 entry · pinned'))
       } finally {
@@ -2020,7 +2021,7 @@ describe('an Attention alert routes to the repair and to the record', () => {
     renderWorkspace('run-1')
     fireEvent.click(await screen.findByRole('button', { name: 'Show evidence' }))
     await waitFor(() => expect(screen.getByRole('complementary', { name: 'Researcher couldn’t ask market-researcher' })).toBeInTheDocument())
-    expect(screen.getByRole('button', { name: /Researcher/, pressed: true })).toHaveClass('flow-who')
+    expect(screen.getByRole('button', { name: /Researcher/, pressed: true })).toHaveClass('stage-who')
     expect(screen.queryByRole('region', { name: 'Inspector' })).not.toBeInTheDocument()
   })
 })

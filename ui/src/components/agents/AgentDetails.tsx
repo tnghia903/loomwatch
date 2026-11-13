@@ -67,6 +67,8 @@ export function AgentDetails({ asked, draft, model, chatId, figure, onClose, onA
   const [inspected, setInspected] = useState<string | null>(asked.evidenceId ?? null)
   const [recorded, setRecorded] = useState(false)
   const [received, setReceived] = useState<string | null>(null)
+  // Who handed it over, as the run view read it from the record; absent, the stage before it.
+  const [receivedFrom, setReceivedFrom] = useState<string | null>(null)
   // Opened from the chat, the way back has the focus, so it is in view where the chat is below the
   // bench; a record a finding asked for takes it instead.
   const back = useRef<HTMLButtonElement>(null)
@@ -131,7 +133,7 @@ export function AgentDetails({ asked, draft, model, chatId, figure, onClose, onA
   const handover = received ? {
     text: projection.agents.find((each) => each.id === received)?.received ?? '',
     toLabel: names.get(received) ?? received,
-    fromLabel: (() => { const index = orderedAgentIds.indexOf(received); return index > 0 ? names.get(orderedAgentIds[index - 1]) ?? orderedAgentIds[index - 1] : 'the preceding stage' })(),
+    fromLabel: receivedFrom ?? (() => { const index = orderedAgentIds.indexOf(received); return index > 0 ? names.get(orderedAgentIds[index - 1]) ?? orderedAgentIds[index - 1] : 'the preceding stage' })(),
   } : null
   const allow = (id: string, key: AllowSwitch) => {
     if (id === agentId) onAllow(key)
@@ -161,7 +163,7 @@ export function AgentDetails({ asked, draft, model, chatId, figure, onClose, onA
               focusAgentId={asked.agentId ?? null}
               onInspectEvidence={(id) => { setInspected(id); setReceived(null) }}
               onShowRecorded={() => setRecorded((open) => !open)}
-              onShowReceived={(id) => { setReceived(id); setInspected(null) }}
+              onShowReceived={(id, from) => { setReceived(id); setReceivedFrom(from ?? null); setInspected(null) }}
               onRevealMessage={(id) => onRevealMessage(runId, id)}
             />
           )}
