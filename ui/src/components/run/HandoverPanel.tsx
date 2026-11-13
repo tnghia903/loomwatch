@@ -48,7 +48,7 @@ export function HandoverPanel({ text, toLabel, fromLabel, packet, packetLoading,
         <span className="insp-text">
           <div className="insp-title t-title" id="handover-title">What {toLabel} was given</div>
           <div className="insp-id t-mono">
-            {text ? `handover from ${fromLabel} · ${text.length.toLocaleString()} characters` : 'no preceding stage'}
+            {text ? `handover from ${fromLabel} · ${text.length.toLocaleString()} characters` : 'it went first'}
             {supplied ? ` · memory ${supplied}` : ''}
           </div>
         </span>
@@ -76,7 +76,7 @@ export function HandoverPanel({ text, toLabel, fromLabel, packet, packetLoading,
         <div className="zone-head t-micro">Handed over</div>
         {text
           ? <pre className="ent-out t-mono-sm">{text}</pre>
-          : <p className="hint t-meta" style={{ margin: 0 }}>Nothing: this stage is the entry point, so it was given only the goal and the team's memory.</p>}
+          : <p className="hint t-meta" style={{ margin: 0 }}>Nothing from another agent: it went first, so it was given your request and the team’s memory.</p>}
       </div>
 
       <div className="zone">

@@ -575,16 +575,11 @@
 .stage-figure[data-glow] { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 3px var(--glow)); }
 /* An agent with no figure wears its mark, which glows by itself: one glow, not two. */
 .stage-figure[data-glow]:has(.lw-mark) { filter: none; }
-/* What it is on now: the start of its reasoning in a thought bubble, or the call by name. */
+/* The call it is on now, by name (its bench's own thought bubble says what it thinks about). */
 .stage-now { display: flex; align-items: center; gap: 6px; margin: 10px 0 0; max-width: 100%; min-width: 0; font-size: 12px; line-height: 16px; color: var(--color-ink); }
 .stage-now > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .stage-now.doing { width: fit-content; padding: 3px 10px 3px 8px; border: 1px solid var(--color-live); border-radius: var(--r-full); background: var(--color-live-tint); }
 .stage-now.doing svg { flex: none; color: var(--color-live); }
-/* The bubble floats over the card; its tail is two dots coming up from the figure under it. */
-.stage-now.thought { position: relative; width: fit-content; min-width: 48px; padding: 5px 11px; border: 1px solid var(--color-hairline); border-radius: 14px; background: var(--color-panel); }
-.stage-now.thought::before, .stage-now.thought::after { content: ""; position: absolute; border-radius: 50%; background: var(--color-warp); }
-.stage-now.thought::before { left: 25px; top: calc(100% + 3px); width: 7px; height: 7px; }
-.stage-now.thought::after { left: 33px; top: calc(100% + 11px); width: 4px; height: 4px; }
 /* The tray: one mark per kind it used, its count beside it; the words are in the label. */
 .stage-tray { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
 .stage-mark { display: inline-flex; align-items: center; gap: 4px; min-height: 32px; min-width: 32px; justify-content: center; padding: 0 8px; border: 1px solid var(--color-hairline); border-radius: var(--r-sm); background: transparent; color: var(--color-ink-2); font-size: 12px; font-variant-numeric: tabular-nums; cursor: pointer; }
@@ -627,7 +622,7 @@
 .stage-skill-receipt > p { margin: 0; color: var(--color-ink-2); }
 /* A finger needs a bigger target than a pointer. */
 @media (max-width: 767px) {
-  .stage-mark, .stage-use, .stage-skill { min-height: 44px; }
+  .stage-mark, .stage-use, .stage-skill, .stage-who, button.stage-handed, .flow-card-link { min-height: 44px; }
   .stage-mark { min-width: 44px; }
   .stage-sheet li > a { min-height: 44px; }
 }
@@ -646,103 +641,96 @@
 @keyframes stage-bob { 50% { transform: translateY(-2px); } }
 
 
-/* ---------- The team at work (TeamFlow.tsx), as option A of the trace sketches drew it ----------
-   Your request, each agent's card and the team's answer in one row, joined by the lines the work
-   moves along; what an agent is at floats over its card, its skills hang under it. The row scrolls
-   on its own when the team is wider than the pane; on a phone it stands in a column. */
-.team-flow {
-  --flow-card-w: 248px;
-  --flow-above: 48px;
-  /* A figure, or the review step's mark, stands in a slot this tall at the card's top. */
-  --flow-figure: 46px;
-  /* The middle of that slot: what floats over the card, the card's border and top padding, half the slot. */
-  --flow-line-y: calc(var(--flow-above) + 1px + 16px + var(--flow-figure) / 2);
-  overflow-x: auto; padding: 2px 2px 10px;
-}
-.flow-row { display: flex; align-items: flex-start; width: max-content; min-width: 100%; }
-.flow-node { display: flex; align-items: flex-start; }
-/* The ends have nothing floating over them: they start where the agents' cards start. The card moves
-   down, not the node, so the line into the answer stays level with the others. */
-.flow-end > .flow-card { margin-top: var(--flow-above); }
-.flow-column { display: grid; min-width: 0; }
-.flow-above { height: var(--flow-above); max-width: var(--flow-card-w); display: flex; align-items: flex-end; padding-bottom: 8px; }
-.flow-above .stage-now { margin: 0; }
-/* Room for the thought's tail between the bubble and the card. */
-.flow-above .stage-now.thought { margin-bottom: 8px; }
-.flow-card { width: var(--flow-card-w); display: grid; gap: 12px; padding: 16px; background: var(--color-panel-solid); border: 1px solid var(--color-hairline); border-radius: var(--r-md); box-shadow: var(--e1-shadow); transition: border-color var(--t-settle), box-shadow var(--t-settle); }
-.flow-request, .flow-answer { width: 136px; }
-.flow-agent.working { border-color: color-mix(in srgb, var(--color-live) 55%, transparent); }
-.flow-agent.selected { border-color: var(--color-accent-dim); }
+/* ---------- The team at work (TeamBenches.tsx), as the office sketches drew it (owner, 2026-11-13) ----------
+   One tile per agent: the agent at its own workbench, what it is at in a paper bubble over its head,
+   its card under it. The tiles wrap, so no team scrolls sideways; on a phone they stand one under
+   another. While the run is watched, the spotlight's band above them says who is talking to whom. */
+.team-benches { position: relative; }
+.bench-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); gap: 14px; margin: 0; padding: 0; list-style: none; }
+.bench-cell { display: flex; min-width: 0; }
+.stage-tile { position: relative; display: flex; flex-direction: column; width: 100%; min-width: 0; overflow: hidden; background: var(--color-panel-solid); border: 1px solid var(--color-hairline); border-radius: var(--r-md); box-shadow: var(--e1-shadow); transition: border-color var(--t-settle); }
+.stage-tile.working { border-color: color-mix(in srgb, var(--color-live) 55%, transparent); }
+.stage-tile.selected { border-color: var(--color-accent-dim); }
+.stage-scene { position: relative; }
+/* Someone else is talking: what isn't in the talk, or at work, steps back. Only its bench does: its
+   name and state stay readable, and no filter runs over a bench that keeps drawing. */
+.stage-scene::after { content: ""; position: absolute; inset: 0; z-index: 4; background: color-mix(in srgb, var(--color-ground) 55%, transparent); opacity: 0; transition: opacity var(--t-move) var(--ease-out); pointer-events: none; }
+.stage-tile.dim .stage-scene::after { opacity: 1; }
+.stage-scene > .bench-stage { aspect-ratio: 4 / 3; border-radius: 0; }
+.stage-bench-still, .stage-you { display: grid; place-items: center; aspect-ratio: 4 / 3; background: radial-gradient(ellipse 70% 60% at 50% 42%, color-mix(in srgb, var(--color-accent) 7%, var(--color-panel-solid)), var(--color-ground) 78%); }
+.stage-bench-still > :is(img, .figure-still) { width: 40%; height: auto; }
+/* What it is at, over its head: paper, as its bench's own thought bubble is, in both themes. */
+.stage-says { position: absolute; left: 50%; top: 10px; z-index: 3; max-width: calc(100% - 20px); padding: 6px 11px; border-radius: 12px; background: var(--color-paper); color: var(--color-paper-ink); box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-paper-ink) 16%, transparent), 0 6px 18px color-mix(in srgb, var(--color-black) 26%, transparent); transform: translateX(-50%); pointer-events: none; }
+.stage-says::after { content: ""; position: absolute; left: 50%; bottom: -5px; width: 10px; height: 10px; margin-left: -5px; background: inherit; transform: rotate(45deg); box-shadow: 1px 1px 0 color-mix(in srgb, var(--color-paper-ink) 14%, transparent); }
+.stage-says .stage-now { margin: 0; color: var(--color-paper-ink); }
+.stage-says .stage-now.doing { width: auto; padding: 0; border: 0; background: none; }
+.stage-says .stage-now.doing svg { color: var(--color-bubble-light-live); }
+.stage-says .caret { background: var(--color-bubble-light-live); }
+.stage-said { display: -webkit-box; margin: 0; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; font-size: 12px; line-height: 16px; overflow-wrap: anywhere; }
+.stage-card { display: grid; gap: 8px; padding: 12px 14px 14px; border-top: 1px solid var(--color-hairline); }
+.stage-who { display: grid; gap: 2px; min-width: 0; padding: 0; border: 0; background: none; color: inherit; text-align: left; cursor: pointer; }
+/* A status too long to sit beside the name ("Stopped with a problem") takes the next row whole. */
+.stage-who-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; min-width: 0; }
+.stage-who strong { font: 550 15px/20px var(--font-sans); letter-spacing: -.01em; overflow-wrap: anywhere; }
+.stage-who .delivery-status { font: 500 10.5px/14px var(--font-mono); letter-spacing: .06em; text-transform: uppercase; }
 .flow-micro { font: 500 10.5px/14px var(--font-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--color-ink-3); }
-.flow-text { margin: 0; font-size: 12px; line-height: 16px; color: var(--color-ink-2); overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
-.flow-answer strong.flow-text { font-size: 13px; line-height: 18px; font-weight: 550; color: var(--color-ink); }
-.flow-answer.done { border-color: var(--color-ok); }
-.flow-answer { position: relative; }
-.flow-answer-mark { position: absolute; top: 16px; right: 16px; color: var(--color-ink-3); }
-.flow-muted { color: var(--color-ink-3); }
-.flow-who { display: grid; gap: 4px; min-width: 0; padding: 0; border: 0; background: none; color: inherit; text-align: left; cursor: pointer; }
-.flow-who:focus-visible { outline: 2px solid var(--color-live); outline-offset: 3px; border-radius: var(--r-xs); }
-/* A status too long to sit beside the figure ("Stopped with a problem") takes the next row whole,
-   under the figure, in line with the model and the name. */
-.flow-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; margin-bottom: 8px; }
-.flow-top .stage-figure { height: var(--flow-figure); align-items: center; }
-.flow-top .delivery-status { font: 500 10.5px/14px var(--font-mono); letter-spacing: .06em; text-transform: uppercase; }
-.flow-who strong { font: 550 15px/20px var(--font-sans); letter-spacing: -.01em; overflow-wrap: anywhere; }
-.flow-said { margin: 0; font-size: 11.5px; line-height: 16px; color: var(--color-ink-2); overflow-wrap: anywhere; }
+/* Who handed it its work: the way to what it received, which the chat says in full. */
+.stage-handed { display: flex; align-items: center; gap: 4px; width: fit-content; max-width: 100%; min-width: 0; margin: 0; padding: 0; border: 0; background: none; color: var(--color-ink-2); font: 400 12px/16px var(--font-sans); text-align: left; white-space: nowrap; }
+.stage-handed b { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 600; color: var(--color-ink); }
+.stage-handed svg { flex: none; color: var(--color-ink-3); }
+button.stage-handed { cursor: pointer; }
+button.stage-handed:hover b { text-decoration: underline; }
+.stage-handed.waits { color: var(--color-ink-3); }
+.stage-card .stage-tray { margin-top: 0; }
 .flow-card-link { justify-self: start; font-size: 12px; }
-.flow-card .stage-tray { margin-top: 0; }
 
-/* The line the work moves along, at the height of the cards' figures. A send-back leaves a dashed
-   arc under it; the work itself is a sheet sliding along it, once, while the run is watched. */
-.flow-link { position: relative; flex: none; width: 44px; align-self: stretch; }
-.flow-line { position: absolute; left: 0; right: 0; top: var(--flow-line-y); border-top: 1.5px solid var(--color-warp); transition: border-color var(--t-settle); }
-.flow-link.passing .flow-line, .flow-link[data-pass="on"] .flow-line { border-top-color: var(--color-live); }
-.flow-link[data-pass="back"] .flow-line { border-top-color: var(--color-accent); }
-.flow-back { position: absolute; left: 6px; right: 6px; top: calc(var(--flow-line-y) + 14px); height: 22px; border: 1.5px dashed var(--color-accent-dim); border-top: 0; border-radius: 0 0 14px 14px; }
-.flow-link .handoff-sheet { position: absolute; left: 50%; top: calc(var(--flow-line-y) - 9px); width: 12px; height: 15px; margin-left: -6px; border: 1px solid var(--color-paper-rule); border-radius: 2px; background: var(--color-paper); box-shadow: 0 1px 3px color-mix(in srgb, var(--color-ink) 25%, transparent); opacity: 0; }
-@media (prefers-reduced-motion: no-preference) {
-  .flow-link[data-pass="on"] .handoff-sheet { animation: handoff-sheet-on var(--t-flow) var(--ease-out) both; }
-  .flow-link[data-pass="back"] .handoff-sheet { animation: handoff-sheet-back var(--t-flow) var(--ease-out) both; }
+/* The spotlight: who is talking to whom, each talk a sentence with their faces that opens what was
+   said in the chat, and a bracket from it down to the tiles it is about. Its band keeps its height for the whole of a live run, so the
+   tiles never jump as a talk comes and goes. */
+.talk-band { position: relative; height: 76px; }
+.talk-cards { display: flex; justify-content: center; gap: 10px; height: 44px; }
+/* A narrow pane gives the sentence two lines, and the band keeps the height of two. */
+@container details (max-width: 560px) {
+  .talk-band { height: 100px; }
+  .talk-cards { height: 68px; }
+  .talk-who { flex-wrap: wrap; row-gap: 2px; white-space: normal; }
 }
-@keyframes handoff-sheet-on { 0% { opacity: 0; transform: translateX(-28px) rotate(-8deg); } 15%, 80% { opacity: 1; } 100% { opacity: 0; transform: translateX(28px) rotate(4deg); } }
-@keyframes handoff-sheet-back { 0% { opacity: 0; transform: translateX(28px) rotate(8deg); } 15%, 80% { opacity: 1; } 100% { opacity: 0; transform: translateX(-28px) rotate(-4deg); } }
+.talk-card { display: grid; align-content: center; gap: 2px; min-width: 0; max-width: min(100%, 640px); padding: 7px 14px; border: 1px solid color-mix(in srgb, var(--color-live) 55%, transparent); border-radius: var(--r-lg); background: var(--color-panel-solid); box-shadow: var(--e2-shadow); color: var(--color-ink); font: inherit; text-align: left; }
+.talk-card.tone-back { border-color: color-mix(in srgb, var(--color-accent) 55%, transparent); }
+/* A talk that comes back (a question still waiting) is the same talk: it doesn't arrive again. */
+.talk-card.again { animation: none; }
+button.talk-card { cursor: pointer; }
+button.talk-card:hover { border-color: var(--color-live); }
+button.talk-card.tone-back:hover { border-color: var(--color-accent); }
+.talk-who { display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; white-space: nowrap; font: 600 13px/18px var(--font-sans); }
+.talk-name { display: inline-flex; align-items: center; gap: 5px; }
+.talk-verb, .talk-and { font-weight: 400; color: var(--color-ink-2); }
+/* "’s work" belongs to the name before it. */
+.talk-tail { margin-left: -6px; }
+/* How it went, where the sentence doesn't say: ink words on a tint, the colour in a ring, so the
+   words read in both themes and the colour never says it alone. Couldn't finish wears the failed mark. */
+.talk-word { display: inline-flex; align-items: center; gap: 4px; margin-left: 4px; padding: 1px 7px; border-radius: var(--r-full); background: var(--color-live-tint); box-shadow: inset 0 0 0 1px var(--color-live); color: var(--color-ink); font: 600 11px/14px var(--font-sans); letter-spacing: .07em; text-transform: uppercase; }
+.talk-word.tone-ok { background: transparent; box-shadow: inset 0 0 0 1px var(--color-ok); }
+.talk-word.tone-failed { background: transparent; box-shadow: inset 0 0 0 1px var(--color-alert); }
+.talk-word.tone-halt { background: transparent; box-shadow: inset 0 0 0 1px var(--color-halt); }
+.talk-word > svg { display: inline-block; }
+.talk-bracket { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.talk-line { fill: none; stroke: var(--color-live); stroke-width: 1.5; }
+.talk-tip { fill: var(--color-live); }
+/* A send-back is dashed as well as gold, as its arc was: two ways to tell it, not colour alone. */
+.talk-bracket .tone-back .talk-line { stroke: var(--color-accent); stroke-dasharray: 6 4; }
+.talk-bracket .tone-back .talk-tip { fill: var(--color-accent); }
+@media (prefers-reduced-motion: no-preference) {
+  .talk-card { animation: talk-in var(--t-entrance) var(--ease-out) both; }
+}
+@keyframes talk-in { from { opacity: 0; transform: translateY(4px); } }
 
-/* Its skills hang under its card on dashed lines; one lights up as it opens it, and keeps a tick. */
-.flow-skills { position: relative; display: grid; gap: 8px; margin-top: 16px; padding-left: 20px; }
-.flow-skills::before { content: ""; position: absolute; left: 8px; top: -16px; bottom: 18px; border-left: 1.5px dashed var(--color-warp); }
-.flow-skill { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 8px; width: 100%; min-height: 44px; padding: 6px 10px; border: 1px solid var(--color-hairline); border-radius: var(--r-sm); background: var(--color-panel-solid); color: var(--color-ink); text-align: left; cursor: pointer; transition: border-color var(--t-settle), box-shadow var(--t-settle); }
-.flow-skill::before { content: ""; position: absolute; left: -13px; top: 50%; width: 12px; border-top: 1.5px dashed var(--color-warp); }
-.flow-skill:hover { border-color: var(--color-ink-3); }
-.flow-skill:focus-visible { outline: 2px solid var(--color-live); outline-offset: 2px; }
-.flow-skill .flow-micro, .flow-skill strong { grid-column: 1; }
-.flow-skill strong { font: 550 12.5px/17px var(--font-sans); overflow-wrap: anywhere; }
-.flow-skill-tick { grid-column: 2; grid-row: 1 / span 2; color: var(--color-ink-3); }
-.flow-skill.had .flow-skill-tick { color: var(--color-ink); }
-.flow-skill.opening { border-color: var(--color-live); box-shadow: 0 0 0 1px var(--color-live); }
-
-/* A mark's list, under the row: the card it belongs to keeps its size beside the others. */
-.flow-sheet { margin-top: 4px; }
+/* A mark's list, under the tiles: the tile it belongs to keeps its size beside the others. */
+.flow-sheet { margin-top: 14px; }
 .flow-sheet-who { margin: 0; font-weight: 600; font-size: 13px; }
 
-/* A phone stands the row up: one card under another, the line running down between them. */
+/* A phone: one tile under another, and the newest talk only. */
 @media (max-width: 640px) {
-  .team-flow { overflow: visible; }
-  .flow-row { flex-direction: column; align-items: stretch; width: auto; }
-  .flow-node { flex-direction: column; align-items: stretch; }
-  .flow-end > .flow-card { margin-top: 0; }
-  .flow-card, .flow-request, .flow-answer { width: 100%; }
-  .flow-above { height: auto; max-width: none; padding: 0 0 8px; }
-  .flow-above:empty { display: none; }
-  .flow-link { width: auto; height: 28px; align-self: stretch; }
-  .flow-line { top: 0; bottom: 0; left: 50%; right: auto; border-top: 0; border-left: 1.5px solid var(--color-warp); }
-  .flow-link.passing .flow-line, .flow-link[data-pass="on"] .flow-line { border-left-color: var(--color-live); }
-  .flow-link[data-pass="back"] .flow-line { border-left-color: var(--color-accent); }
-  .flow-back { display: none; }
-  .flow-link .handoff-sheet { top: 6px; }
+  .talk-card:not(:last-child) { display: none; }
+  .talk-card { max-width: 100%; }
 }
-@media (prefers-reduced-motion: no-preference) and (max-width: 640px) {
-  .flow-link[data-pass="on"] .handoff-sheet { animation-name: handoff-sheet-down; }
-  .flow-link[data-pass="back"] .handoff-sheet { animation-name: handoff-sheet-up; }
-}
-@keyframes handoff-sheet-down { 0% { opacity: 0; transform: translateY(-8px) rotate(-8deg); } 15%, 80% { opacity: 1; } 100% { opacity: 0; transform: translateY(16px) rotate(4deg); } }
-@keyframes handoff-sheet-up { 0% { opacity: 0; transform: translateY(16px) rotate(8deg); } 15%, 80% { opacity: 1; } 100% { opacity: 0; transform: translateY(-8px) rotate(-4deg); } }

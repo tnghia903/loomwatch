@@ -43,8 +43,8 @@ describe('HandoverPanel as the packet inspector', () => {
 
   it('says the entry point had no predecessor rather than showing an empty block', () => {
     render(<HandoverPanel text="" toLabel="Researcher" fromLabel="the preceding stage" packet={null} onClose={vi.fn()} />)
-    expect(screen.getByText(/no preceding stage/)).toBeInTheDocument()
-    expect(screen.getByText(/this stage is the entry point/)).toBeInTheDocument()
+    expect(screen.getByText(/it went first$/)).toBeInTheDocument()
+    expect(screen.getByText(/Nothing from another agent: it went first, so it was given your request/)).toBeInTheDocument()
   })
 
   it('reports a packet read failure instead of implying nothing was supplied', () => {

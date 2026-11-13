@@ -182,17 +182,31 @@ answer is read only in the chat, with its record's verdict (which opens the revi
 names, **Copy**, **Download** and **Send to Notion** under it; Details shows the receipt (the
 run's tokens, and its cost on each turn's `turn_end`: as OpenRouter reported it, ≈ at Claude's list
 prices, or "ChatGPT plan"), timeline,
-and the team in one row: your request, a card for each agent, and the team's answer, joined by
-the lines the work moves along. While the run is watched, an agent's figure acts out what it is
-at (reading, thinking, using a tool, typing), what it is thinking or the call it is on floats over
-its card, and its last words show as it types; the work slides along the line to the next agent,
-or back when a check sends it back, which leaves a dashed arc under that line. An agent's skills
-hang under its card and light up as it opens them. Each card's marks count what that agent used:
-skills (a required one it never had, once the run is over, leaves the mark dashed), the web
-(pages read and searches, with the programs its model ran to search), files, commands, plan. A
-mark opens its list under the row: the pages read by site, marked when the team's answer links
-them, and what each search found; each skill's receipt; or the calls, each opening its record.
-The request and the answer themselves are read in the chat, not again here. A file the answer
+and the team as one tile per agent, the tiles wrapping so no team scrolls sideways. Each tile
+shows the agent at its workbench, drawn as on the agent's own page but only to look at. Under it
+are the agent's name, model and state, and who gave it its work ("Work from you", "Work from
+Researcher"); when there is something to show, that line opens what the agent was given. An agent
+that hasn't started yet says what it waits for ("Starts after Writer") until the run is over. A
+team of more than eight shows the rest by their figures, since a page can draw only so many
+benches.
+
+While the run is watched, each figure acts out what it is doing (reading, thinking, using a tool,
+typing): a thought bubble on its bench says what it is thinking about, and a bubble over its head
+names the tool it is using, or shows its last words as it types. A card above the tiles says who is
+talking to whom, in a sentence with their faces: one agent hands the work to another, gives it a
+task, asks it a question or answers one, reports back on a task (done, couldn't finish or
+stopped), checks another's work, sends it back, or sends back the revised work. A bracket points
+to their tiles, and the benches of agents not in it and not at work dim. One talk shows at a time,
+the newest; a question stays until it is answered or something newer is said, anything else for a
+few seconds. Click the card to read the message in the chat. A replay and a finished run show no
+card.
+
+Each tile's marks count what that agent used: skills (a required one it never had, once the run is
+over, leaves the mark dashed), the web (pages read and searches, with the programs its model ran to
+search), files, commands, plan. A mark opens its list under the tiles: the pages read by site,
+marked when the team's answer links them, and what each search found; each skill's receipt; or the
+calls, each opening its record. The request and the answer themselves are read in the chat, not
+again here. A file the answer
 names that another agent wrote, such as the Writer's guide in the Lead's answer, comes into the
 chat as that agent's own message just before the answer, and the answer keeps the files its own
 agent wrote or only named. What the work made is a tab of the pane beside the chat, after

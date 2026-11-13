@@ -19,10 +19,16 @@ vi.mock('@xyflow/react', () => ({
   MarkerType: { ArrowClosed: 'arrowclosed' },
   ReactFlow: ({ nodes, nodeTypes }: { nodes: Array<{ id: string; type: string; data: unknown }>; nodeTypes: Record<string, ComponentType<{ data: unknown }>> }) => <>{nodes.map(node => createElement(nodeTypes[node.type], { key: node.id, data: node.data }))}</>,
 }))
+vi.mock('../agents/benchFigure', () => ({
+  // The bench draws with WebGL, which jsdom hasn't got: a stand-in that shows what it was told to act out.
+  AgentFigure: ({ view, who }: { view: { mood: string; phase?: string; thought?: string | null }; who?: string }) => (
+    <div className="bench-told" data-who={who} data-mood={view.mood} data-phase={view.phase ?? ''} data-thought={view.thought ?? ''} />
+  ),
+}))
 import { type Evidence, projectRun } from '../../lib/watch/events'
 import type { AgentRuntime } from '../../lib/runs/graph'
 import type { RunRecord } from '../../lib/runs/client'
-import { appRules, background, cascaded, px, topLevel } from '../../test/cascade'
+import { background, cascaded } from '../../test/cascade'
 import { apcaLc, THEMES, tokenColour, wcagRatio, type Theme } from '../../test/contrast'
 const setup = (overrides: Partial<DeliveryLaneProps> = {}) => {
   const props: DeliveryLaneProps = {
@@ -82,62 +88,49 @@ describe('Delivery Lane', () => {
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
     expect(screen.queryByText('2m 53s', { selector: '.delivery-took' })).toBeNull()
   })
-  // Option A of the trace sketches: one row from your request to the team's answer. Its ends say
-  // where the work starts and ends, not the words again (ADR 0051): those are read in the chat.
-  it('lays the team out in one row from your request to the answer, without repeating either', () => {
+  // The office sketches (owner, 2026-11-13): one tile per agent, at its own bench. What was asked and
+  // what came back are read in the chat beside the record (ADR 0051), so no tile says either again.
+  it('lays the team out as one tile per agent, at its own bench, without repeating the request or the answer', () => {
     const { props } = setup()
-    const row = screen.getByRole('list', { name: 'Team stages' })
-    const items = within(row).getAllByRole('listitem')
-    expect([items[0], items[2]].map((item) => item.querySelector('.flow-micro')?.textContent)).toEqual(['Your request', 'The team’s answer'])
-    expect(items[1].querySelector('.delivery-status')).toHaveTextContent(/Done|Finished|Ready|Not started/)
-    expect(row).toHaveTextContent('From you')
-    expect(row).toHaveTextContent('In the chat')
-    expect(row).not.toHaveTextContent(props.prompt)
-    expect(row).not.toHaveTextContent('Market report')
-    cleanup()
-    setup({ output: { ...props.output, text: '' } })
-    expect(screen.getByRole('list', { name: 'Team stages' })).toHaveTextContent('Appears when the team is done.')
+    const grid = screen.getByRole('list', { name: 'Team stages' })
+    const items = within(grid).getAllByRole('listitem')
+    expect(items).toHaveLength(1)
+    const tile = items[0].querySelector('.stage-tile') as HTMLElement
+    expect(tile.querySelector('.bench-told')?.getAttribute('data-who')).toBe('designer')
+    expect(tile.querySelector('.delivery-status')).toHaveTextContent(/Done|Finished|Ready|Not started/)
+    // Who handed it its work, not the words: those are in the chat.
+    expect(tile.querySelector('.stage-handed')).toHaveTextContent(/^Work from you$/)
+    expect(grid).not.toHaveTextContent(props.prompt)
+    expect(grid).not.toHaveTextContent('Market report')
+    // The tiles wrap, so no team scrolls sideways. (Spelled in parts: Tailwind reads test files.)
+    expect(cascaded(grid, ['grid', 'template', 'columns'].join('-'))).toMatch(/^repeat\(auto-fill, minmax\(/)
   })
 
   // ADR 0083, decision 10: work one of your agents asked for starts from that agent, as the chat
   // beside the record says, not from you.
-  it('starts the row from the agent that asked for the work for you', () => {
+  it('says the first tile’s work came from the agent that asked for it for you', () => {
     const record = { runId: 'r', askedBy: { agent: 'maya', name: 'Maya' } } as RunRecord
     setup({ record })
-    const first = within(screen.getByRole('list', { name: 'Team stages' })).getAllByRole('listitem')[0]
-    expect(first.querySelector('.flow-micro')).toHaveTextContent(/^Request$/)
-    expect(first).toHaveTextContent('From Maya')
-    expect(first).not.toHaveTextContent('From you')
-    expect(first.querySelector('.flow-request')).toHaveAttribute('title', 'Maya asked this for you. You pressed Start.')
+    const handed = document.getElementById('delivery-stage-designer')?.querySelector('.stage-handed') as HTMLElement
+    expect(handed).toHaveTextContent(/^Work from Maya$/)
+    expect(handed).toHaveAttribute('title', 'Maya asked this for you. You pressed Start.')
   })
 
   // A card had its model, its status and its name squeezed in beside the figure: a long model
   // ("GPT-6.1 Sol · ChatGPT plan") wrapped, and the status pill ran into the name under it.
-  it('gives a card room: its status beside the figure, its model and name the full width under them', () => {
+  it('gives a tile’s card room: its name and status on one row, its model the full width under them', () => {
     setup()
-    const card = within(screen.getByRole('list', { name: 'Team stages' })).getAllByRole('listitem')[1].querySelector('.flow-agent') as HTMLElement
-    const who = card.querySelector('.flow-who') as HTMLElement
-    const [top, model, name] = [...who.children] as HTMLElement[]
-    expect(top.querySelector('.stage-figure')).not.toBeNull()
+    const who = document.getElementById('delivery-stage-designer')?.querySelector('.stage-who') as HTMLElement
+    const [top, model] = [...who.children] as HTMLElement[]
+    expect(top.querySelector('strong')).toHaveTextContent('Designer')
     expect(top.querySelector('.delivery-status')).toHaveTextContent(/Done|Finished|Ready|Not started/)
     expect(model).toHaveClass('flow-micro')
     expect(model.querySelector('.delivery-status')).toBeNull()
-    expect(name.tagName).toBe('STRONG')
-    // One under another, not beside the figure; a status too long for the top row takes the next one
-    // whole, starting under the figure. (Spelled in parts: Tailwind reads test files for class names.)
+    // A status too long for the name's row takes the next one whole. (Spelled in parts: Tailwind
+    // reads test files for class names.)
     expect(cascaded(who, 'display')).toBe('grid')
     expect(cascaded(top, ['flex', 'wrap'].join('-'))).toBe('wrap')
     expect(cascaded(top, 'justify-content')).toBe('space-between')
-  })
-
-  // The line into the answer ran 44px under the others: the end's top padding pushed its line down too.
-  it('keeps every line the work moves along at one height, the answer’s too', () => {
-    setup()
-    const links = [...screen.getByRole('list', { name: 'Team stages' }).querySelectorAll('.flow-link')]
-    expect(links.length).toBeGreaterThan(1)
-    for (const link of links) expect(cascaded(link.closest('.flow-node') as HTMLElement, ['padding', 'padding-top'])).toBeNull()
-    // The lines meet the figures' middle: a figure and the review step's taller mark stand in one slot.
-    for (const figure of document.querySelectorAll('.flow-top .stage-figure')) expect(cascaded(figure, 'height')).toBe('var(--flow-figure)')
   })
 
   it('counts one stage and one page as one, not "1 stages" and "1 pages"', () => {
@@ -237,12 +230,9 @@ describe('Delivery Lane', () => {
     ])
     setup({ projection })
 
-    // Its skill hangs under its card, ticked, and opens the same receipt.
-    const hanging = screen.getByRole('button', { name: 'Skill claude-design, opened' })
-    expect(hanging).toHaveClass('had')
-    fireEvent.click(hanging)
-    expect(screen.getByRole('region', { name: 'Designer: skills' })).toHaveTextContent(/In-prompt, translated/)
-    // The tray's skill mark folds the same list away.
+    // The tray's skill mark opens its skills under the tiles, and folds them away again.
+    openSkills(1, 1)
+    expect(screen.getByRole('region', { name: 'Designer: skills' })).toHaveTextContent('claude-design')
     openSkills(1, 1)
     expect(screen.queryByRole('region', { name: 'Designer: skills' })).toBeNull()
     expect(screen.getByRole('button', { name: 'Opened or was given 1 of the 1 skill it must use.' })).toHaveTextContent('1/1')
@@ -277,7 +267,6 @@ describe('Delivery Lane', () => {
     // A required skill it never opened leaves its mark dashed.
     expect(screen.getByRole('button', { name: 'Opened or was given 0 of the 1 skill it must use.' })).toHaveClass('short')
     openSkills(1)
-    expect(screen.getByRole('button', { name: 'Skill claude-design' })).not.toHaveClass('had')
     fireEvent.click(screen.getByRole('button', { name: /Inspect claude-design: Not opened/ }))
     expect(screen.getByText(/Native — the bundle sits/)).toBeInTheDocument()
     expect(screen.getByText(/Being given a skill is not using it/)).toBeInTheDocument()
@@ -355,15 +344,16 @@ describe('Delivery Lane', () => {
       { id: 'writer', type: 'agent', position: { x: 0, y: 0 }, data: { label: 'Writer', agent: { id: 'writer', name: 'Writer', role: 'Write' }, runtime: runtime(writerStatus) } },
     ] as DeliveryLaneProps['agents']
     const stage = (id: string) => document.getElementById(`delivery-stage-${id}`) as HTMLElement
-    // The arrow into a stage only shows the order; what the agent received opens from its card (ADR 0043).
-    const handoffInto = (id: string) => stage(id).closest('.flow-node')?.querySelector('.flow-link') as HTMLElement
+    // What its bench was told to act out.
+    const told = (id: string) => ({ ...(stage(id).querySelector('.bench-told') as HTMLElement).dataset })
 
-    it('is marked, with the handoff into it, while the run is watched live', () => {
+    it('is marked, and at work at its bench, while the run is watched live', () => {
       setup({ mode: 'live', phase: 'running', agents: agents('running') })
       expect(screen.getByRole('main', { name: 'Run workspace' })).toHaveClass('live')
       expect(stage('writer')).toHaveClass('working')
       expect(stage('researcher')).not.toHaveClass('working')
-      expect(handoffInto('writer')).toHaveClass('passing')
+      expect(told('writer').mood).toBe('working')
+      expect(told('researcher').mood).toBe('done')
     })
 
     // Waiting on your answer to a permission it asked for, the agent is not at work: its card says so
@@ -373,7 +363,8 @@ describe('Delivery Lane', () => {
       asking[1].data = { ...asking[1].data, runtime: { ...(asking[1].data.runtime as AgentRuntime), taskState: 'WAITING' } }
       setup({ mode: 'live', phase: 'running', agents: asking })
       expect(stage('writer')).not.toHaveClass('working')
-      expect(handoffInto('writer')).not.toHaveClass('passing')
+      // At its bench it looks to you, as it does in its own chat while it asks.
+      expect(told('writer').mood).toBe('asking')
       const status = within(stage('writer')).getByText('Waiting for you')
       expect(status).toHaveClass('status-waiting')
       expect(cascaded(status, 'color')).toBe('var(--color-accent)')
@@ -426,7 +417,7 @@ describe('Delivery Lane', () => {
     it('settles once the stage finishes', () => {
       setup({ mode: 'live', phase: 'succeeded', agents: agents('succeeded') })
       expect(stage('writer')).not.toHaveClass('working')
-      expect(handoffInto('writer')).not.toHaveClass('passing')
+      expect(told('writer').mood).toBe('done')
     })
 
     // Option A of the trace sketches: the figure acts out what it is at, and the call it is on is named.
@@ -441,72 +432,158 @@ describe('Delivery Lane', () => {
       const projection = projectRun(events)
       return { events, projection, evidenceByAgent: new Map([['writer', projection.evidence.filter((item) => item.agentId === 'writer')]]) }
     }
-    it('acts out the call it is on, and names it, while watched live', () => {
+    it('acts out the call it is on at its bench, and names it over its head, while watched live', () => {
       setup({ mode: 'live', phase: 'running', agents: agents('running'), ...handedOn() })
-      const figure = stage('writer').querySelector('.stage-figure') as HTMLElement
-      expect(figure.dataset.phase).toBe('tools')
-      expect(figure.dataset.glow).toBe('working')
-      // What it is on floats over its card, as the sketch drew it.
-      expect(within(stage('writer').closest('.flow-column')?.querySelector('.flow-above') as HTMLElement).getByText('Read example.com/brief')).toBeInTheDocument()
-      expect((stage('researcher').querySelector('.stage-figure') as HTMLElement).dataset).toMatchObject({ glow: 'done' })
-      expect((stage('researcher').querySelector('.stage-figure') as HTMLElement).dataset.phase).toBeUndefined()
-    })
-    // Its thought floats over its card, so the bubble's tail comes up from the figure under it: two
-    // dots below the bubble, the smaller one lower, nearer the figure. It used to leave the bubble's top.
-    it('trails a thought up from the figure under it', () => {
-      const dot = (which: 'before' | 'after') => Object.fromEntries(appRules
-        .filter((rule) => rule.media.length === 0 && topLevel(rule.selectors).includes(`.stage-now.thought::${which}`))
-        .flatMap((rule) => rule.body.split(';').map((declaration) => declaration.split(':').map((part) => part.trim())))
-        .filter(([property, value]) => property && value))
-      const below = (value: string) => Number(/^calc\(100% \+ (\d+)px\)$/.exec(value)?.[1] ?? NaN)
-      const [near, far] = [dot('before'), dot('after')]
-      expect(below(near.top)).toBeGreaterThan(0)
-      expect(below(far.top)).toBeGreaterThan(below(near.top) + px(near.height))
-      expect(px(far.width)).toBeLessThan(px(near.width))
-      // Inside the bubble's left edge, over the figure, not out to its side.
-      expect(px(near.left)).toBeGreaterThan(0)
-      expect(px(far.left)).toBeGreaterThan(0)
-    })
-    it('carries the work along the handoff arrow just as it passes on', () => {
-      setup({ mode: 'live', phase: 'running', agents: agents('running'), ...handedOn() })
-      expect(handoffInto('writer').dataset.pass).toBe('on')
-      expect(handoffInto('writer').querySelector('.handoff-sheet')).not.toBeNull()
-    })
-    // A send-back leaves a dashed arc under the line it went back along, for as long as the record shows.
-    it('marks the line a check sent the work back along', () => {
-      const meta = (seq: number, payload: Record<string, unknown>) => ({ id: `c${seq}`, sessionId: 'run', agentId: 'writer', seq, ts: new Date(Date.UTC(2026, 9, 21, 9, 0, seq)).toISOString(), kind: 'session_meta', payload, raw: { source: 'loomwatch', phase: payload.phase } })
-      const checked = projectRun([
-        meta(0, { phase: 'check_result', checked: 'researcher', round: 1, items: [{ item: 'Every claim has a source', verdict: 'not_met', evidence: '' }] }),
-        meta(1, { phase: 'check_sent_back', to: 'researcher', round: 1 }),
-      ] as unknown as Parameters<typeof projectRun>[0])
-      setup({ mode: 'replay', agents: agents('succeeded'), projection: checked })
-      expect(handoffInto('writer').querySelector('.flow-back')).not.toBeNull()
-      cleanup()
-      setup({ mode: 'replay', agents: agents('succeeded') })
-      expect(handoffInto('writer').querySelector('.flow-back')).toBeNull()
+      expect(told('writer')).toMatchObject({ mood: 'working', phase: 'tools' })
+      expect(stage('writer').querySelector('.stage-says')).toHaveTextContent('Read example.com/brief')
+      expect(told('researcher')).toMatchObject({ mood: 'done', phase: '' })
+      expect(stage('researcher').querySelector('.stage-says')).toBeNull()
     })
 
-    it('shows its last words as it types them, while watched live', () => {
+    // What it is thinking about, its bench's own thought bubble says, over its head: the tile's bubble
+    // is for the call it is on, so the two never say it twice.
+    it('lets its bench say what it is thinking about', () => {
+      const thinking = handedOn()
+      const thought = { ...thinking.events[2], id: 'w8', seq: 8, kind: 'thought', ts: new Date().toISOString(), payload: { content: { type: 'text', text: '**Which day comes first**' } } }
+      const events = [...thinking.events.slice(0, 2), thought] as typeof thinking.events
+      setup({ mode: 'live', phase: 'running', agents: agents('running'), ...thinking, events })
+      expect(told('writer')).toMatchObject({ mood: 'working', phase: 'thinking', thought: 'Which day comes first' })
+      expect(stage('writer').querySelector('.stage-says')).toBeNull()
+    })
+
+    it('shows its last words over its head as it types them, while watched live', () => {
       const typing = handedOn()
       const said = { ...typing.events[2], id: 'w9', seq: 9, kind: 'message', ts: new Date().toISOString(), payload: { role: 'agent', content: { type: 'text', text: 'The guide opens with the first day.' } } }
       const events = [...typing.events, said] as typeof typing.events
       setup({ mode: 'live', phase: 'running', agents: agents('running'), ...typing, events })
-      expect(stage('writer').querySelector('.flow-said')).toHaveTextContent('The guide opens with the first day.')
-      expect((stage('writer').querySelector('.stage-figure') as HTMLElement).dataset.phase).toBe('typing')
+      expect(stage('writer').querySelector('.stage-says .stage-said')).toHaveTextContent('The guide opens with the first day.')
+      expect(told('writer').phase).toBe('typing')
     })
 
-    it('holds the figure and the arrow still in a replay', () => {
+    // Who handed it its work opens what it received: one way to it (ADR 0043), not a second link. The
+    // panel is told who that was, as the record says, rather than guessing the stage before it.
+    it('opens what a stage received from the line that says who handed it over', () => {
+      const onShowReceived = vi.fn()
+      const handed = agents('running')
+      handed[1].data = { ...handed[1].data, runtime: { ...(handed[1].data.runtime as AgentRuntime), received: 'Findings.' } }
+      setup({ mode: 'live', phase: 'running', agents: handed, ...handedOn(), onShowReceived })
+      const line = within(stage('writer')).getByRole('button', { name: /^Work from Researcher/ })
+      expect(line).toHaveAttribute('title', 'What Writer was given')
+      fireEvent.click(line)
+      expect(onShowReceived).toHaveBeenCalledWith('writer', 'Researcher')
+      expect(screen.queryByRole('button', { name: /What it received/ })).toBeNull()
+    })
+
+    // A step-by-step run stopped early: the stages it never reached won't start, so none says it will.
+    it('says what a stage waits for only while the run can still reach it, and names your review as you', () => {
+      const review = { id: 'review', type: 'agent', position: { x: 0, y: 0 }, data: { label: 'You', agent: { id: 'review', name: 'You', role: 'Approve it', kind: 'operator' } } }
+      const later = { id: 'checker', type: 'agent', position: { x: 0, y: 0 }, data: { label: 'Checker', agent: { id: 'checker', name: 'Checker', role: 'Check' } } }
+      const team = [...agents('running'), review, later] as DeliveryLaneProps['agents']
+      setup({ mode: 'live', phase: 'running', agents: team })
+      expect(stage('checker').querySelector('.stage-handed')).toHaveTextContent('Starts after your review')
+      cleanup()
+      setup({ mode: 'replay', phase: 'failed', agents: team })
+      expect(stage('checker').querySelector('.stage-handed')).toBeNull()
+    })
+
+    // A browser keeps only so many 3D views on a page and drops the oldest unannounced: past them, a
+    // tile shows its agent's figure instead of a bench that might go blank.
+    it('draws a bench for the first eight agents, and the figure for the rest', () => {
+      const team = Array.from({ length: 9 }, (_, index) => ({ id: `a${index}`, type: 'agent', position: { x: 0, y: 0 }, data: { label: `Agent ${index}`, agent: { id: `a${index}`, name: `Agent ${index}`, role: 'Work' } } })) as DeliveryLaneProps['agents']
+      setup({ agents: team })
+      expect(stage('a7').querySelector('.bench-told')).not.toBeNull()
+      expect(stage('a8').querySelector('.bench-told')).toBeNull()
+      expect(stage('a8').querySelector('.stage-bench-still')).not.toBeNull()
+    })
+
+    // The spotlight (owner, 2026-11-13): who is talking to whom, in a sentence with their faces. The
+    // stages in it stay lit and the rest dim, and its card opens what was said in the chat beside the
+    // record (ADR 0051) rather than saying it again.
+    it('spotlights a handover as it passes, and opens it in the chat', () => {
+      const onRevealMessage = vi.fn()
+      const passing = handedOn()
+      const team = [...agents('running'), { id: 'checker', type: 'agent', position: { x: 0, y: 0 }, data: { label: 'Checker', agent: { id: 'checker', name: 'Checker', role: 'Check' } } }] as DeliveryLaneProps['agents']
+      setup({ mode: 'live', phase: 'running', agents: team, ...passing, onRevealMessage })
+      const card = screen.getByRole('button', { name: /Researcher.*hands the work to.*Writer/ })
+      // The sentence says it: no word repeats it, and the words handed over stay in the chat.
+      expect(card.querySelector('.talk-word')).toBeNull()
+      expect(card).not.toHaveTextContent('Findings.')
+      expect(stage('researcher')).not.toHaveClass('dim')
+      expect(stage('writer')).not.toHaveClass('dim')
+      expect(stage('checker')).toHaveClass('dim')
+      // It hasn't started, and says what it waits for.
+      expect(stage('checker').querySelector('.stage-handed')).toHaveTextContent('Starts after Writer')
+      fireEvent.click(card)
+      expect(onRevealMessage).toHaveBeenCalledWith(passing.projection.messages.find((message) => message.kind === 'handover')?.id)
+    })
+
+    it('spotlights a send-back in the send-back’s gold, and nothing once the run is over', () => {
+      const recent = (seq: number) => new Date(Date.now() - 3000 + seq * 1000).toISOString()
+      const meta = (seq: number, payload: Record<string, unknown>) => ({ id: `c${seq}`, sessionId: 'run', agentId: 'writer', seq, ts: recent(seq), kind: 'session_meta', payload, raw: { source: 'loomwatch', phase: payload.phase } })
+      const checked = projectRun([
+        meta(0, { phase: 'check_result', checked: 'researcher', round: 1, items: [{ item: 'Every claim has a source', verdict: 'not_met', evidence: '' }] }),
+        meta(1, { phase: 'check_sent_back', to: 'researcher', round: 1 }),
+      ] as unknown as Parameters<typeof projectRun>[0])
+      // A third stage, outside the talk and not at work, is dimmed while it lasts.
+      const third = { id: 'analyst', type: 'agent', position: { x: 0, y: 0 }, data: { label: 'Analyst', agent: { id: 'analyst', name: 'Analyst', role: 'Analyse' } } }
+      setup({ mode: 'live', phase: 'running', agents: [...agents('running'), third] as DeliveryLaneProps['agents'], projection: checked, onRevealMessage: vi.fn() })
+      const card = screen.getByRole('button', { name: /Writer.*sends the work back to.*Researcher/ })
+      expect(card).toHaveClass('tone-back')
+      expect(stage('analyst')).toHaveClass('dim')
+      cleanup()
+      setup({ mode: 'live', phase: 'succeeded', agents: [...agents('succeeded'), third] as DeliveryLaneProps['agents'], projection: checked, onRevealMessage: vi.fn() })
+      expect(screen.queryByRole('button', { name: /sends the work back/ })).toBeNull()
+      expect(stage('analyst')).not.toHaveClass('dim')
+    })
+
+    // Two talks close together squeezed two cards into the pane, and a stage lit by a talk no card
+    // explained read as a mistake: the newest talk has the spotlight, and only its stages stay lit.
+    it('spotlights one talk at a time, the newest', () => {
+      const now = Date.now()
+      const at = (ms: number) => new Date(now - ms).toISOString()
+      const handed = (agentId: string, ms: number) => ({ agentId, kind: 'session_meta', payload: { phase: 'prompt_sections', sections: [{ kind: 'stage_results', heading: '## Results', text: 'Work.' }] }, raw: { source: 'loomwatch', phase: 'prompt_sections' }, ts: at(ms) })
+      const events = [handed('writer', 4000), handed('checker', 1000)].map((event, seq) => ({ ...event, id: `h${seq}`, seq, sessionId: 'run' })) as unknown as Parameters<typeof projectRun>[0]
+      const team = [
+        { id: 'researcher', type: 'agent', position: { x: 0, y: 0 }, data: { label: 'Researcher', agent: { id: 'researcher', name: 'Researcher', role: 'Research' }, runtime: runtime('succeeded') } },
+        { id: 'writer', type: 'agent', position: { x: 0, y: 0 }, data: { label: 'Writer', agent: { id: 'writer', name: 'Writer', role: 'Write' }, runtime: runtime('succeeded') } },
+        { id: 'checker', type: 'agent', position: { x: 0, y: 0 }, data: { label: 'Checker', agent: { id: 'checker', name: 'Checker', role: 'Check' } , runtime: runtime('running') } },
+      ] as DeliveryLaneProps['agents']
+      setup({ mode: 'live', phase: 'running', agents: team, events, projection: projectRun(events), onRevealMessage: vi.fn() })
+      expect(document.querySelectorAll('.talk-card')).toHaveLength(1)
+      expect(screen.getByRole('button', { name: /Writer.*hands the work to.*Checker/ })).toBeInTheDocument()
+      expect(stage('researcher')).toHaveClass('dim')
+      expect(stage('writer')).not.toHaveClass('dim')
+      expect(stage('checker')).not.toHaveClass('dim')
+    })
+
+    // Whoever is at work stays lit, in the talk or not: dimming it would hide what it is doing.
+    it('keeps a stage at work lit while others talk', () => {
+      const now = Date.now()
+      const handed = { agentId: 'checker', kind: 'session_meta', payload: { phase: 'prompt_sections', sections: [{ kind: 'stage_results', heading: '## Results', text: 'Draft.' }] }, raw: { source: 'loomwatch', phase: 'prompt_sections' }, ts: new Date(now - 1000).toISOString() }
+      const events = [{ ...handed, id: 'k0', seq: 0, sessionId: 'run' }] as unknown as Parameters<typeof projectRun>[0]
+      const team = [
+        { id: 'researcher', type: 'agent', position: { x: 0, y: 0 }, data: { label: 'Researcher', agent: { id: 'researcher', name: 'Researcher', role: 'Research' }, runtime: runtime('running') } },
+        { id: 'writer', type: 'agent', position: { x: 0, y: 0 }, data: { label: 'Writer', agent: { id: 'writer', name: 'Writer', role: 'Write' }, runtime: runtime('succeeded') } },
+        { id: 'checker', type: 'agent', position: { x: 0, y: 0 }, data: { label: 'Checker', agent: { id: 'checker', name: 'Checker', role: 'Check' }, runtime: runtime('running') } },
+      ] as DeliveryLaneProps['agents']
+      setup({ mode: 'live', phase: 'running', agents: team, events, projection: projectRun(events), onRevealMessage: vi.fn() })
+      expect(screen.getByRole('button', { name: /Writer.*hands the work to.*Checker/ })).toBeInTheDocument()
+      expect(stage('researcher')).toHaveClass('working')
+      expect(stage('researcher')).not.toHaveClass('dim')
+    })
+
+    it('holds the figure still, and spotlights nothing, in a replay', () => {
       setup({ mode: 'replay', agents: agents('running'), ...handedOn() })
-      expect((stage('writer').querySelector('.stage-figure') as HTMLElement).dataset.phase).toBeUndefined()
-      expect(within(stage('writer').closest('.flow-column') as HTMLElement).queryByText('Read example.com/brief')).toBeNull()
-      expect(handoffInto('writer').dataset.pass).toBeUndefined()
+      expect(told('writer')).toMatchObject({ mood: 'still', phase: '' })
+      expect(stage('writer').querySelector('.stage-says')).toBeNull()
+      expect(document.querySelector('.talk-band')).toBeNull()
     })
 
     it('never moves in a replay, whatever the recorded status says', () => {
       setup({ mode: 'replay', agents: agents('running') })
       expect(screen.getByRole('main', { name: 'Run workspace' })).not.toHaveClass('live')
       expect(stage('writer')).not.toHaveClass('working')
-      expect(handoffInto('writer')).not.toHaveClass('passing')
+      expect(told('writer').mood).toBe('still')
     })
   })
 

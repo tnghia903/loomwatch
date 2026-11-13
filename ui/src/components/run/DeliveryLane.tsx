@@ -6,14 +6,20 @@ import { cardActivity, linkedIn, asUse, USE_NAMES, WEB_KINDS, type Use, type Use
 import { useNow } from '../../lib/useNow'
 import type { AllowSwitch } from '../../lib/team-file/types'
 import { SkillList, UseList, WebList, type FigureGlow, type SkillSummary } from './StageActivity'
-import { FlowLinkButton, TeamFlow, type FlowStage } from './TeamFlow'
+import { CardLinkButton, TeamBenches, type BenchStage } from './TeamBenches'
+import { converse, type Party } from '../../lib/story/conversation'
+import { inTalks, talksAt } from '../../lib/watch/talk'
+import { helpersOf } from '../../lib/chat/helpers'
+import { workPhase } from '../../lib/watch/workPhase'
+import type { FigureMood } from '../../lib/library/figure'
+import { listNames } from '../../lib/format'
+import type { MessageKind } from '../../lib/watch/messages'
 import type { AgentNode } from '../../lib/library/nodeFromDrop'
 import { buildReceipt } from '../../lib/story/receipt'
 import { RunReceipt } from './RunReceipt'
 import { WeftBar } from './WeftBar'
 import type { WeftKnot } from '../../lib/story/weft'
 import { markLabel, markState } from '../../lib/story/mark'
-import { skillName } from '../../lib/story/reads'
 import type { RunRecord } from '../../lib/runs/client'
 import { modelLabelForAgent } from '../../lib/models'
 import { useRunQuests } from './useRunQuests'
@@ -36,8 +42,9 @@ export interface DeliveryLaneProps {
   onSelectAgent?: (id: string) => void
   /** "What was recorded": every record behind the run, for an expert. */
   onShowRecorded?: () => void
-  /** "What it received": the handover an agent was given and the memory packet it was supplied. */
-  onShowReceived?: (agentId: string) => void
+  /** "What it received": the handover an agent was given and the memory packet it was supplied.
+      `from` names who handed it over, as the record says, where the run view knows. */
+  onShowReceived?: (agentId: string, from?: string) => void
   /** The model each agent runs on, in words, by agent id. */
   harnessLabels?: ReadonlyMap<string, string>
   planned?: boolean
@@ -72,10 +79,27 @@ function glowOf(status: string | undefined, waiting: boolean): FigureGlow {
 }
 
 const NO_EVENTS: readonly RunEvent[] = []
-/** How long after work passes on, or is sent back, the line between the cards shows it moving. */
-const PASS_MS = 2400
-/** How long a skill's card stays lit after its agent opens it. */
-const OPENING_MS = 1600
+
+/** What a stage's figure acts out at its bench. A replay never shows work in motion. */
+function moodOf(status: string | undefined, { live, waiting, working, planned }: { live: boolean; waiting: boolean; working: boolean; planned: boolean }): FigureMood {
+  if (planned || !status) return 'still'
+  if (waiting) return 'asking'
+  switch (status) {
+    case 'starting': return live ? 'starting' : 'still'
+    case 'running': return working ? 'working' : live ? 'quiet' : 'still'
+    case 'waiting': return 'asking'
+    case 'succeeded': return 'done'
+    case 'failed':
+    case 'unavailable': return 'failed'
+    case 'stopped': return 'stopped'
+    default: return 'still'
+  }
+}
+
+/** The messages that hand a stage its work: the line under its name says who from. */
+const HANDS_WORK: ReadonlySet<MessageKind> = new Set(['handover', 'handoff', 'dispatch'])
+/** How long a helper that finished stays at its lead's bench, handing its part back, before it goes. */
+const HELPER_LINGER_MS = 3500
 
 
 const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`
@@ -205,11 +229,27 @@ export function DeliveryLane({
   const linked = useMemo(() => linkedIn(output.text ?? ''), [output.text])
   // The stage whose tray list is open under the row.
   const openStage = openMark ? agents.find((node) => node.id === openMark.agentId) ?? null : null
-  // The team has answered: its answer's card says so, and where to read it.
-  const answered = Boolean(output.text?.trim())
-  // The answer just came in from the stage that wrote it: the work slides onto the answer's card.
-  const lastEnd = useMemo(() => [...events].reverse().find((event) => event.kind === 'turn_end' && event.agentId === output.producer)?.ts, [events, output.producer])
-  const answerPass = live && answered && lastEnd !== undefined && now - Date.parse(lastEnd) < PASS_MS
+  // The team as the team's chat reads it (lib/story/conversation.ts): who handed each stage its work,
+  // and who is talking to whom now, which the spotlight lights while the run is watched.
+  const parties = useMemo<Party[]>(() => agents.map((node) => ({ id: node.id, name: node.data.agent.name, operator: node.data.agent.kind === 'operator' })), [agents])
+  const lines = useMemo(() => converse(projection.messages, parties).lines, [projection.messages, parties])
+  // Only while it runs: once it's over, nobody is talking any more, whatever was left unanswered.
+  // One talk at a time, the newest: two cards side by side were too cramped to read in the pane,
+  // and a stage lit by a talk no card explains read as a mistake.
+  const talks = useMemo(() => (live && !terminal ? talksAt(projection.messages, parties, now).slice(-1) : []), [live, terminal, projection.messages, parties, now])
+  const lit = useMemo(() => inTalks(talks), [talks])
+  const helpers = useMemo(() => (live ? helpersOf(events) : []), [live, events])
+  // The review step is you: "Work from you", not "Work from You".
+  const nameOf = (id: string) => { const party = parties.find((each) => each.id === id); return party?.operator ? 'you' : party?.name ?? id }
+  // Who handed a stage its work, newest first; the first stage's is the request, from you or from
+  // the agent that asked for it for you (ADR 0083, decision 10).
+  const handedTo = (id: string, index: number): BenchStage['handed'] => {
+    const line = [...lines].reverse().find((item) => item.receiver === id && HANDS_WORK.has(item.message.kind) && item.senders.length > 0)
+    if (line) return { from: listNames(line.senders.map(nameOf)) }
+    if (index > 0 || !prompt.trim()) return null
+    const askedBy = record?.askedBy?.name
+    return { from: askedBy ?? 'you', title: askedBy ? `${askedBy} asked this for you. You pressed Start.` : undefined }
+  }
   // Beside the record, the receipt stays in view while the record scrolls past it. A slip taller
   // than the pane sticks by its foot rather than its head, so its last lines are never held out of view.
   const work = useRef<HTMLElement>(null)
@@ -272,19 +312,16 @@ export function DeliveryLane({
               {/* Every record behind the cards, for an expert. */}
               {!planned && onShowRecorded && <button className="delivery-link" onClick={onShowRecorded}>What was recorded <ArrowRight size={13} /></button>}
             </div>
-            <TeamFlow
-              asked={Boolean(prompt.trim())}
-              askedBy={record?.askedBy?.name}
-              relay={pipeline && linearPipeline}
-              answered={answered}
-              answerPass={answerPass}
+            <TeamBenches
+              live={live}
+              talks={talks}
               planned={planned}
               finished={terminal}
               animate={mode === 'live'}
               onSelect={select}
               onOpen={openFrom}
-              onOpenSkill={(agentId, skillId) => { setSelectedId(agentId); setOpenMark({ agentId, kind: 'skill' }); setOpenSkill(skillId) }}
-              stages={agents.map((node, index): FlowStage => {
+              onReadMessage={onRevealMessage}
+              stages={agents.map((node, index): BenchStage => {
                 const { agent, runtime } = node.data
                 // The model the run recorded for it, else the one the team file names now.
                 const recorded = projection.agents.find((item) => item.id === node.id)?.model
@@ -294,36 +331,40 @@ export function DeliveryLane({
                 const working = live && (runtime?.status === 'starting' || runtime?.status === 'running') && !waiting
                 const evidence = evidenceByAgent.get(node.id) ?? []
                 const activity = cardActivity({ events, evidence, agentId: node.id, working, now, linked })
-                // The work passing on to this stage, or sent back from it, just now while watched.
-                const before = index > 0 ? agents[index - 1].id : null
-                const backFrom = (message: (typeof projection.messages)[number]) => message.kind === 'check' && message.check?.sentBack === true && message.from === node.id && message.to === before
-                const pass = live ? [...projection.messages].reverse().find((message) => now - Date.parse(message.ts) < PASS_MS && ((message.kind === 'handover' && message.to === node.id) || backFrom(message))) : undefined
+                const started = Boolean(runtime) && runtime?.status !== 'idle'
+                const handed = planned ? null : handedTo(node.id, index)
+                const before = index > 0 ? agents[index - 1].data.agent : null
                 return {
                   id: node.id,
                   name: agent.name,
                   model,
+                  agent,
                   status: planned ? 'Ready' : runtime ? markLabel(markState(runtime), runtime.openCalls) : 'Not started yet',
                   statusClass: `status-${waiting ? 'waiting' : runtime?.status ?? 'idle'}`,
                   glow: planned || agent.kind === 'operator' ? null : glowOf(runtime?.status, waiting),
+                  mood: moodOf(runtime?.status, { live, waiting, working, planned }),
                   phase: activity.phase,
                   markState: planned ? 'still' : markState(runtime),
                   events: runtime?.eventCount ?? 0,
                   operator: agent.kind === 'operator',
                   working,
                   selected: selected?.id === node.id,
+                  // Someone is talking: those in it stay lit, and so does anyone at work.
+                  dim: talks.length > 0 && !lit.has(node.id) && !working,
                   activity,
+                  // Its helpers (ADR 0079) at its own bench; one that finished stays a moment, then goes.
+                  helpers: helpers
+                    .filter((helper) => helper.lead === node.id && (helper.state === 'working' || now - Date.parse(helper.finishedAt ?? '') < HELPER_LINGER_MS))
+                    .map((helper) => ({ id: helper.id, state: helper.state === 'stopped' ? 'failed' as const : helper.state, phase: helper.state === 'working' ? workPhase(events, helper.id, now) : null })),
                   skills: skillsByAgent.get(node.id) ?? { skills: [], required: 0, met: 0 },
-                  opening: new Set(live ? evidence.filter((item) => item.kind === 'skill' && now - Date.parse(item.ts) < OPENING_MS).map((item) => skillName(item) ?? item.name) : []),
-                  pass: pass ? { id: pass.id, way: pass.kind === 'handover' ? 'on' : 'back' } : null,
-                  sentBack: projection.messages.some(backFrom),
                   open: openMark?.agentId === node.id ? openMark.kind : null,
-                  extra: (
-                    <>
-                      {(runtime?.hasPacket || runtime?.received) && onShowReceived && <FlowLinkButton onClick={() => onShowReceived(node.id)}>What it received</FlowLinkButton>}
-                      {/* The selected stage's way to its agent's settings: one on the screen, as before. */}
-                      {selected?.id === node.id && agent.kind !== 'operator' && onSelectAgent && <FlowLinkButton onClick={() => onSelectAgent(node.id)}>Agent details</FlowLinkButton>}
-                    </>
-                  ),
+                  handed,
+                  // What it waits for, while it can still start: once the run is over, it never will.
+                  waits: !terminal && pipeline && linearPipeline && before && !started ? `Starts after ${before.kind === 'operator' ? 'your review' : before.name}` : null,
+                  // What it was handed opens from the line that says who from: one way to it (ADR 0043).
+                  onReceived: (runtime?.hasPacket || runtime?.received) && onShowReceived ? () => onShowReceived(node.id, handed?.from) : undefined,
+                  // The selected stage's way to its agent's settings: one on the screen, as before.
+                  extra: selected?.id === node.id && agent.kind !== 'operator' && onSelectAgent ? <CardLinkButton onClick={() => onSelectAgent(node.id)}>Agent details</CardLinkButton> : null,
                 }
               })}
             />

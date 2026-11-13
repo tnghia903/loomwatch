@@ -9,8 +9,8 @@ import { formatOffset } from '../../lib/watch/events'
 import { SuppliedInstructions } from './SuppliedInstructions'
 
 /**
- * A stage card's run, as option A of the trace sketches drew it (Team handoff): its figure acts out
- * what it is at while the run is watched live, the call it is on is named under it, and a tray
+ * A stage tile's run (TeamBenches.tsx): its figure acts out what it is at at its bench while the
+ * run is watched live, the call it is on is named in a bubble over its head, and a tray
  * holds one mark per kind of thing it used. A mark opens what is behind it in the card: what it
  * found on the web, its skills and whether it opened each, or the calls of that kind, each a way to
  * its record. Searches, pages and the programs that ran them share one web mark: one list, one mark.
@@ -36,14 +36,11 @@ export function StageFigure({ phase, glow, children }: { phase: WorkPhase | null
   return <span className="stage-figure" data-phase={phase ?? undefined} data-glow={glow ?? undefined}>{children}</span>
 }
 
-/** What it is at now, in a few words: the start of its reasoning, or the call it is on by name. */
+/** The call it is on now, by name. What it thinks about, its bench's own thought bubble says. */
 export function StageNow({ activity }: { activity: CardActivity }) {
-  if (activity.doing) {
-    const Icon = USE_ICONS[activity.doing.kind]
-    return <p className="stage-now doing" aria-live="polite"><Icon size={13} aria-hidden="true" /><span>{activity.doing.label}</span></p>
-  }
-  if (activity.phase === 'thinking' && activity.thought) return <p className="stage-now thought" aria-live="polite"><span>{activity.thought}</span></p>
-  return null
+  if (!activity.doing) return null
+  const Icon = USE_ICONS[activity.doing.kind]
+  return <p className="stage-now doing" aria-live="polite"><Icon size={13} aria-hidden="true" /><span>{activity.doing.label}</span></p>
 }
 
 export interface SkillSummary {
