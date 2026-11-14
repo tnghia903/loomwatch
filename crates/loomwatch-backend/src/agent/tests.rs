@@ -1238,6 +1238,11 @@ impl HostTools for AskingTool {
         })
     }
 
+    /// What the daemon knows about the call (ADR 0040): which item an id names, when it does.
+    fn known(&self, _name: &str, input: &Value) -> Option<Value> {
+        (input["parentId"] == "ENG-7").then(|| json!({"about": "Login is slow"}))
+    }
+
     fn call<'a>(&'a self, _name: &'a str, input: Value) -> BoxFuture<'a, (String, bool)> {
         self.made.lock().unwrap().push(input);
         Box::pin(async { ("Created ENG-1".to_owned(), false) })
@@ -1248,9 +1253,10 @@ impl HostTools for AskingTool {
 async fn a_connected_tools_call_asks_first_and_runs_only_when_allowed() {
     let folder = Folder::new();
     let issue = json!({"title": "Fix login"});
+    let under = json!({"title": "Fix login", "parentId": "ENG-7"});
     let demo = Demo::scripted(vec![
         Completion::calls("", vec![call("c1", "linear__create_issue", &issue)]),
-        Completion::calls("", vec![call("c2", "linear__create_issue", &issue)]),
+        Completion::calls("", vec![call("c2", "linear__create_issue", &under)]),
         Completion::calls("", vec![call("c3", "linear__create_issue", &issue)]),
         Completion::text("Done."),
     ]);
@@ -1288,6 +1294,11 @@ async fn a_connected_tools_call_asks_first_and_runs_only_when_allowed() {
     assert_eq!(
         message["params"]["toolCall"]["rawInput"],
         json!({"server": "Linear", "tool": "create_issue", "arguments": issue})
+    );
+    // What the daemon knows about a call goes with its ask, for the card to say (ADR 0040).
+    assert_eq!(
+        asked[1].as_message()["params"]["toolCall"]["rawInput"]["known"],
+        json!({"about": "Login is slow"})
     );
     // Only the allowed call reached the tool.
     assert_eq!(*tool.made.lock().unwrap(), std::slice::from_ref(&issue));

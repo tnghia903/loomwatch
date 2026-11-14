@@ -307,6 +307,25 @@ describe('Team chat', () => {
     expect(screen.getByRole('button', { name: 'Allow p1' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull()
     expect(permissionTurn).toHaveBeenCalledWith(asking)
+    // A request with nothing sent beside it has nothing more to open.
+    expect(within(ask).queryByText('Everything it would send')).toBeNull()
+  })
+
+  // ADR 0069: a connected tool's call is said in words in the chat too, with everything it sends one tap away.
+  it('says a connected tool’s call in words, with everything it sends one tap away', () => {
+    const asking = message({
+      id: 'permission:p2', kind: 'permission', from: 'researcher', to: 'operator', text: 'Apple Calendar: Add event', evidenceId: 'e4', seq: 4, ts: at(4), offsetMs: 4000, state: 'pending',
+      permission: { requestId: 'p2', switch: null, tool: 'Apple Calendar', detail: 'Upper A · Sat 14 Nov, 15:00–16:00', sends: { fields: [{ name: 'Title', said: 'Upper A' }, { name: 'Start', said: 'Sat 14 Nov, 15:00', sent: '2026-11-14T15:00:00' }, { name: 'End', said: 'Sat 14 Nov, 16:00', sent: '2026-11-14T16:00:00' }] }, outcome: null, settled: null },
+    })
+    setup([asking], { live: true, bare: true, permissionTurn: () => null })
+    const ask = msg(/Researcher to you: asks permission/)
+    expect(within(ask).getByText('Asks to use Apple Calendar')).toBeInTheDocument()
+    expect(within(ask).getByText('Add event · Upper A · Sat 14 Nov, 15:00–16:00')).toHaveClass('said')
+    const all = within(ask).getByText('Everything it would send').closest('details')!
+    // Said as the line says it, with the text sent in its tooltip, in the order the daemon gives.
+    expect(within(all).getByText('Start').nextElementSibling).toHaveTextContent('Sat 14 Nov, 15:00')
+    expect(within(all).getByText('Start').nextElementSibling).toHaveAttribute('title', '2026-11-14T15:00:00')
+    expect([...all.querySelectorAll('dt')].map((name) => name.textContent)).toEqual(['Title', 'Start', 'End'])
   })
 
   it('remembers how a permission request was settled: by you, or by nobody answering in time', () => {

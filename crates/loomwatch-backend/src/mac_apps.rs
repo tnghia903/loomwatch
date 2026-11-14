@@ -641,6 +641,21 @@ impl Runner for Arc<Fake> {
     }
 }
 
+/// What an option of one of the apps' actions does, in words, for the card that asks first
+/// (ADR 0040): `which: future` on deleting an event is "This one and every later one". Every
+/// option the actions offer has words here.
+pub(crate) fn option_words(call: &str, key: &str, value: &str) -> Option<&'static str> {
+    match (call, key, value) {
+        ("change_event" | "delete_event", "which", "this") => Some("Only this one"),
+        ("change_event" | "delete_event", "which", "future") => {
+            Some("This one and every later one")
+        }
+        ("change_note", "how", "append") => Some("Adds to the end"),
+        ("change_note", "how", "replace") => Some("Replaces all its text"),
+        _ => None,
+    }
+}
+
 /// An action's answer as the agent reads it, and whether it failed.
 pub(crate) fn for_the_agent(answer: Result<Value, String>) -> (String, bool) {
     match answer {
@@ -652,6 +667,38 @@ pub(crate) fn for_the_agent(answer: Result<Value, String>) -> (String, bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every option an action offers says what it does on the card that asks first, so a newcomer
+    /// never allows "which: future" without knowing every later event goes too.
+    #[test]
+    fn every_option_has_words_for_the_card_that_asks() {
+        let mut options = 0;
+        for app in App::ALL {
+            for call in app.calls() {
+                let properties = call.input_schema["properties"]
+                    .as_object()
+                    .cloned()
+                    .unwrap_or_default();
+                for (key, property) in properties {
+                    for value in property["enum"].as_array().into_iter().flatten() {
+                        let value = value.as_str().expect("an option is words");
+                        options += 1;
+                        assert!(
+                            option_words(&call.name, &key, value).is_some(),
+                            "{}.{key} = {value} has no words",
+                            call.name
+                        );
+                    }
+                }
+            }
+        }
+        assert_eq!(options, 6, "the options this test knows");
+        assert_eq!(
+            option_words("delete_event", "which", "future"),
+            Some("This one and every later one")
+        );
+        assert_eq!(option_words("delete_event", "how", "future"), None);
+    }
 
     #[test]
     fn every_app_has_an_address_of_its_own_and_actions_that_read_well() {

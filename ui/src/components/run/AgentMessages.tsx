@@ -21,6 +21,7 @@ import { FIGURE_HUES, figureHue, type FigureChoice } from '../../lib/library/fig
 import { InlineMarkdown, Markdown } from '../ui/Markdown'
 import { LOOMWATCH_CHECK_ID, LOOMWATCH_CHECK_TITLE, LOOMWATCH_NAME, helperOf, wearerOf } from '../../lib/chat/helpers'
 import { LoomFace } from '../ui/glyphs'
+import { PermissionSends } from './PermissionSends'
 
 interface AgentMessagesProps {
   messages: readonly TeamMessage[]
@@ -457,7 +458,8 @@ function ChatMessage({ bubble, member, mentionable, alone, continued, open, flas
             {asking ? (
               <div className="chat-file chat-permission">
                 <p className="chat-file-head"><ShieldQuestionMark size={15} aria-hidden="true" /><span>{permissionAsks(message.permission?.switch, message.permission?.tool)}</span></p>
-                <p className="permission-what" title={permissionWhat({ title: text, detail: message.permission?.detail })}>{permissionWhat({ title: text, detail: message.permission?.detail })}</p>
+                <p className={`permission-what${message.permission?.tool ? ' said' : ''}`} title={permissionWhat({ title: text, detail: message.permission?.detail, tool: message.permission?.tool })}>{permissionWhat({ title: text, detail: message.permission?.detail, tool: message.permission?.tool })}</p>
+                <PermissionSends sends={message.permission?.sends} />
                 {message.permission?.auto && <p className="permission-auto">{autoNote(message.permission.auto)}</p>}
               </div>
             ) : (

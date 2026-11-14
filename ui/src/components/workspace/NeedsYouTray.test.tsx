@@ -45,12 +45,18 @@ describe('a permission ticket in the tray (ADR 0040)', () => {
   })
 
   // ADR 0122: deleting an event or a contact can't be undone, so it is allowed one at a time.
+  // ADR 0040: which event, in words, and everything the call would send, before the Allow beside it.
   it('allows what can’t be undone once only, and says so', async () => {
-    const deleting: Ticket = { ...ticket, team: true, cantUndo: true, text: 'Researcher wants to use Apple Calendar', context: 'Apple Calendar: Delete event · {"id":"e1"}' }
+    const sends = { fields: [{ name: 'Occurrence', said: 'Sat 14 Nov, 15:00', sent: '2026-11-14T15:00:00' }, { name: 'ID', said: 'E7:0400' }, { name: 'Which', said: 'This one and every later one', sent: 'future' }] }
+    const deleting: Ticket = { ...ticket, team: true, cantUndo: true, text: 'Researcher wants to use Apple Calendar', context: 'Delete event · Upper A · Sat 14 Nov, 15:00 · This one and every later one', sends }
     const onPermission = vi.fn(() => Promise.resolve())
     render(<NeedsYouTray tickets={[deleting]} working={0} onAnswer={vi.fn()} onPermission={onPermission} onDismiss={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: /1 needs you/ }))
     expect(screen.getByText('Researcher wants to use Apple Calendar. This can’t be undone. It is paused until you answer.')).toBeInTheDocument()
+    expect(screen.getByText('Delete event · Upper A · Sat 14 Nov, 15:00 · This one and every later one')).toBeInTheDocument()
+    const all = screen.getByText('Everything it would send').closest('details')!
+    expect([...all.querySelectorAll('dt')].map((name) => name.textContent)).toEqual(['Occurrence', 'ID', 'Which'])
+    expect(screen.getByText('This one and every later one', { selector: 'dd' })).toHaveAttribute('title', 'future')
     expect(screen.queryByRole('button', { name: 'Allow for this run' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Allow for the whole team' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: /^Allow\s*A$/ }))

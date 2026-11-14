@@ -288,7 +288,7 @@ describe('messages between agents', () => {
       answered(650, 'writer', 'p2', 'timed_out'),
       // Let through by an earlier "Allow for this run": never asked, so no message.
       answered(660, 'writer', null, 'allowed_for_run'),
-      asked(700, 'writer', 'p3', { title: 'Bash: rm -rf build', kind: 'execute', switch: 'commands' }),
+      asked(700, 'writer', 'p3', { title: 'Bash: rm -rf build', kind: 'execute', switch: 'commands', sends: ['not', 'fields'] }),
       asked(710, 'data', 'p4'),
       answered(720, 'data', 'p4', 'allow_team'),
     ]
@@ -306,6 +306,20 @@ describe('messages between agents', () => {
     expect(messages[2]).toMatchObject({ kind: 'permission', text: 'Bash: rm -rf build', state: 'pending', reply: null, permission: { requestId: 'p3', outcome: null, settled: null } })
     // Before the answer, the first one waits on you.
     expect(projectRun(events, 1).messages[0]).toMatchObject({ state: 'pending', reply: null, permission: { outcome: null } })
+    // Only a tool call's fields are kept as what it sends.
+    expect(messages[2].permission?.sends).toBeNull()
+  })
+
+  // ADR 0069: a connected tool's call is said in words, with everything it sends kept beside them.
+  it('keeps what a connected tool’s call sends with the request it asked', () => {
+    seq = 0
+    const events = [
+      event(1, 'coby', 'session_meta', { phase: 'awaiting_permission', requestId: 'p1', title: 'Apple Calendar: Add event', kind: 'other', switch: null, tool: { server: 'Apple Calendar', call: 'add_event' }, detail: 'Upper A · Sat 14 Nov, 15:00–16:00', sends: { fields: [{ name: 'Title', said: 'Upper A' }, { name: 'Start', said: 'Sat 14 Nov, 15:00', sent: '2026-11-14T15:00:00' }, { name: 'Bad', said: 3 }, 'not a field'], cut: true } }, loomwatch('awaiting_permission')),
+    ]
+    expect(projectRun(events).messages[0]).toMatchObject({
+      kind: 'permission', text: 'Apple Calendar: Add event',
+      permission: { tool: 'Apple Calendar', detail: 'Upper A · Sat 14 Nov, 15:00–16:00', sends: { fields: [{ name: 'Title', said: 'Upper A' }, { name: 'Start', said: 'Sat 14 Nov, 15:00', sent: '2026-11-14T15:00:00' }], cut: true } },
+    })
   })
 
   // ADR 0109: switching the team to Auto while a request waits on you answers it when Auto would have.

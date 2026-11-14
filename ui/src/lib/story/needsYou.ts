@@ -1,5 +1,5 @@
 import { baseName } from '../files/paths'
-import type { RunRecord } from '../runs/client'
+import type { RunRecord, SendsList } from '../runs/client'
 import { plainRunError, runAgents } from '../runs/errors'
 import { dueAt } from '../chat/format'
 import { permissionSentence, permissionWhat } from '../runs/permissionRequests'
@@ -41,6 +41,8 @@ export interface Ticket {
   team?: boolean
   /** A permission ticket's action can't be undone, such as deleting an event: allowed once only (ADR 0122). */
   cantUndo?: boolean
+  /** A permission ticket's connected tool call: everything it would send, under its line (ADR 0040). */
+  sends?: SendsList | null
   /** A spend ticket's stop, which its answer names, and the words of its two answers. */
   stopId?: string
   spendActions?: { add: string; finish: string }
@@ -90,6 +92,7 @@ export function ticketsFrom(records: readonly RunRecord[], names: ReadonlyMap<st
         switch: request.switch ?? null,
         team: record.agentIds.length > 1,
         cantUndo: Boolean(request.tool?.cantUndo),
+        sends: request.sends ?? null,
         until: ifNobodyAnswers(request.expiresAt, 'it is declined', now),
       })
     }

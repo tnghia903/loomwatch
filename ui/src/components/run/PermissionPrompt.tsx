@@ -7,6 +7,7 @@ import { autoNote, permissionDeadline, permissionSentence, permissionWhat } from
 import type { AllowSwitch } from '../../lib/team-file/types'
 import type { AlwaysAllowed } from '../../lib/tools/allow'
 import { useNow } from '../../lib/useNow'
+import { PermissionSends } from './PermissionSends'
 
 interface PermissionPromptProps {
   run: Pick<RunRecord, 'runId' | 'permissionRequests'>
@@ -74,7 +75,8 @@ function Ask({ request, children }: { request: PermissionRequest; children: Reac
         <ShieldQuestionMark size={18} aria-hidden="true" />
         <strong>{permissionSentence(request)}</strong>
       </header>
-      <p className="permission-what" title={permissionWhat(request)}>{permissionWhat(request)}</p>
+      <p className={`permission-what${request.tool ? ' said' : ''}`} title={permissionWhat(request)}>{permissionWhat(request)}</p>
+      <PermissionSends sends={request.sends} />
       {request.auto && <p className="permission-auto">{autoNote(request.auto)}</p>}
       {children}
     </article>

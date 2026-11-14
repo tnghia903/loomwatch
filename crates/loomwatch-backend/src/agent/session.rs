@@ -182,6 +182,13 @@ pub trait HostTools: Send + Sync {
         None
     }
 
+    /// What the daemon knows that makes a call's ask read plainly (ADR 0040), as
+    /// `{about?, options?}`: what an earlier result called the item the call's id points to, and
+    /// an option's own words by argument. `None` for nothing.
+    fn known(&self, _name: &str, _input: &Value) -> Option<Value> {
+        None
+    }
+
     /// The tool's answer, and whether it failed.
     fn call<'a>(&'a self, name: &'a str, input: Value) -> BoxFuture<'a, (String, bool)>;
 }
@@ -1431,6 +1438,10 @@ impl Session {
             let mut asked = json!({"server": ask.server, "tool": ask.call, "arguments": input});
             if ask.cant_undo {
                 asked["cantUndo"] = json!(true);
+            }
+            // What the card can say besides the arguments: which item an id is, an option's words.
+            if let Some(known) = self.host.known(&call.name, &input) {
+                asked["known"] = known;
             }
             let request = PermissionRequest {
                 session_id: self.config.session_id.clone(),

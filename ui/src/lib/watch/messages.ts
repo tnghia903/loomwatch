@@ -1,4 +1,5 @@
 import { checkItemsOf, type CheckItemResult } from '../story/checks'
+import { sendsList, type SendsList } from '../runs/client'
 import type { Evidence, PromptSection, RunEvent } from './events'
 
 /**
@@ -133,8 +134,11 @@ export interface PermissionAsk {
   switch: string | null
   /** For a connected tool's call (ADR 0069): which tool, by name. */
   tool?: string | null
-  /** The query, command, address or path, when the request named one. */
+  /** The query, command, address or path, when the request named one; for a connected tool's call,
+      what it sends said in plain words. */
   detail: string | null
+  /** For a connected tool's call: everything it would send (older runs don't have it). */
+  sends?: SendsList | null
   /** Why Auto mode left this command to you, when the team was in Auto mode (ADR 0061). */
   auto?: string | null
   /** How it was settled; `null` while it waits, or when the run ended first. */
@@ -464,7 +468,7 @@ export class Correspondence {
     this.add(event, {
       id: `permission:${requestId}`, kind: 'permission', from: event.agentId, to: OPERATOR_ID, text: words(p.title) ?? 'An action',
       evidenceId, state: 'pending',
-      permission: { requestId, switch: words(p.switch), tool: toolOf(p.tool), detail: words(p.detail), auto: words(p.autoNote), outcome: null, settled: null },
+      permission: { requestId, switch: words(p.switch), tool: toolOf(p.tool), detail: words(p.detail), sends: sendsList(p.sends), auto: words(p.autoNote), outcome: null, settled: null },
     })
   }
 
