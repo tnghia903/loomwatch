@@ -5395,6 +5395,7 @@ pub(crate) mod tests {
             switch: crate::permissions::switch_for(kind).map(str::to_owned),
             tool: None,
             detail: None,
+            sends: None,
             since: now(),
             expires_at: now(),
             auto: None,

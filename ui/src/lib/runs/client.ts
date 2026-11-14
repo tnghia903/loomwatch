@@ -45,6 +45,30 @@ export interface ScheduleEntry {
  * switches do not cover, such as a web search with "Use the web" off. Declined by itself at
  * `expiresAt` when nobody answers.
  */
+/**
+ * Everything a connected tool's call would send (ADR 0040), as the daemon says it
+ * (`permissions/plain.rs`): each argument's name, what it says (dates, lists and yes or no in words),
+ * the text sent when that reads differently, and `code` for a group of fields shown as its JSON.
+ * `cut` when the rest was too long to list.
+ */
+export interface SendsList {
+  fields: { name: string; said: string; sent?: string; code?: boolean }[]
+  cut?: boolean
+}
+
+/** `value` as a list of what a call sends, or `null` when it isn't one (an older run's record). */
+export function sendsList(value: unknown): SendsList | null {
+  if (!value || typeof value !== 'object' || !Array.isArray((value as { fields?: unknown }).fields)) return null
+  const fields = ((value as { fields: unknown[] }).fields).flatMap((field) => {
+    if (!field || typeof field !== 'object') return []
+    const { name, said, sent, code } = field as Record<string, unknown>
+    return typeof name === 'string' && typeof said === 'string'
+      ? [{ name, said, ...(typeof sent === 'string' ? { sent } : {}), ...(code === true ? { code } : {}) }]
+      : []
+  })
+  return fields.length > 0 ? { fields, ...((value as { cut?: unknown }).cut === true ? { cut: true } : {}) } : null
+}
+
 export interface PermissionRequest {
   id: string
   /** The agent asking, and its name. */
@@ -59,8 +83,11 @@ export interface PermissionRequest {
   /** A connected tool's call (ADR 0069): which tool and which of its calls, which "Always allow"
       lets through for this agent from then on. */
   tool?: { server: string; call: string; cantUndo?: boolean } | null
-  /** The query, command, address or path, when there is one. */
+  /** The query, command, address or path, when there is one; for a connected tool's call, what it
+      sends said in plain words ("Fix login · Priority: 2"). */
   detail?: string | null
+  /** For a connected tool's call: everything it would send, in the line's order. */
+  sends?: SendsList | null
   since: string
   expiresAt: string
   /** Why Auto mode left this command to you, when the team is in Auto mode (ADR 0061). */

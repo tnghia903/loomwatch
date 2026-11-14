@@ -934,6 +934,17 @@ policy answers it (`permissions.rs`), from the agent's `allow:` switches (`web`,
   (ADR 0090). A scheduled run's spend stop and agents' questions wait the same way: then the team
   finishes with what it has, or the agent goes on with its best assumption.
 
+What the operator reads is `permissions::describe`'s title and one line of detail: the query,
+command, address or path, and for a connected tool's call its arguments said plainly
+(`permissions/plain.rs`): what it is about (`title`, `name`, `summary`, …), then when (a start and an
+end as "Sat 14 Nov, 15:00–16:00", offsets turned to this computer's zone), then short facts by name,
+then long words. The tool's host adds what it knows as `rawInput.known` (`HostTools::known`):
+`connected_tools::host` remembers what its session's results called each id, so a later call that
+names the id says which item it is, and the Mac's apps give their options words
+(`mac_apps::option_words`). Groups of fields and the rest of long words are left out of the line, so
+the request also carries `sends`, every argument said the same way, which the cards and the
+needs-you tray open under "Everything it would send".
+
 Every decision that was not the policy's own is recorded with who made it. Ask and one-turn
 helpers have no policy, and they are offered no tool that would need one.
 

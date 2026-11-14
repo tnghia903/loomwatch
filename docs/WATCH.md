@@ -604,8 +604,13 @@ Response (`202 Accepted`):
   `agent`), `agent`, `limitUsd`, `spentUsd` and `addUsd`.
 - `permissionRequests` lists what an agent is waiting on the operator for: `{id, agent, name,
   title, kind, switch, detail, since, expiresAt}`, plus `auto` (why Auto mode left a command or an
-  edit to you, in a run in Auto mode) and `edit` (`{field, value}`: the whole command, when it may be
-  changed before it runs). `kind` is the tool's kind (`read`, `search`, `edit`, `execute`, …) and
+  edit to you, in a run in Auto mode), `edit` (`{field, value}`: the whole command, when it may be
+  changed before it runs), and for a connected tool's call `tool` (`{server, call, cantUndo}`) and
+  `sends` (`{fields: [{name, said, sent?, code?}], cut?}`: every argument in the line's order, said
+  as the line says it, with the text sent when that reads differently and `code` for a group of
+  fields shown as its JSON; `cut` when the rest passed 16,000 characters); its `detail` then says
+  the arguments in plain words, such as `Upper A · Sat 14 Nov, 15:00–16:00 · Calendar: Home`, times
+  with an offset in this computer's time zone. `kind` is the tool's kind (`read`, `search`, `edit`, `execute`, …) and
   `switch` the `allow:` switch that would let it through without asking. It is live only, emptied
   when the run ends and never stored. `POST /api/runs/{id}/permissions` with `{ "requestId": "…",
   "decision": "allow_once" | "allow_run" | "allow_team" | "deny" | "edit" | "answer", "text": "…" }`
@@ -619,7 +624,7 @@ Response (`202 Accepted`):
   or its run ended. The app's **Always allow** is `allow_run`
   plus switching that switch on for the agent in the team file. The archive records `session_meta`
   events with `phase: "awaiting_permission"` (with the request's `requestId`, `title`, `kind`,
-  `switch`, `detail`, `expiresAt` and `autoNote`) and `phase: "permission_answered"` (`outcome`:
+  `switch`, `tool`, `detail`, `sends`, `expiresAt` and `autoNote`) and `phase: "permission_answered"` (`outcome`:
   `allow_once`, `allow_run`, `allow_team`, `allowed_for_run`, `auto_approved` (a command that only
   read, or an edit in the agent's folder), `auto_contained` (a command Auto mode ran in its tighter
   sandbox, ADR 0109), `deny`, `edited` with the command that ran as `edited`, `answered` with your

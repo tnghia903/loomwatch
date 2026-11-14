@@ -8,6 +8,7 @@ import { historyRunUrl } from '../../lib/runs/history'
 import { ago, APPROVAL_TEXT, type Ticket } from '../../lib/story/needsYou'
 import { goToRun } from '../agents/route'
 import { InlineMarkdown } from '../ui/Markdown'
+import { PermissionSends } from '../run/PermissionSends'
 import { stateLabel } from '../../lib/state/words'
 
 interface NeedsYouTrayProps {
@@ -228,6 +229,8 @@ export function NeedsYouTray({ tickets, working, onAnswer, onPermission, onSpend
                   {ticket.kind === 'question' ? <><b>{ticket.asker}</b> asks: “<InlineMarkdown clickable={false}>{ticket.text}</InlineMarkdown>”</> : ticket.kind === 'permission' ? <>{ticket.text}. {ticket.cantUndo && <>This can’t be undone. </>}It is paused until you answer.</> : ticket.kind === 'spend' ? <>{ticket.text}</> : ticket.kind === 'review' ? <>{ticket.text ? <InlineMarkdown clickable={false}>{ticket.text}</InlineMarkdown> : `${ticket.asker} is waiting for your approval.`}</> : <>{ticket.text}</>}
                 </p>
                 {ticket.context && <blockquote className="ticket-context" title={agentWrote(ticket) ? plainWords(ticket.context) : ticket.context}>{agentWrote(ticket) ? <InlineMarkdown clickable={false}>{ticket.context}</InlineMarkdown> : ticket.context}</blockquote>}
+                {/* What is allowed is never only what the line shows (ADR 0040). */}
+                {ticket.kind === 'permission' && <PermissionSends sends={ticket.sends} />}
                 {ticket.until && <p className="ticket-until t-meta">{ticket.until}</p>}
                 {onScreen(ticket) ? (
                   <p className="ticket-here t-meta">On this screen: answer it below.</p>

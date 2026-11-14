@@ -85,10 +85,19 @@ shows on the team's canvas, on its Team tab, as a card wired to the agent.
 ## It asks you first
 
 A tool works in your own account on that service, so **the agent asks you before each action**,
-even one that only reads. The card says which tool, which action, and what it would send:
+even one that only reads. The card says which tool, which action, and what it would send, in
+plain words: what it's about first, then when, then the rest.
 
 > Researcher wants to use Linear
-> Linear: Create issue · {"title":"Fix login"}
+> Create issue · Fix login · Priority: 2
+
+> Coby wants to use Apple Calendar
+> Add event · Upper A · Sat 14 Nov, 15:00–16:00
+
+A change or a delete names the item when the agent found it first in the same piece of work
+("Delete event · Upper A · …"), and an option of the Mac's own apps says what it does ("This one
+and every later one"). **Everything it would send** under it lists every field the action sends,
+said the same way; point at a value to see it exactly as it will be sent.
 
 You can answer in three ways:
 

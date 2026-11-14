@@ -267,6 +267,7 @@ impl PolicyGate {
                 "switch": open.request.switch,
                 "tool": open.request.tool,
                 "detail": open.request.detail,
+                "sends": open.request.sends,
                 "expiresAt": open.request.expires_at,
                 "autoNote": open.request.auto,
             }));
@@ -363,6 +364,10 @@ impl HostTools for CombinedTools {
         self.owner(name).and_then(|host| host.asks(name))
     }
 
+    fn known(&self, name: &str, input: &Value) -> Option<Value> {
+        self.owner(name).and_then(|host| host.known(name, input))
+    }
+
     fn call<'a>(&'a self, name: &'a str, input: Value) -> BoxFuture<'a, (String, bool)> {
         match self.owner(name) {
             Some(host) => host.call(name, input),
@@ -421,6 +426,47 @@ mod tests {
     use crate::config::{AgentAllow, TeamConfig};
     use crate::permissions::{PermissionAsker, PermissionDecision, PermissionPolicy};
     use crate::runs::{RunRecord, RunRegistry, RunTrigger};
+
+    /// A daemon tool for [`CombinedTools`]: one call, and what it knows about any call of it.
+    struct Knowing(&'static str);
+
+    impl crate::agent::HostTools for Knowing {
+        fn specs(&self) -> Vec<crate::agent::ToolSpec> {
+            vec![crate::agent::ToolSpec {
+                name: self.0.to_owned(),
+                description: String::new(),
+                parameters: json!({"type": "object"}),
+            }]
+        }
+
+        /// Its own name, so the test can tell which tool answered.
+        fn known(&self, _name: &str, _input: &serde_json::Value) -> Option<serde_json::Value> {
+            Some(json!({"about": self.0}))
+        }
+
+        fn call<'a>(
+            &'a self,
+            _name: &'a str,
+            _input: serde_json::Value,
+        ) -> crate::agent::BoxFuture<'a, (String, bool)> {
+            Box::pin(async { (String::new(), false) })
+        }
+    }
+
+    /// ADR 0040: what the daemon knows about a call comes from the tool that offers it.
+    #[test]
+    fn what_is_known_about_a_call_comes_from_the_tool_that_offers_it() {
+        use crate::agent::HostTools as _;
+        let combined = super::CombinedTools(vec![
+            std::sync::Arc::new(Knowing("linear__create_issue")),
+            std::sync::Arc::new(Knowing("apple_calendar__delete_event")),
+        ]);
+        assert_eq!(
+            combined.known("apple_calendar__delete_event", &json!({})),
+            Some(json!({"about": "apple_calendar__delete_event"}))
+        );
+        assert_eq!(combined.known("write_file", &json!({})), None);
+    }
 
     /// A person-started run whose one agent may do nothing without asking, and its gate.
     fn gate() -> (

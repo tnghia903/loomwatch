@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { PermissionPrompt } from './PermissionPrompt'
@@ -101,9 +101,26 @@ describe('the permission card (ADR 0040)', () => {
     const fetch = vi.fn(() => Promise.resolve(json({ runId: 'r1' })))
     vi.stubGlobal('fetch', fetch)
     const onAlwaysAllow = vi.fn()
-    render(<PermissionPrompt run={{ runId: 'r1', permissionRequests: [request({ title: 'Linear: Create issue', kind: 'other', switch: null, detail: '{"title":"Fix login"}', tool: { server: 'Linear', call: 'create_issue' } })] }} onAlwaysAllow={onAlwaysAllow} />)
+    const sends = { fields: [
+      { name: 'Title', said: 'Fix login' },
+      { name: 'Labels', said: 'bug, ui', sent: '["bug","ui"]' },
+      { name: 'Assignee', said: '{\n  "id": "u1"\n}', code: true },
+      { name: 'Description', said: 'The login button does nothing\non Safari.' },
+    ], cut: true }
+    render(<PermissionPrompt run={{ runId: 'r1', permissionRequests: [request({ title: 'Linear: Create issue', kind: 'other', switch: null, detail: 'Fix login · Labels: bug, ui · Assignee: …', sends, tool: { server: 'Linear', call: 'create_issue' } })] }} onAlwaysAllow={onAlwaysAllow} />)
     expect(screen.getByText('Researcher wants to use Linear')).toBeInTheDocument()
-    expect(screen.getByText('Linear: Create issue · {"title":"Fix login"}')).toBeInTheDocument()
+    // In words, not code, from its action; everything it would send one tap away, each field by name.
+    const line = screen.getByText('Create issue · Fix login · Labels: bug, ui · Assignee: …')
+    expect(line).toHaveClass('said')
+    const all = screen.getByText('Everything it would send').closest('details')!
+    expect(all).not.toHaveAttribute('open')
+    const field = (name: string) => within(all).getByText(name).nextElementSibling
+    expect(field('Title')).toHaveTextContent('Fix login')
+    expect(field('Labels')?.textContent).toBe('bug, ui')
+    expect(field('Labels')).toHaveAttribute('title', '["bug","ui"]')
+    expect(field('Assignee')).toHaveClass('mono')
+    expect(field('Description')?.textContent).toBe('The login button does nothing\non Safari.')
+    expect(within(all).getByText('The rest is too long to show here.')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Edit, then allow' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Always allow this' }))
     expect(onAlwaysAllow).toHaveBeenCalledWith('researcher', { tool: 'Linear', call: 'create_issue', label: 'Linear: Create issue' })
@@ -137,7 +154,7 @@ describe('the permission card (ADR 0040)', () => {
   it('allows what can’t be undone only once, and says it can’t be undone', async () => {
     const fetch = vi.fn(() => Promise.resolve(json({ runId: 'r1' })))
     vi.stubGlobal('fetch', fetch)
-    const deleting = request({ title: 'Apple Calendar: Delete event', kind: 'other', switch: null, detail: '{"id":"e1"}', tool: { server: 'Apple Calendar', call: 'delete_event', cantUndo: true } })
+    const deleting = request({ title: 'Apple Calendar: Delete event', kind: 'other', switch: null, detail: 'ID: e1', tool: { server: 'Apple Calendar', call: 'delete_event', cantUndo: true } })
     render(<PermissionPrompt team run={{ runId: 'r1', permissionRequests: [deleting] }} onAlwaysAllow={vi.fn()} />)
     expect(screen.getByText(/This can’t be undone\. Researcher is paused until you answer\./)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Allow for this run' })).toBeNull()

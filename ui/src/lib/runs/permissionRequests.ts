@@ -53,9 +53,14 @@ export function autoNote(note: string): string {
   return `${text.charAt(0).toUpperCase()}${text.slice(1)}${/[.!?]$/.test(text) ? '' : '.'}`
 }
 
-/** What exactly: the app's own title, plus the query, command or path when it named one. */
-export function permissionWhat(request: Pick<PermissionRequest, 'title' | 'detail'>): string {
-  return request.detail ? `${request.title} · ${request.detail}` : request.title
+/**
+ * What exactly: the app's own title, plus the query, command or path when it named one. A connected
+ * tool's call starts at its action ("Add event · Upper A …"): the line above it names the tool.
+ */
+export function permissionWhat(request: Pick<PermissionRequest, 'title' | 'detail'> & { tool?: { server: string } | string | null }): string {
+  const server = typeof request.tool === 'string' ? request.tool : request.tool?.server
+  const title = server && request.title.startsWith(`${server}: `) ? request.title.slice(server.length + 2) : request.title
+  return request.detail ? `${title} · ${request.detail}` : title
 }
 
 /**

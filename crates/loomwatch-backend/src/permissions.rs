@@ -14,6 +14,8 @@ use serde_json::Value;
 use crate::config::{AgentAllow, AgentConfig, CapabilityKind, CapabilityRef, TurnedOff};
 use crate::delivery::{Delivery, RESERVED_SERVER};
 
+mod plain;
+
 /// Folders an agent may never edit, even inside its own folder: a change there could give it more
 /// on its next session than the operator switched on. `.agents` and `.claude` hold the skills it is
 /// offered, `.loomwatch` what `LoomWatch` keeps for the team, and `.git` hooks run code.
@@ -393,9 +395,13 @@ pub struct PermissionRequest {
     /// through for this agent from then on.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool: Option<ToolAsk>,
-    /// The query, command, address or path, when the request names one.
+    /// The query, command, address or path, when the request names one; for a connected tool's
+    /// call, what it sends said in plain words.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
+    /// For a connected tool's call: everything it sends, for the card to open ([`sends`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sends: Option<Value>,
     /// RFC 3339.
     pub since: String,
     /// RFC 3339: when it is declined if nobody answers.
@@ -639,15 +645,16 @@ pub fn describe(request: &Value) -> (String, String, Option<String>) {
     };
     let kind = text("/kind").unwrap_or("other").to_owned();
     let title = text("/title").unwrap_or("An action").to_owned();
-    // A connected tool's call shows what it would send, in one line.
+    // A connected tool's call says what it would send, in plain words: what it is about, when,
+    // then the rest, with what its host knows (`rawInput.known`). Everything it sends is beside it
+    // ([`sends`]).
     let arguments = call
         .and_then(|call| call.pointer("/rawInput/arguments"))
-        .filter(|arguments| {
-            arguments
-                .as_object()
-                .is_some_and(|fields| !fields.is_empty())
-        })
-        .map(Value::to_string);
+        .and_then(Value::as_object)
+        .and_then(|fields| {
+            let known = plain::Known::of(call.and_then(|call| call.pointer("/rawInput/known")));
+            plain::said(fields, known, &chrono::Local::now())
+        });
     let named = [
         "/rawInput/command",
         "/rawInput/query",
@@ -670,6 +677,18 @@ pub fn describe(request: &Value) -> (String, String, Option<String>) {
             }
         });
     (title, kind, detail)
+}
+
+/// Everything a connected tool's call sends, for the card that asks to open beside its plain words:
+/// `{fields: [{name, said, sent?, code?}], cut?}`. `None` for any other request.
+#[must_use]
+pub fn sends(request: &Value) -> Option<Value> {
+    let input = request.pointer("/params/toolCall/rawInput")?;
+    plain::sends(
+        input.get("arguments")?.as_object()?,
+        plain::Known::of(input.get("known")),
+        &chrono::Local::now(),
+    )
 }
 
 /// Who an agent's declined requests are put to: the operator of the run it belongs to (ADR 0040).
@@ -833,6 +852,7 @@ impl PermissionAsker {
             title,
             kind,
             detail,
+            sends: sends(request),
             since: stamp(now),
             expires_at: stamp(now + wait),
             auto,
@@ -1091,7 +1111,12 @@ mod tests {
             (title.as_str(), kind.as_str()),
             ("Linear: Create issue", "other")
         );
-        assert_eq!(detail.as_deref(), Some(r#"{"title":"Fix login"}"#));
+        // Said plainly, not as JSON, with everything it sends beside it.
+        assert_eq!(detail.as_deref(), Some("Fix login"));
+        assert_eq!(
+            sends(&call("create_issue")),
+            Some(json!({"fields": [{"name": "Title", "said": "Fix login"}]}))
+        );
     }
 
     /// ADR 0122: what can't be undone, such as deleting an event, asks every time, even when the

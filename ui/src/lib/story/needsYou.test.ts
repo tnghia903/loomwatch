@@ -26,6 +26,16 @@ describe('ticketsFrom', () => {
     expect(tickets[2].text).toBe('Coder could not open slides.pptx')
   })
 
+  // ADR 0040: what a connected tool's call would send is on its ticket, so the tray can list it.
+  it('keeps everything a connected tool’s call would send on its ticket', () => {
+    const sends = { fields: [{ name: 'Title', said: 'Fix login' }], cut: true }
+    const [ticket] = ticketsFrom([
+      run('r1', { status: 'running', permissionRequests: [{ id: 'p1', agent: 'researcher', name: 'Researcher', title: 'Linear: Create issue', kind: 'other', switch: null, tool: { server: 'Linear', call: 'create_issue' }, detail: 'Fix login', sends, since: '2026-10-01T03:55:00Z', expiresAt: '2026-10-01T04:10:00Z' }] }),
+    ], names, new Set(), NOW)
+    expect(ticket.context).toBe('Create issue · Fix login')
+    expect(ticket.sends).toEqual(sends)
+  })
+
   it('says a failure with the name of the step that didn’t finish, as its run names it', () => {
     const [ticket] = ticketsFrom([
       run('f1', { status: 'failed', error: 'pipeline node coder failed: it broke', agentNames: { coder: 'Slide maker' }, finishedAt: '2026-10-01T03:30:00Z' }),

@@ -18,6 +18,8 @@ use crate::mac_apps::{self, App};
 
 /// The longest a function name may be, for the providers' sake.
 const MAX_FUNCTION_CHARS: usize = 64;
+/// The most item names one session remembers from its tools' results ([`OutsideTools::named`]).
+const MAX_NAMED: usize = 2_000;
 
 pub(crate) struct OutsideTools {
     tools: Tools,
@@ -25,6 +27,9 @@ pub(crate) struct OutsideTools {
     specs: Vec<ToolSpec>,
     /// Each function name offered: which tool, and which of its calls.
     calls: HashMap<String, Offered>,
+    /// What the session's tool results called each item they gave an id, so the ask for a later
+    /// call naming that id can say which item it is (ADR 0040): an event's title, a contact's name.
+    named: std::sync::Mutex<HashMap<String, String>>,
 }
 
 struct Given {
@@ -110,7 +115,80 @@ impl OutsideTools {
                 .collect(),
             specs,
             calls,
+            named: std::sync::Mutex::default(),
         }
+    }
+
+    /// Remember what `result`, a call's answer, calls each item it gives an id.
+    fn remember(&self, result: &str) {
+        let Ok(found) = serde_json::from_str::<Value>(result) else {
+            return;
+        };
+        let mut named = self
+            .named
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        names_in(&found, &mut named);
+    }
+}
+
+/// The ids in `found` and what each item is called: its title, name, summary or subject, or a
+/// person's given and family names.
+fn names_in(found: &Value, named: &mut HashMap<String, String>) {
+    match found {
+        Value::Array(items) => items.iter().for_each(|item| names_in(item, named)),
+        Value::Object(fields) => {
+            let id = match fields.get("id") {
+                Some(Value::String(id)) if !id.trim().is_empty() => Some(id.trim().to_owned()),
+                Some(Value::Number(id)) => Some(id.to_string()),
+                _ => None,
+            };
+            let text = |key: &str| {
+                fields
+                    .get(key)
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|text| !text.is_empty())
+            };
+            let name = ["title", "name", "summary", "subject"]
+                .into_iter()
+                .find_map(text)
+                .map(str::to_owned)
+                .or_else(|| {
+                    let person: Vec<&str> = ["givenName", "familyName"]
+                        .into_iter()
+                        .filter_map(text)
+                        .collect();
+                    (!person.is_empty()).then(|| person.join(" "))
+                });
+            if let (Some(id), Some(name)) = (id, name)
+                && (named.len() < MAX_NAMED || named.contains_key(&id))
+            {
+                named.insert(id, name);
+            }
+            fields.values().for_each(|value| names_in(value, named));
+        }
+        _ => {}
+    }
+}
+
+impl OutsideTools {
+    /// What an earlier result called the item a call's id points to (`id`, `event_id`,
+    /// `parentId`).
+    fn about(&self, input: &Value) -> Option<String> {
+        let named = self
+            .named
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        input.as_object()?.iter().find_map(|(key, value)| {
+            let is_id = key == "id" || key.ends_with("_id") || key.ends_with("Id");
+            let id = match value {
+                Value::String(id) => id.trim().to_owned(),
+                Value::Number(id) => id.to_string(),
+                _ => return None,
+            };
+            is_id.then(|| named.get(&id).cloned()).flatten()
+        })
     }
 
     /// The session with tool `index`'s server, opened on first use.
@@ -152,6 +230,30 @@ impl HostTools for OutsideTools {
         })
     }
 
+    fn known(&self, name: &str, input: &Value) -> Option<Value> {
+        let offered = self.calls.get(name)?;
+        let mut known = serde_json::Map::new();
+        if let Some(about) = self.about(input) {
+            known.insert("about".to_owned(), json!(about));
+        }
+        // The Mac's apps are LoomWatch's own actions, so their options have words of their own.
+        if mac_app(&self.given[offered.given].tool).is_some() {
+            let options: serde_json::Map<String, Value> = input
+                .as_object()
+                .into_iter()
+                .flatten()
+                .filter_map(|(key, value)| {
+                    mac_apps::option_words(&offered.call, key, value.as_str()?)
+                        .map(|words| (key.clone(), json!(words)))
+                })
+                .collect();
+            if !options.is_empty() {
+                known.insert("options".to_owned(), Value::Object(options));
+            }
+        }
+        (!known.is_empty()).then_some(Value::Object(known))
+    }
+
     fn call<'a>(&'a self, name: &'a str, input: Value) -> BoxFuture<'a, (String, bool)> {
         Box::pin(async move {
             let Some(offered) = self.calls.get(name) else {
@@ -167,16 +269,21 @@ impl HostTools for OutsideTools {
                     ),
                 };
             }
-            if let Some(app) = mac_app(given) {
+            let (said, failed) = if let Some(app) = mac_app(given) {
                 // A Mac app's action runs here, never through a server (ADR 0122).
                 let answer = self.tools.mac().call(app, &offered.call, input).await;
-                return mac_apps::for_the_agent(answer);
+                mac_apps::for_the_agent(answer)
+            } else {
+                let tool = &given.name;
+                match self.session(offered.given).await {
+                    Ok(session) => client::call(&session, tool, &offered.call, input).await,
+                    Err(said) => (said, true),
+                }
+            };
+            if !failed {
+                self.remember(&said);
             }
-            let tool = &given.name;
-            match self.session(offered.given).await {
-                Ok(session) => client::call(&session, tool, &offered.call, input).await,
-                Err(said) => (said, true),
-            }
+            (said, failed)
         })
     }
 }
@@ -281,6 +388,70 @@ mod tests {
             ("Linear", "list.teams")
         );
         assert!(offered.asks("write_file").is_none());
+    }
+
+    /// ADR 0040: once a call's result named an item, the ask for a later call that points to it by
+    /// id says which item it is; a Mac app's option says what it does. A tool that never named the
+    /// id, or that isn't the Mac's, gets nothing made up.
+    #[tokio::test]
+    async fn an_ask_names_the_item_an_earlier_result_gave_and_a_mac_apps_option_in_words() {
+        let dir = std::env::temp_dir().join(format!("lw-host-{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&dir).expect("a folder");
+        let (tools, _fake) = Tools::with_mac_for_tests(&dir);
+        let calendar = ConnectedTool {
+            id: "cal".to_owned(),
+            name: "Apple Calendar".to_owned(),
+            url: crate::mac_apps::App::Calendar.url().to_owned(),
+            auth: Auth::OnThisMac,
+            ..tool("Apple Calendar", &[])
+        };
+        let offered = OutsideTools::new(
+            tools,
+            vec![
+                calendar,
+                tool("Linear", &["update_issue"]),
+                tool("Google Calendar", &["delete_event"]),
+            ],
+        );
+        let deleting =
+            json!({"id": "E7:0400", "occurrence": "2026-11-14T15:00:00", "which": "future"});
+        assert_eq!(
+            offered.known("apple_calendar__delete_event", &deleting),
+            Some(json!({"options": {"which": "This one and every later one"}})),
+            "nothing named E7 yet"
+        );
+        // The stand-in answers with what it was sent, so a search that sends events finds them.
+        let (said, failed) = offered
+            .call(
+                "apple_calendar__find_events",
+                json!({"events": [{"id": "E7:0400", "title": "Upper A, session 1 of 16"}, {"id": 12, "givenName": "An", "familyName": "Tran"}]}),
+            )
+            .await;
+        assert!(!failed, "{said}");
+        assert_eq!(
+            offered.known("apple_calendar__delete_event", &deleting),
+            Some(
+                json!({"about": "Upper A, session 1 of 16", "options": {"which": "This one and every later one"}})
+            )
+        );
+        assert_eq!(
+            offered.known(
+                "linear__update_issue",
+                &json!({"issueId": 12, "state": "Done"})
+            ),
+            Some(json!({"about": "An Tran"}))
+        );
+        assert_eq!(
+            offered.known("linear__update_issue", &json!({"issueId": 13})),
+            None
+        );
+        // Only the Mac's own apps have words for their options; another tool's are said as sent.
+        assert_eq!(
+            offered.known("google_calendar__delete_event", &json!({"which": "future"})),
+            None,
+            "a tool not the Mac's gets no Mac words"
+        );
+        assert_eq!(offered.known("write_file", &deleting), None);
     }
 
     #[test]
