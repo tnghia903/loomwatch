@@ -313,6 +313,7 @@ fn bus_tools(out: &mut String) {
     );
     show_widget_pages(out);
     suggest_skill(out);
+    suggest_tool(out);
 }
 
 /// ADR 0125: the same tool when pages are offered (a trial, or `widgets::PAGES_ON`), and what the
@@ -362,6 +363,29 @@ fn suggest_skill(out: &mut String) {
         out,
         "bus: suggest_skill, once suggested",
         &serde_json::to_string_pretty(&crate::widgets::skill::suggested(&skill)).expect("told"),
+    );
+}
+
+/// ADR 0126: the tool the agent whose reply is the answer is offered to suggest connecting a tool,
+/// listing three here (a computer lists what it can connect), and what it is told after.
+fn suggest_tool(out: &mut String) {
+    section(
+        out,
+        "bus: suggest_tool",
+        &serde_json::to_string_pretty(&crate::widgets::connect::tool_definition_listing(&[
+            "Apple Calendar",
+            "Notion",
+            "Linear",
+        ]))
+        .expect("tool"),
+    );
+    let calendar = crate::widgets::connect::read(&serde_json::json!({"tool": "apple calendar"}))
+        .expect("a tool");
+    section(
+        out,
+        "bus: suggest_tool, once suggested",
+        &serde_json::to_string_pretty(&crate::widgets::connect::suggested(&calendar, 1))
+            .expect("told"),
     );
 }
 

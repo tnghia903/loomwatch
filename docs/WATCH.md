@@ -142,7 +142,10 @@ each point's values in words as you tap, hover or use the arrow keys. Ticks and 
 (`POST /api/chat/widgets`) and the next work reads what you changed, with the results worked out
 again. A skill the agent suggests (ADR 0118) stands after the answer's words: its name, when to use
 it and what it says, with Save skill, Change and Not now; nothing is saved until you press one, and
-the next work is told whether you saved it. A connected iPhone shows them too and keeps what you tick or change there through its door.
+the next work is told whether you saved it. A tool the agent suggests connecting (ADR 0126) stands
+where its words place it: the tool's icon, name and what it does, with one **Connect**. Connect
+connects it as Connections does, gives it to that agent, and sends "I connected …" to that agent as
+your reply, so it carries on with the tool; the card then says it's connected. A connected iPhone shows them too and keeps what you tick or change there through its door; it doesn't show a tool to connect yet.
 Copy, Notion, search and the notch read the answer's words only.
 
 Where none of these fits, an agent can make a drawing of its own (ADR 0125). It is a trial, off
@@ -416,6 +419,10 @@ The stand-in writes the place line between two short paragraphs, so the widget s
 With `LOOMWATCH_WIDGET_PAGES=on` in the daemon's environment, `MOCK-PAGE` shows a page an agent wrote
 itself (ADR 0125), two pendulums swinging, and `MOCK-PAGE-EXITS` a page that tries every way out of
 its frame and lists what stopped each one.
+To see a tool an agent suggests connecting (ADR 0126): `MOCK-CONNECT: Apple Calendar` in a message.
+Start the daemon with `LOOMWATCH_MAC_APPS_PROGRAM` set to `scripts/mock-mac-apps.py` so Connect
+touches no real calendar; the reply the card sends makes the stand-in add an event with the
+connected calendar, which asks first.
 To see a skill an agent suggests (ADR 0118): `MOCK-TOOL: suggest_skill {"name":"Weekly client update","description":"Writes the weekly update for a client.","instructions":"1. Read the notes.\n2. Write three bullets."}`.
 The stand-in also answers the Skills page's Write it and Change it, from the words you type.
 `MOCK-BRIEF` in a message makes it show two charts, a checklist and choices at once, then answer

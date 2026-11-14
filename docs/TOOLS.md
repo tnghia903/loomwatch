@@ -82,6 +82,17 @@ and the agent can use that tool's actions. A tool from the list also says what t
 example "Find the cheapest flight from Hanoi to Tokyo in mid-November." In a team, the tool also
 shows on the team's canvas, on its Team tab, as a card wired to the agent.
 
+## Or connect it from the chat
+
+Ask an agent for something a tool would do, such as "Put these on my calendar", and if it doesn't
+have that tool it suggests it in its answer: the tool's icon and name, what it does, and one
+**Connect** button. Connect does what Connections does for that tool (your Mac asks you, the site
+asks you to sign in, or it takes a token), gives the tool to that agent, and sends "I connected
+Apple Calendar." as your reply, so the agent carries on with it. Each action still asks you first.
+
+In an agent's own chat in My agents, the tool goes into the agent's changes: **Save** keeps it. In a
+team's chat, it's given and saved at once, and shows on the team's canvas like any other.
+
 ## It asks you first
 
 A tool works in your own account on that service, so **the agent asks you before each action**,

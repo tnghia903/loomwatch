@@ -130,6 +130,13 @@ export function toolsOf(agent: Pick<AgentConfig, 'capabilities'>): string[] {
   return [...new Set(names)]
 }
 
+/** `tools` with `tool` given too, once, whatever its case: a tool an agent suggested, connected
+    from its card in the chat (ADR 0126). */
+export function withTool(tools: readonly string[], tool: string): string[] {
+  const wanted = tool.trim().toLowerCase()
+  return tools.some((name) => name.trim().toLowerCase() === wanted) ? [...tools] : [...tools, tool.trim()]
+}
+
 /** A tool given to an agent, with the calls it always allows (ADR 0069), as a team file entry. */
 function toolEntry(name: string, allowed: ToolAllow): CapabilityRef {
   const calls = callsFor(allowed, name)

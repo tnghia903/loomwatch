@@ -176,6 +176,24 @@ pub(crate) enum Adopted {
     AlreadyConnected,
 }
 
+/// The starter tools this computer can connect, by name, in the list's order, as Connections
+/// lists them: what an agent may suggest connecting (ADR 0126, `crate::widgets::connect`).
+pub(crate) fn starter_names_here() -> impl Iterator<Item = &'static str> {
+    catalog::CATALOG
+        .iter()
+        .filter(|entry| api::shown_here(entry))
+        .map(|entry| entry.name)
+}
+
+/// The starter tool called `name`, ignoring case, as the list spells it.
+pub(crate) fn starter_named(name: &str) -> Option<&'static str> {
+    let name = name.trim();
+    catalog::CATALOG
+        .iter()
+        .find(|entry| entry.name.eq_ignore_ascii_case(name))
+        .map(|entry| entry.name)
+}
+
 /// Whether two tool addresses are the same, ignoring a final `/`.
 pub(crate) fn same_address(one: &str, other: &str) -> bool {
     one.trim_end_matches('/') == other.trim_end_matches('/')

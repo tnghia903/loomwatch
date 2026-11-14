@@ -615,6 +615,18 @@ and drawn with Save skill, Change and Not now; `show_widget` never makes one. No
 tool: Save writes it through the Skills page's route, and what the person did is kept and told to the
 agent's next work like any widget's change.
 
+It may also suggest connecting a tool it doesn't have, with `suggest_tool` (`widgets/connect.rs`, ADR
+0126), on the same seat. The tool's description lists the starter tools this computer can connect
+(`connected_tools::starter_names_here`, the Mac's own apps only on a Mac); a name outside that list
+is taken only when the agent was given it. The suggestion is a widget of kind `connect`, numbered
+with the answer's widgets so its place line puts it where the words ask for it. Nothing is connected
+by the tool. The card (`WidgetConnect.tsx`) connects it through `POST /api/tools` and Connections'
+own steps, gives it to the agent (the team file in a team's chat, saved at once; the agent's draft
+in its own chat in My agents; My agents itself for an agent a run brought in), keeps
+`{"connected": true}`, and then sends "I connected <tool>." to that agent as the person's reply,
+after the chat has drawn again so the work it starts is set up with the tool. The next work is told
+"Connected <tool>, which you suggested, and gave it to you".
+
 `widgets::read` checks a widget against limits kept in one place (`widgets::limits`) and says what
 to change when it is refused. A calculator's results are formulas in a small language that the
 daemon (`widgets/formula.rs`) and the app (`ui/src/lib/widgets/formula.ts`) both work out, tested

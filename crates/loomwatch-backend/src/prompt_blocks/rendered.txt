@@ -3016,6 +3016,31 @@ Tell the person in a few words when the message comes, then end your turn.
   "next": "It is under your answer for the person to save, change or leave. Say in a sentence that you suggested it; don't write the skill out in your answer.",
   "suggested": "Weekly client update"
 }
+===== bus: suggest_tool
+{
+  "description": "Suggest connecting a tool you don't have when the person asks for something it would do, such as putting events on their calendar, setting a reminder or adding a page in Notion. They see it in your answer with the tool's mark and a Connect button; once they connect it, it is given to you, you are told, and you carry on with its calls. When more than one could do it, such as Apple Reminders and Todoist, suggest the one they named, or ask which they use. Use it instead of telling them how to set a tool up, and for the Mac's own apps in the list instead of a command. Say in your answer what you will do once it is connected, and do now whatever doesn't need it. The tools you can suggest: Apple Calendar, Notion, Linear. You can also suggest a tool you were given that isn't connected yet.",
+  "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "tool": {
+        "description": "The tool's name as it is listed, such as \"Apple Calendar\"",
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "tool"
+    ],
+    "type": "object"
+  },
+  "name": "suggest_tool"
+}
+===== bus: suggest_tool, once suggested
+{
+  "next": "Its Connect button is in your answer. Write its place line on its own line where it belongs, such as after the sentence that asks for it, and say what you will do once it is connected; don't explain how to connect it. When the person connects it, their next message says so and its calls are yours.",
+  "place": "{{widget 1}}",
+  "suggested": "Apple Calendar"
+}
 ===== stage 0
 You are Researcher, step 1 of 3 in the News desk team.
 The operator's request comes to you first.

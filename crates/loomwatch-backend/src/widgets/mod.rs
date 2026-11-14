@@ -23,14 +23,16 @@
 //! markup. The tool's description tells it which kind fits which shape of answer
 //! ([`SHOW_WIDGET`]).
 //!
-//! One more kind is not shown with `show_widget`: a skill an agent suggests with its own tool
-//! ([`skill`], ADR 0118), kept with the answer the same way so the person can save it.
+//! Two more kinds are not shown with `show_widget`, each made by a tool of its own and kept with the
+//! answer the same way: a skill an agent suggests, for the person to save ([`skill`], ADR 0118), and
+//! a tool it suggests connecting, for the person to connect with one tap ([`connect`], ADR 0126).
 //!
 //! Each widget is told a place line, `{{widget N}}`, that the agent writes on its own line where the
 //! widget belongs in its answer. When the run ends the line is taken out of the answer's words and
 //! the widget keeps the line it stood before ([`place`]), so the words read whole everywhere else.
 
 pub(crate) mod calendar;
+pub(crate) mod connect;
 pub(crate) mod finder;
 pub(crate) mod formula;
 pub(crate) mod host;
@@ -283,6 +285,11 @@ pub(crate) enum Widget {
         title: String,
         description: String,
         instructions: String,
+    },
+    /// A tool the agent suggests connecting with `suggest_tool` (ADR 0126), never with
+    /// `show_widget`: its name, as Connections names it. The person connects it with one tap.
+    Connect {
+        title: String,
     },
     /// A graph: bars or a line over labelled points, up to three series. To look at; tapping a
     /// point reads its values.
@@ -571,6 +578,7 @@ impl Widget {
             | Self::Flow { title, .. }
             | Self::Picture { title, .. }
             | Self::Skill { title, .. }
+            | Self::Connect { title }
             | Self::Graph { title, .. }
             | Self::Finder { title, .. }
             | Self::Quiz { title, .. }
@@ -594,6 +602,7 @@ impl Widget {
             Self::Flow { .. } => "flow",
             Self::Picture { .. } => "picture",
             Self::Skill { .. } => "skill",
+            Self::Connect { .. } => "connect",
             Self::Graph { .. } => "graph",
             Self::Finder { .. } => "finder",
             Self::Quiz { .. } => "quiz",
@@ -618,6 +627,7 @@ impl Widget {
             Self::Flow { .. } => "a flow",
             Self::Picture { .. } => "a picture",
             Self::Skill { .. } => "a suggested skill",
+            Self::Connect { .. } => "a tool to connect",
             Self::Graph {
                 style: GraphStyle::Bar,
                 ..
@@ -2533,9 +2543,8 @@ pub(crate) struct Shown {
     pub(crate) widget: Widget,
 }
 
-/// The widgets of `responder`'s answer: the `show_widget` and `suggest_skill` calls that went
-/// through in the turn
-/// whose reply became the answer, or, when that turn showed none, in the latest earlier turn of
+/// The widgets of `responder`'s answer: the `show_widget`, `suggest_skill` and `suggest_tool` calls
+/// that went through in the turn whose reply became the answer, or, when that turn showed none, in the latest earlier turn of
 /// work in the same session that did (a revision after a check sent the work back, an answer after
 /// a question). The last [`MOST_PER_ANSWER`].
 ///
@@ -2578,11 +2587,15 @@ pub(crate) fn of_answer(events: &[RunEvent], responder: Option<&str>) -> Vec<Sho
                 }
             }
             EventKind::ToolCall
-                if event.payload["name"] == TOOL || event.payload["name"] == skill::TOOL =>
+                if event.payload["name"] == TOOL
+                    || event.payload["name"] == skill::TOOL
+                    || event.payload["name"] == connect::TOOL =>
             {
                 if let Some(call) = event.payload["callId"].as_str() {
                     let read: Reader = if event.payload["name"] == TOOL {
                         read
+                    } else if event.payload["name"] == connect::TOOL {
+                        connect::read
                     } else {
                         skill::read
                     };
@@ -2665,6 +2678,7 @@ pub(crate) fn read_state(widget: &Widget, state: &Value) -> Result<Value, String
         } => finder::read_state(questions, outcomes, state),
         Widget::Quiz { checks, .. } => quiz::read_state(checks, state),
         Widget::Skill { .. } => skill::read_state(state),
+        Widget::Connect { .. } => connect::read_state(state),
         Widget::Choices { .. }
         | Widget::Steps { .. }
         | Widget::Chart { .. }
@@ -2805,7 +2819,9 @@ pub(crate) fn showed(widgets: &[Kept]) -> Option<String> {
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
-            Widget::Picture { .. } | Widget::Skill { .. } => kept.spec.named(),
+            Widget::Picture { .. } | Widget::Skill { .. } | Widget::Connect { .. } => {
+                kept.spec.named()
+            }
             Widget::Compare { .. } => {
                 format!("{} ({})", kept.spec.named(), compare_line(&kept.spec))
             }
@@ -2948,6 +2964,7 @@ fn change(widget: &Widget, state: &Value) -> Option<String> {
         } => finder::change(widget.title(), questions, outcomes, state),
         Widget::Quiz { checks, .. } => quiz::change(widget.title(), checks, state),
         Widget::Skill { title, .. } => skill::change(title, state),
+        Widget::Connect { title } => connect::change(title, state),
         Widget::Choices { .. }
         | Widget::Steps { .. }
         | Widget::Chart { .. }

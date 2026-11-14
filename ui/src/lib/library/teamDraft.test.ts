@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { AgentConfig } from '../team-file/types'
-import { draftFromTeamAgent, knowledgeForChat, readsOf, teamAgentEdit, teamKnowledge, toolsOf } from './teamDraft'
+import { draftFromTeamAgent, knowledgeForChat, readsOf, teamAgentEdit, teamKnowledge, toolsOf, withTool } from './teamDraft'
 
 const writer: AgentConfig = {
   id: 'writer', name: 'Writer', role: 'Write the digest.', model: 'sonnet', thinkingEffort: 'high',
@@ -166,5 +166,15 @@ describe('a team’s own agent on the workbench', () => {
       { kind: 'tool', name: '  ' },
     ] })).toEqual(['github', 'notion'])
     expect(toolsOf({})).toEqual([])
+  })
+
+  it('gives a tool an agent suggested once, whatever its case, wired and turned back on (ADR 0126)', () => {
+    expect(withTool(['Linear'], ' Apple Calendar ')).toEqual(['Linear', 'Apple Calendar'])
+    expect(withTool(['Linear', 'apple calendar'], 'Apple Calendar')).toEqual(['Linear', 'apple calendar'])
+    const off: AgentConfig = { ...writer, turnedOff: [{ kind: 'tool', name: 'Apple Calendar' }] }
+    expect(teamAgentEdit(off, 'tools', withTool(toolsOf(off), 'Apple Calendar'))).toEqual({ kind: 'fields', fields: {
+      capabilities: [...(writer.capabilities ?? []), { kind: 'tool', name: 'Apple Calendar' }],
+      turnedOff: undefined,
+    } })
   })
 })

@@ -125,6 +125,11 @@ interface TeamChatProps {
   onConnectFolder?: (name: string) => Promise<string | null>
   /** The team's mode, Ask me or Auto (ADR 0109), beside the message box's send button. */
   permissionMode?: PermissionModeControl
+  /**
+   * Give a tool an agent suggested connecting in its answer to that agent (ADR 0126), once it is
+   * connected. Absent where the team can't be changed here: the card then only connects it.
+   */
+  onGiveTool?: (agent: string, tool: string) => Promise<string | void>
 }
 
 /** Sending one message: as a retry of a pending one, and as a reply to something said. */
@@ -146,7 +151,7 @@ const ROSTER_KEY = 'loomwatch.chatRoster'
  * With `team.solo` it is one agent's own chat (its Chat tab): everything you write goes to that
  * agent, starting its work when it is free and joining its turn while it works, so there is no @.
  */
-export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, routine, detailsRunId, answerRunId = null, recordRunId, onHandOver, onOpenAnswer, blocked, prepare, onDetails, onTeamReview, onStale, onAlwaysAllow, announce, onNewest, onStarted, reveal = null, landAt = null, onOpenFinding, onNewestRun, onWriting, startTeam = false, onStartTeamTaken, ask = null, onPassages, onConnectFolder, permissionMode }: TeamChatProps) {
+export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, routine, detailsRunId, answerRunId = null, recordRunId, onHandOver, onOpenAnswer, blocked, prepare, onDetails, onTeamReview, onStale, onAlwaysAllow, announce, onNewest, onStarted, reveal = null, landAt = null, onOpenFinding, onNewestRun, onWriting, startTeam = false, onStartTeamTaken, ask = null, onPassages, onConnectFolder, permissionMode, onGiveTool }: TeamChatProps) {
   const chat = useTeamChat(teamPath)
   // Pictures and files pasted or dropped in, kept as they are added (ADR 0082).
   const attachments = useChatAttachments(teamPath)
@@ -539,6 +544,9 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
   }))
   // Only the newest answer's choices can be tapped, and only while nothing is at work.
   const choose = (label: string, reply: ReplyTo) => send(label, soloAgent ? { kind: 'agent', agent: soloAgent.id } : null, false, undefined, replyOf(reply))
+  // ADR 0126: once a tool an agent suggested is connected, your reply goes to that agent and starts
+  // its work, as an @ to it does: in a team, a reply with no @ would only be a note.
+  const carryOn = (label: string, reply: ReplyTo, agent: string) => send(label, { kind: 'agent', agent }, false, undefined, replyOf(reply))
   // At work: in a live piece, or answering a message in the chat themselves.
   const writing = writingNow(chat.items)
   const writingKey = writing.join('\n')
@@ -950,11 +958,13 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
                   ? <WorkPiece item={item} newest={item.run.runId === newestRun} approveFilled={!decision || decision.runId === item.run.runId} fixFilled={fixFill === item.run.runId} fixFill={fixFill} reveal={shown?.runId === item.run.runId ? shown : null} followed={item.run.followsRunId ? runs.get(item.run.followsRunId) ?? null : null} earlier={earlierTries(item.run, runs)} continuedFrom={continuedFrom.has(item.run.runId)} team={team} draft={draft}
                       detailsOpen={detailsRunId === item.run.runId} answerOpen={answerRunId === item.run.runId} recordOpen={recordRunId === undefined ? undefined : recordRunId === item.run.runId} onHandOver={onHandOver} onDetails={onDetails} onOpenAnswer={onOpenAnswer} onRun={chat.applyRun} onBaton={onBaton} onLine={line.onLine} onTryAgain={tryAgain} onContinue={keepGoing}
                       onDecided={() => setDraft('')} onAlwaysAllow={onAlwaysAllow} onOpenFinding={onOpenFinding} onReply={startReply} onShowReplied={showReplied} onReact={chat.react} onUndoLesson={undoLearned} onTellAllLesson={tellAllLearned}
-                      onWidgetChange={(runId, n, state) => changeWidget(teamPath, runId, n, state)} onChoose={item.run.runId === newestRun && live.length === 0 && !blocked ? choose : undefined} chosen={chosenFor.get(item.run.runId) ?? null} />
+                      onWidgetChange={(runId, n, state) => changeWidget(teamPath, runId, n, state)} onChoose={item.run.runId === newestRun && live.length === 0 && !blocked ? choose : undefined} chosen={chosenFor.get(item.run.runId) ?? null}
+                      onGiveTool={onGiveTool} onCarryOn={item.run.runId === newestRun && live.length === 0 && !blocked ? carryOn : undefined} />
                   : <TeamNote message={item.message} reactions={item.reactions} lessons={item.lessons} widgets={item.widgets} fixFill={fixFill}
                       onWidgetChange={(agent, n, state) => changeNoteWidget(teamPath, item.message.id, agent, n, state)}
                       onChoose={item === chat.items.at(-1) && live.length === 0 && !blocked ? choose : undefined}
-                      chosen={(agent) => chosenOnNote.get(`note:${item.message.id}|${agent}`) ?? null} name={name} hue={(id) => team.hues.get(id) ?? 1} flash={noteFlash?.id === item.message.id ? noteFlash.at : null} onReply={startReply} onShowReplied={showReplied} onStart={() => void startNote(item.message)} onReact={chat.react} onUndoLesson={undoLearned} onTellAllLesson={tellAllLearned} />}
+                      onCarryOn={item === chat.items.at(-1) && live.length === 0 && !blocked ? carryOn : undefined}
+                      chosen={(agent) => chosenOnNote.get(`note:${item.message.id}|${agent}`) ?? null} onGiveTool={onGiveTool} name={name} hue={(id) => team.hues.get(id) ?? 1} flash={noteFlash?.id === item.message.id ? noteFlash.at : null} onReply={startReply} onShowReplied={showReplied} onStart={() => void startNote(item.message)} onReact={chat.react} onUndoLesson={undoLearned} onTellAllLesson={tellAllLearned} />}
               </Fragment>
             )
           })}
@@ -1158,7 +1168,7 @@ function revealId(runId: string, target: string): string {
  * answer writes back to the agent that gave it, with the answer quoted (ADR 0051), or about the same
  * part of a file when that is what your message asked about (ADR 0077).
  */
-function TeamNote({ message, reactions, lessons, widgets, fixFill = null, name, hue, flash = null, onReply, onShowReplied, onStart, onReact, onUndoLesson, onTellAllLesson, onWidgetChange, onChoose, chosen }: { message: ChatMessage; reactions?: readonly Reaction[]; lessons?: readonly Lesson[]; widgets?: Readonly<Record<string, KeptWidget[]>>; fixFill?: string | null; name: (id: string) => string; hue: (id: string) => number; flash?: number | null; onReply?: (reply: ReplyTo, to?: string) => void; onShowReplied: (reply: ReplyTo) => (() => void) | undefined; onStart: () => void; onReact?: (anchor: string, target: string, face: Face | null, about?: ReactionAbout) => Promise<void>; onUndoLesson?: (lesson: Lesson) => Promise<void>; onTellAllLesson?: (lesson: Lesson) => Promise<void>; onWidgetChange?: (agent: string, n: number, state: WidgetState) => Promise<KeptWidget>; onChoose?: (label: string, reply: ReplyTo) => Promise<boolean> | void; chosen?: (agent: string) => string | null }) {
+function TeamNote({ message, reactions, lessons, widgets, fixFill = null, name, hue, flash = null, onReply, onShowReplied, onStart, onReact, onUndoLesson, onTellAllLesson, onWidgetChange, onChoose, chosen, onGiveTool, onCarryOn }: { message: ChatMessage; reactions?: readonly Reaction[]; lessons?: readonly Lesson[]; widgets?: Readonly<Record<string, KeptWidget[]>>; fixFill?: string | null; name: (id: string) => string; hue: (id: string) => number; flash?: number | null; onReply?: (reply: ReplyTo, to?: string) => void; onShowReplied: (reply: ReplyTo) => (() => void) | undefined; onStart: () => void; onReact?: (anchor: string, target: string, face: Face | null, about?: ReactionAbout) => Promise<void>; onUndoLesson?: (lesson: Lesson) => Promise<void>; onTellAllLesson?: (lesson: Lesson) => Promise<void>; onWidgetChange?: (agent: string, n: number, state: WidgetState) => Promise<KeptWidget>; onChoose?: (label: string, reply: ReplyTo) => Promise<boolean> | void; chosen?: (agent: string) => string | null; onGiveTool?: (agent: string, tool: string) => Promise<string | void>; onCarryOn?: (label: string, reply: ReplyTo, agent: string) => Promise<boolean> | void }) {
   const [starting, setStarting] = useState(false)
   const appear = useAppear()
   // Found by a search and opened (ADR 0081): it comes into view, ringed for a moment.
@@ -1205,7 +1215,9 @@ function TeamNote({ message, reactions, lessons, widgets, fixFill = null, name, 
           const reply = answerReply(message.replyTo, { runId: null, messageId: `note:${message.id}`, from: said.from, to: null, kind: 'answer', text: said.text })
           const draw = (one: KeptWidget) => (
             <AnswerWidget kept={one} by={name(said.from)} onChange={(n, state) => onWidgetChange ? onWidgetChange(said.from, n, state) : Promise.reject(new Error('not kept'))}
-              onChoose={onChoose ? (label) => onChoose(label, reply) : undefined} chosen={chosen?.(said.from) ?? null} />
+              onChoose={onChoose ? (label) => onChoose(label, reply) : undefined} chosen={chosen?.(said.from) ?? null}
+              onGive={onGiveTool ? (tool) => onGiveTool(said.from, tool) : undefined}
+              onCarryOn={onCarryOn ? (label) => onCarryOn(label, reply, said.from) : undefined} />
           )
           const inWords = placed !== null && placed.parts.length > 1
           return (

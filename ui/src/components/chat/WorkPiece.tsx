@@ -145,6 +145,11 @@ interface WorkPieceProps {
   /** Tap one of the answer's choices: sent as your message, replying to it. Absent: they can't be
       tapped now. */
   onChoose?: (label: string, reply: ReplyTo) => Promise<boolean> | void
+  /** Give a tool its answer's agent suggested connecting to that agent (ADR 0126). */
+  onGiveTool?: (agent: string, tool: string) => Promise<string | void>
+  /** Your reply to that agent once the tool is connected, starting its work. Absent when this isn't
+      the newest answer or something is at work. */
+  onCarryOn?: (label: string, reply: ReplyTo, agent: string) => Promise<boolean> | void
   /** The choice the next message sent, when it replied to this answer with one. */
   chosen?: string | null
   /** Take back something an agent learned from your feedback on this work (ADR 0078). */
@@ -159,7 +164,7 @@ interface WorkPieceProps {
  * you for, the files handed to you, and the answer. The line opens and folds the replies under it,
  * in the chat; Details, beside it, opens the full record.
  */
-export function WorkPiece({ item, newest = false, approveFilled = true, fixFilled = false, fixFill = null, reveal = null, followed, earlier = NO_TRIES, continuedFrom, team, draft, detailsOpen, answerOpen, recordOpen = detailsOpen && !answerOpen, onHandOver, onDetails, onOpenAnswer, onRun, onBaton, onLine, onTryAgain, onContinue, onDecided, onAlwaysAllow, onOpenFinding, onReply, onShowReplied, onReact, onWidgetChange, onChoose, chosen = null, onUndoLesson, onTellAllLesson }: WorkPieceProps) {
+export function WorkPiece({ item, newest = false, approveFilled = true, fixFilled = false, fixFill = null, reveal = null, followed, earlier = NO_TRIES, continuedFrom, team, draft, detailsOpen, answerOpen, recordOpen = detailsOpen && !answerOpen, onHandOver, onDetails, onOpenAnswer, onRun, onBaton, onLine, onTryAgain, onContinue, onDecided, onAlwaysAllow, onOpenFinding, onReply, onShowReplied, onReact, onWidgetChange, onChoose, chosen = null, onUndoLesson, onTellAllLesson, onGiveTool, onCarryOn }: WorkPieceProps) {
   const { run, request, notes } = item
   const live = !isTerminalRun(run.status)
   // What the agents said is shown where the work is happening — the newest piece, and any piece
@@ -636,6 +641,8 @@ export function WorkPiece({ item, newest = false, approveFilled = true, fixFille
             onChange={(n, state) => onWidgetChange(run.runId, n, state)}
             onChoose={onChoose ? (label) => onChoose(label, answerReply(item.request?.replyTo, { runId: run.runId, messageId: answerKey, from: run.responder, to: null, kind: 'answer', text: answer })) : undefined}
             chosen={chosen}
+            onGive={onGiveTool ? (tool) => onGiveTool(run.responder, tool) : undefined}
+            onCarryOn={onCarryOn ? (label) => onCarryOn(label, answerReply(item.request?.replyTo, { runId: run.runId, messageId: answerKey, from: run.responder, to: null, kind: 'answer', text: answer }), run.responder) : undefined}
           />
         ),
       } : undefined} tour={newest} run={record} tries={tryingAgain(ended) ? tries : null} fixFilled={fixFilled} answer={inAnswer.words} touched={touched} folder={folder} written={written} streaming={streaming} name={name} hue={hue} open={answerOpen} flash={answerFlash !== null} solo={Boolean(team.solo)} reactions={reactOn(targets.answer, `${name(record.responder)}'s answer`, [])} onOpen={() => onOpenAnswer(run.runId)} onTryAgain={() => onTryAgain(item)} onDetails={loaded ? undefined : () => onDetails(run.runId)}>

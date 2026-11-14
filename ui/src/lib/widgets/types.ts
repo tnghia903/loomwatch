@@ -151,6 +151,9 @@ export type WidgetSpec =
   /** A skill the agent suggested with `suggest_skill` (ADR 0118): its name in words, when to use
       it, and what to do. Nothing is saved until the person saves it. */
   | { kind: 'skill'; title: string; description: string; instructions: string }
+  /** A tool the agent suggested connecting with `suggest_tool` (ADR 0126), by the name Connections
+      gives it. Nothing is connected until the person taps Connect. */
+  | { kind: 'connect'; title: string }
   /** A widget the agent wrote itself (ADR 0125): its markup and script, drawn in a frame that
       reaches nothing, with figures declared as a calculator's that LoomWatch works out. */
   | { kind: 'page'; title: string; why: string; html?: string; script?: string; inputs?: WidgetInput[]; results?: WidgetFigure[]; presets?: WidgetPreset[] }
@@ -158,7 +161,8 @@ export type WidgetSpec =
 /** What you made of a widget: a checklist's ticks, a calculator's or a page's values by input id
     (a page's with what it said when it couldn't draw), the answer you took at each of a finder's
     questions from the first (each from 0), the choice you picked for each of a quiz's questions
-    (from 0, or null), or a suggested skill saved (by its folder name) or left. */
+    (from 0, or null), a suggested skill saved (by its folder name) or left, or a suggested tool
+    connected and given to the agent. */
 export type WidgetState =
   | { checked: boolean[] }
   | { values: Record<string, number | boolean>; broke?: string }
@@ -167,6 +171,7 @@ export type WidgetState =
   | { picked: (number | null)[] }
   | { saved: string }
   | { dismissed: true }
+  | { connected: true }
 
 /** A widget kept with an answer: its place among the answer's widgets (from 1), the line of the
     answer's words it stands before (none: at the end), and what you last made of it. */

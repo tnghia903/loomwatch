@@ -917,6 +917,33 @@
 .wg-skill.left { padding: var(--sp-2) var(--sp-4); box-shadow: none; }
 .wg-skill-left { margin: 0; font: 400 13px/18px var(--font-sans); color: var(--color-ink-2); }
 
+/* ---------------------------------------------------------------------------
+   A TOOL THE AGENT SUGGESTS CONNECTING (ADR 0126): the tool's own mark, big enough to read alone,
+   its name and what it lets the agent do, and one Connect button across the card. Connect is the
+   ring button, not a fill: the chat's send is the one. A step on the way (your Mac's permission, a
+   sign-in, a token) opens under it in Connections' own panel, laid flat on the card behind one
+   hairline so nothing stacks three deep; its fill is then the one, and the send steps back to a
+   ring (box.css). A letter stands in for a tool with no icon in ink, never gold on its gold tint.
+   --------------------------------------------------------------------------- */
+.wg-connect { gap: var(--sp-3); }
+.wg-connect-head { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
+.wg-connect-head .tool-icon b { color: var(--color-ink); }
+.wg-connect-name { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.wg-connect-does { margin: 0; font: 400 13.5px/1.5 var(--font-sans); color: var(--color-ink-2); overflow-wrap: anywhere; }
+.wg-connect-go { width: 100%; height: 36px; justify-content: center; }
+.wg-connect-done { display: flex; align-items: center; gap: var(--sp-2); min-height: 36px; margin: 0; font: 500 13px/18px var(--font-sans); color: var(--color-ok); }
+.wg-connect-elsewhere { margin: 0; font: 400 13px/1.5 var(--font-sans); color: var(--color-ink-2); }
+.wg-connect-error { margin: 0; font: 500 13px/1.45 var(--font-sans); color: var(--color-alert); }
+.wg-connect .connect-tool { padding: var(--sp-3) 0 0; border: 0; border-top: 1px solid var(--color-hairline); border-radius: 0; background: none; }
+
+@media (pointer: coarse), (max-width: 767px) {
+  .wg-connect-go, .wg-connect-done { min-height: 44px; }
+  .wg-connect .connect-tool-head .link { display: inline-flex; align-items: center; min-height: 44px; }
+}
+@media (max-width: 767px) {
+  .wg-connect .connect-tool .btn { width: 100%; justify-content: center; }
+}
+
 @media (pointer: coarse) {
   .wg-skill-actions .btn { min-height: 44px; }
   .wg-skill-actions .link, .wg-skill-left .link, .wg-skill-says > summary { min-height: 44px; display: inline-flex; align-items: center; }

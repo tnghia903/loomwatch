@@ -175,7 +175,7 @@ async fn icon(State(tools): State<Tools>, Path(host): Path<String>) -> Response 
 }
 
 /// Whether this computer can connect `entry`: the Mac's own apps only on a Mac.
-fn shown_here(entry: &catalog::Entry) -> bool {
+pub(super) fn shown_here(entry: &catalog::Entry) -> bool {
     entry.auth != Auth::OnThisMac || cfg!(target_os = "macos")
 }
 

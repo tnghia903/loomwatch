@@ -142,6 +142,8 @@ export function asUse(item: Evidence): Use | null {
   if (firstLine(item.name) === 'Team Bus: show_widget') return make('tool', shownIn(item.rawInput))
   // ADR 0118.
   if (firstLine(item.name) === 'Team Bus: suggest_skill') return make('tool', 'Suggest a skill')
+  // ADR 0126: the tool it suggests connecting, by name.
+  if (firstLine(item.name) === 'Team Bus: suggest_tool') return make('tool', suggestedTool(item.rawInput))
   return make('tool', firstLine(item.name))
 }
 
@@ -151,7 +153,13 @@ const SHOWN: Record<WidgetSpec['kind'], string> = {
   calculator: 'a calculator', checklist: 'a checklist', choices: 'choices', steps: 'steps',
   chart: 'a chart', graph: 'a graph', marks: 'a yes-or-no row', flow: 'a diagram', compare: 'a comparison',
   picture: 'a picture', finder: 'a decision guide', quiz: 'a quiz', scale: 'a scale', timeline: 'a timeline', map: 'a map', calendar: 'a calendar',
-  skill: 'a suggested skill', page: 'a drawing',
+  skill: 'a suggested skill', connect: 'a tool to connect', page: 'a drawing',
+}
+
+/** "Suggest connecting Apple Calendar", from a `suggest_tool` call's input. */
+function suggestedTool(input: unknown): string {
+  const tool = typeof input === 'object' && input !== null ? (input as { tool?: unknown }).tool : null
+  return typeof tool === 'string' && tool.trim() ? `Suggest connecting ${tool.trim()}` : 'Suggest a tool to connect'
 }
 
 /** "Show a calculator in the answer", from a `show_widget` call's input. */

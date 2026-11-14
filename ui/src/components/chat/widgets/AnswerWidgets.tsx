@@ -10,6 +10,7 @@ import { WidgetChart } from './WidgetChart'
 import { WidgetChecklist } from './WidgetChecklist'
 import { WidgetChoices } from './WidgetChoices'
 import { WidgetCompare } from './WidgetCompare'
+import { WidgetConnect } from './WidgetConnect'
 import { WidgetFinder } from './WidgetFinder'
 import { WidgetFlow } from './WidgetFlow'
 import { WidgetGraph } from './WidgetGraph'
@@ -37,6 +38,12 @@ export interface AnswerWidgetsProps {
   live?: boolean
   /** Who answered, as the chat names them: a skill they suggest says so once saved. */
   by?: string
+  /** Give a tool the agent suggested connecting to the agent that answered (ADR 0126). Absent where
+      the chat can't change it. */
+  onGive?: (tool: string) => Promise<string | void>
+  /** Once that tool is connected, your reply to the agent that answered, starting its work so it
+      carries on with it. Absent when this isn't the newest answer or something is at work. */
+  onCarryOn?: (label: string) => Promise<boolean> | void
 }
 
 /**
@@ -57,7 +64,8 @@ export function AnswerWidgets(props: AnswerWidgetsProps) {
  * what the answer explained, steps to tap through, a picture the agent drew whose parts you step
  * through, a map of places to open in a maps app, or a comparison, a chart, a graph, a scale, a
  * timeline, a calendar, a row of marks or a flow to look at, or a page the agent wrote itself for
- * what none of those fits (ADR 0125). What you tick, answer or change is kept, and the next work's conversation says so. When it
+ * what none of those fits (ADR 0125); or a skill or a tool to connect the agent suggests (ADR 0118,
+ * ADR 0126). What you tick, answer or change is kept, and the next work's conversation says so. When it
  * arrives as news (ADR 0051) and this window hasn't drawn it before, its marks grow in once
  * (`wg-fresh`); history and a widget drawn again are simply there.
  */
@@ -108,7 +116,7 @@ class WidgetGuard extends Component<{ drawing: string; title: unknown; children:
   }
 }
 
-function drawn({ kept, onChange, onChoose, chosen = null, live = false, by }: Omit<AnswerWidgetsProps, 'widgets'> & { kept: KeptWidget }, fresh: boolean) {
+function drawn({ kept, onChange, onChoose, chosen = null, live = false, by, onGive, onCarryOn }: Omit<AnswerWidgetsProps, 'widgets'> & { kept: KeptWidget }, fresh: boolean) {
   switch (kept.spec.kind) {
     case 'choices': return <WidgetChoices spec={kept.spec} onChoose={live ? undefined : onChoose} chosen={chosen} live={live} />
     case 'checklist': return <HeldChecklist kept={kept} onChange={onChange} live={live} />
@@ -127,6 +135,7 @@ function drawn({ kept, onChange, onChoose, chosen = null, live = false, by }: Om
     case 'map': return <WidgetMap spec={kept.spec} />
     case 'calendar': return <WidgetCalendar spec={kept.spec} onChoose={live ? undefined : onChoose} by={by} />
     case 'skill': return <WidgetSkill kept={kept} onChange={onChange} live={live} by={by} />
+    case 'connect': return <WidgetConnect kept={kept} onChange={onChange} onGive={onGive} onCarryOn={live ? undefined : onCarryOn} live={live} by={by} />
     case 'page': return <WidgetPage kept={kept} onChange={onChange} live={live} by={by} />
   }
   return null

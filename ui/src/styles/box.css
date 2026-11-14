@@ -19,4 +19,6 @@
 .lw-attach:disabled { opacity: .45; cursor: default; }
 /* While the bell's tray shows its own fill, a box's gold steps back to a ring, as every page fill does. */
 [data-needs-you-fill] .lw-send.primary:not(:disabled) { background: transparent; color: var(--color-ink); border-color: var(--color-accent); filter: none; }
+/* So it does while a tool the agent suggested shows a step with its own fill (ADR 0126). */
+:root:has(.wg-connect .btn-primary:not(:disabled)) .lw-send.primary:not(:disabled) { background: transparent; color: var(--color-ink); border-color: var(--color-accent); filter: none; }
 @media (max-width: 767px) { .lw-send, .lw-attach { width: 44px; height: 44px; } }
