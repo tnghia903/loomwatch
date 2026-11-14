@@ -1534,6 +1534,7 @@ impl TeamBus {
             let shown = match name {
                 crate::widgets::TOOL => crate::widgets::read(&arguments).ok(),
                 crate::widgets::skill::TOOL => crate::widgets::skill::read(&arguments).ok(),
+                crate::widgets::connect::TOOL => crate::widgets::connect::read(&arguments).ok(),
                 _ => None,
             };
             if let Some(widget) = shown {
@@ -1686,6 +1687,7 @@ impl TeamBus {
             "cancel_message" => self.cancel_message(session, arguments).await,
             crate::widgets::TOOL => self.show_widget(session, arguments),
             crate::widgets::skill::TOOL => self.suggest_skill(session, arguments),
+            crate::widgets::connect::TOOL => self.suggest_tool(session, arguments),
             "my_agents" => self.my_agents(session).await,
             "dispatch" => {
                 let reference = required_string(arguments, "agent")?;
@@ -3446,7 +3448,8 @@ pub(crate) struct BusSeat {
     /// Its reply is the answer the person reads, and its switch is on: it may put widgets under it
     /// (ADR 0114).
     pub(crate) answers: bool,
-    /// Its reply is the answer the person reads: it may suggest a skill under it (ADR 0118).
+    /// Its reply is the answer the person reads: it may suggest a skill under it (ADR 0118), or a
+    /// tool to connect in it (ADR 0126).
     pub(crate) suggests_skills: bool,
 }
 
@@ -3590,6 +3593,31 @@ impl TeamBus {
         let widget = crate::widgets::skill::read(arguments)
             .map_err(|error| refused("skill_refused", format!("It isn't suggested: {error}.")))?;
         Ok(crate::widgets::skill::suggested(&widget))
+    }
+
+    /// `suggest_tool` (ADR 0126): checked, and kept with the answer when the run ends, where its
+    /// words place it. Nothing is connected: the person does that from the card in the answer.
+    fn suggest_tool(&self, session: &AgentSession, arguments: &Value) -> Result<Value> {
+        if crate::helpers::lead_of(&session.agent_id).is_some()
+            || session.answering
+            || session.delegation_path.len() != 1
+            || !self.gives_the_answer(&session.agent_id)
+        {
+            return Err(refused(
+                "not_the_answer",
+                "only the agent whose reply is the answer the person reads may suggest a tool"
+                    .to_owned(),
+            ));
+        }
+        let agent = self.agent(&session.agent_id).ok();
+        let widget = crate::widgets::connect::read(arguments)
+            .and_then(|widget| {
+                crate::widgets::connect::check(&widget, agent.as_ref()).map(|()| widget)
+            })
+            .map_err(|error| refused("tool_refused", format!("It isn't suggested: {error}.")))?;
+        // Numbered with the answer's widgets, so its place line is its own.
+        let place = session.widgets_shown.fetch_add(1, Ordering::Relaxed) + 1;
+        Ok(crate::widgets::connect::suggested(&widget, place))
     }
 
     /// `message_me_at`: keep the message for its time, and return at once.
@@ -3858,9 +3886,11 @@ pub(crate) fn offered_tools(seat: &BusSeat) -> Vec<Value> {
     if seat.answers {
         tools.push(crate::widgets::tool_definition());
     }
-    // ADR 0118: and may suggest a skill there, for the person to save.
+    // ADR 0118: and may suggest a skill there, for the person to save; ADR 0126: or a tool to
+    // connect, which the person connects there with one tap.
     if seat.suggests_skills {
         tools.push(crate::widgets::skill::tool_definition());
+        tools.push(crate::widgets::connect::tool_definition());
     }
     if seat.notebook {
         tools.extend(memory_tool_definitions());
@@ -4571,6 +4601,108 @@ mod tests {
             .await;
         assert!(!names(&helper).contains(&crate::widgets::skill::TOOL.to_owned()));
         let refused = helper.call(crate::widgets::skill::TOOL, skill).await;
+        assert_eq!(refused["isError"], true, "{refused}");
+        Ok(())
+    }
+
+    /// ADR 0126: the agent whose reply is the answer is offered `suggest_tool`. A listed tool, or
+    /// one it was given, goes through with its place line and is on the live record, spelled as
+    /// the list spells it; any other name is refused with the ones it may suggest. A teammate's
+    /// call is refused.
+    #[tokio::test]
+    async fn the_agent_whose_reply_is_the_answer_suggests_a_tool_to_connect() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
+        let archive = EventArchive::new(pool);
+        let mut lead = test_agent("lead", OFFLINE);
+        lead.widgets = Some(false);
+        lead.capabilities.push(serde_json::from_value(
+            json!({"kind": "tool", "name": "Acme CRM"}),
+        )?);
+        let team = Arc::new(TeamConfig {
+            project: None,
+            shares: None,
+            project_file: None,
+            schema_version: 1,
+            id: "desk".into(),
+            name: "Desk".into(),
+            entrypoint: "lead".into(),
+            responder: None,
+            schedule: None,
+            deliver: None,
+            conversation: ConversationConfig::default(),
+            permissions: crate::config::TeamPermissions::default(),
+            spend: crate::spend::SpendConfig::default(),
+            memory: None,
+            guards: GuardsConfig::default(),
+            agents: vec![lead, test_agent("helper", OFFLINE)],
+            edges: Vec::new(),
+        });
+        let bus = TeamBus::start(
+            team,
+            &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("desk.yaml"),
+            archive.clone(),
+            Duration::from_secs(2),
+            TeamBusMode::Team,
+            Arc::new(crate::memory::TeamMemory::default()),
+            Some(crate::runs::RunRegistry::default().operator_desk(Some(&archive))),
+        )?;
+        bus.answered_by("lead");
+        let names = |connection: &TeamBusConnection| {
+            connection
+                .tool_definitions(false)
+                .iter()
+                .filter_map(|tool| tool["name"].as_str().map(str::to_owned))
+                .collect::<Vec<_>>()
+        };
+
+        let lead = bus.connection("lead").await?;
+        lead.register(EventLog::new(archive.clone(), "answering".into()))
+            .await;
+        assert!(names(&lead).contains(&crate::widgets::connect::TOOL.to_owned()));
+        let suggested = lead
+            .call(crate::widgets::connect::TOOL, json!({"tool": "notion"}))
+            .await;
+        assert_eq!(suggested["isError"], false, "{suggested}");
+        assert_eq!(suggested["structuredContent"]["suggested"], "Notion");
+        assert_eq!(suggested["structuredContent"]["place"], "{{widget 1}}");
+        let update = archive
+            .load_session("answering")
+            .await?
+            .into_iter()
+            .rfind(|event| event.kind == EventKind::ToolUpdate)
+            .context("the suggestion's update")?;
+        assert_eq!(
+            update.payload["widget"],
+            json!({"kind": "connect", "title": "Notion"}),
+            "{}",
+            update.payload
+        );
+        // One it was given that isn't in the list, numbered after the first.
+        let given = lead
+            .call(crate::widgets::connect::TOOL, json!({"tool": "Acme CRM"}))
+            .await;
+        assert_eq!(given["isError"], false, "{given}");
+        assert_eq!(given["structuredContent"]["place"], "{{widget 2}}");
+        let unknown = lead
+            .call(
+                crate::widgets::connect::TOOL,
+                json!({"tool": "Google Calendar"}),
+            )
+            .await;
+        assert_eq!(unknown["isError"], true, "{unknown}");
+        assert!(
+            unknown.to_string().contains("The tools you can suggest:"),
+            "{unknown}"
+        );
+
+        let helper = bus.connection("helper").await?;
+        helper
+            .register(EventLog::new(archive.clone(), "helper".into()))
+            .await;
+        assert!(!names(&helper).contains(&crate::widgets::connect::TOOL.to_owned()));
+        let refused = helper
+            .call(crate::widgets::connect::TOOL, json!({"tool": "Notion"}))
+            .await;
         assert_eq!(refused["isError"], true, "{refused}");
         Ok(())
     }
@@ -8692,16 +8824,18 @@ mod tests {
                     "ask_user",
                     "show_widget",
                     "suggest_skill",
+                    "suggest_tool",
                 ],
             ),
-            // ADR 0118: and may suggest a skill there, with its widgets switch off too.
+            // ADR 0118, ADR 0126: and may suggest a skill or a tool to connect there, with its
+            // widgets switch off too.
             (
                 "an agent whose reply is the answer, without widgets",
                 BusSeat {
                     suggests_skills: true,
                     ..seat(TeamBusMode::Team, 0, false)
                 },
-                &["ask_user", "suggest_skill"],
+                &["ask_user", "suggest_skill", "suggest_tool"],
             ),
             (
                 "an agent in its own chat whose reply is the answer",
@@ -8718,6 +8852,7 @@ mod tests {
                     "cancel_message",
                     "show_widget",
                     "suggest_skill",
+                    "suggest_tool",
                 ],
             ),
         ];

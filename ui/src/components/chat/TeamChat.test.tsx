@@ -3174,6 +3174,31 @@ describe('widgets under an answer', () => {
     await waitFor(() => expect(posted.find((post) => post.url === '/api/chat/messages')).toMatchObject({ body: { teamPath: 'news.yaml', text: 'Food', replyTo: { runId: 'run-1', kind: 'answer', from: 'writer' } } }))
   })
 
+  // ADR 0126: a tool the answer's agent suggested connecting, once connected from its card, is given
+  // to that agent, and the reply starts that agent's work: in a team, a reply with no @ is a note.
+  it('gives a tool the agent suggested to that agent, and sends the reply to it, not as a note', async () => {
+    said.read = true
+    const connect = { n: 1, spec: { kind: 'connect' as const, title: 'Apple Calendar' } }
+    page = [{ kind: 'work', run: run({ reply: 'One tap fixes it.' }), request: message({}), notes: [], widgets: [connect] }]
+    answer = (url) => (url === '/api/chat/widgets'
+      ? new Response(JSON.stringify({ ...connect, state: { connected: true }, changedAt: '2026-11-14T10:00:00.000Z' }), { status: 200 })
+      : new Response(JSON.stringify({ route: 'agent', message: message({ id: 'm-2', text: 'I connected Apple Calendar.' }), run: run({ runId: 'run-2', status: 'running', reply: null, finishedAt: null }) }), { status: 202 }))
+    const calendar = { id: 'c1', name: 'Apple Calendar', url: 'loomwatch:apple-calendar', auth: 'onThisMac', calls: [], checkedAt: null, pending: false, problem: null, tokenHelp: null }
+    const base = globalThis.fetch
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => (String(input) === '/api/tools' && (init?.method ?? 'GET') === 'GET'
+      ? Promise.resolve(new Response(JSON.stringify({ tools: [calendar], catalog: [], keptIn: 'keychain' }), { status: 200 }))
+      : base(input, init))))
+    const onGiveTool = vi.fn(async () => {})
+    renderChat({ onGiveTool })
+    const card = await screen.findByRole('region', { name: 'Connect Apple Calendar' })
+    const button = within(card).getByRole('button', { name: 'Connect' })
+    await waitFor(() => expect(button).not.toBeDisabled())
+    fireEvent.click(button)
+    await waitFor(() => expect(posted.find((post) => post.url === '/api/chat/messages')).toMatchObject({ body: { teamPath: 'news.yaml', text: 'I connected Apple Calendar.', to: { kind: 'agent', agent: 'writer' }, replyTo: { runId: 'run-1', kind: 'answer', from: 'writer' } } }))
+    expect(onGiveTool).toHaveBeenCalledWith('writer', 'Apple Calendar')
+    expect(posted.find((post) => post.url === '/api/chat/widgets')).toMatchObject({ body: { runId: 'run-1', n: 1, state: { connected: true } } })
+  })
+
   it('lets only the newest answer’s choices be tapped, and shows the one sent', async () => {
     said.read = true
     page = [

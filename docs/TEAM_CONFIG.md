@@ -679,7 +679,9 @@ An action that can't be undone, such as `delete_event` in Apple Calendar, asks e
 
 A name with no connected tool, such as an MCP server from another AI app's settings, still loads
 and runs: the agent is told it doesn't have that tool and asked to say in its reply what the tool
-would have let it do, and the run records the tool as unavailable.
+would have let it do, and the run records the tool as unavailable. The agent whose reply is the
+answer can also suggest connecting it, or any tool from the Connections list, with a **Connect**
+card in its answer (ADR 0126); connecting it there adds the tool to that agent here.
 
 ### Where an agent starts
 

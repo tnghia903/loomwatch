@@ -7,7 +7,7 @@ import type { BenchFile } from '../../lib/files/useBenchFile'
 import { joinUnderRoot } from '../../lib/files/paths'
 import { agentFromDraft, chatAgentId, chatTeamYaml, type AgentDraft } from '../../lib/library/draft'
 import { figureHue, type FigureChoice } from '../../lib/library/figures'
-import { alwaysAllowGuest } from '../../lib/library/bringIn'
+import { alwaysAllowGuest, giveToolToGuest } from '../../lib/library/bringIn'
 import { benchFolder, useSavedJobs } from '../../lib/library/jobs'
 import { guestsOf } from '../../lib/chat/guests'
 import { knowledgeForChat, type TeamKnowledge } from '../../lib/library/teamDraft'
@@ -40,6 +40,9 @@ export interface AgentChatProps {
   /** "Allow from now on": switch this on, or always allow this tool call, in the draft, for the
       next message and every team. */
   onAllow: (what: AlwaysAllowed) => void
+  /** A tool it suggested connecting in an answer, connected: give it to it in the draft, for the
+      next message and every team (ADR 0126). */
+  onGiveTool?: (tool: string) => void
   /** The work the figure shows: the newest piece while it runs, and how it ended if you watched. */
   onRecord: (record: RunRecord | null) => void
   /** Whether it is answering a message in the chat itself, which no run shows: the figure works meanwhile. */
@@ -78,7 +81,7 @@ const message = (failed: unknown) => (failed instanceof Error ? failed.message :
  * A piece's Details, and the record a finding of its review points at, open over the bench
  * (`AgentDetails`), so working with one agent never takes you to a team's screen.
  */
-export function AgentChat({ draft, model, chatId, figure, onAllow, onRecord, onWriting, answerRunId, onOpenAnswer, knowledge, file, detailsRunId, onDetails, reveal = null, landAt = null }: AgentChatProps) {
+export function AgentChat({ draft, model, chatId, figure, onAllow, onGiveTool, onRecord, onWriting, answerRunId, onOpenAnswer, knowledge, file, detailsRunId, onDetails, reveal = null, landAt = null }: AgentChatProps) {
   const agentId = chatAgentId(chatId)
   const name = draft.name.trim() || 'New agent'
   // A new agent's chat is kept under its name, so one with no name yet has nowhere to keep it.
@@ -215,6 +218,18 @@ export function AgentChat({ draft, model, chatId, figure, onAllow, onRecord, onW
           announce(typeof what === 'string'
             ? `${name} may ${ALLOW_SWITCHES.find((item) => item.key === what)?.label.toLowerCase() ?? what} from now on. Save it to keep that.`
             : `${name} may do “${what.label}” without asking from now on. Save it to keep that.`)
+        }}
+        onGiveTool={async (asked, tool) => {
+          // One of your other agents it added to this chat (ADR 0092): changed in My agents itself.
+          const guest = guests.names.get(asked)
+          if (guest) {
+            await giveToolToGuest(asked, tool)
+            return `${guest} has it in every team it’s in.`
+          }
+          if (!onGiveTool) throw new Error(`${name} can’t be changed here. Give it ${tool} in Build, under Tools it can use.`)
+          onGiveTool(tool)
+          // In its changes, as "Allow from now on" is here: the card says what keeps it.
+          return 'Save to keep it.'
         }}
         announce={announce}
         onOpenFinding={(runId, line) => onDetails({ runId, evidenceId: line.evidenceId, agentId: line.agentId })}

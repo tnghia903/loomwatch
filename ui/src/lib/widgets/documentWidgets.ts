@@ -23,9 +23,9 @@ export interface DocumentWidgets {
  * tapped. Every other widget goes with the words it illustrates.
  */
 export function inDocument(kept: KeptWidget): boolean {
-  // A suggested skill is about the agent's way of working, not the document: it stays under the
-  // answer in the chat.
-  return kept.spec.kind !== 'choices' && kept.spec.kind !== 'skill'
+  // A suggested skill or tool is about the agent's way of working, not the document: it stays with
+  // the answer in the chat, where connecting a tool sends your reply.
+  return kept.spec.kind !== 'choices' && kept.spec.kind !== 'skill' && kept.spec.kind !== 'connect'
 }
 
 interface Shown {

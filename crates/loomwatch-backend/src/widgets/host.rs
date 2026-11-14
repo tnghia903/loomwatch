@@ -1,29 +1,34 @@
 //! `show_widget` for an agent answering in the chat without starting work (ADR 0114): a quick
 //! question answered in one turn, such as "what is nDCG". The turn has no Team Bus, so the daemon
 //! serves the tool itself, as one of its own tools, and keeps what it shows for the answer. So it
-//! does `suggest_skill` (ADR 0118), which an agent has whether its widgets switch is on or not.
+//! does `suggest_skill` (ADR 0118) and `suggest_tool` (ADR 0126), which an agent has whether its
+//! widgets switch is on or not.
 
 use std::sync::{Arc, Mutex, PoisonError};
 
 use serde_json::Value;
 
-use super::{MOST_PER_ANSWER, Shown, TOOL, read, shown, skill, tool_definition};
+use super::{MOST_PER_ANSWER, Shown, TOOL, connect, read, shown, skill, tool_definition};
 use crate::agent::{BoxFuture, HostTools, ToolSpec};
+use crate::config::AgentConfig;
 
 /// The widgets one agent shows in one answer in the chat, numbered from 1 in the order shown, and
-/// the skills it suggests there.
+/// the skills and tools it suggests there.
 #[derive(Default)]
 pub(crate) struct WidgetTools {
     shown: Mutex<Vec<Shown>>,
-    /// Its widgets switch: off, it may still suggest a skill.
+    /// Its widgets switch: off, it may still suggest a skill or a tool.
     widgets: bool,
+    /// The agent answering, whose tools it was given it may suggest connecting.
+    agent: Option<AgentConfig>,
 }
 
 impl WidgetTools {
-    pub(crate) fn new(widgets: bool) -> Arc<Self> {
+    pub(crate) fn new(widgets: bool, agent: Option<AgentConfig>) -> Arc<Self> {
         Arc::new(Self {
             shown: Mutex::default(),
             widgets,
+            agent,
         })
     }
 
@@ -49,6 +54,7 @@ impl HostTools for WidgetTools {
             specs.push(spec(tool_definition()));
         }
         specs.push(spec(skill::tool_definition()));
+        specs.push(spec(connect::tool_definition()));
         specs
     }
 
@@ -66,6 +72,23 @@ impl HostTools for WidgetTools {
                                 place: None,
                                 widget,
                             });
+                        (told.to_string(), false)
+                    }
+                    Err(error) => (format!("It isn't suggested: {error}."), true),
+                };
+            }
+            if name == connect::TOOL {
+                return match connect::read(&input).and_then(|widget| {
+                    connect::check(&widget, self.agent.as_ref()).map(|()| widget)
+                }) {
+                    Ok(widget) => {
+                        let mut all = self.shown.lock().unwrap_or_else(PoisonError::into_inner);
+                        let place = u32::try_from(all.len() + 1).unwrap_or(u32::MAX);
+                        let told = connect::suggested(&widget, place);
+                        all.push(Shown {
+                            place: Some(place),
+                            widget,
+                        });
                         (told.to_string(), false)
                     }
                     Err(error) => (format!("It isn't suggested: {error}."), true),

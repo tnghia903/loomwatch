@@ -945,3 +945,48 @@ fn every_kind_the_tool_offers_has_its_place_in_the_guide() {
         "{habit}"
     );
 }
+
+/// ADR 0126: a tool the writer suggested connecting is kept with its answer, at the place its
+/// words gave it, beside the widgets it showed; once the person connects it, the next work is told
+/// so, and a state other than connected is refused.
+#[test]
+fn a_suggested_tool_is_kept_where_its_words_place_it_and_its_connecting_is_told() {
+    let mut events = Vec::new();
+    turn(&mut events, "work", &["Before Friday"]);
+    let answer = events.pop().expect("the answer");
+    let seq = events.len() as u64;
+    events.push(event(
+        seq + 1,
+        EventKind::ToolCall,
+        json!({"callId": "connect", "name": connect::TOOL, "rawInput": {"tool": "apple calendar"}}),
+    ));
+    events.push(event(
+        seq + 2,
+        EventKind::ToolUpdate,
+        json!({"callId": "connect", "status": "completed", "rawOutput": {"suggested": "Apple Calendar", "place": "{{widget 2}}"}}),
+    ));
+    events.push(answer);
+    let shown = of_answer(&events, Some("writer"));
+    assert_eq!(titles(&shown), ["Before Friday", "Apple Calendar"]);
+    assert_eq!(shown[1].place, Some(2));
+    assert_eq!(shown[1].widget.kind(), "connect");
+
+    let calendar = shown[1].widget.clone();
+    assert!(read_state(&calendar, &json!({"checked": [true]})).is_err());
+    let connected = read_state(&calendar, &json!({"connected": true})).expect("connected");
+    let widgets = [kept(
+        1,
+        calendar,
+        Some(connected),
+        Some("2026-11-05T10:06:00Z"),
+    )];
+    assert_eq!(
+        showed(&widgets).unwrap(),
+        "[Under this answer: a tool to connect \"Apple Calendar\".]"
+    );
+    assert_eq!(
+        changes("Mai", "your answer", &widgets, "2026-11-05T11:00:00Z").unwrap(),
+        "Mai changed what is under your answer: Connected Apple Calendar, which you suggested, and \
+         gave it to you: its calls are yours."
+    );
+}

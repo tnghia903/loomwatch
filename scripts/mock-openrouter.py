@@ -30,6 +30,10 @@ Replies are scripted from what the request says, so a run exercises real tool ca
   example.com. It lists what stopped each one, with every refusal the frame's policy reported. A
   browser keeps a frame with no origin from this computer's own addresses whatever its policy, so
   only an outside address shows the policy at work
+- "MOCK-CONNECT: <tool>" in the task -> a suggest_tool call for <tool> (ADR 0126), then words with
+  its place line on a line of its own, saying what it will do once the tool is connected
+- "I connected <tool>." as the task  -> the reply the connect card sends: an add_event call of the
+  connected calendar when it is offered (each call asks first), then a summary
 - "MOCK-FAIL-402" in the task         -> a 402 out-of-credits answer
 - the chat's read of an @ message     -> TALK for a greeting, thanks or a question ("hi", "thanks",
                                          "Explain …", "… ?"), so the agents answer it in the chat;
@@ -417,6 +421,14 @@ def plan(body):
             if "MOCK-CALENDAR" in task:
                 return ("text", calendar_with(places))
             return ("text", kinds_with(places) if "MOCK-KINDS" in task else brief_with(places))
+        if call_name.endswith("suggest_tool"):
+            # ADR 0126: the card stands where the words place it, after the line that asks for it.
+            try:
+                told = json.loads(said)
+            except (ValueError, AttributeError):
+                told = {}
+            if told.get("place"):
+                return ("text", f"I can put the sessions on your calendar, but I can't reach {told.get('suggested', 'it')} yet. Connect it here:\n\n{told['place']}\n\nOnce it's connected, I'll add today's session at 15:00 and the rest after it.")
         if call_name.endswith("show_widget"):
             # ADR 0114: write the place line on a line of its own, between words that lead to the
             # widget and words that say what to try, as the tool asks.
@@ -543,6 +555,11 @@ def plan(body):
         return ("calls", [(find_tool(names, "show_widget"), MAP_WIDGET)])
     if "MOCK-CALENDAR" in task and find_tool(names, "show_widget"):
         return ("calls", [(find_tool(names, "show_widget"), CALENDAR_WIDGET)])
+    if "MOCK-CONNECT:" in task and find_tool(names, "suggest_tool"):
+        wanted = task.rsplit("MOCK-CONNECT:", 1)[1].strip().splitlines()[0]
+        return ("calls", [(find_tool(names, "suggest_tool"), {"tool": wanted})])
+    if task.strip().startswith("I connected ") and find_tool(names, "add_event"):
+        return ("calls", [(find_tool(names, "add_event"), {"title": "Upper A, session 1 of 16", "start": "2026-11-14T15:00:00", "end": "2026-11-14T16:00:00"})])
     if "MOCK-TOOL:" in task:
         line = task.rsplit("MOCK-TOOL:", 1)[1].strip().splitlines()[0]
         call, _, arguments = line.partition(" ")

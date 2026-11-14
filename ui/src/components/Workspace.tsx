@@ -130,11 +130,11 @@ import { DEPTH_LABEL, DEPTH_ZOOM, STORY_MAX_ZOOM } from '../lib/story/depth'
 import { modelForPreset, ROLE_PRESETS, roleSource } from '../lib/library/roles'
 import { agentFigure, FIGURE_HUES, figureHue } from '../lib/library/figures'
 import { ChatOfContext, GuestNamesContext, SavedAgentsContext, TeamFiguresContext } from './agents/figureContext'
-import { alwaysAllowGuest } from '../lib/library/bringIn'
+import { alwaysAllowGuest, giveToolToGuest } from '../lib/library/bringIn'
 import { benchChatOwner, savedJobPreset, toolAllowOf, useSavedJobs, type SavedJob } from '../lib/library/jobs'
 import { readKey } from '../lib/library/reads'
 import { guestsOf } from '../lib/chat/guests'
-import { teamAgentEdit } from '../lib/library/teamDraft'
+import { teamAgentEdit, toolsOf, withTool } from '../lib/library/teamDraft'
 import { withAllowed, type AlwaysAllowed } from '../lib/tools/allow'
 import { actionCount, toolNamed, useConnectedTools, type ConnectedTool } from '../lib/tools/client'
 import type { LibrarySource } from '../lib/library/types'
@@ -1842,6 +1842,23 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     void doc.save()
     setStatusAnnouncement(`${name} may do “${what.label}” without asking from now on, in every team it’s in.`)
   }, [doc, guests])
+  // ADR 0126: a tool an agent suggested connecting in its answer, once connected from the card, is
+  // given to that agent as wiring its card on the canvas would, and saved at once like "Always
+  // allow", so the reply the card sends starts work that has it.
+  const giveTool = useCallback(async (agentId: string, tool: string) => {
+    // One of the person's agents a run brought in (ADR 0092): it is changed in My agents itself.
+    const guest = guests.names.get(agentId)
+    if (guest) {
+      await giveToolToGuest(agentId, tool)
+      return `${guest} has it in every team it’s in.`
+    }
+    const agent = doc.nodes.find((node) => node.id === agentId)?.data.agent
+    if (!agent) throw new Error('That agent isn’t on this team any more.')
+    const change = teamAgentEdit(agent, 'tools', withTool(toolsOf(agent), tool))
+    if (change?.kind !== 'fields') return
+    doc.applyAgentFields(agentId, change.fields)
+    if (!(await doc.save())) throw new Error(`Couldn’t save the team, so ${agent.name || agentId} doesn’t have ${tool} yet. Click Connect to try again.`)
+  }, [doc, guests])
   // ADR 0109: the team's mode, beside the chat's send button. Saved at once, like "Always allow",
   // and the daemon turns the team's work that is going on now to it as well.
   const chooseMode = useCallback(async (mode: PermissionMode) => {
@@ -2648,6 +2665,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
             ask={chatAsk}
             onPassages={takePassages}
             onConnectFolder={connectChatFolder}
+            onGiveTool={editable ? giveTool : undefined}
             permissionMode={permissionMode}
           />
           {detailsOpen && wide && <ChatResizer width={chatWidth} onResize={setChatWidth} />}

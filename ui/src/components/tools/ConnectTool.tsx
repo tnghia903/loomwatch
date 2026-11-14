@@ -3,7 +3,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 
 import {
   CATALOG_TOPICS, cantConnectYet, checkToolAgain, connectTool, fetchTools, findTools, isToolAddress, keptInWords, onToolsMessage, openMacSettings, sendToolToken, signInToToolAgain,
-  type CatalogEntry, type CatalogTopic, type ConnectedTool, type KeptIn, type SignInOutcome,
+  type CatalogEntry, type CatalogTopic, type ConnectAnswer, type ConnectedTool, type KeptIn, type SignInOutcome,
 } from '../../lib/tools/client'
 import { ToolIcon } from './ToolIcon'
 
@@ -31,6 +31,18 @@ interface ConnectToolProps {
   resume?: ConnectedTool | null
   /** Start connecting the starter tool at this address straight away, as if it were picked. */
   start?: string | null
+  /** A connect already started elsewhere (an agent's suggestion in the chat, ADR 0126) that
+      still needs a step: the panel opens on that step, with no list to pick from. */
+  begun?: ConnectAnswer | null
+}
+
+/** The step a connect's answer still needs, or `null` when it is connected. */
+function stepFor(answer: ConnectAnswer, catalog: readonly CatalogEntry[]): Step | null {
+  if (answer.needs === 'signIn' && answer.url) return { kind: 'signIn', tool: answer.tool, url: answer.url, opened: false }
+  if (answer.needs === 'macPermission') return { kind: 'macPermission', tool: answer.tool, opened: false }
+  if (answer.needs === 'phoneHealth') return { kind: 'phoneHealth', tool: answer.tool }
+  if (answer.needs === 'token') return { kind: 'token', tool: answer.tool, help: answer.tool.tokenHelp ?? catalog.find((entry) => entry.url.replace(/\/$/, '') === answer.tool.url.replace(/\/$/, ''))?.tokenHelp ?? null }
+  return null
 }
 
 /**
@@ -41,9 +53,9 @@ interface ConnectToolProps {
  * and this panel carries on when the site sends you back. One that wants a token takes the one you
  * paste. Either way the secret goes to the daemon, which keeps it out of your team files.
  */
-export function ConnectTool({ catalog, connected, keptIn, onConnected, onClose, resume, start }: ConnectToolProps) {
+export function ConnectTool({ catalog, connected, keptIn, onConnected, onClose, resume, start, begun }: ConnectToolProps) {
   const ids = useId()
-  const [step, setStep] = useState<Step>({ kind: 'pick' })
+  const [step, setStep] = useState<Step>(() => (begun && stepFor(begun, catalog)) || { kind: 'pick' })
   const [text, setText] = useState('')
   const [topic, setTopic] = useState<CatalogTopic | null>(null)
   const [token, setToken] = useState('')
@@ -62,10 +74,8 @@ export function ConnectTool({ catalog, connected, keptIn, onConnected, onClose, 
 
   async function begin(url: string, name?: string) {
     const answer = await connectTool(url, name)
-    if (answer.needs === 'signIn' && answer.url) setStep({ kind: 'signIn', tool: answer.tool, url: answer.url, opened: false })
-    else if (answer.needs === 'macPermission') setStep({ kind: 'macPermission', tool: answer.tool, opened: false })
-    else if (answer.needs === 'phoneHealth') setStep({ kind: 'phoneHealth', tool: answer.tool })
-    else if (answer.needs === 'token') setStep({ kind: 'token', tool: answer.tool, help: answer.tool.tokenHelp ?? catalog.find((entry) => entry.url === url)?.tokenHelp ?? null })
+    const next = stepFor(answer, catalog)
+    if (next) setStep(next)
     else onConnected(answer.tool)
   }
 
